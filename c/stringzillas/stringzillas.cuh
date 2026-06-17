@@ -158,24 +158,51 @@ class strided_ptr {
     reference operator[](difference_type i) const noexcept { return *reinterpret_cast<pointer>(data_ + i * stride_); }
 #endif // defined(__cpp_lib_assume_aligned)
 
-    // clang-format off
     pointer operator->() const noexcept { return &operator*(); }
-    strided_ptr &operator++() noexcept { data_ += stride_; return *this; }
-    strided_ptr operator++(int) noexcept { strided_ptr temp = *this; ++(*this); return temp; }
-    strided_ptr &operator--() noexcept { data_ -= stride_; return *this; }
-    strided_ptr operator--(int) noexcept { strided_ptr temp = *this; --(*this); return temp; }
-    strided_ptr &operator+=(difference_type offset) noexcept { data_ += offset * stride_; return *this; }
-    strided_ptr &operator-=(difference_type offset) noexcept { data_ -= offset * stride_; return *this; }
-    strided_ptr operator+(difference_type offset) const noexcept { strided_ptr temp = *this; return temp += offset; }
-    strided_ptr operator-(difference_type offset) const noexcept { strided_ptr temp = *this; return temp -= offset; }
-    friend difference_type operator-(strided_ptr const &a, strided_ptr const &b) noexcept { assert(a.stride_ == b.stride_); return (a.data_ - b.data_) / static_cast<difference_type>(a.stride_); }
+    strided_ptr &operator++() noexcept {
+        data_ += stride_;
+        return *this;
+    }
+    strided_ptr operator++(int) noexcept {
+        strided_ptr temp = *this;
+        ++(*this);
+        return temp;
+    }
+    strided_ptr &operator--() noexcept {
+        data_ -= stride_;
+        return *this;
+    }
+    strided_ptr operator--(int) noexcept {
+        strided_ptr temp = *this;
+        --(*this);
+        return temp;
+    }
+    strided_ptr &operator+=(difference_type offset) noexcept {
+        data_ += offset * stride_;
+        return *this;
+    }
+    strided_ptr &operator-=(difference_type offset) noexcept {
+        data_ -= offset * stride_;
+        return *this;
+    }
+    strided_ptr operator+(difference_type offset) const noexcept {
+        strided_ptr temp = *this;
+        return temp += offset;
+    }
+    strided_ptr operator-(difference_type offset) const noexcept {
+        strided_ptr temp = *this;
+        return temp -= offset;
+    }
+    friend difference_type operator-(strided_ptr const &a, strided_ptr const &b) noexcept {
+        assert(a.stride_ == b.stride_);
+        return (a.data_ - b.data_) / static_cast<difference_type>(a.stride_);
+    }
     friend bool operator==(strided_ptr const &a, strided_ptr const &b) noexcept { return a.data_ == b.data_; }
     friend bool operator<(strided_ptr const &a, strided_ptr const &b) noexcept { return a.data_ < b.data_; }
     friend bool operator!=(strided_ptr const &a, strided_ptr const &b) noexcept { return !(a == b); }
     friend bool operator>(strided_ptr const &a, strided_ptr const &b) noexcept { return b < a; }
     friend bool operator<=(strided_ptr const &a, strided_ptr const &b) noexcept { return !(b < a); }
     friend bool operator>=(strided_ptr const &a, strided_ptr const &b) noexcept { return !(a < b); }
-    // clang-format on
 };
 
 constexpr bool is_gpu_capability(sz_capability_t capability) noexcept {

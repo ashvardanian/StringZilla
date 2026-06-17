@@ -503,30 +503,18 @@ struct sequence_argsort_from_sz_ {
     }
 };
 
-/** @brief Wraps a pgram integer-sort backend by its kernel pointer. */
-template <sz_pgrams_sort_t pgrams_sort_>
-struct pgrams_sort_from_sz_ {
-    sz_status_t operator()(sz_pgram_t *keys, sz_size_t count, sz_memory_allocator_t *alloc,
-                           sz_sorted_idx_t *order) const noexcept {
-        return pgrams_sort_(keys, count, alloc, order);
-    }
-};
-
-/** @brief Bundles a backend's byte arg-sort, uncased arg-sort, and pgram sort under a single name. */
-template <sz_sequence_argsort_t argsort_, sz_sequence_argsort_t argsort_uncased_, sz_pgrams_sort_t pgrams_sort_>
+/** @brief Bundles a backend's byte arg-sort and uncased arg-sort under a single name. */
+template <sz_sequence_argsort_t argsort_, sz_sequence_argsort_t argsort_uncased_>
 struct sequence_sort_from_sz_ {
     sequence_argsort_from_sz_<argsort_> argsort;
     sequence_argsort_from_sz_<argsort_uncased_> argsort_uncased;
-    pgrams_sort_from_sz_<pgrams_sort_> pgrams_sort;
 };
 
 /**
  *  @brief Demands a candidate sort backend produce results identical to the reference backend, across many inputs.
  *
  *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique - the candidate
- *  and reference `order` arrays must match exactly across ascending, descending, and top-K modes. The pgram integer
- *  sort is not stable, so only the @b sorted key arrays are compared (equal keys may tie-break differently between
- *  backends), with the permutation checked for validity.
+ *  and reference `order` arrays must match exactly across ascending, descending, and top-K modes.
  *
  *  Mirrors `test_hash_equivalence` & friends: one generic checker, invoked once per ISA under `SZ_USE_*`.
  *
@@ -595,79 +583,6 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
                 }
             }
         }
-
-        // Pgram integer sort: compare the sorted key arrays (the sort is not stable, so permutations may differ).
-        for (std::size_t count : {33u, 100u, 1000u, 5000u}) {
-            std::vector<sz_pgram_t> keys(count);
-            for (auto &key : keys)
-                key = (sz_pgram_t)(generator() % 50); // Heavy duplication exercises the equal region.
-            std::vector<sz_pgram_t> keys_reference = keys, keys_candidate = keys;
-            std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
-            reference.pgrams_sort(keys_reference.data(), count, nullptr, order_reference.data());
-            candidate.pgrams_sort(keys_candidate.data(), count, nullptr, order_candidate.data());
-            assert(keys_reference == keys_candidate && "SIMD pgram sort produced a different sorted order than serial");
-            for (std::size_t i = 0; i < count; ++i)
-                assert(keys[order_candidate[i]] == keys_candidate[i] && "SIMD pgram sort permutation is invalid");
-        }
-    }
-
-    // Misaligned output-buffer case: a backend that internally assumes a cache-line-aligned `order` (or key)
-    // buffer would diverge here. The shared `for_each_cacheline_offset_` helper sweeps a representative spread
-    // of sub-cache-line offsets; at each one we run the same arg-sort and pgram-sort over a buffer placed at
-    // that offset and assert the result matches the naturally-aligned run byte-for-byte.
-    {
-        std::size_t const count = scale_iterations(1000u);
-
-        // A long, common-prefix dataset so the candidate exercises a non-trivial partitioning path.
-        strs_t dataset;
-        dataset.reserve(count);
-        for (std::size_t index = 0; index < count; ++index)
-            dataset.push_back(sz::scripts::random_string(6 + index % 40, "abc", 3));
-        std::shuffle(dataset.begin(), dataset.end(), generator);
-
-        sz_sequence_t sequence;
-        sequence.handle = &dataset;
-        sequence.count = count;
-        sequence.get_start = sort_sequence_get_start_;
-        sequence.get_length = sort_sequence_get_length_;
-
-        // Reference runs over a naturally-aligned `order` buffer.
-        std::vector<sz_sorted_idx_t> order_aligned(count);
-
-        // Arg-sort: run over an `order` buffer placed at every swept offset and compare against the aligned run.
-        for_each_cacheline_offset_(
-            count * sizeof(sz_sorted_idx_t), [&](sz_ptr_t pointer, [[maybe_unused]] std::size_t offset) {
-                sz_sorted_idx_t *const order_offset = reinterpret_cast<sz_sorted_idx_t *>(pointer);
-                for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
-                    candidate.argsort(&sequence, nullptr, order_aligned.data(), 0, reverse);
-                    candidate.argsort(&sequence, nullptr, order_offset, 0, reverse);
-                    for (std::size_t index = 0; index < count; ++index)
-                        assert(order_aligned[index] == order_offset[index] &&
-                               "misaligned `order` buffer changed the arg-sort");
-
-                    candidate.argsort_uncased(&sequence, nullptr, order_aligned.data(), 0, reverse);
-                    candidate.argsort_uncased(&sequence, nullptr, order_offset, 0, reverse);
-                    for (std::size_t index = 0; index < count; ++index)
-                        assert(order_aligned[index] == order_offset[index] &&
-                               "misaligned `order` buffer changed the uncased sort");
-                }
-            });
-
-        // Pgram key sort: run over a key buffer placed at every swept offset and compare against the aligned run.
-        std::vector<sz_pgram_t> keys(count);
-        for (auto &key : keys) key = (sz_pgram_t)(generator() % 50);
-        std::vector<sz_pgram_t> keys_aligned = keys;
-        std::vector<sz_sorted_idx_t> pgram_order_aligned(count), pgram_order_offset(count);
-        candidate.pgrams_sort(keys_aligned.data(), count, nullptr, pgram_order_aligned.data());
-
-        for_each_cacheline_offset_(
-            count * sizeof(sz_pgram_t), [&](sz_ptr_t pointer, [[maybe_unused]] std::size_t offset) {
-                sz_pgram_t *const keys_offset = reinterpret_cast<sz_pgram_t *>(pointer);
-                for (std::size_t index = 0; index < count; ++index) keys_offset[index] = keys[index];
-                candidate.pgrams_sort(keys_offset, count, nullptr, pgram_order_offset.data());
-                for (std::size_t index = 0; index < count; ++index)
-                    assert(keys_aligned[index] == keys_offset[index] && "misaligned key buffer changed the pgram sort");
-            });
     }
 }
 
@@ -677,39 +592,33 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
 /** @brief Runs `test_sort_equivalence` (serial reference vs. every enabled SIMD backend candidate). */
 void test_sort_all() {
-    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_utf8_uncased_serial, sz_pgrams_sort_serial>
-        reference;
+    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_utf8_uncased_serial> reference;
     // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
     constexpr sz_size_t repetitions = 1;
 #if SZ_USE_HASWELL
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_uncased_haswell,
-                                                 sz_pgrams_sort_haswell> {},
-                          repetitions);
+    test_sort_equivalence(
+        reference, sequence_sort_from_sz_<sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_uncased_haswell> {},
+        repetitions);
 #endif
 #if SZ_USE_SKYLAKE
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_uncased_skylake,
-                                                 sz_pgrams_sort_skylake> {},
-                          repetitions);
+    test_sort_equivalence(
+        reference, sequence_sort_from_sz_<sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_uncased_skylake> {},
+        repetitions);
 #endif
 #if SZ_USE_SVE
-    test_sort_equivalence(
-        reference,
-        sequence_sort_from_sz_<sz_sequence_argsort_sve, sz_sequence_argsort_utf8_uncased_sve, sz_pgrams_sort_sve> {},
-        repetitions);
+    test_sort_equivalence(reference,
+                          sequence_sort_from_sz_<sz_sequence_argsort_sve, sz_sequence_argsort_utf8_uncased_sve> {},
+                          repetitions);
 #endif
 #if SZ_USE_NEON
-    test_sort_equivalence(
-        reference,
-        sequence_sort_from_sz_<sz_sequence_argsort_neon, sz_sequence_argsort_utf8_uncased_neon, sz_pgrams_sort_neon> {},
-        repetitions);
+    test_sort_equivalence(reference,
+                          sequence_sort_from_sz_<sz_sequence_argsort_neon, sz_sequence_argsort_utf8_uncased_neon> {},
+                          repetitions);
 #endif
 #if SZ_USE_RVV
-    test_sort_equivalence(
-        reference,
-        sequence_sort_from_sz_<sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_uncased_rvv, sz_pgrams_sort_rvv> {},
-        repetitions);
+    test_sort_equivalence(reference,
+                          sequence_sort_from_sz_<sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_uncased_rvv> {},
+                          repetitions);
 #endif
 }
 

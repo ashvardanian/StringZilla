@@ -101,8 +101,8 @@ SZ_INTERNAL sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
  *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_(   //
-    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
+    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size,  //
     __mmask64 is_two_byte_lead_mask, __mmask64 is_three_byte_lead_mask, __mmask64 malformed_lead_mask,
     sz_ptr_t target) {
 
@@ -138,10 +138,9 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_(   //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(      //
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(   //
     __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
-    __mmask64 is_continuation_mask, __mmask64 is_three_byte_lead_mask, __mmask64 malformed_lead_mask,
-    sz_ptr_t target) {
+    __mmask64 is_continuation_mask, __mmask64 is_three_byte_lead_mask, __mmask64 malformed_lead_mask, sz_ptr_t target) {
 
     __m512i const a_upper_vec = _mm512_set1_epi8('A');
     __m512i const subtract26_vec = _mm512_set1_epi8(26);
@@ -151,31 +150,24 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(      //
     // byte's low 6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (serial).
     // Generated from Unicode full case folding; verified against the serial reference in tests.
     __m512i const c4_deltas_lut = _mm512_set_epi8( // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
-        // clang-format off
         // 'Ŀ' (U+013F, C4 BF) folds to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead
         // byte, so it cannot fold in place and is flagged irregular alongside 'İ'.
         (char)0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, (char)0x80, // 0x3F..0x30
-        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,          // 0x2F..0x20: even-parity pairs
-        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,          // 0x1F..0x10
-        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1           // 0x0F..0x00
-        // clang-format on
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x2F..0x20: even-parity pairs
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x1F..0x10
+        0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1                    // 0x0F..0x00
     );
-    __m512i const c5_deltas_lut = _mm512_set_epi8( // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
-        // clang-format off
+    __m512i const c5_deltas_lut = _mm512_set_epi8(                        // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
         (char)0x80, 0, 1, 0, 1, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1, 0, 1, // 0x3F..0x30: 'ſ' and 'Ÿ' irregular
         0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x2F..0x20
         0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,                   // 0x1F..0x10
         0, 1, 0, 1, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1, 0, 1, 0           // 0x0F..0x00: 'ŉ' irregular, odd head
-        // clang-format on
     );
     __m512i const c6_deltas_lut = _mm512_set_epi8( // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
-        // clang-format off
-        0, 0, 0, 1, 0, 0, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, (char)0x80, 0,
-        1, (char)0x80, 0, 1, 0, 0, (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1,
-        (char)0x80, 0, (char)0x80, (char)0x80, 0, 0, 0, 1, (char)0x80, (char)0x80, 0, (char)0x80, (char)0x80, 0, 1, (char)0x80,
-        (char)0x80, (char)0x80, 0, 0, 1, (char)0x80, (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, 0
-        // clang-format on
-    );
+        0, 0, 0, 1, 0, 0, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 0,
+        (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, 0, 1, (char)0x80, 0, (char)0x80, (char)0x80, 0, 0, 0, 1, (char)0x80,
+        (char)0x80, 0, (char)0x80, (char)0x80, 0, 1, (char)0x80, (char)0x80, (char)0x80, 0, 0, 1, (char)0x80,
+        (char)0x80, 0, 1, (char)0x80, 0, 1, 0, 1, (char)0x80, 0);
 
     // Lead byte detection: C2/C3 Latin-1, C4-C6 Latin Extended, E1 Latin Extended Additional
     __mmask64 is_c2_mask = _mm512_cmpeq_epi8_mask(source_zmm, _mm512_set1_epi8((char)0xC2));
@@ -428,28 +420,25 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
         __mmask64 well_formed_three_byte_mask = is_three_byte_lead_mask & next_is_cont_mask & next2_is_cont_mask;
         __mmask64 well_formed_four_byte_mask = is_four_byte_lead_mask & next_is_cont_mask & next2_is_cont_mask &
                                                next3_is_cont_mask;
-        __mmask64 well_formed_lead_mask =
-            (well_formed_two_byte_mask | well_formed_three_byte_mask | well_formed_four_byte_mask) &
-            ~bad_special_lead_mask;
+        __mmask64 well_formed_lead_mask = (well_formed_two_byte_mask | well_formed_three_byte_mask |
+                                           well_formed_four_byte_mask) &
+                                          ~bad_special_lead_mask;
         // Malformed leads are foreign to every family: handlers stop at them and the strict per-rune fallback
         // copies one byte to resync, exactly as the serial reference does.
         __mmask64 malformed_lead_mask = is_lead_mask & ~well_formed_lead_mask;
 
         __m512i const lead_families_lut = _mm512_set_epi8(
-            // clang-format off
             // Indices 0x3F..0x30 (leads F0-FF): supplementary planes and invalid leads
-            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
-            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
             // Indices 0x2F..0x20 (leads E0-EF): EF/EA/E2 guarded, E1 special, the rest caseless
             0x40, 0x01, 0x01, 0x01, 0x01, 0x40, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x40, 0x20, 0x01,
             // Indices 0x1F..0x10 (leads D0-DF): D7-DF caseless, D2-D6 complex, D0-D1 Cyrillic
-            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
-            (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, 0x08, 0x08,
+            0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
+            (char)0x80, 0x08, 0x08,
             // Indices 0x0F..0x00 (leads C0-CF): CE/CF Greek, C7-CD complex, C4-C6 Latin Ext, C2-C3 Latin
-            0x10, 0x10, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80,
-            0x04, 0x04, 0x04, 0x02, 0x02, (char)0x80, (char)0x80
-            // clang-format on
-        );
+            0x10, 0x10, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, (char)0x80, 0x04, 0x04,
+            0x04, 0x02, 0x02, (char)0x80, (char)0x80);
         __m512i lead_families_vec = _mm512_maskz_permutexvar_epi8(is_lead_mask, source_vec.zmm, lead_families_lut);
         sz_u8_t lead_families = sz_utf8_fold_icelake_reduce_or_u8_(lead_families_vec);
 
@@ -466,9 +455,9 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
         else if ((lead_families & (sz_utf8_fold_lead_latin_extended_flag_ | sz_utf8_fold_lead_e1_flag_)) &&
                  !(lead_families & ~(sz_utf8_fold_lead_latin_flag_ | sz_utf8_fold_lead_latin_extended_flag_ |
                                      sz_utf8_fold_lead_e1_flag_))) {
-            sz_size_t handled = sz_utf8_uncased_fold_icelake_latin_chunk_(
-                source_vec.zmm, load_mask, chunk_size, is_cont_mask, is_three_byte_lead_mask, malformed_lead_mask,
-                target);
+            sz_size_t handled = sz_utf8_uncased_fold_icelake_latin_chunk_(source_vec.zmm, load_mask, chunk_size,
+                                                                          is_cont_mask, is_three_byte_lead_mask,
+                                                                          malformed_lead_mask, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -558,8 +547,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
         __mmask64 latin1_second_byte_positions = is_latin1_lead << 1;
         sz_size_t latin1_length = 0;
         if (lead_families & sz_utf8_fold_lead_latin_flag_) {
-            __mmask64 is_valid_latin1_mix =
-                (~is_non_ascii | is_latin1_lead | latin1_second_byte_positions) & ~malformed_lead_mask;
+            __mmask64 is_valid_latin1_mix = (~is_non_ascii | is_latin1_lead | latin1_second_byte_positions) &
+                                            ~malformed_lead_mask;
             latin1_length = sz_icelake_first_invalid_(is_valid_latin1_mix, load_mask, chunk_size);
             latin1_length -= latin1_length && ((is_latin1_lead >> (latin1_length - 1)) & 1); // Don't split 2-byte seq
         }
@@ -804,8 +793,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
 
         // Accept ALL well-formed 2-byte sequences; we'll detect singletons after decoding. A malformed lead
         // truncates the run so the strict serial fallback copies it one byte at a time.
-        __mmask64 is_valid_two_byte_mix =
-            (~is_non_ascii | is_two_byte_lead | two_byte_second_positions) & ~malformed_lead_mask;
+        __mmask64 is_valid_two_byte_mix = (~is_non_ascii | is_two_byte_lead | two_byte_second_positions) &
+                                          ~malformed_lead_mask;
         sz_size_t two_byte_length = sz_icelake_first_invalid_(is_valid_two_byte_mix, load_mask, chunk_size);
         two_byte_length -= two_byte_length && ((is_two_byte_lead >> (two_byte_length - 1)) & 1);
 
@@ -1362,8 +1351,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
                         if (first_special_byte == 0) {
                             // First char needs serial - fold it if well-formed, else copy one byte to resync
                             sz_rune_t rune;
-                            sz_rune_length_t const rune_length =
-                                sz_rune_parse(source, source + source_length, &rune);
+                            sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
                             if (rune_length == sz_utf8_invalid_k) {
                                 *target++ = *source++;
                                 source_length -= 1;

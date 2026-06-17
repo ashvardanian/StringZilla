@@ -169,7 +169,8 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16
     uint8x16_t next2_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 2);
     uint8x16_t next3_u8x16 = vextq_u8(source_u8x16, next_register_u8x16, 3);
 
-    uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, continuation_low_u8x16), continuation_span_u8x16);
+    uint8x16_t is_continuation_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, continuation_low_u8x16),
+                                                continuation_span_u8x16);
     uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, continuation_low_u8x16);
     uint8x16_t is_lead_u8x16 = vbicq_u8(is_non_ascii_u8x16, is_continuation_u8x16);
     uint8x16_t next1_is_continuation_u8x16 = vcltq_u8(vsubq_u8(next1_u8x16, continuation_low_u8x16),
@@ -193,10 +194,14 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16
         vandq_u8(next1_is_continuation_u8x16, vandq_u8(next2_is_continuation_u8x16, next3_is_continuation_u8x16)));
 
     // Bad-special set keyed by the lead and its second byte, mirroring `sz_rune_parse`
-    uint8x16_t e0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE0)), vcltq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
-    uint8x16_t ed_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xED)), vcgeq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
-    uint8x16_t f0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF0)), vcltq_u8(next1_u8x16, vdupq_n_u8(0x90)));
-    uint8x16_t f4_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF4)), vcgeq_u8(next1_u8x16, vdupq_n_u8(0x90)));
+    uint8x16_t e0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE0)),
+                                       vcltq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
+    uint8x16_t ed_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xED)),
+                                       vcgeq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
+    uint8x16_t f0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF0)),
+                                       vcltq_u8(next1_u8x16, vdupq_n_u8(0x90)));
+    uint8x16_t f4_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xF4)),
+                                       vcgeq_u8(next1_u8x16, vdupq_n_u8(0x90)));
     uint8x16_t bad_special_u8x16 = vorrq_u8(vorrq_u8(e0_bad_u8x16, ed_bad_u8x16), vorrq_u8(f0_bad_u8x16, f4_bad_u8x16));
 
     uint8x16_t well_formed_u8x16 = vbicq_u8(
@@ -264,7 +269,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t sou
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                          sz_ptr_t target) {
+                                                             sz_ptr_t target) {
 
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_neon_c4_deltas_lut_);
     uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_neon_c5_deltas_lut_);
@@ -346,9 +351,9 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source
         // fallback copies one byte and resyncs. For valid text the malformed mask is empty, so the
         // handler behaves exactly as before.
         uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
-        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(irregular_extended_u8x16, foreign_e1_second_u8x16),
-                                         vorrq_u8(vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16),
-                                                  malformed_lead_u8x16));
+        uint8x16_t stop_u8x16 = vorrq_u8(
+            vorrq_u8(irregular_extended_u8x16, foreign_e1_second_u8x16),
+            vorrq_u8(vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16), malformed_lead_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -437,7 +442,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                             sz_ptr_t target) {
+                                                                sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
@@ -514,7 +519,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t sou
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                          sz_ptr_t target) {
+                                                             sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_ce_u8x16 = zero_u8x16, previous_is_cf_u8x16 = zero_u8x16;
     uint8x16_t stop_masks_u8x16[4];
@@ -537,8 +542,8 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source
         uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
         uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
-        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16)),
-                                         malformed_lead_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(
+            vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16)), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -610,7 +615,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                             sz_ptr_t target) {
+                                                                sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_d4_u8x16 = zero_u8x16, previous_is_d5_u8x16 = zero_u8x16;
     uint8x16_t stop_masks_u8x16[4];
@@ -635,8 +640,8 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t sou
         uint8x16_t is_ligature_stop_u8x16 = vandq_u8(is_d6_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x87)));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
         uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
-        uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16)),
-                                         malformed_lead_u8x16);
+        uint8x16_t stop_u8x16 = vorrq_u8(
+            vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16)), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
@@ -709,7 +714,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t sou
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                             sz_ptr_t target) {
+                                                                sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_82_upper_lead_u8x16 = zero_u8x16, previous_is_83_upper_lead_u8x16 = zero_u8x16;
     uint8x16_t previous_is_82_upper_second_u8x16 = zero_u8x16, previous_is_83_upper_second_u8x16 = zero_u8x16;
@@ -805,7 +810,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t sou
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
-                                                            sz_ptr_t target) {
+                                                               sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t stop_masks_u8x16[4];
     uint8x16_t any_stop_u8x16 = zero_u8x16;

@@ -152,8 +152,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_serial(sz_cptr_t str, sz_size_t le
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                              sz_size_t b_length) {
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_utf8_folded_iter_t_ a_iterator, b_iterator;
     sz_utf8_folded_iter_init_(&a_iterator, a, a_length);
     sz_utf8_folded_iter_init_(&b_iterator, b, b_length);
@@ -187,8 +186,8 @@ SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_le
  *  @param match_length Haystack bytes consumed by this match.
  */
 SZ_INTERNAL sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz_cptr_t needle_end,
-                                                            sz_cptr_t haystack_start, sz_cptr_t haystack_end,
-                                                            sz_size_t *match_length) {
+                                                   sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                   sz_size_t *match_length) {
 
     // If needle head is empty, no haystack bytes needed
     if (needle_end <= needle_start) {
@@ -229,8 +228,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz_cp
  *  @param match_length Haystack bytes consumed by this match.
  */
 SZ_INTERNAL sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz_cptr_t needle_end,
-                                                            sz_cptr_t haystack_start, sz_cptr_t haystack_end,
-                                                            sz_size_t *match_length) {
+                                                   sz_cptr_t haystack_start, sz_cptr_t haystack_end,
+                                                   sz_size_t *match_length) {
 
     sz_size_t needle_length = (sz_size_t)(needle_end - needle_start);
 
@@ -279,7 +278,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz_cp
  *  @param match_length Total length of the verified match in haystack bytes.
  *  @return Match start pointer, or SZ_NULL_CHAR if validation fails.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(             //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(                      //
     sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_size_t haystack_matched_offset, sz_size_t haystack_matched_length, //
@@ -292,7 +291,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(             //
     // Verify head using backward iterators
     sz_size_t head_match_length = 0;
     if (needle_head_bytes)
-        if (!sz_utf8_uncased_verify_head_(           //
+        if (!sz_utf8_uncased_verify_head_(                    //
                 needle, needle + needle_head_bytes,           // needle head region
                 haystack, haystack + haystack_matched_offset, // haystack head region
                 &head_match_length))
@@ -302,7 +301,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(             //
     sz_size_t tail_match_length = 0;
     sz_cptr_t haystack_tail_start = haystack + haystack_matched_offset + haystack_matched_length;
     if (needle_tail_bytes)
-        if (!sz_utf8_uncased_verify_tail_(                     //
+        if (!sz_utf8_uncased_verify_tail_(                              //
                 needle + needle_length - needle_tail_bytes, needle_end, // needle tail region
                 haystack_tail_start, haystack_end,                      // haystack tail region
                 &tail_match_length))
@@ -326,7 +325,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(             //
  *  @return Pointer to the first matching rune, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_1folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t haystack, sz_size_t haystack_length,          //
     sz_rune_t needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -389,11 +388,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_1folded_serial_( //
  *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
-    sz_cptr_t danger_cursor, sz_size_t danger_length,                //
-    sz_rune_t needle_first_safe_folded_rune,                         //
-    sz_size_t needle_first_safe_folded_rune_offset,                  //
+    sz_cptr_t haystack, sz_size_t haystack_length,          //
+    sz_cptr_t needle, sz_size_t needle_length,              //
+    sz_cptr_t danger_cursor, sz_size_t danger_length,       //
+    sz_rune_t needle_first_safe_folded_rune,                //
+    sz_size_t needle_first_safe_folded_rune_offset,         //
     sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -429,9 +428,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
         if (haystack_folded_runes[0] == needle_first_safe_folded_rune) {
             // Validate the full match using the unified validator
             sz_cptr_t match = sz_utf8_uncased_verify_match_( //
-                haystack, haystack_length,                            //
-                needle, needle_length,                                //
-                danger_cursor - haystack, 0,                          // No pre-matched middle
+                haystack, haystack_length,                   //
+                needle, needle_length,                       //
+                danger_cursor - haystack, 0,                 // No pre-matched middle
                 needle_first_safe_folded_rune_offset,
                 needle_length - needle_first_safe_folded_rune_offset, // Verify everything after head serially
                 match_length);
@@ -613,7 +612,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
  *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t haystack, sz_size_t haystack_length,          //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -699,7 +698,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
  *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
+    sz_cptr_t haystack, sz_size_t haystack_length,          //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_rune_t third_needle_folded,
     sz_size_t *match_length) {
 
@@ -790,9 +789,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial( //
-    sz_cptr_t haystack, sz_size_t haystack_length,        //
-    sz_cptr_t needle, sz_size_t needle_length,            //
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial(   //
+    sz_cptr_t haystack, sz_size_t haystack_length, //
+    sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
 
     (void)needle_metadata; // Only used by SIMD kernels for debugging
@@ -827,15 +826,15 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial( //
         switch (folded_count) {
         case 1:
             return sz_utf8_uncased_find_1folded_serial_( //
-                haystack, haystack_length,                        //
+                haystack, haystack_length,               //
                 folded_runes[0], match_length);
         case 2:
             return sz_utf8_uncased_find_2folded_serial_( //
-                haystack, haystack_length,                        //
+                haystack, haystack_length,               //
                 folded_runes[0], folded_runes[1], match_length);
         case 3:
             return sz_utf8_uncased_find_3folded_serial_( //
-                haystack, haystack_length,                        //
+                haystack, haystack_length,               //
                 folded_runes[0], folded_runes[1], folded_runes[2], match_length);
         default: break; // 4+ folded runes: fall through to Rabin-Karp
         }
@@ -1018,9 +1017,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial( //
  *        position 1; if next_next==0 && next!=0, we're at position N-2.
  */
 SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_profile_( //
-    sz_rune_t rune, sz_size_t rune_bytes,                                          //
-    sz_rune_t prev_rune, sz_rune_t next_rune,                                      //
-    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                            //
+    sz_rune_t rune, sz_size_t rune_bytes,                                                //
+    sz_rune_t prev_rune, sz_rune_t next_rune,                                            //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                                  //
     unsigned int *safety_profiles) {
 
     unsigned safety = 0;
@@ -1028,10 +1027,10 @@ SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_p
     // Bitmasks for profiles that share identical ASCII rules
     unsigned int western_group = //
         (1 << sz_utf8_uncased_rune_safe_western_europe_k);
-    unsigned int central_viet_group =                    //
+    unsigned int central_viet_group =                       //
         (1 << sz_utf8_uncased_rune_safe_central_europe_k) | //
         (1 << sz_utf8_uncased_rune_safe_vietnamese_k);
-    unsigned int strict_ascii_group =                //
+    unsigned int strict_ascii_group =                   //
         (1 << sz_utf8_uncased_rune_ascii_invariant_k) | //
         (1 << sz_utf8_uncased_rune_safe_cyrillic_k) |   //
         (1 << sz_utf8_uncased_rune_safe_greek_k) |      //
@@ -1061,16 +1060,23 @@ SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_p
         if (lower >= 'a' && lower <= 'z') {
             switch (lower) {
 
-                // Unconditionally safe for all profiles.
-                // No Unicode chars fold to sequences containing these,
-                // and they don't participate in dangerous ligatures.
-                // clang-format off
-            case 'b': case 'c': case 'd': case 'e': case 'g':
-            case 'm': case 'o': case 'p': case 'q': case 'r': case 'u':
-            case 'v': case 'x': case 'z':
-                // clang-format on
-                safety |= strict_ascii_group | central_viet_group | western_group;
-                break;
+            // Unconditionally safe for all profiles.
+            // No Unicode chars fold to sequences containing these,
+            // and they don't participate in dangerous ligatures.
+            case 'b':
+            case 'c':
+            case 'd':
+            case 'e':
+            case 'g':
+            case 'm':
+            case 'o':
+            case 'p':
+            case 'q':
+            case 'r':
+            case 'u':
+            case 'v':
+            case 'x':
+            case 'z': safety |= strict_ascii_group | central_viet_group | western_group; break;
 
             // 'k':
             // - Strict: UNSAFE. 'K' (U+212A, E2 84 AA) → 'k' (U+006B, 6B).
@@ -1412,8 +1418,9 @@ SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_p
         // For case-invariant non-ASCII runes (like CJK), add the ASCII-invariant bit.
         if (sz_rune_is_uncased_(rune)) safety |= (1 << sz_utf8_uncased_rune_ascii_invariant_k);
         *safety_profiles = safety;
-        if (rune >= 0x10D0 && rune <= 0x10FF) return sz_utf8_uncased_rune_safe_georgian_k;   // Georgian Mkhedruli
-        if (rune >= 0x1E00 && rune <= 0x1EFF) return sz_utf8_uncased_rune_safe_vietnamese_k; // Latin Extended Additional
+        if (rune >= 0x10D0 && rune <= 0x10FF) return sz_utf8_uncased_rune_safe_georgian_k; // Georgian Mkhedruli
+        if (rune >= 0x1E00 && rune <= 0x1EFF)
+            return sz_utf8_uncased_rune_safe_vietnamese_k; // Latin Extended Additional
         return sz_utf8_uncased_rune_invariant_k;
     }
 
@@ -1511,7 +1518,7 @@ SZ_INTERNAL sz_size_t sz_utf8_probe_diversity_score_(sz_u8_t const *data, sz_siz
  *  @param refined Output metadata structure to populate.
  */
 SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t needle_length, //
-                                                           sz_utf8_uncased_needle_metadata_t *refined) {
+                                                  sz_utf8_uncased_needle_metadata_t *refined) {
 
     // Per-script window state during iteration
     typedef struct {
@@ -1603,8 +1610,8 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
             // Parse next-next rune for context
             sz_rune_t next_next_rune = 0;
             if (next_rune != 0 && position + rune_bytes + next_bytes < needle_end) {
-                sz_rune_length_t const next_next_bytes =
-                    sz_rune_parse_unchecked((sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune);
+                sz_rune_length_t const next_next_bytes = sz_rune_parse_unchecked(
+                    (sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune);
                 if (position + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
             }
 

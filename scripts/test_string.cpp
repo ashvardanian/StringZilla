@@ -1561,11 +1561,11 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
                 std::vector<char> reference_output(length, '\0');
                 reference.copy(reference_output.data(), source, length);
                 candidate.copy(target, source, length);
-                assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
 
                 reference.fill(reference_output.data(), length, fill_value);
                 candidate.fill(target, length, fill_value);
-                assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
             });
 
             // `move` with overlapping regions: shift the source pattern within one buffer by a small offset,
@@ -1625,7 +1625,7 @@ void test_lookup_equivalence(reference_ reference, candidate_ candidate, sz_size
                 std::vector<char> reference_output(length, '\0');
                 reference.lookup(reference_output.data(), length, source, lookup_table);
                 candidate.lookup(target, length, source, lookup_table);
-                assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
             });
         }
     }

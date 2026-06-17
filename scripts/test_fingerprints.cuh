@@ -593,13 +593,21 @@ void test_fingerprints_safety() {
     using min_hashes_t = safe_array<u32_t, dims_k>;
     using min_counts_t = safe_array<u32_t, dims_k>;
 
+    // The CUDA fingerprinter reads the text and writes its outputs from the @b device, so both must live in
+    // device-accessible (unified) memory rather than on the host stack - otherwise the kernel's output writes land
+    // out of bounds. Stage the degenerate inputs into a tape and reuse one unified output slot, as `equivalence` does.
+    arrow_strings_tape_t degenerate_tape;
+    sz_assert_(degenerate_tape.try_assign(degenerate.begin(), degenerate.end()) == status_t::success_k);
+    unified_vector<min_hashes_t> hashes_buffer(1);
+    unified_vector<min_counts_t> counts_buffer(1);
+
     auto check_fingerprinter = [&](auto &fingerprinter) {
-        for (std::string const &text : degenerate) {
-            min_hashes_t hashes;
-            min_counts_t counts;
-            byte_t const *bytes = reinterpret_cast<byte_t const *>(text.data());
-            span<byte_t const> const text_span(bytes, text.size());
-            sz_assert_(fingerprinter.try_fingerprint(text_span, hashes, counts) == status_t::success_k);
+        for (std::size_t text_index = 0; text_index < degenerate.size(); ++text_index) {
+            auto text = degenerate_tape[text_index];
+            min_hashes_t &hashes = hashes_buffer[0];
+            min_counts_t &counts = counts_buffer[0];
+            sz_assert_(fingerprinter.try_fingerprint(text.template cast<byte_t const>(), hashes, counts) ==
+                       status_t::success_k);
             // A degenerate input shorter than the window must yield zero counts on every dimension.
             for (std::size_t dimension = 0; dimension < dims_k; ++dimension)
                 if (text.size() < fingerprinter.window_width(dimension)) sz_assert_(counts[dimension] == 0);

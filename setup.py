@@ -462,7 +462,7 @@ elif sz_target == "stringzillas-cuda":
             ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
             include_dirs=["include", "c/stringzillas", "fork_union/include", "/usr/local/cuda/include"],
             extra_compile_args=compile_args,
-            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lstdc++"],
+            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lcuda", "-lstdc++"],
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),
