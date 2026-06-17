@@ -328,18 +328,14 @@ def test_parameter_validation():
     # Test computation input validation
     engine = szs.LevenshteinDistances()
 
-    # Test None inputs - expect either `TypeError` or `RuntimeError` (GPU memory issues)
+    # Test None queries - expect either `TypeError` or `RuntimeError` (GPU memory issues).
+    # Note: `candidates=None` is now valid and requests symmetric self-similarity, so it is not an error.
     with pytest.raises((TypeError, RuntimeError)):
         engine(None, Strs(["test"]))
 
-    with pytest.raises((TypeError, RuntimeError)):
-        engine(Strs(["test"]), None)
-
-    # Test mismatched input sizes
-    with pytest.raises((ValueError, RuntimeError)):
-        a = Strs(["a", "b"])
-        b = Strs(["c"])  # Different size
-        engine(a, b)
+    # Mismatched query/candidate counts are valid in the cross-product API: they yield a rectangular matrix.
+    rectangular = engine(Strs(["a", "b"]), Strs(["c"]))
+    assert rectangular.shape == (2, 1)
 
     # Test with non-Strs inputs
     with pytest.raises((TypeError, RuntimeError)):
@@ -428,8 +424,8 @@ def test_levenshtein_distance_insertions(max_edit_distance: int, seed_value: int
         a_strs = Strs([a])
         b_strs = Strs([b])
         results = binary_engine(a_strs, b_strs)
-        assert len(results) == 1, "Binary engine should return a single distance"
-        assert results[0] == [i + 1], f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix for single query and candidate"
+        assert results[0, 0] == i + 1, f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
@@ -443,8 +439,8 @@ def test_levenshtein_distances_with_simple_cases(capabilities_mode: str, device_
         a_strs = Strs([a])
         b_strs = Strs([b])
         results = binary_engine(a_strs, b_strs, device=device_scope)
-        assert len(results) == 1, "Binary engine should return a single distance"
-        return results[0]
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix"
+        return int(results[0, 0])
 
     assert binary_distance("hello", "hello") == 0
     assert binary_distance("hello", "hell") == 1
@@ -475,8 +471,8 @@ def test_levenshtein_distances_utf8_with_simple_cases(capabilities_mode: str, de
         a_strs = Strs([a])
         b_strs = Strs([b])
         results = unicode_engine(a_strs, b_strs, device=device_scope)
-        assert len(results) == 1, "Unicode engine should return a single distance"
-        return results[0]
+        assert results.shape == (1, 1), "Unicode engine should return a 1x1 matrix"
+        return int(results[0, 0])
 
     assert unicode_distance("hello", "hell") == 1, "no unicode symbols, just ASCII"
     assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3, "add 3 whitespaces in Chinese"
@@ -510,8 +506,8 @@ def test_levenshtein_distances_with_custom_gaps(capabilities_mode: str, device_n
         a_strs = Strs([a])
         b_strs = Strs([b])
         results = binary_engine(a_strs, b_strs, device=device_scope)
-        assert len(results) == 1, "Binary engine should return a single distance"
-        return results[0]
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix"
+        return int(results[0, 0])
 
     assert binary_distance("hello", "hello") == 0
     assert binary_distance("hello", "hell") == opening
@@ -548,8 +544,8 @@ def test_levenshtein_distances_utf8_with_custom_gaps(capabilities_mode: str, dev
         a_strs = Strs([a])
         b_strs = Strs([b])
         results = unicode_engine(a_strs, b_strs, device=device_scope)
-        assert len(results) == 1, "Unicode engine should return a single distance"
-        return results[0]
+        assert results.shape == (1, 1), "Unicode engine should return a 1x1 matrix"
+        return int(results[0, 0])
 
     assert unicode_distance("hello", "hell") == opening, "no unicode symbols, just ASCII"
     assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3 * opening, "add 3 whitespaces in Chinese"
@@ -585,11 +581,73 @@ def test_levenshtein_distance_random(
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.LevenshteinDistances(capabilities=base_caps if capabilities_mode == "base" else device_scope)
 
-    # Convert to Strs objects
-    a_strs, b_strs = Strs(a_batch), Strs(b_batch)
-    results = engine(a_strs, b_strs)
+    # The cross-product engine returns a (queries x candidates) matrix; the original pairwise
+    # baseline corresponds to the matrix diagonal where query_index == candidate_index.
+    queries, candidates = Strs(a_batch), Strs(b_batch)
+    matrix = engine(queries, candidates)
+    assert matrix.shape == (batch_size, batch_size)
+    np.testing.assert_array_equal(np.diagonal(matrix), baselines, "Edit distances do not match")
 
-    np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("queries_count", [1, 3, 5])
+@pytest.mark.parametrize("candidates_count", [1, 4, 6])
+def test_levenshtein_cross_product_matrix(device_name: DeviceName, queries_count: int, candidates_count: int):
+    """Verify the full (queries x candidates) Levenshtein matrix against the pure-Python reference.
+
+    Covers rectangular grids including the 1xN and Nx1 degenerate shapes.
+    """
+
+    seed_random_generators(42)
+    query_strings = [get_random_string(length=randint(4, 20)) for _ in range(queries_count)]
+    candidate_strings = [get_random_string(length=randint(4, 20)) for _ in range(candidates_count)]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.LevenshteinDistances(capabilities=base_caps)
+
+    matrix = engine(Strs(query_strings), Strs(candidate_strings), device=device_scope)
+    assert matrix.shape == (queries_count, candidates_count)
+    assert matrix.dtype == np.uint64
+
+    reference = np.array(
+        [[baseline_levenshtein_distance(q, c) for c in candidate_strings] for q in query_strings],
+        dtype=np.uint64,
+    )
+    for query_index in range(queries_count):
+        for candidate_index in range(candidates_count):
+            assert (
+                matrix[query_index, candidate_index] == reference[query_index, candidate_index]
+            ), f"Cross-product mismatch at ({query_index}, {candidate_index})"
+
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("queries_count", [1, 4, 8])
+def test_levenshtein_symmetric_self_similarity(device_name: DeviceName, queries_count: int):
+    """Passing `candidates=None` requests symmetric self-similarity of the queries."""
+
+    seed_random_generators(7)
+    query_strings = [get_random_string(length=randint(4, 20)) for _ in range(queries_count)]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.LevenshteinDistances(capabilities=base_caps)
+
+    matrix = engine(Strs(query_strings), device=device_scope)
+    assert matrix.shape == (queries_count, queries_count)
+    assert matrix.dtype == np.uint64
+
+    # The self-similarity matrix must be symmetric with a zero diagonal.
+    assert np.array_equal(np.diagonal(matrix), np.zeros(queries_count, dtype=np.uint64)), "Diagonal must be zero"
+    for first_index in range(queries_count):
+        for second_index in range(queries_count):
+            assert (
+                matrix[first_index, second_index] == matrix[second_index, first_index]
+            ), f"Matrix must be symmetric at ({first_index}, {second_index})"
+
+    # The off-diagonal cells must match the pure-Python pairwise reference.
+    for first_index in range(queries_count):
+        for second_index in range(queries_count):
+            expected = baseline_levenshtein_distance(query_strings[first_index], query_strings[second_index])
+            assert matrix[first_index, second_index] == expected
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
@@ -615,7 +673,7 @@ def test_needleman_wunsch_vs_levenshtein_random(
     class_costs = np.full((32, 32), -1, dtype=np.int8)
     np.fill_diagonal(class_costs, 0)
 
-    baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)]
+    baselines = np.array([-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)])
 
     device_scope, base_caps = device_scope_and_capabilities(device_name)
     engine = szs.NeedlemanWunschScores(
@@ -626,11 +684,12 @@ def test_needleman_wunsch_vs_levenshtein_random(
         extend=-1,
     )
 
-    # Convert to Strs objects
-    a_strs, b_strs = Strs(a_batch), Strs(b_batch)
-    results = engine(a_strs, b_strs)
-
-    np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    queries, candidates = Strs(a_batch), Strs(b_batch)
+    matrix = engine(queries, candidates)
+    assert matrix.shape == (batch_size, batch_size)
+    np.testing.assert_array_equal(np.diagonal(matrix), baselines, "Edit distances do not match")
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
@@ -687,9 +746,13 @@ def test_needleman_wunsch_against_affine_gaps(
         extend=ag.default_gap_extension,
     )
 
-    results = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
-    if not np.array_equal(results, baseline):
-        idx = int(np.where(results != baseline)[0][0])
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    matrix = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    assert matrix.shape == (batch_size, batch_size)
+    scores = np.diagonal(matrix)
+    if not np.array_equal(scores, baseline):
+        idx = int(np.where(scores != baseline)[0][0])
         a, b = a_batch[idx], b_batch[idx]
         aligned_a, aligned_b = ag.needleman_wunsch_gotoh(
             a,
@@ -706,7 +769,7 @@ def test_needleman_wunsch_against_affine_gaps(
                     f"Needleman-Wunsch mismatch at index {idx}:",
                     f"  a: {a}",
                     f"  b: {b}",
-                    f"  szs score:     {int(results[idx])}",
+                    f"  szs score:     {int(scores[idx])}",
                     f"  affine_gaps:   {int(baseline[idx])}",
                     "  Alignment (affine_gaps):",
                     f"    {aligned_a}",
@@ -715,7 +778,7 @@ def test_needleman_wunsch_against_affine_gaps(
                 ]
             )
         )
-    np.testing.assert_array_equal(results, baseline)
+    np.testing.assert_array_equal(scores, baseline)
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
@@ -772,9 +835,13 @@ def test_smith_waterman_against_affine_gaps(
         extend=ag.default_gap_extension,
     )
 
-    results = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
-    if not np.array_equal(results, baseline):
-        idx = int(np.where(results != baseline)[0][0])
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    matrix = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    assert matrix.shape == (batch_size, batch_size)
+    scores = np.diagonal(matrix)
+    if not np.array_equal(scores, baseline):
+        idx = int(np.where(scores != baseline)[0][0])
         a, b = a_batch[idx], b_batch[idx]
         aligned_a, aligned_b = ag.smith_waterman_gotoh(
             a,
@@ -791,7 +858,7 @@ def test_smith_waterman_against_affine_gaps(
                     f"Smith-Waterman mismatch at index {idx}:",
                     f"  a: {a}",
                     f"  b: {b}",
-                    f"  szs score:     {int(results[idx])}",
+                    f"  szs score:     {int(scores[idx])}",
                     f"  affine_gaps:   {int(baseline[idx])}",
                     "  Alignment (affine_gaps):",
                     f"    {aligned_a}",
@@ -800,7 +867,7 @@ def test_smith_waterman_against_affine_gaps(
                 ]
             )
         )
-    np.testing.assert_array_equal(results, baseline)
+    np.testing.assert_array_equal(scores, baseline)
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])

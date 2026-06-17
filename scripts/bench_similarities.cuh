@@ -62,6 +62,8 @@ using ashvardanian::stringzillas::smith_waterman_cuda_t;
 using ashvardanian::stringzillas::smith_waterman_hopper_t;
 #endif
 
+using ashvardanian::stringzillas::strided_rows;
+
 using namespace ashvardanian::stringzilla::scripts;
 
 using similarities_t = unified_vector<sz_ssize_t>;
@@ -94,72 +96,96 @@ template <typename status_type_>
  *        the call and the read together in a non-inlined frame reproduces the same code path as a separate-TU
  *        call, which the library validates as correct in isolation.
  */
-template <typename engine_type_, typename first_type_, typename second_type_, typename... rest_types_>
-[[gnu::noinline]] status_t invoke_engine_status_(engine_type_ &engine, first_type_ const &first,
-                                                 second_type_ const &second, similarities_t &results,
+template <typename engine_type_, typename queries_type_, typename candidates_type_, typename... rest_types_>
+[[gnu::noinline]] status_t invoke_engine_status_(engine_type_ &engine, queries_type_ const &queries,
+                                                 candidates_type_ const &candidates, strided_rows<sz_ssize_t> results,
                                                  rest_types_ &...rest) noexcept {
-    auto status = engine(first, second, results, rest...);
+    auto status = engine(queries, candidates, results, rest...);
     do_not_optimize(status);
     return read_engine_status_(status);
 }
 
 #pragma region Levenshtein Distance and Alignment Scores
 
-/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+/**
+ *  @brief Wraps a hardware-specific similarity backend into something @b `bench_unary`-compatible.
+ *
+ *  Each invocation scores a @b cross-product tile: a block of `queries_count` query tokens against a block of
+ *  `candidates_count` candidate tokens, writing the row-major `queries_count x candidates_count` distance matrix
+ *  into `results`. The reported `operations` count is the Cells-Updates total `sum(len(query) * len(candidate))`
+ *  over the whole tile, so the harness derives GCUPS over `Q * C * avg_len^2` cells.
+ */
 template <typename engine_type_, typename... extra_args_>
 struct similarities_callable {
     using engine_t = engine_type_;
 
     environment_t const &env;
     similarities_t &results;
+    std::size_t queries_count = 0;
+    std::size_t candidates_count = 0;
     engine_t engine = {};
     std::tuple<extra_args_...> extra_args = {};
 
-    similarities_callable(environment_t const &env, similarities_t &res, engine_t eng = {}, extra_args_... args)
-        : env(env), results(res), engine(std::move(eng)), extra_args(std::forward<extra_args_>(args)...) {
-        if (env.tokens.size() <= results.size()) throw std::runtime_error("Batch size is too large.");
+    similarities_callable(environment_t const &env, similarities_t &res, std::size_t queries_count,
+                          std::size_t candidates_count, engine_t eng = {}, extra_args_... args)
+        : env(env), results(res), queries_count(queries_count), candidates_count(candidates_count),
+          engine(std::move(eng)), extra_args(std::forward<extra_args_>(args)...) {
+        if (env.tokens.size() <= queries_count + candidates_count)
+            throw std::runtime_error("Cross-product tile is too large for the dataset.");
+        if (results.size() < queries_count * candidates_count)
+            throw std::runtime_error("Results matrix is smaller than the cross-product tile.");
     }
 
     call_result_t operator()(std::size_t batch_index) noexcept(false) {
-        std::size_t const batch_size = results.size();
-        std::size_t const forward_token_index = (batch_index * batch_size) % (env.tokens.size() - batch_size);
-        std::size_t const backward_token_index = env.tokens.size() - forward_token_index - batch_size;
+        // Slide a query block forward and a candidate block backward through the token stream, so consecutive
+        // invocations score different tiles without the two blocks overlapping for small datasets.
+        std::size_t const usable_span = env.tokens.size() - queries_count - candidates_count;
+        std::size_t const queries_token_index = (batch_index * queries_count) % (usable_span + 1);
+        std::size_t const candidates_token_index = env.tokens.size() - candidates_count;
 
-        return operator()({env.tokens.data() + forward_token_index, batch_size},
-                          {env.tokens.data() + backward_token_index, batch_size});
+        return operator()({env.tokens.data() + queries_token_index, queries_count},
+                          {env.tokens.data() + candidates_token_index, candidates_count});
     }
 
-    call_result_t operator()(std::span<token_view_t const> a, std::span<token_view_t const> b) noexcept(false) {
+    call_result_t operator()(std::span<token_view_t const> queries_block,
+                             std::span<token_view_t const> candidates_block) noexcept(false) {
+        strided_rows<sz_ssize_t> const results_matrix {results.data(), queries_count, candidates_count,
+                                                       candidates_count};
+
         // Unpack the extra arguments from `std::tuple` and run the call + status read behind one non-inlined
         // boundary (`invoke_engine_status_`) to dodge a large-TU return-by-value miscompile (see its note).
         status_t const status_code = std::apply(
-            [&](auto &&...rest) { return invoke_engine_status_(engine, a, b, results, rest...); }, extra_args);
+            [&](auto &&...rest) {
+                return invoke_engine_status_(engine, queries_block, candidates_block, results_matrix, rest...);
+            },
+            extra_args);
         if (status_code != status_t::success_k)
-            throw std::runtime_error(std::string("Failed to compute Levenshtein distance: ") +
-                                     status_name(status_code));
+            throw std::runtime_error(std::string("Failed to compute similarity matrix: ") + status_name(status_code));
         do_not_optimize(results);
         std::size_t bytes_passed = 0, cells_passed = 0;
-        for (std::size_t i = 0; i < results.size(); ++i) {
-            bytes_passed += a[i].size() + b[i].size();
-            cells_passed += a[i].size() * b[i].size();
-        }
+        for (std::size_t query_index = 0; query_index < queries_count; ++query_index)
+            for (std::size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
+                bytes_passed += queries_block[query_index].size() + candidates_block[candidate_index].size();
+                cells_passed += queries_block[query_index].size() * candidates_block[candidate_index].size();
+            }
         call_result_t call_result;
         call_result.bytes_passed = bytes_passed;
         call_result.operations = cells_passed;
-        call_result.inputs_processed = results.size();
+        call_result.inputs_processed = queries_count * candidates_count;
         call_result.check_value = reinterpret_cast<check_value_t>(&results);
         return call_result;
     }
 };
 
 struct similarities_equality_t {
-    bool operator()(check_value_t const &a, check_value_t const &b) const noexcept {
-        similarities_t const &a_ = *reinterpret_cast<similarities_t const *>(a);
-        similarities_t const &b_ = *reinterpret_cast<similarities_t const *>(b);
-        if (a_.size() != b_.size()) return false;
-        for (std::size_t i = 0; i < a_.size(); ++i)
-            if (a_[i] != b_[i]) {
-                std::printf("Mismatch at index %zu: %zd != %zd\n", i, a_[i], b_[i]);
+    bool operator()(check_value_t const &left, check_value_t const &right) const noexcept {
+        similarities_t const &left_matrix = *reinterpret_cast<similarities_t const *>(left);
+        similarities_t const &right_matrix = *reinterpret_cast<similarities_t const *>(right);
+        if (left_matrix.size() != right_matrix.size()) return false;
+        for (std::size_t cell_index = 0; cell_index < left_matrix.size(); ++cell_index)
+            if (left_matrix[cell_index] != right_matrix[cell_index]) {
+                std::printf("Mismatch at cell %zu: %zd != %zd\n", cell_index, left_matrix[cell_index],
+                            right_matrix[cell_index]);
                 return false;
             }
         return true;
@@ -209,22 +235,30 @@ void bench_levenshtein(environment_t const &env) {
 
     for (auto const &scheme : cost_schemes)
         for (std::size_t batch_size : batch_sizes) {
-            results_linear_baseline.resize(batch_size), results_linear_accelerated.resize(batch_size);
-            results_affine_baseline.resize(batch_size), results_affine_accelerated.resize(batch_size);
-            results_utf8_baseline.resize(batch_size), results_utf8_accelerated.resize(batch_size);
+            // Interpret the batch size as the number of queries in the cross-product tile; cap the candidate
+            // dimension so the `Q x C` matrix stays bounded even for the largest batch sizes.
+            std::size_t const queries_count = batch_size;
+            std::size_t const candidates_count = std::min<std::size_t>(batch_size, 64);
+            std::size_t const matrix_size = queries_count * candidates_count;
+            results_linear_baseline.resize(matrix_size), results_linear_accelerated.resize(matrix_size);
+            results_affine_baseline.resize(matrix_size), results_affine_accelerated.resize(matrix_size);
+            results_utf8_baseline.resize(matrix_size), results_utf8_accelerated.resize(matrix_size);
 
             auto call_linear_baseline = similarities_callable<levenshtein_serial_t, fu::basic_pool_t &>(
-                env, results_linear_baseline, levenshtein_serial_t {scheme.uniform, scheme.linear}, pool);
+                env, results_linear_baseline, queries_count, candidates_count,
+                levenshtein_serial_t {scheme.uniform, scheme.linear}, pool);
             auto name_linear_baseline = "levenshtein_serial_"s + scheme.tag + ":batch" + std::to_string(batch_size);
             bench_result_t linear_baseline = bench_unary(env, name_linear_baseline, call_linear_baseline).log();
 
             auto call_utf8_baseline = similarities_callable<levenshtein_utf8_serial_t>(
-                env, results_utf8_baseline, levenshtein_utf8_serial_t {scheme.uniform, scheme.linear});
+                env, results_utf8_baseline, queries_count, candidates_count,
+                levenshtein_utf8_serial_t {scheme.uniform, scheme.linear});
             auto name_utf8_baseline = "levenshtein_utf8_serial_"s + scheme.tag + ":batch" + std::to_string(batch_size);
             bench_result_t utf8_baseline = bench_unary(env, name_utf8_baseline, call_utf8_baseline).log();
 
             auto call_affine_baseline = similarities_callable<affine_levenshtein_serial_t, fu::basic_pool_t &>(
-                env, results_affine_baseline, affine_levenshtein_serial_t {scheme.uniform, scheme.affine}, pool);
+                env, results_affine_baseline, queries_count, candidates_count,
+                affine_levenshtein_serial_t {scheme.uniform, scheme.affine}, pool);
             auto name_affine_baseline = "affine_levenshtein_serial_"s + scheme.tag + ":batch" +
                                         std::to_string(batch_size);
             bench_result_t affine_baseline =
@@ -232,19 +266,20 @@ void bench_levenshtein(environment_t const &env) {
             sz_unused_(affine_baseline);
 
 #if SZ_USE_ICELAKE
-            bench_unary(
-                env, "levenshtein_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size), call_linear_baseline,
-                similarities_callable<levenshtein_icelake_t, fu::basic_pool_t &>(
-                    env, results_linear_accelerated, levenshtein_icelake_t {scheme.uniform, scheme.linear}, pool),
-                callable_no_op_t {},        // preprocessing
-                similarities_equality_t {}) // equality check
+            bench_unary(env, "levenshtein_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size),
+                        call_linear_baseline,
+                        similarities_callable<levenshtein_icelake_t, fu::basic_pool_t &>(
+                            env, results_linear_accelerated, queries_count, candidates_count,
+                            levenshtein_icelake_t {scheme.uniform, scheme.linear}, pool),
+                        callable_no_op_t {},        // preprocessing
+                        similarities_equality_t {}) // equality check
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
             bench_unary(env, "affine_levenshtein_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_affine_baseline,
                         similarities_callable<affine_levenshtein_icelake_t, fu::basic_pool_t &>(
-                            env, results_affine_accelerated,
+                            env, results_affine_accelerated, queries_count, candidates_count,
                             affine_levenshtein_icelake_t {scheme.uniform, scheme.affine}, pool),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
@@ -254,7 +289,8 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "levenshtein_utf8_icelake_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_utf8_baseline,
                         similarities_callable<levenshtein_utf8_icelake_t>(
-                            env, results_utf8_accelerated, levenshtein_utf8_icelake_t {scheme.uniform, scheme.linear}),
+                            env, results_utf8_accelerated, queries_count, candidates_count,
+                            levenshtein_utf8_icelake_t {scheme.uniform, scheme.linear}),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(utf8_baseline);
@@ -265,26 +301,28 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "levenshtein_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_linear_baseline,
                         similarities_callable<levenshtein_neon_t, fu::basic_pool_t &>(
-                            env, results_linear_accelerated, levenshtein_neon_t {scheme.uniform, scheme.linear}, pool),
+                            env, results_linear_accelerated, queries_count, candidates_count,
+                            levenshtein_neon_t {scheme.uniform, scheme.linear}, pool),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(
-                env, "affine_levenshtein_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size),
-                call_affine_baseline,
-                similarities_callable<affine_levenshtein_neon_t, fu::basic_pool_t &>(
-                    env, results_affine_accelerated, affine_levenshtein_neon_t {scheme.uniform, scheme.affine}, pool),
-                callable_no_op_t {},        // preprocessing
-                similarities_equality_t {}) // equality check
+            bench_unary(env, "affine_levenshtein_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size),
+                        call_affine_baseline,
+                        similarities_callable<affine_levenshtein_neon_t, fu::basic_pool_t &>(
+                            env, results_affine_accelerated, queries_count, candidates_count,
+                            affine_levenshtein_neon_t {scheme.uniform, scheme.affine}, pool),
+                        callable_no_op_t {},        // preprocessing
+                        similarities_equality_t {}) // equality check
                 .log(linear_baseline, affine_baseline);
             scramble_accelerated_results(results_affine_accelerated);
 
             bench_unary(env, "levenshtein_utf8_neon_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_utf8_baseline,
                         similarities_callable<levenshtein_utf8_neon_t>(
-                            env, results_utf8_accelerated, levenshtein_utf8_neon_t {scheme.uniform, scheme.linear}),
+                            env, results_utf8_accelerated, queries_count, candidates_count,
+                            levenshtein_utf8_neon_t {scheme.uniform, scheme.linear}),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(utf8_baseline);
@@ -295,8 +333,8 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "levenshtein_cuda_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_linear_baseline,
                         similarities_callable<levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_linear_accelerated, levenshtein_cuda_t {scheme.uniform, scheme.linear},
-                            cuda_executor_t {}, specs),
+                            env, results_linear_accelerated, queries_count, candidates_count,
+                            levenshtein_cuda_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline);
@@ -305,8 +343,8 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "affine_levenshtein_cuda_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_affine_baseline,
                         similarities_callable<affine_levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_affine_accelerated, affine_levenshtein_cuda_t {scheme.uniform, scheme.affine},
-                            cuda_executor_t {}, specs),
+                            env, results_affine_accelerated, queries_count, candidates_count,
+                            affine_levenshtein_cuda_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline, affine_baseline);
@@ -317,8 +355,8 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "levenshtein_kepler_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_linear_baseline,
                         similarities_callable<levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_linear_accelerated, levenshtein_kepler_t {scheme.uniform, scheme.linear},
-                            cuda_executor_t {}, specs),
+                            env, results_linear_accelerated, queries_count, candidates_count,
+                            levenshtein_kepler_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline);
@@ -327,7 +365,7 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "affine_levenshtein_kepler_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_affine_baseline,
                         similarities_callable<affine_levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_affine_accelerated,
+                            env, results_affine_accelerated, queries_count, candidates_count,
                             affine_levenshtein_kepler_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
@@ -339,8 +377,8 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "levenshtein_hopper_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_linear_baseline,
                         similarities_callable<levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_linear_accelerated, levenshtein_hopper_t {scheme.uniform, scheme.linear},
-                            cuda_executor_t {}, specs),
+                            env, results_linear_accelerated, queries_count, candidates_count,
+                            levenshtein_hopper_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline);
@@ -349,7 +387,7 @@ void bench_levenshtein(environment_t const &env) {
             bench_unary(env, "affine_levenshtein_hopper_"s + scheme.tag + ":batch" + std::to_string(batch_size),
                         call_affine_baseline,
                         similarities_callable<affine_levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_affine_accelerated,
+                            env, results_affine_accelerated, queries_count, candidates_count,
                             affine_levenshtein_hopper_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
@@ -392,31 +430,40 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     sz_unused_(scramble_accelerated_results);
 
     for (std::size_t batch_size : batch_sizes) {
-        results_linear_global_baseline.resize(batch_size), results_linear_global_accelerated.resize(batch_size);
-        results_affine_global_baseline.resize(batch_size), results_affine_global_accelerated.resize(batch_size);
-        results_linear_local_baseline.resize(batch_size), results_linear_local_accelerated.resize(batch_size);
-        results_affine_local_baseline.resize(batch_size), results_affine_local_accelerated.resize(batch_size);
+        // Interpret the batch size as the number of queries in the cross-product tile; cap the candidate
+        // dimension so the `Q x C` matrix stays bounded even for the largest batch sizes.
+        std::size_t const queries_count = batch_size;
+        std::size_t const candidates_count = std::min<std::size_t>(batch_size, 64);
+        std::size_t const matrix_size = queries_count * candidates_count;
+        results_linear_global_baseline.resize(matrix_size), results_linear_global_accelerated.resize(matrix_size);
+        results_affine_global_baseline.resize(matrix_size), results_affine_global_accelerated.resize(matrix_size);
+        results_linear_local_baseline.resize(matrix_size), results_linear_local_accelerated.resize(matrix_size);
+        results_affine_local_baseline.resize(matrix_size), results_affine_local_accelerated.resize(matrix_size);
 
         auto call_linear_global_baseline = similarities_callable<needleman_wunsch_serial_t, fu::basic_pool_t &>(
-            env, results_linear_global_baseline, {blosum62_matrix32, blosum62_linear_cost}, pool);
+            env, results_linear_global_baseline, queries_count, candidates_count,
+            {blosum62_matrix32, blosum62_linear_cost}, pool);
         auto name_linear_global_baseline = "needleman_wunsch_serial:batch"s + std::to_string(batch_size);
         bench_result_t linear_global_baseline =
             bench_unary(env, name_linear_global_baseline, call_linear_global_baseline).log();
 
         auto call_linear_local_baseline = similarities_callable<smith_waterman_serial_t, fu::basic_pool_t &>(
-            env, results_linear_local_baseline, {blosum62_matrix32, blosum62_linear_cost}, pool);
+            env, results_linear_local_baseline, queries_count, candidates_count,
+            {blosum62_matrix32, blosum62_linear_cost}, pool);
         auto name_linear_local_baseline = "smith_waterman_serial:batch"s + std::to_string(batch_size);
         bench_result_t linear_local_baseline =
             bench_unary(env, name_linear_local_baseline, call_linear_local_baseline).log();
 
         auto call_affine_global_baseline = similarities_callable<affine_needleman_wunsch_serial_t, fu::basic_pool_t &>(
-            env, results_affine_global_baseline, {blosum62_matrix32, blosum62_affine_cost}, pool);
+            env, results_affine_global_baseline, queries_count, candidates_count,
+            {blosum62_matrix32, blosum62_affine_cost}, pool);
         auto name_affine_global_baseline = "affine_needleman_wunsch_serial:batch"s + std::to_string(batch_size);
         bench_result_t affine_global_baseline =
             bench_unary(env, name_affine_global_baseline, call_affine_global_baseline).log();
 
         auto call_affine_local_baseline = similarities_callable<affine_smith_waterman_serial_t, fu::basic_pool_t &>(
-            env, results_affine_local_baseline, {blosum62_matrix32, blosum62_affine_cost}, pool);
+            env, results_affine_local_baseline, queries_count, candidates_count,
+            {blosum62_matrix32, blosum62_affine_cost}, pool);
         auto name_affine_local_baseline = "affine_smith_waterman_serial:batch"s + std::to_string(batch_size);
         bench_result_t affine_local_baseline =
             bench_unary(env, name_affine_local_baseline, call_affine_local_baseline).log();
@@ -424,7 +471,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_ICELAKE
         bench_unary(env, "needleman_wunsch_icelake:batch"s + std::to_string(batch_size), call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_icelake_t, fu::basic_pool_t &>(
-                        env, results_linear_global_accelerated, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                        env, results_linear_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -432,7 +480,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_icelake:batch"s + std::to_string(batch_size), call_linear_local_baseline,
                     similarities_callable<smith_waterman_icelake_t, fu::basic_pool_t &>(
-                        env, results_linear_local_accelerated, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                        env, results_linear_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
@@ -441,7 +490,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_unary(env, "affine_needleman_wunsch_icelake:batch"s + std::to_string(batch_size),
                     call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_icelake_t, fu::basic_pool_t &>(
-                        env, results_affine_global_accelerated, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                        env, results_affine_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
@@ -450,7 +500,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_unary(env, "affine_smith_waterman_icelake:batch"s + std::to_string(batch_size),
                     call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_icelake_t, fu::basic_pool_t &>(
-                        env, results_affine_local_accelerated, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                        env, results_affine_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);
@@ -460,8 +511,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_CUDA
         bench_unary(env, "needleman_wunsch_cuda:batch"s + std::to_string(batch_size), call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, {blosum62_matrix32, blosum62_linear_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_linear_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -469,8 +520,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_cuda:batch"s + std::to_string(batch_size), call_linear_local_baseline,
                     similarities_callable<smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, {blosum62_matrix32, blosum62_linear_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_linear_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
@@ -479,8 +530,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_unary(env, "affine_needleman_wunsch_cuda:batch"s + std::to_string(batch_size),
                     call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, {blosum62_matrix32, blosum62_affine_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_affine_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
@@ -488,8 +539,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_cuda:batch"s + std::to_string(batch_size), call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, {blosum62_matrix32, blosum62_affine_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_affine_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);
@@ -499,8 +550,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_HOPPER
         bench_unary(env, "needleman_wunsch_hopper:batch"s + std::to_string(batch_size), call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, {blosum62_matrix32, blosum62_linear_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_linear_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -508,8 +559,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_hopper:batch"s + std::to_string(batch_size), call_linear_local_baseline,
                     similarities_callable<smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, {blosum62_matrix32, blosum62_linear_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_linear_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
@@ -518,8 +569,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_unary(env, "affine_needleman_wunsch_hopper:batch"s + std::to_string(batch_size),
                     call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, {blosum62_matrix32, blosum62_affine_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_affine_global_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
@@ -527,8 +578,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_hopper:batch"s + std::to_string(batch_size), call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, {blosum62_matrix32, blosum62_affine_cost},
-                        cuda_executor_t {}, specs),
+                        env, results_affine_local_accelerated, queries_count, candidates_count,
+                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);

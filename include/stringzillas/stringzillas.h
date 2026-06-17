@@ -154,7 +154,10 @@ SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scop
  */
 SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope);
 
-/*  APIs for computing edit-distances between binary and UTF-8 strings.
+/*  APIs for computing edit-distances between binary and UTF-8 strings as a cross-product matrix.
+ *  Each call scores every `queries[query_index]` against every `candidates[candidate_index]` and writes the result
+ *  to `results[query_index * results_row_stride + candidate_index]`. Passing `candidates == NULL` requests symmetric
+ *  self-similarity of `queries` (the lower triangle is computed and mirrored, `rows == columns`).
  *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  */
 typedef void *szs_levenshtein_distances_t;
@@ -181,51 +184,51 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
     szs_levenshtein_distances_t *engine, char const **error_message);
 
 /**
- *  @brief Compute Levenshtein distances for sequence pairs.
+ *  @brief Compute the cross-product matrix of Levenshtein distances between two sequence collections.
  *  @param[in] engine Initialized distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence collection (matrix rows).
+ *  @param[in] candidates Candidate sequence collection (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_sequence(         //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                 //
     szs_levenshtein_distances_t engine, szs_device_scope_t device, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                //
-    sz_size_t *results, sz_size_t results_stride,                  //
+    sz_sequence_t const *queries, sz_sequence_t const *candidates, //
+    sz_size_t *results, sz_size_t results_row_stride,             //
     char const **error_message);
 
 /**
- *  @brief Compute Levenshtein distances for 32-bit tape format.
+ *  @brief Compute the cross-product matrix of Levenshtein distances for 32-bit tape format.
  *  @param[in] engine Initialized distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(           //
-    szs_levenshtein_distances_t engine, szs_device_scope_t device,  //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b, //
-    sz_size_t *results, sz_size_t results_stride,                   //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                       //
+    szs_levenshtein_distances_t engine, szs_device_scope_t device,              //
+    sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
+    sz_size_t *results, sz_size_t results_row_stride,                           //
     char const **error_message);
 
 /**
- *  @brief Compute Levenshtein distances for 64-bit tape format.
+ *  @brief Compute the cross-product matrix of Levenshtein distances for 64-bit tape format.
  *  @param[in] engine Initialized distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(           //
-    szs_levenshtein_distances_t engine, szs_device_scope_t device,  //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b, //
-    sz_size_t *results, sz_size_t results_stride,                   //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                       //
+    szs_levenshtein_distances_t engine, szs_device_scope_t device,              //
+    sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
+    sz_size_t *results, sz_size_t results_row_stride,                           //
     char const **error_message);
 
 /**
@@ -255,51 +258,51 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
     szs_levenshtein_distances_utf8_t *engine, char const **error_message);
 
 /**
- *  @brief Compute UTF-8 aware Levenshtein distances for sequences.
+ *  @brief Compute the cross-product matrix of UTF-8 aware Levenshtein distances between two collections.
  *  @param[in] engine Initialized UTF-8 distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence collection (matrix rows).
+ *  @param[in] candidates Candidate sequence collection (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_sequence(         //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8(                  //
     szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                     //
-    sz_size_t *results, sz_size_t results_stride,                       //
+    sz_sequence_t const *queries, sz_sequence_t const *candidates,      //
+    sz_size_t *results, sz_size_t results_row_stride,                   //
     char const **error_message);
 
 /**
- *  @brief Compute UTF-8 aware distances for 32-bit tape format.
+ *  @brief Compute the cross-product matrix of UTF-8 aware distances for 32-bit tape format.
  *  @param[in] engine Initialized UTF-8 distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(          //
-    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,     //
-    sz_size_t *results, sz_size_t results_stride,                       //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                  //
+    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,         //
+    sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
+    sz_size_t *results, sz_size_t results_row_stride,                           //
     char const **error_message);
 
 /**
- *  @brief Compute UTF-8 aware distances for 64-bit tape format.
+ *  @brief Compute the cross-product matrix of UTF-8 aware distances for 64-bit tape format.
  *  @param[in] engine Initialized UTF-8 distance engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output distance array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output distance matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(          //
-    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,     //
-    sz_size_t *results, sz_size_t results_stride,                       //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                  //
+    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,         //
+    sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
+    sz_size_t *results, sz_size_t results_row_stride,                           //
     char const **error_message);
 
 /**
@@ -308,7 +311,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(          //
  */
 SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine);
 
-/*  APIs for computing similarity scores between pairs of strings.
+/*  APIs for computing similarity scores between two string collections as a cross-product matrix.
+ *  Each call scores every `queries[query_index]` against every `candidates[candidate_index]` and writes the result
+ *  to `results[query_index * results_row_stride + candidate_index]`. Passing `candidates == NULL` requests symmetric
+ *  self-similarity of `queries` (the lower triangle is computed and mirrored, `rows == columns`).
  *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  */
 
@@ -337,51 +343,51 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                        
     szs_needleman_wunsch_scores_t *engine, char const **error_message);
 
 /**
- *  @brief Calculate Needleman-Wunsch global alignment scores for sequences.
+ *  @brief Calculate the cross-product matrix of Needleman-Wunsch global alignment scores.
  *  @param[in] engine Initialized global alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence collection (matrix rows).
+ *  @param[in] candidates Candidate sequence collection (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_sequence(         //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores(                  //
     szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                  //
-    sz_ssize_t *results, sz_size_t results_stride,                   //
+    sz_sequence_t const *queries, sz_sequence_t const *candidates,   //
+    sz_ssize_t *results, sz_size_t results_row_stride,               //
     char const **error_message);
 
 /**
- *  @brief Calculate global alignment scores for 32-bit tape format.
+ *  @brief Calculate the cross-product matrix of global alignment scores for 32-bit tape format.
  *  @param[in] engine Initialized global alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(          //
-    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,  //
-    sz_ssize_t *results, sz_size_t results_stride,                   //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                     //
+    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,            //
+    sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride,                          //
     char const **error_message);
 
 /**
- *  @brief Calculate global alignment scores for 64-bit tape format.
+ *  @brief Calculate the cross-product matrix of global alignment scores for 64-bit tape format.
  *  @param[in] engine Initialized global alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(          //
-    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,  //
-    sz_ssize_t *results, sz_size_t results_stride,                   //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                     //
+    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,            //
+    sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride,                          //
     char const **error_message);
 
 /**
@@ -412,51 +418,51 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
     szs_smith_waterman_scores_t *engine, char const **error_message);
 
 /**
- *  @brief Calculate Smith-Waterman local alignment scores for sequences.
+ *  @brief Calculate the cross-product matrix of Smith-Waterman local alignment scores.
  *  @param[in] engine Initialized local alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence collection.
- *  @param[in] b Second sequence collection.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence collection (matrix rows).
+ *  @param[in] candidates Candidate sequence collection (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(         //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                 //
     szs_smith_waterman_scores_t engine, szs_device_scope_t device, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                //
-    sz_ssize_t *results, sz_size_t results_stride,                 //
+    sz_sequence_t const *queries, sz_sequence_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride,            //
     char const **error_message);
 
 /**
- *  @brief Calculate local alignment scores for 32-bit tape format.
+ *  @brief Calculate the cross-product matrix of local alignment scores for 32-bit tape format.
  *  @param[in] engine Initialized local alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(           //
-    szs_smith_waterman_scores_t engine, szs_device_scope_t device,  //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b, //
-    sz_ssize_t *results, sz_size_t results_stride,                  //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                      //
+    szs_smith_waterman_scores_t engine, szs_device_scope_t device,             //
+    sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride,                         //
     char const **error_message);
 
 /**
- *  @brief Calculate local alignment scores for 64-bit tape format.
+ *  @brief Calculate the cross-product matrix of local alignment scores for 64-bit tape format.
  *  @param[in] engine Initialized local alignment engine.
  *  @param[in] device Device scope for execution.
- *  @param[in] a First sequence tape.
- *  @param[in] b Second sequence tape.
- *  @param[out] results Output score array.
- *  @param[in] results_stride Stride between results in bytes.
+ *  @param[in] queries Query sequence tape (matrix rows).
+ *  @param[in] candidates Candidate sequence tape (matrix columns); NULL requests symmetric self-similarity of @p queries.
+ *  @param[out] results Output score matrix; cell `(query_index, candidate_index)` is at `results[query_index * results_row_stride + candidate_index]`.
+ *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(           //
-    szs_smith_waterman_scores_t engine, szs_device_scope_t device,  //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b, //
-    sz_ssize_t *results, sz_size_t results_stride,                  //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                      //
+    szs_smith_waterman_scores_t engine, szs_device_scope_t device,             //
+    sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride,                         //
     char const **error_message);
 
 /**

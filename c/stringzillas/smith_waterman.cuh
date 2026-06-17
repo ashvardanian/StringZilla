@@ -24,6 +24,103 @@ inline sz_status_t emplace_smith_waterman_engine(szs_smith_waterman_scores_t *en
     return propagate_error(sz::status_t::success_k, error_message);
 }
 
+/**
+ *  @brief Cross-product (or symmetric self-similarity) dispatch shared by the Smith-Waterman shims.
+ *
+ *  Builds an `szs::strided_rows<sz_ssize_t>` view over the caller's @p results matrix and invokes the migrated C++
+ *  engine: the two-set overload `engine(queries, candidates, matrix, ...)` when @p candidates_container is non-null,
+ *  or the symmetric overload `engine(queries, matrix, ...)` when it is null. The signed score value type is
+ *  `sz_ssize_t`, and @p results_row_stride counts elements (not bytes) between consecutive query rows.
+ */
+template <typename queries_type_, typename candidates_type_>
+sz_status_t szs_smith_waterman_cross_(                                              //
+    smith_waterman_backends_t *engine, szs_device_scope_t device_punned,           //
+    queries_type_ const &queries_container, candidates_type_ const *candidates_container, //
+    sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
+
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
+    sz_assert_(results != nullptr && "Results must not be null");
+
+    auto *device = reinterpret_cast<device_scope_t *>(device_punned);
+    auto const queries_count = queries_container.size();
+    auto const candidates_count = candidates_container != nullptr ? candidates_container->size() : queries_count;
+    auto results_matrix = szs::strided_rows<sz_ssize_t> {results, queries_count, candidates_count, results_row_stride};
+
+    sz_status_t result = sz_success_k;
+    auto variant_logic = [&](auto &engine_variant) {
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
+
+        // GPU backends are only compatible with GPU scopes
+        if constexpr (is_gpu_capability(engine_capability_k)) {
+#if SZ_USE_CUDA
+            if (std::holds_alternative<gpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<gpu_scope_t>(device->variants);
+                szs::cuda_status_t status =
+                    candidates_container != nullptr
+                        ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                         get_executor(device_scope), get_specs(device_scope))
+                        : engine_variant(queries_container, results_matrix, //
+                                         get_executor(device_scope), get_specs(device_scope));
+                result = propagate_error(status, error_message);
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                sz::gpu_specs_t specs;
+                auto specs_status = szs::gpu_specs_fetch(specs, 0);
+                if (specs_status.status != sz::status_t::success_k) {
+                    result = propagate_error(specs_status, error_message);
+                }
+                else {
+                    szs::cuda_executor_t executor;
+                    auto exec_status = executor.try_scheduling(0);
+                    if (exec_status.status != sz::status_t::success_k) {
+                        result = propagate_error(exec_status, error_message);
+                    }
+                    else {
+                        szs::cuda_status_t status =
+                            candidates_container != nullptr
+                                ? engine_variant(queries_container, *candidates_container, results_matrix, executor,
+                                                 specs)
+                                : engine_variant(queries_container, results_matrix, executor, specs);
+                        result = propagate_error(status, error_message);
+                    }
+                }
+            }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
+#else
+            result = propagate_error(sz::status_t::unknown_k, error_message); // GPU support is not enabled
+#endif // SZ_USE_CUDA
+        }
+        // CPU backends are only compatible with CPU scopes
+        else {
+            if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &device_scope = std::get<default_scope_t>(device->variants);
+                sz::status_t status =
+                    candidates_container != nullptr
+                        ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                         get_executor(device_scope), get_specs(device_scope))
+                        : engine_variant(queries_container, results_matrix, //
+                                         get_executor(device_scope), get_specs(device_scope));
+                result = propagate_error(status, error_message);
+            }
+            else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<cpu_scope_t>(device->variants);
+                sz::status_t status =
+                    candidates_container != nullptr
+                        ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                         get_executor(device_scope), get_specs(device_scope))
+                        : engine_variant(queries_container, results_matrix, //
+                                         get_executor(device_scope), get_specs(device_scope));
+                result = propagate_error(status, error_message);
+            }
+            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
+        }
+    };
+
+    std::visit(variant_logic, engine->variants);
+    return result;
+}
+
 extern "C" {
 
 #pragma region Smith Waterman
@@ -107,43 +204,49 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
                                                                                   substitution_costs, affine_costs);
 }
 
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_sequence(                       //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                                //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_t const *a, sz_sequence_t const *b,                              //
-    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
+    sz_sequence_t const *queries, sz_sequence_t const *candidates,               //
+    sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
-    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
-    auto a_container = sz_sequence_as_cpp_container_t {a};
-    auto b_container = sz_sequence_as_cpp_container_t {b};
-    return szs_smith_waterman_scores_for_(                      //
-        engine_punned, device_punned, a_container, b_container, //
-        results, results_stride, error_message);
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(queries != nullptr && "Query texts cannot be null");
+    auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
+    auto queries_container = sz_sequence_as_cpp_container_t {queries};
+    auto candidates_container = sz_sequence_as_cpp_container_t {candidates};
+    return szs_smith_waterman_cross_(                                                                  //
+        engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
+        results, results_row_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                        //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,              //
-    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
+    sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
-    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
-    auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
-    auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
-    return szs_smith_waterman_scores_for_(                      //
-        engine_punned, device_punned, a_container, b_container, //
-        results, results_stride, error_message);
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(queries != nullptr && "Query texts cannot be null");
+    auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
+    auto queries_container = sz_sequence_u32tape_as_cpp_container_t {queries};
+    auto candidates_container = sz_sequence_u32tape_as_cpp_container_t {candidates};
+    return szs_smith_waterman_cross_(                                                                  //
+        engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
+        results, results_row_stride, error_message);
 }
 
 SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                        //
     szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
-    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,              //
-    sz_ssize_t *results, sz_size_t results_stride, char const **error_message) {
+    sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
+    sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
-    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
-    auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
-    auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
-    return szs_smith_waterman_scores_for_(                      //
-        engine_punned, device_punned, a_container, b_container, //
-        results, results_stride, error_message);
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(queries != nullptr && "Query texts cannot be null");
+    auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
+    auto queries_container = sz_sequence_u64tape_as_cpp_container_t {queries};
+    auto candidates_container = sz_sequence_u64tape_as_cpp_container_t {candidates};
+    return szs_smith_waterman_cross_(                                                                  //
+        engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
+        results, results_row_stride, error_message);
 }
 
 SZ_DYNAMIC void szs_smith_waterman_scores_free(szs_smith_waterman_scores_t engine_punned) {

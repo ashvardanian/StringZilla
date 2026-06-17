@@ -562,6 +562,115 @@ template <                                                       //
 struct horizontal_walker;
 
 /**
+ *  @brief @b Inter-sequence walker: scores a block of candidates against @b one shared query, one candidate per
+ *      SIMD lane, advancing the Dynamic Programming matrix @b row-by-row.
+ *
+ *  This is the cross-product workhorse. Unlike `diagonal_walker` (which vectorizes the anti-diagonal of a single
+ *  pair and therefore starves its lanes for short strings), here every lane carries an independent candidate, so
+ *  there is no intra-pair left-dependency to break — a plain row walk keeps all lanes busy regardless of length.
+ *  The `sz_cap_serial_k` specialization below is the scalar per-lane @b reference oracle that every SIMD/GPU
+ *  candidate-lane kernel is validated against.
+ *
+ *  @tparam candidate_lanes_ Number of candidates packed side-by-side (64 for 8-bit cells, 32 for 16-bit).
+ *  @sa `candidate_lanes_block_t`, `sz_packing_candidates_across_lanes_k`.
+ */
+template <                                                       //
+    typename char_or_rune_type_ = char,                          //
+    typename score_type_ = size_t,                               //
+    typename substituter_type_ = uniform_substitution_costs_t,   //
+    typename gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_minimize_distance_k, //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    size_t candidate_lanes_ = 64,                                //
+    typename enable_ = void                                      //
+    >
+#if SZ_HAS_CONCEPTS_
+    requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
+#endif
+struct candidate_lane_walker;
+
+/**
+ *  @brief Serial reference: scalar per-lane row Dynamic Programming. Differential oracle for the SIMD/GPU
+ *      candidate-lane kernels. Covers @b global alignment with @b linear gaps (Levenshtein when the substituter
+ *      is uniform, Needleman-Wunsch when it is a class-cost matrix); local alignment is a separate specialization.
+ */
+template <typename char_or_rune_type_, typename score_type_, typename substituter_type_,
+          sz_similarity_objective_t objective_, size_t candidate_lanes_>
+struct candidate_lane_walker<char_or_rune_type_, score_type_, substituter_type_, linear_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_serial_k, candidate_lanes_, void> {
+
+    using char_t = char_or_rune_type_;
+    using score_t = score_type_;
+    using substituter_t = substituter_type_;
+    using gap_costs_t = linear_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
+    static constexpr size_t candidate_lanes_k = candidate_lanes_;
+
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds two score rows of `longest_candidate + 1` cells each. */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = sizeof(score_t) * (longest_candidate + 1);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += row_bytes; // previous row
+        amount += row_bytes; // current row
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to `candidate_lanes_` candidates (see `candidate_lanes_block_t`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block_t<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        error_cost_t const gap = gap_costs_.open_or_extend;
+        size_t const query_length = query.size();
+        size_t const row_cells = candidates.longest_candidate + 1;
+
+        // Two rows carved from the scratch byte span (the allocation is over-aligned for `score_t`).
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_cells;
+
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+
+            // Row 0: the empty query prefix against every candidate prefix is a run of gaps.
+            for (size_t column = 0; column <= candidate_length; ++column)
+                previous_row[column] = static_cast<score_t>(gap * column);
+
+            for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+                current_row[0] = static_cast<score_t>(gap * query_position);
+                char_t const query_char = query[query_position - 1];
+                for (size_t column = 1; column <= candidate_length; ++column) {
+                    char_t const candidate_char = candidates.character_of_lane(lane_index, column - 1);
+                    error_cost_t const cost_of_substitution = substituter_(query_char, candidate_char);
+                    score_t const if_substitution = previous_row[column - 1] + cost_of_substitution;
+                    score_t const if_gap =
+                        min_or_max<objective_k>(previous_row[column], current_row[column - 1]) + gap;
+                    current_row[column] = min_or_max<objective_k>(if_substitution, if_gap);
+                }
+                trivial_swap(previous_row, current_row);
+            }
+
+            result_lanes[lane_index] = previous_row[candidate_length];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
  *  @brief Specialized Myers algorithm implementation for Levenshtein one-to-one distance.
  *      Doesn't support non-unary substitution costs or affine gaps.
  */
@@ -2705,144 +2814,161 @@ struct smith_waterman_score {
 #pragma region - Parallel Batch Algorithms
 
 /**
- *  @brief Helper method, applying the desired pairwise scoring kernel to all input pairs,
- *      reusing the sae dynamic memory buffer across pairs.
+ *  @brief Helper applying a single-pair scoring kernel across the @b cross-product of @p queries and
+ *      @p candidates - every query against every candidate - reusing one dynamic scratch buffer. When
+ *      @p is_symmetric, only the lower triangle (including the diagonal) is computed and mirrored.
  */
 template <                                   //
     typename score_type_,                    //
     typename scoring_engine_type_,           //
-    typename first_strings_type_,            //
-    typename second_strings_type_,           //
+    typename queries_type_,                  //
+    typename candidates_type_,               //
     typename results_type_,                  //
-    typename allocator_type_ = dummy_alloc_t //
+    typename scratch_buffer_type_            //
     >
 #if SZ_HAS_CONCEPTS_
-    requires score_like<score_type_> && indexed_results_like<results_type_>
+    requires score_like<score_type_>
 #endif
-status_t score_sequentially_( //
-    scoring_engine_type_ &&scoring, first_strings_type_ const &first_strings,
-    second_strings_type_ const &second_strings, //
-    results_type_ &&results, allocator_type_ &alloc, cpu_specs_t const &specs) noexcept {
+status_t cross_sequentially_( //
+    scoring_engine_type_ &&scoring, queries_type_ const &queries, candidates_type_ const &candidates,
+    results_type_ &&results, cross_similarities_t cross_kind, scratch_buffer_type_ &scratch_buffer,
+    cpu_specs_t const &specs) noexcept {
 
     using score_t = score_type_;
-    using allocator_t = allocator_type_;
+    bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
 
-    auto first_size = first_strings.size();
-    auto second_size = second_strings.size();
-    sz_assert_(first_size == second_size && "Expect equal number of strings");
+    size_t const queries_count = queries.size();
+    size_t const candidates_count = candidates.size();
 
-    // Allocate one shared buffer for all pairs
+    // One shared scratch buffer sized to the largest (query, candidate) pair. The DP scratch is monotonic
+    // non-decreasing in both lengths, so the longest query against the longest candidate maximizes it.
     size_t max_memory_requirement = 0;
-    for (size_t i = 0; i < first_size; ++i) {
-        auto const &first = first_strings[i];
-        auto const &second = second_strings[i];
-        max_memory_requirement = std::max(max_memory_requirement,
-                                          scoring.scratch_space_needed(to_view(first), to_view(second), specs));
+    if (queries_count != 0 && candidates_count != 0) {
+        size_t longest_query_index = 0, longest_candidate_index = 0;
+        for (size_t query_index = 1; query_index < queries_count; ++query_index)
+            if (queries[query_index].size() > queries[longest_query_index].size()) longest_query_index = query_index;
+        for (size_t candidate_index = 1; candidate_index < candidates_count; ++candidate_index)
+            if (candidates[candidate_index].size() > candidates[longest_candidate_index].size())
+                longest_candidate_index = candidate_index;
+        max_memory_requirement = scoring.scratch_space_needed(
+            to_view(queries[longest_query_index]), to_view(candidates[longest_candidate_index]), specs);
     }
-    safe_vector<std::byte, allocator_t> scratch_buffer(alloc);
+    // The caller owns `scratch_buffer` (a grow-only engine member reused across calls); size it here.
     if (status_t status = scratch_buffer.try_resize(max_memory_requirement); status != status_t::success_k)
         return status;
 
-    // Loop through all pairs again, but now reusing the allocated scratch space.
-    for (size_t i = 0; i < first_size; ++i) {
-        score_t result = 0;
-        auto const &first = first_strings[i];
-        auto const &second = second_strings[i];
-        // Pass the dummy by lvalue so the single-pair `operator()` instantiates on the bare executor type.
-        dummy_executor_t dummy_executor;
-        status_t status = scoring(to_view(first), to_view(second), result, scratch_space_t(scratch_buffer),
-                                  dummy_executor, specs);
-        if (status == status_t::success_k) results[i] = result;
-        else return status;
+    // Walk the grid, reusing the scratch space; mirror across the diagonal in the symmetric case.
+    for (size_t query_index = 0; query_index < queries_count; ++query_index) {
+        size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
+        for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index) {
+            score_t result_score = 0;
+            // Pass the dummy by lvalue so the single-pair `operator()` instantiates on the bare executor type.
+            dummy_executor_t dummy_executor;
+            status_t status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]),
+                                      result_score, scratch_space_t(scratch_buffer), dummy_executor, specs);
+            if (status != status_t::success_k) return status;
+            results.data[query_index * results.row_stride + candidate_index] = result_score;
+            if (is_symmetric && candidate_index != query_index)
+                results.data[candidate_index * results.row_stride + query_index] = result_score;
+        }
     }
     return status_t::success_k;
 }
 
 /**
- *  @brief Helper method, applying the desired pairwise scoring kernel to all input pairs,
- *      differentiating multi-threaded and single-threaded cases.
- *      For pairs of very large strings, all cores cooperate to compute one distance maximizing
- *      cache hits. For smaller strings, each core computes its own distance.
+ *  @brief Helper applying a single-pair scoring kernel across the @b cross-product of @p queries and
+ *      @p candidates, differentiating multi-threaded and single-threaded cases. For very large pairs, all
+ *      cores cooperate on one cell maximizing cache hits; for smaller pairs, each core computes its own cell.
+ *      When @p is_symmetric, only the lower triangle (including the diagonal) is computed and mirrored.
  */
 template <                                     //
     typename score_type_,                      //
     typename scoring_engine_type_,             //
-    typename first_strings_type_,              //
-    typename second_strings_type_,             //
+    typename queries_type_,                    //
+    typename candidates_type_,                 //
     typename results_type_,                    //
-    typename allocator_type_ = dummy_alloc_t,  //
+    typename scratch_buffer_type_,             //
     typename executor_type_ = dummy_executor_t //
     >
 #if SZ_HAS_CONCEPTS_
-    requires score_like<score_type_> && executor_like<executor_type_> && indexed_results_like<results_type_>
+    requires score_like<score_type_> && executor_like<executor_type_>
 #endif
-status_t score_in_parallel_(                           //
+status_t cross_in_parallel_(                           //
     scoring_engine_type_ &&scoring,                    //
-    first_strings_type_ const &first_strings,          //
-    second_strings_type_ const &second_strings,        //
-    results_type_ &&results,                           //
-    allocator_type_ &alloc, executor_type_ &&executor, //
+    queries_type_ const &queries,                      //
+    candidates_type_ const &candidates,                //
+    results_type_ &&results, cross_similarities_t cross_kind, //
+    scratch_buffer_type_ &scratch_buffer, executor_type_ &&executor, //
     cpu_specs_t const &specs) noexcept {
 
     using score_t = score_type_;
-    using allocator_t = allocator_type_;
     using executor_t = typename std::decay<executor_type_>::type;
     using prong_t = typename executor_t::prong_t;
+    bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
 
-    auto first_size = first_strings.size();
-    auto second_size = second_strings.size();
-    sz_assert_(first_size == second_size && "Expect equal number of strings");
+    size_t const queries_count = queries.size();
+    size_t const candidates_count = candidates.size();
+    if (queries_count == 0 || candidates_count == 0) return status_t::success_k;
 
-    // Estimate our memory requirements for both single-threaded processing of small pairs on
-    // all CPU cores and multi-threaded processing of larger pairs.
+    // Estimate memory for both single-threaded processing of small cells across all cores and cooperative
+    // processing of large cells. Scan only the live cells (the lower triangle when symmetric).
     size_t max_memory_per_small = 0, max_memory_for_large = 0;
-    auto const is_small = [&specs](size_t first_length, size_t second_length) noexcept {
-        return std::min(first_length, second_length) <= specs.l1_bytes;
+    auto const is_small = [&specs](size_t query_length, size_t candidate_length) noexcept {
+        return std::min(query_length, candidate_length) <= specs.l1_bytes;
     };
-    for (size_t i = 0; i < first_size; ++i) {
-        auto const &first = first_strings[i];
-        auto const &second = second_strings[i];
-        size_t const needed = scoring.scratch_space_needed(to_view(first), to_view(second), specs);
-        if (is_small(first.size(), second.size())) max_memory_per_small = std::max(max_memory_per_small, needed);
-        else max_memory_for_large = std::max(max_memory_for_large, needed);
+    for (size_t query_index = 0; query_index < queries_count; ++query_index) {
+        size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
+        for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index) {
+            size_t const needed = scoring.scratch_space_needed(to_view(queries[query_index]),
+                                                              to_view(candidates[candidate_index]), specs);
+            if (is_small(queries[query_index].size(), candidates[candidate_index].size()))
+                max_memory_per_small = std::max(max_memory_per_small, needed);
+            else max_memory_for_large = std::max(max_memory_for_large, needed);
+        }
     }
     size_t const threads_count = executor.threads_count();
     size_t const max_memory_requirement = std::max(max_memory_per_small * threads_count, max_memory_for_large);
-    safe_vector<std::byte, allocator_t> scratch_buffer(alloc);
+    // The caller owns `scratch_buffer` (a grow-only engine member reused across calls); size it here.
     if (status_t status = scratch_buffer.try_resize(max_memory_requirement); status != status_t::success_k)
         return status;
 
-    // Use an atomic to store any error encountered.
     std::atomic<status_t> error {status_t::success_k};
 
-    // There may be a huge variance in the lengths of the strings,
-    // so we need to use a dynamic schedule.
-    executor.for_n_dynamic(first_size, [&](prong_t prong) noexcept {
-        if (error.load() != status_t::success_k) return;
-        size_t const i = prong.task;
-        score_t result = 0;
-        auto const &first = first_strings[i];
-        auto const &second = second_strings[i];
+    auto const write_cell = [&](size_t query_index, size_t candidate_index, score_t result_score) noexcept {
+        results.data[query_index * results.row_stride + candidate_index] = result_score;
+        if (is_symmetric && candidate_index != query_index)
+            results.data[candidate_index * results.row_stride + query_index] = result_score;
+    };
 
-        if (!is_small(first.size(), second.size())) return;
+    // Small cells: one per thread, dynamically scheduled over the flattened rectangle for load balance. The
+    // symmetric upper triangle is skipped here (it is filled by mirroring the lower triangle).
+    size_t const flattened_cells = queries_count * candidates_count;
+    executor.for_n_dynamic(flattened_cells, [&](prong_t prong) noexcept {
+        if (error.load() != status_t::success_k) return;
+        size_t const query_index = prong.task / candidates_count;
+        size_t const candidate_index = prong.task % candidates_count;
+        if (is_symmetric && candidate_index > query_index) return;
+        if (!is_small(queries[query_index].size(), candidates[candidate_index].size())) return;
+        score_t result_score = 0;
         scratch_space_t worker_scratch = scratch_space_t(scratch_buffer).part_i_of_n(prong.thread, threads_count);
         dummy_executor_t dummy_executor; // Lvalue, so the scorer pins the bare executor type.
-        status_t status = scoring(to_view(first), to_view(second), result, worker_scratch, dummy_executor, specs);
-        if (status == status_t::success_k) results[i] = result;
+        status_t status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]), result_score,
+                                  worker_scratch, dummy_executor, specs);
+        if (status == status_t::success_k) write_cell(query_index, candidate_index, result_score);
         else error.store(status);
     });
 
-    // Now handle the longer strings - all cores cooperate on a single pair, so only this thread allocates.
-    for (size_t i = 0; i < first_size && error.load() == status_t::success_k; ++i) {
-        score_t result = 0;
-        auto const &first = first_strings[i];
-        auto const &second = second_strings[i];
-
-        if (is_small(first.size(), second.size())) continue;
-        status_t status = scoring(to_view(first), to_view(second), result, scratch_space_t(scratch_buffer), executor,
-                                  specs);
-        if (status == status_t::success_k) results[i] = result;
-        else error.store(status);
+    // Large cells: all cores cooperate on one cell at a time, so only this thread allocates.
+    for (size_t query_index = 0; query_index < queries_count && error.load() == status_t::success_k; ++query_index) {
+        size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
+        for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index) {
+            if (is_small(queries[query_index].size(), candidates[candidate_index].size())) continue;
+            score_t result_score = 0;
+            status_t status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]),
+                                      result_score, scratch_space_t(scratch_buffer), executor, specs);
+            if (status != status_t::success_k) { error.store(status); break; }
+            write_cell(query_index, candidate_index, result_score);
+        }
     }
     return error.load();
 }
@@ -2868,30 +2994,44 @@ struct levenshtein_distances {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
+    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, gap_costs_t gaps,
                           allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) noexcept {
-        return score_sequentially_<size_t>(       //
-            scoring_t {substituter_, gap_costs_}, //
-            first_strings, second_strings, std::forward<results_type_>(results), alloc_, specs);
+    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
+    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                           cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              typename executor_type_>
-#if SZ_HAS_CONCEPTS_
-        requires executor_like<executor_type_> && indexed_results_like<results_type_>
-#endif
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        return score_in_parallel_<size_t>(                                       //
-            scoring_t {substituter_, gap_costs_},                                //
-            first_strings, second_strings, std::forward<results_type_>(results), //
-            alloc_, executor, specs);
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                          cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                           cross_similarities_t::symmetric_k, scratch_, specs);
+    }
+
+    template <typename sequences_type_, typename value_type_, typename executor_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                          cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
 };
 
@@ -2916,30 +3056,44 @@ struct levenshtein_distances_utf8 {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
+    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+
     levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, gap_costs_t gaps,
                                allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) noexcept {
-        return score_sequentially_<size_t>(       //
-            scoring_t {substituter_, gap_costs_}, //
-            first_strings, second_strings, std::forward<results_type_>(results), alloc_, specs);
+    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
+    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                           cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              typename executor_type_>
-#if SZ_HAS_CONCEPTS_
-        requires executor_like<executor_type_> && indexed_results_like<results_type_>
-#endif
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        return score_in_parallel_<size_t>(                                       //
-            scoring_t {substituter_, gap_costs_},                                //
-            first_strings, second_strings, std::forward<results_type_>(results), //
-            alloc_, executor, specs);
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                          cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                           cross_similarities_t::symmetric_k, scratch_, specs);
+    }
+
+    template <typename sequences_type_, typename value_type_, typename executor_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                          cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
 };
 
@@ -2966,29 +3120,43 @@ struct needleman_wunsch_scores {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
+    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) noexcept {
-        return score_sequentially_<ssize_t>(      //
-            scoring_t {substituter_, gap_costs_}, //
-            first_strings, second_strings, std::forward<results_type_>(results), alloc_, specs);
+    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
+    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                            cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              typename executor_type_>
-#if SZ_HAS_CONCEPTS_
-        requires executor_like<executor_type_> && indexed_results_like<results_type_>
-#endif
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        return score_in_parallel_<ssize_t>(                                      //
-            scoring_t {substituter_, gap_costs_},                                //
-            first_strings, second_strings, std::forward<results_type_>(results), //
-            alloc_, executor, specs);
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                            cross_similarities_t::symmetric_k, scratch_, specs);
+    }
+
+    template <typename sequences_type_, typename value_type_, typename executor_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
 };
 
@@ -3015,29 +3183,43 @@ struct smith_waterman_scores {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
+    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) noexcept {
-        return score_sequentially_<ssize_t>(      //
-            scoring_t {substituter_, gap_costs_}, //
-            first_strings, second_strings, std::forward<results_type_>(results), alloc_, specs);
+    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
+    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                            cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              typename executor_type_>
-#if SZ_HAS_CONCEPTS_
-        requires executor_like<executor_type_> && indexed_results_like<results_type_>
-#endif
-    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        return score_in_parallel_<ssize_t>(                                      //
-            scoring_t {substituter_, gap_costs_},                                //
-            first_strings, second_strings, std::forward<results_type_>(results), //
-            alloc_, executor, specs);
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                        strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        cpu_specs_t const &specs = {}) noexcept {
+        return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                            cross_similarities_t::symmetric_k, scratch_, specs);
+    }
+
+    template <typename sequences_type_, typename value_type_, typename executor_type_>
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
+                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
 };
 

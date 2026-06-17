@@ -85,10 +85,13 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
             pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -197,10 +200,13 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
             pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -302,10 +308,13 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
             pre_insertion_vec.i16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.i16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.i16s[1] = scores_pre_deletion[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
@@ -473,10 +482,13 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
             pre_insertion_expansion_vec.i16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.i16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.i16s[1] = scores_running_deletions[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);

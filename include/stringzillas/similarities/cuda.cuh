@@ -1998,7 +1998,8 @@ struct cuda_similarity_task {
     char_t const *longer_ptr = nullptr;
     size_t longer_length = 0;
     size_t memory_requirement = 0;
-    size_t original_index = 0;
+    size_t result_offset = 0;                                 // ? Flat index into the row-major results matrix.
+    size_t mirror_offset = 0;                                 // ? Second slot for symmetric self-similarity (== result_offset otherwise).
     size_t result = std::numeric_limits<size_t>::max();       // ? Signal that we are not done yet.
     bytes_per_cell_t bytes_per_cell = eight_bytes_per_cell_k; // ? Worst case, need the most memory per scalar.
     warp_tasks_density_t density = warps_working_together_k;  // ? Worst case, we are not using shared memory.
@@ -2561,12 +2562,15 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
 
     using task_t = cuda_similarity_task<char_t>;
     using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
+    using grouping_scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
     safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
+    safe_vector<std::byte, grouping_scratch_allocator_t> grouping_scratch_ {alloc_}; // grow-only `cub` sort temp
+
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
     safe_vector<u64_t, scores_allocator_t> myers_peq_buffer_ {alloc_}; // per-thread Myers `Peq` scratch (zeroed once)
     cuda_timer_t timer_ {};
@@ -2706,68 +2710,97 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
     cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept;
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-#if SZ_HAS_CONCEPTS_
-        requires indexed_results_like<results_type_>
-#endif
-    cuda_status_t operator()(                                                                 //
-        first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
-        results_type_ &&results,                                                              //
-        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+    /**
+     *  @brief Shared cross-product driver: builds one task per live (query, candidate) cell, runs the
+     *         container-independent GPU pipeline, and scatters each result into the row-major matrix. For
+     *         @b symmetric_k only the lower triangle (incl. the diagonal) is built and each result is mirrored.
+     */
+    template <typename queries_type_, typename candidates_type_, typename results_type_>
+    cuda_status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+                         cross_similarities_t cross_kind, cuda_executor_t const &executor,
+                         gpu_specs_t specs) noexcept {
 
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
+        size_t const queries_count = queries.size();
+        size_t const candidates_count = candidates.size();
+        size_t const row_stride = results.row_stride;
+        size_t const live_cells =
+            is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
 
-        // Pack the container pairs into the engine-owned task list (the only container-dependent step), run the
-        // container-independent GPU pipeline, then scatter the per-task results back into the caller's array.
         tasks_.clear();
         auto &tasks = tasks_;
-        if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        if (tasks.try_resize(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-        // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
-        // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
-        // round-trip - would cost two driver calls per pair (~65k calls at batch 32768). We validate the base
-        // pointers of the first pair once, which covers the whole tape for each side.
-        if (first_strings.size()) {
-            if (!is_device_accessible_memory((void const *)first_strings[0].data()) ||
-                !is_device_accessible_memory((void const *)second_strings[0].data()))
+        // Ensure inputs are device-accessible (Unified/Device memory). Both sides come from contiguous
+        // tapes/arrays, so we validate the base pointers of the first element once (covers the whole tape)
+        // instead of a per-cell `cudaPointerGetAttributes` driver round-trip.
+        if (queries_count != 0 && candidates_count != 0) {
+            if (!is_device_accessible_memory((void const *)queries[0].data()) ||
+                !is_device_accessible_memory((void const *)candidates[0].data()))
                 return {status_t::device_memory_mismatch_k, cudaSuccess};
         }
 
-        // Export all the tasks and sort them by decreasing memory requirement.
+        // Export one task per live cell; the per-cell sizing/tiering is unchanged from the pairwise design.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
-        for (size_t i = 0; i < first_strings.size(); ++i) {
-            task_t task(                                            //
-                first_strings[i].data(), first_strings[i].length(), //
-                second_strings[i].data(), second_strings[i].length());
-            diagonal_memory_requirements_t requirement(                                    //
-                task.shorter_length, task.longer_length,                                   //
-                gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
-                sizeof(char_t), 4);
+        size_t task_index = 0;
+        for (size_t query_index = 0; query_index < queries_count; ++query_index) {
+            size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
+            for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index, ++task_index) {
+                task_t task(queries[query_index].data(), queries[query_index].length(),
+                            candidates[candidate_index].data(), candidates[candidate_index].length());
+                diagonal_memory_requirements_t requirement(                                    //
+                    task.shorter_length, task.longer_length,                                   //
+                    gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
+                    sizeof(char_t), 4);
 
-            task.original_index = i;
-            // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they only
-            // need shared memory for the DP diagonals - not the input strings.
-            task.memory_requirement = requirement.bytes_for_diagonals;
-            task.bytes_per_cell = requirement.bytes_per_cell;
-            task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
-            // Perf-based promotion to the device (tiled) tier - far faster than the warp tier for mid-size pairs
-            // (see `tiled_promotion_min_shorter_k`); never promote empty tasks.
-            if (task.density != infinite_warps_per_multiprocessor_k &&
-                task.shorter_length >= tiled_promotion_min_shorter_k)
-                task.density = warps_working_together_k;
-            if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
-                else if (!task.longer_length) { task.result = 0; }
-                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+                task.result_offset = query_index * row_stride + candidate_index;
+                task.mirror_offset = is_symmetric ? candidate_index * row_stride + query_index : task.result_offset;
+                // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they
+                // only need shared memory for the DP diagonals - not the input strings.
+                task.memory_requirement = requirement.bytes_for_diagonals;
+                task.bytes_per_cell = requirement.bytes_per_cell;
+                task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
+                // Perf-based promotion to the device (tiled) tier - far faster than the warp tier for mid-size
+                // pairs (see `tiled_promotion_min_shorter_k`); never promote empty tasks.
+                if (task.density != infinite_warps_per_multiprocessor_k &&
+                    task.shorter_length >= tiled_promotion_min_shorter_k)
+                    task.density = warps_working_together_k;
+                if (task.density == infinite_warps_per_multiprocessor_k) {
+                    if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
+                    else if (!task.longer_length) { task.result = 0; }
+                    else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+                }
+                tasks[task_index] = task;
             }
-            tasks[i] = task;
         }
 
         cuda_status_t status = run_trampoline_(executor, specs);
         if (status.status != status_t::success_k) return status;
 
-        for (size_t i = 0; i < tasks.size(); ++i) results[tasks[i].original_index] = tasks[i].result;
+        for (size_t scatter_index = 0; scatter_index < tasks.size(); ++scatter_index) {
+            results.data[tasks[scatter_index].result_offset] = tasks[scatter_index].result;
+            if (tasks[scatter_index].mirror_offset != tasks[scatter_index].result_offset)
+                results.data[tasks[scatter_index].mirror_offset] = tasks[scatter_index].result;
+        }
         return status;
+    }
+
+    // The concrete `strided_rows<value_type_>` results parameter (rather than a constrained forwarding ref)
+    // disambiguates the two-set and symmetric overloads by type alone - so symmetric self-similarity is available
+    // even with `SZ_HAS_CONCEPTS_` off (it is currently hard-disabled repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    cuda_status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cuda_executor_t const &executor = {},
+                             gpu_specs_t specs = {}) noexcept {
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    cuda_status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                             cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, executor, specs);
     }
 };
 
@@ -2913,7 +2946,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
 
         size_t const non_myers_register = myers_count + count_register_level_tasks;
         auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
-            {tasks.data() + non_myers_register, tasks.size() - non_myers_register}, specs);
+            {tasks.data() + non_myers_register, tasks.size() - non_myers_register}, grouping_scratch_, specs);
 
         if (device_level_tasks.size()) {
             task_t const &largest_task = device_level_tasks[0];
@@ -3495,12 +3528,15 @@ struct cuda_weighted_scores {
 
     using task_t = cuda_similarity_task<char_t>;
     using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
+    using grouping_scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
 
     error_costs_32x32_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
     safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
+    safe_vector<std::byte, grouping_scratch_allocator_t> grouping_scratch_ {alloc_}; // grow-only `cub` sort temp
+
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
     safe_vector<u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
     safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
@@ -3602,70 +3638,98 @@ struct cuda_weighted_scores {
     /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
     cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept;
 
-    template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-#if SZ_HAS_CONCEPTS_
-        requires indexed_results_like<results_type_>
-#endif
-    cuda_status_t operator()(                                                                 //
-        first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
-        results_type_ &&results,                                                              //
-        cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+    /**
+     *  @brief Shared cross-product driver: builds one task per live (query, candidate) cell, runs the
+     *         container-independent GPU pipeline, and scatters each result into the row-major matrix. For
+     *         @b symmetric_k only the lower triangle (incl. the diagonal) is built and each result is mirrored.
+     */
+    template <typename queries_type_, typename candidates_type_, typename results_type_>
+    cuda_status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+                         cross_similarities_t cross_kind, cuda_executor_t const &executor,
+                         gpu_specs_t specs) noexcept {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
+        size_t const queries_count = queries.size();
+        size_t const candidates_count = candidates.size();
+        size_t const row_stride = results.row_stride;
+        size_t const live_cells =
+            is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
 
-        // Pack the container pairs into the engine-owned task list (the only container-dependent step), run the
-        // container-independent GPU pipeline, then scatter the per-task results back into the caller's array.
         tasks_.clear();
         auto &tasks = tasks_;
-        if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        if (tasks.try_resize(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
-        // Ensure inputs are device-accessible (Unified/Device memory). Both strings of every pair come from
-        // contiguous tapes/arrays, so probing each pair with `cudaPointerGetAttributes` - a per-pointer driver
-        // round-trip - would cost two driver calls per pair (~65k calls at batch 32768). We validate the base
-        // pointers of the first pair once, which covers the whole tape for each side.
-        if (first_strings.size()) {
-            if (!is_device_accessible_memory((void const *)first_strings[0].data()) ||
-                !is_device_accessible_memory((void const *)second_strings[0].data()))
+        // Ensure inputs are device-accessible (Unified/Device memory). Both sides come from contiguous
+        // tapes/arrays, so we validate the base pointers of the first element once (covers the whole tape).
+        if (queries_count != 0 && candidates_count != 0) {
+            if (!is_device_accessible_memory((void const *)queries[0].data()) ||
+                !is_device_accessible_memory((void const *)candidates[0].data()))
                 return {status_t::device_memory_mismatch_k, cudaSuccess};
         }
 
-        // Export all the tasks and sort them by decreasing memory requirement.
+        // Export one task per live cell; the per-cell sizing/tiering is unchanged from the pairwise design.
         using diagonal_memory_requirements_t = diagonal_memory_requirements<ssize_t>;
-        for (size_t i = 0; i < first_strings.size(); ++i) {
-            task_t task(                                            //
-                first_strings[i].data(), first_strings[i].length(), //
-                second_strings[i].data(), second_strings[i].length());
-            diagonal_memory_requirements_t requirement(                                    //
-                task.shorter_length, task.longer_length,                                   //
-                gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
-                sizeof(char_t), 4, two_bytes_per_cell_k);
+        size_t task_index = 0;
+        for (size_t query_index = 0; query_index < queries_count; ++query_index) {
+            size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
+            for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index, ++task_index) {
+                task_t task(queries[query_index].data(), queries[query_index].length(),
+                            candidates[candidate_index].data(), candidates[candidate_index].length());
+                diagonal_memory_requirements_t requirement(                                    //
+                    task.shorter_length, task.longer_length,                                   //
+                    gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
+                    sizeof(char_t), 4, two_bytes_per_cell_k);
 
-            task.original_index = i;
-            // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they only
-            // need shared memory for the DP diagonals - not the input strings.
-            task.memory_requirement = requirement.bytes_for_diagonals;
-            task.bytes_per_cell = requirement.bytes_per_cell;
-            task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
-            // Perf-based promotion to the device (tiled) tier - far faster than the warp tier for mid-size pairs
-            // (see `tiled_promotion_min_shorter_k`); never promote empty tasks.
-            if (task.density != infinite_warps_per_multiprocessor_k &&
-                task.shorter_length >= tiled_promotion_min_shorter_k)
-                task.density = warps_working_together_k;
-            if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (is_local_k) { task.result = 0; }
-                else if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
-                else if (!task.longer_length) { task.result = 0; }
-                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+                task.result_offset = query_index * row_stride + candidate_index;
+                task.mirror_offset = is_symmetric ? candidate_index * row_stride + query_index : task.result_offset;
+                // Both warp kernels (linear & affine) read the strings straight from global (L1-cached), so they
+                // only need shared memory for the DP diagonals - not the input strings.
+                task.memory_requirement = requirement.bytes_for_diagonals;
+                task.bytes_per_cell = requirement.bytes_per_cell;
+                task.density = warp_tasks_density(requirement.bytes_for_diagonals, specs);
+                // Perf-based promotion to the device (tiled) tier - far faster than the warp tier for mid-size
+                // pairs (see `tiled_promotion_min_shorter_k`); never promote empty tasks.
+                if (task.density != infinite_warps_per_multiprocessor_k &&
+                    task.shorter_length >= tiled_promotion_min_shorter_k)
+                    task.density = warps_working_together_k;
+                if (task.density == infinite_warps_per_multiprocessor_k) {
+                    if constexpr (is_local_k) { task.result = 0; }
+                    else if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
+                    else if (!task.longer_length) { task.result = 0; }
+                    else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+                }
+                tasks[task_index] = task;
             }
-            tasks[i] = task;
         }
 
         cuda_status_t status = run_trampoline_(executor, specs);
         if (status.status != status_t::success_k) return status;
 
-        for (size_t i = 0; i < tasks.size(); ++i) results[tasks[i].original_index] = tasks[i].result;
+        for (size_t scatter_index = 0; scatter_index < tasks.size(); ++scatter_index) {
+            results.data[tasks[scatter_index].result_offset] = tasks[scatter_index].result;
+            if (tasks[scatter_index].mirror_offset != tasks[scatter_index].result_offset)
+                results.data[tasks[scatter_index].mirror_offset] = tasks[scatter_index].result;
+        }
         return status;
+    }
+
+    // The concrete `strided_rows<value_type_>` results parameter (rather than a constrained forwarding ref)
+    // disambiguates the two-set and symmetric overloads by type alone - so symmetric self-similarity is available
+    // even with `SZ_HAS_CONCEPTS_` off (it is currently hard-disabled repo-wide for the GCC concepts bug).
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    cuda_status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cuda_executor_t const &executor = {},
+                             gpu_specs_t specs = {}) noexcept {
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    cuda_status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                             cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, executor, specs);
     }
 };
 
@@ -3730,7 +3794,8 @@ cuda_status_t cuda_weighted_scores<gap_costs_type_, allocator_type_, locality_, 
         }
 
         auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
-            {tasks.data() + count_register_level_tasks, tasks.size() - count_register_level_tasks}, specs);
+            {tasks.data() + count_register_level_tasks, tasks.size() - count_register_level_tasks}, grouping_scratch_,
+            specs);
 
         if (device_level_tasks.size()) {
             task_t const &largest_task = device_level_tasks[0];

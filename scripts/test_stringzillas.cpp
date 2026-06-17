@@ -54,6 +54,7 @@ int main(int argc, char const **argv) {
     std::printf("\n=== Similarities ===\n");
     failures += run_test("test_similarities_unit", test_similarities_unit);
     failures += run_test("test_similarities_equivalence", test_similarities_equivalence);
+    failures += run_test("test_similarities_cross_product", test_similarities_cross_product);
     failures += run_test("test_similarities_safety", test_similarities_safety);
     failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
 

@@ -126,6 +126,12 @@ concept indexed_results_like = requires(results_type_ results, size_t i) {
     { results[i] };
 };
 
+template <typename results_type_>
+concept strided_results_like = requires(results_type_ results) {
+    { results.data };
+    { results.row_stride };
+};
+
 #endif
 
 /** @brief Type trait to extract the value type from indexed results. */
@@ -143,6 +149,64 @@ struct indexed_results_type<value_type_ *> {
 template <typename value_type_>
 struct indexed_results_type<value_type_ *&> {
     using type = value_type_;
+};
+
+/**
+ *  @brief Row-major, query-major strided view of an output distance/score matrix.
+ *
+ *  The cross-product similarity engines score `rows` queries against `columns` candidates and write cell
+ *  `(query_index, candidate_index)` to `data[query_index * row_stride + candidate_index]`, with
+ *  `row_stride >= columns` elements between consecutive query rows (so callers can embed the matrix in a wider
+ *  allocation). For symmetric self-similarity `rows == columns` and both triangles are filled.
+ */
+template <typename value_type_>
+struct strided_rows {
+    using value_type = value_type_;
+    value_type_ *data = nullptr;
+    size_t rows = 0;
+    size_t columns = 0;
+    size_t row_stride = 0;
+
+    constexpr value_type_ *row(size_t query_index) const noexcept { return data + query_index * row_stride; }
+};
+
+/**
+ *  @brief How a cross-product similarity call pairs its two input sets.
+ *
+ *  @b all_pairs_k scores every query against every candidate (a full `queries × candidates` matrix).
+ *  @b symmetric_k scores one set against itself: only the lower triangle (incl. the diagonal) is computed and
+ *  then mirrored into the upper triangle, halving the work for self-similarity matrices.
+ */
+enum class cross_similarities_t {
+    all_pairs_k,
+    symmetric_k,
+};
+
+/**
+ *  @brief Column-major (transposed) view of a block of candidate strings scored against one shared query.
+ *
+ *  The inter-sequence (`sz_packing_candidates_across_lanes_k`) kernels place one candidate per SIMD lane and
+ *  advance the Dynamic Programming matrix row-by-row, so they need character @p position across all lanes
+ *  contiguously. We therefore store the block @b transposed: the character at @p position of lane
+ *  @p lane_index lives at `transposed[position * lane_capacity + lane_index]`. A block holds up to
+ *  @p lane_capacity candidates (64 for 8-bit cells, 32 for 16-bit); @p lanes_count counts the live lanes, the
+ *  rest being a masked tail. @p lengths gives each lane's candidate length so the walker can latch that lane's
+ *  result at its own final column, and @p longest_candidate bounds the row count of the walk.
+ */
+template <typename char_type_>
+struct candidate_lanes_block_t {
+    char_type_ const *transposed = nullptr;
+    size_t lane_capacity = 0;        // ? SIMD width: 64 (u8), 32 (u16); also the transpose stride.
+    size_t lanes_count = 0;          // ? Live candidates in this block, `<= lane_capacity` (tail underfills).
+    size_t const *lengths = nullptr; // ? Per-lane candidate length, indexed by `lane_index`.
+    size_t longest_candidate = 0;    // ? Max length across live lanes; the number of DP rows to walk.
+
+    constexpr char_type_ const *position(size_t position_index) const noexcept {
+        return transposed + position_index * lane_capacity;
+    }
+    constexpr char_type_ character_of_lane(size_t lane_index, size_t position_index) const noexcept {
+        return transposed[position_index * lane_capacity + lane_index];
+    }
 };
 
 /**

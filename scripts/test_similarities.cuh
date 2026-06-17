@@ -33,6 +33,7 @@ using ashvardanian::stringzillas::linear_gap_costs_t;
 using ashvardanian::stringzillas::malloc_t;
 using ashvardanian::stringzillas::needleman_wunsch_scores;
 using ashvardanian::stringzillas::smith_waterman_scores;
+using ashvardanian::stringzillas::strided_rows;
 using ashvardanian::stringzillas::uniform_substitution_costs_t;
 
 // StringZillas library symbols provided only by the CUDA backend:
@@ -381,6 +382,41 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
     std::printf(format_string, result_simd, result_base, first.c_str(), ellipsis, second.c_str(), ellipsis);
 }
 
+/**
+ *  @brief Adapts a cross-product similarity engine into the @b pairwise calling convention the agreement suites use.
+ *
+ *  The agreement suites (`check_similarities_*`) drive each engine over @b paired views (`first[i]` against
+ *  `second[i]`), writing a flat `results[i]`. The cross-product engines instead score a `Q × C` matrix into a
+ *  `strided_rows`, so this adapter forwards each diagonal pair as its own 1x1 tile and threads any trailing
+ *  executor / spec arguments straight through.
+ */
+template <typename engine_type_>
+struct pairwise_via_cross_t {
+    using engine_t = engine_type_;
+    engine_t engine = {};
+
+    template <typename score_type_, typename... extra_args_>
+    status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, score_type_ *results,
+                        extra_args_ &&...extra_args) {
+        sz_assert_(first.size() == second.size());
+        std::size_t const pairs_count = first.size();
+        for (std::size_t pair_index = 0; pair_index != pairs_count; ++pair_index) {
+            arrow_strings_view_t const first_cell {first.buffer_, first.offsets_.subspan(pair_index, 2)};
+            arrow_strings_view_t const second_cell {second.buffer_, second.offsets_.subspan(pair_index, 2)};
+            strided_rows<score_type_> const single_cell {&results[pair_index], 1, 1, 1};
+            status_t const status = engine(first_cell, second_cell, single_cell, extra_args...);
+            if (status != status_t::success_k) return status;
+        }
+        return status_t::success_k;
+    }
+};
+
+/** @brief Deduces the engine type so call sites stay terse: `make_pairwise(engine)`. */
+template <typename engine_type_>
+inline pairwise_via_cross_t<engine_type_> make_pairwise(engine_type_ engine) noexcept {
+    return pairwise_via_cross_t<engine_type_> {std::move(engine)};
+}
+
 #pragma endregion // Helpers
 
 #pragma region Unit
@@ -388,7 +424,7 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
 /** @brief Checks base-vs-SIMD agreement on a @b fixed set of representative ASCII and UTF-8 strings. */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 static void check_similarities_fixed_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                           std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
+                                      std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
 
     std::vector<std::pair<std::string, std::string>> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
@@ -539,8 +575,7 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
 /** @brief Runs one string pair through a similarity operator and asserts the @b known expected score. */
 template <typename score_type_, typename operator_type_, typename... extra_args_>
 static void check_similarities_known_(operator_type_ &&similarity_operator, std::string const &first,
-                                          std::string const &second, score_type_ expected,
-                                          extra_args_ &&...extra_args) {
+                                      std::string const &second, score_type_ expected, extra_args_ &&...extra_args) {
 
     arrow_strings_tape_t first_tape, second_tape;
     sz_assert_(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
@@ -548,8 +583,7 @@ static void check_similarities_known_(operator_type_ &&similarity_operator, std:
 
     unified_vector<score_type_> result(1);
     result[0] = std::numeric_limits<score_type_>::max();
-    status_t status =
-        similarity_operator(first_tape.view(), second_tape.view(), result.data(), extra_args...);
+    status_t status = similarity_operator(first_tape.view(), second_tape.view(), result.data(), extra_args...);
     sz_assert_(status == status_t::success_k);
     if (result[0] != expected) edit_distance_log_mismatch(first, second, expected, result[0]);
     sz_assert_(result[0] == expected);
@@ -573,21 +607,21 @@ void test_similarities_unit() {
         sz_size_t distance;
     };
     known_levenshtein_t const levenshtein_vectors[] = {
-        {"", "", 0},                            // both empty
-        {"ABC", "ABC", 0},                      // identical
-        {"A", "=", 1},                          // single substitution
-        {"", "ABC", 3},                         // pure insertion
-        {"ABC", "", 3},                         // pure deletion
-        {"ABC", "AABC", 1},                     // one prepended insertion
-        {"ABC", "ABCC", 1},                     // one appended insertion
-        {"ABC", "AC", 1},                       // one deletion
-        {"ABC", "AXBC", 1},                     // one insertion
-        {"ABC", "AXC", 1},                      // one substitution
-        {"ABCDEFG", "ABCXEFG", 1},              // one substitution
-        {"ggbuzgjux{}l", "gbuzgjux{}l", 1},     // one prepended insertion
-        {"APPLE", "APLE", 1},                   // one deletion
-        {"LISTEN", "SILENT", 4},                // classic anagram-ish pair
-        {"ATCA", "CTACTCACCC", 6},              // DNA-like pair
+        {"", "", 0},                        // both empty
+        {"ABC", "ABC", 0},                  // identical
+        {"A", "=", 1},                      // single substitution
+        {"", "ABC", 3},                     // pure insertion
+        {"ABC", "", 3},                     // pure deletion
+        {"ABC", "AABC", 1},                 // one prepended insertion
+        {"ABC", "ABCC", 1},                 // one appended insertion
+        {"ABC", "AC", 1},                   // one deletion
+        {"ABC", "AXBC", 1},                 // one insertion
+        {"ABC", "AXC", 1},                  // one substitution
+        {"ABCDEFG", "ABCXEFG", 1},          // one substitution
+        {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one prepended insertion
+        {"APPLE", "APLE", 1},               // one deletion
+        {"LISTEN", "SILENT", 4},            // classic anagram-ish pair
+        {"ATCA", "CTACTCACCC", 6},          // DNA-like pair
     };
 
     constexpr uniform_substitution_costs_t unit_uniform {0, 1};
@@ -599,12 +633,13 @@ void test_similarities_unit() {
 
         // Dispatched serial engine (automatic kernel resolution within the serial capability).
         check_similarities_known_<sz_size_t>(
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}, //
+            make_pairwise(
+                levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}), //
             first, second, vector.distance);
 
         // The dual-row reference baseline, sharing none of the engine's machinery.
         check_similarities_known_<sz_size_t>(levenshtein_baselines_t {unit_uniform, unit_linear}, //
-                                                 first, second, vector.distance);
+                                             first, second, vector.distance);
     }
 }
 
@@ -618,8 +653,8 @@ void test_similarities_unit() {
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                           fuzzy_config_t config = {}, std::size_t iterations = scale_iterations(100),
-                                           simd_extra_args_ &&...simd_extra_args) {
+                                      fuzzy_config_t config = {}, std::size_t iterations = scale_iterations(100),
+                                      simd_extra_args_ &&...simd_extra_args) {
 
     unified_vector<score_type_> results_base(config.batch_size), results_simd(config.batch_size);
     std::vector<std::string> first_array, second_array;
@@ -648,8 +683,8 @@ static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_opera
 /** @brief Runs both the fixed and a single fuzzy base-vs-SIMD agreement pass for one backend pairing. */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 static void check_similarities_fixed_and_fuzzy_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                                     std::string_view allowed_chars = {}, fuzzy_config_t config = {},
-                                                     simd_extra_args_ &&...simd_extra_args) {
+                                                std::string_view allowed_chars = {}, fuzzy_config_t config = {},
+                                                simd_extra_args_ &&...simd_extra_args) {
     check_similarities_fixed_<score_type_>(base_operator, simd_operator, allowed_chars, simd_extra_args...);
     check_similarities_fuzzy_<score_type_>(base_operator, simd_operator, config, 1, simd_extra_args...);
 }
@@ -689,33 +724,37 @@ void test_similarities_equivalence() {
 
     // Single-threaded serial Levenshtein distance implementation
     check_similarities_fixed_and_fuzzy_<sz_size_t>( //
-        levenshtein_baselines_t {},                      //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
+        levenshtein_baselines_t {},                 //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}));
 
     // Multi-threaded parallel Levenshtein distance implementation
     check_similarities_fixed_and_fuzzy_<sz_size_t>( //
-        levenshtein_baselines_t {},                      //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
+        levenshtein_baselines_t {},                 //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}));
 
     // Single-threaded serial Levenshtein distance implementation with weird linear costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(            //
         levenshtein_baselines_t {weird_uniform, weird_linear}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}));
 
     // Multi-threaded parallel Levenshtein distance implementation with weird linear costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(            //
         levenshtein_baselines_t {weird_uniform, weird_linear}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}));
 
     // Single-threaded serial Levenshtein distance implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(            //
         levenshtein_baselines_t {weird_uniform, weird_affine}, //
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}));
 
     // Multi-threaded parallel Levenshtein distance implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(       //
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(            //
         levenshtein_baselines_t {weird_uniform, weird_affine}, //
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}));
 
     // Now let's take non-unary substitution costs, like BLOSUM62
     constexpr linear_gap_costs_t blosum62_linear_cost {-4};
@@ -723,107 +762,113 @@ void test_similarities_equivalence() {
     error_matrix32_t blosum62_matrix = error_costs_32x32_t::blosum62();
 
     // Single-threaded serial NW implementation
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Multi-threaded parallel NW implementation
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Single-threaded serial SW implementation
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Multi-threaded parallel SW implementation
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Single-threaded serial NW implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}));
 
     // Multi-threaded parallel NW implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}));
 
     // Single-threaded serial SW implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                                blosum62_affine_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}));
 
     // Multi-threaded parallel SW implementation with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                                blosum62_affine_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}));
 
 #if SZ_USE_ICELAKE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                         //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                             //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}), //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}));
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}), //
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear}));
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine});
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}), //
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine}));
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                              //
-        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {});
+    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                  //
+        make_pairwise(levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}), //
+        make_pairwise(levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}));
 
     // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU with weird linear costs
     check_similarities_fixed_and_fuzzy_<sz_size_t>( //
-        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
-        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear});
+        make_pairwise(
+            levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}),
+        make_pairwise(
+            levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear}));
 
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Ice Lake Smith-Waterman distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {blosum62_matrix,
-                                                                                              blosum62_linear_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+            blosum62_matrix, blosum62_linear_cost}));
 
 #endif
 
 #if SZ_USE_HASWELL
     // Haswell Needleman-Wunsch distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                     //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                          //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
-                                (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
-                                                                                        blosum62_linear_cost});
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
+                                              (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {
+            blosum62_matrix, blosum62_linear_cost}));
 
     // Haswell Smith-Waterman distance against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                   //
+    check_similarities_fixed_and_fuzzy_<sz_ssize_t>(                        //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
-                              (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {blosum62_matrix,
-                                                                                      blosum62_linear_cost});
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t,
+                                            (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {
+            blosum62_matrix, blosum62_linear_cost}));
 
 #endif
 
@@ -834,91 +879,94 @@ void test_similarities_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU with weird linear costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}, {}, {},
-        cuda_executor_t {}, first_gpu_specs);
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}), //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}),
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Levenshtein distance against Multi-threaded on CPU with weird affine costs
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
-        levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_affine}, {}, {},
-        cuda_executor_t {}, first_gpu_specs);
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}), //
+        make_pairwise(levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_affine}),
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
     // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-    check_similarities_fixed_and_fuzzy_<sz_size_t>(                                                    //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {weird_uniform, weird_linear}, {}, {},
-        cuda_executor_t {}, first_gpu_specs);
+    check_similarities_fixed_and_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}), //
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {weird_uniform, weird_linear}),
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost},
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}), //
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU with affine costs
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                                blosum62_affine_cost},
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}), //
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_affine_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                              blosum62_linear_cost},
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}), //
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU with affine costs
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                              blosum62_affine_cost},
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}), //
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_affine_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_HOPPER
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost},
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}), //
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_linear_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU with affine costs
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost}, //
-        needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                                blosum62_affine_cost},
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}), //
+        make_pairwise(needleman_wunsch_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_affine_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_linear_cost}, //
-        smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                              blosum62_linear_cost},
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}), //
+        make_pairwise(smith_waterman_scores<error_matrix32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_linear_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU with affine costs
     check_similarities_fixed_and_fuzzy_<sz_ssize_t>( //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_affine_cost}, //
-        smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
-                                                                                              blosum62_affine_cost},
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}), //
+        make_pairwise(smith_waterman_scores<error_matrix32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_affine_cost}),
         {}, {}, cuda_executor_t {}, first_gpu_specs);
 
 #endif
@@ -934,7 +982,7 @@ void test_similarities_equivalence() {
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                                error_cost_t gap_cost, simd_extra_args_ &&...simd_extra_args) {
+                                           error_cost_t gap_cost, simd_extra_args_ &&...simd_extra_args) {
 
     // The degenerate corpus: empty/empty, empty/non-empty, single-char, identical, and a near-identical
     // one-edit pair. They live in one batch so the engines also face a mixed-length, mostly-tiny input.
@@ -1009,47 +1057,252 @@ void test_similarities_safety() {
 #endif
 
     // Serial Levenshtein distance against the dual-row baseline on degenerate inputs.
-    check_similarities_fuzzy_<sz_size_t>(               //
+    check_similarities_fuzzy_<sz_size_t>(                    //
         levenshtein_baselines_t {unit_uniform, unit_linear}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}),
         degenerate_config, iterations);
-    check_similarities_degenerate_<sz_size_t>(          //
+    check_similarities_degenerate_<sz_size_t>(               //
         levenshtein_baselines_t {unit_uniform, unit_linear}, //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}, 1);
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}),
+        1);
 
 #if SZ_USE_ICELAKE
     // Ice Lake Levenshtein distance against the serial CPU engine on degenerate inputs.
     check_similarities_fuzzy_<sz_size_t>( //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear},
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}),
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}),
         degenerate_config, iterations);
     check_similarities_degenerate_<sz_size_t>( //
         levenshtein_baselines_t {unit_uniform, unit_linear},
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}, 1);
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}),
+        1);
 #endif
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against the serial CPU engine on degenerate inputs.
     check_similarities_fuzzy_<sz_size_t>( //
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear},
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear}),
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}),
         degenerate_config, iterations, cuda_executor_t {}, first_gpu_specs);
     check_similarities_degenerate_<sz_size_t>( //
         levenshtein_baselines_t {unit_uniform, unit_linear},
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}, 1,
-        cuda_executor_t {}, first_gpu_specs);
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}),
+        1, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
     // CUDA Levenshtein distance on Kepler against the serial CPU engine on degenerate inputs.
     check_similarities_degenerate_<sz_size_t>( //
         levenshtein_baselines_t {unit_uniform, unit_linear},
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {unit_uniform, unit_linear}, 1,
+        make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {unit_uniform, unit_linear}), 1,
         cuda_executor_t {}, first_gpu_specs);
 #endif
 }
 
 #pragma endregion // Safety
+
+#pragma region Cross Product
+
+/**
+ *  @brief Fills the `queries × candidates` @p reference_matrix cell-by-cell from a pairwise @p baseline operator.
+ *
+ *  The baseline operators score @b paired views (`first[i]` against `second[i]`), so each grid cell is computed by
+ *  handing the baseline a one-string sub-view of the query tape and a one-string sub-view of the candidate tape.
+ */
+template <typename score_type_, typename baseline_operator_>
+static void fill_reference_matrix_(baseline_operator_ const &baseline, arrow_strings_view_t queries_view,
+                                   arrow_strings_view_t candidates_view, unified_vector<score_type_> &reference_matrix,
+                                   std::size_t row_stride) {
+    std::size_t const queries_count = queries_view.size();
+    std::size_t const candidates_count = candidates_view.size();
+    for (std::size_t query_index = 0; query_index != queries_count; ++query_index)
+        for (std::size_t candidate_index = 0; candidate_index != candidates_count; ++candidate_index) {
+            arrow_strings_view_t const query_cell {queries_view.buffer_, queries_view.offsets_.subspan(query_index, 2)};
+            arrow_strings_view_t const candidate_cell {candidates_view.buffer_,
+                                                       candidates_view.offsets_.subspan(candidate_index, 2)};
+            score_type_ cell_score = 0;
+            sz_assert_(baseline(query_cell, candidate_cell, &cell_score) == status_t::success_k);
+            reference_matrix[query_index * row_stride + candidate_index] = cell_score;
+        }
+}
+
+/**
+ *  @brief Drives a cross-product engine over @p queries_config × @p candidates_config and asserts every cell of the
+ *         `Q × C` matrix against the dual-row @p baseline, across the full set of shapes (1xN, Nx1, square, ragged,
+ *         rectangular, empty).
+ */
+template <typename score_type_, typename engine_type_, typename baseline_operator_, typename... trailing_args_>
+static void check_cross_product_cell_exact_(engine_type_ &&engine, baseline_operator_ const &baseline,
+                                            fuzzy_config_t queries_config, fuzzy_config_t candidates_config,
+                                            trailing_args_ &&...trailing_args) {
+
+    // The Arrow tape cannot represent a zero-string set, so a `batch_size == 0` config is materialized as an
+    // empty sub-view sliced (one offset, zero strings) off a one-string fallback tape.
+    std::string const empty_fallback_string;
+    arrow_strings_tape_t empty_fallback_tape;
+    sz_assert_(empty_fallback_tape.try_append({empty_fallback_string.data(), empty_fallback_string.size()}) ==
+               status_t::success_k);
+    auto build_view = [&](fuzzy_config_t config, std::vector<std::string> &array,
+                          arrow_strings_tape_t &tape) -> arrow_strings_view_t {
+        if (config.batch_size == 0)
+            return arrow_strings_view_t {empty_fallback_tape.view().buffer_,
+                                         empty_fallback_tape.view().offsets_.subspan(0, 1)};
+        randomize_strings(config, array, tape);
+        return tape.view();
+    };
+
+    std::vector<std::string> queries_array, candidates_array;
+    arrow_strings_tape_t queries_tape, candidates_tape;
+    arrow_strings_view_t const queries_view = build_view(queries_config, queries_array, queries_tape);
+    arrow_strings_view_t const candidates_view = build_view(candidates_config, candidates_array, candidates_tape);
+    std::size_t const queries_count = queries_view.size();
+    std::size_t const candidates_count = candidates_view.size();
+    std::size_t const row_stride = candidates_count;
+
+    unified_vector<score_type_> engine_matrix(queries_count * candidates_count);
+    unified_vector<score_type_> reference_matrix(queries_count * candidates_count);
+
+    strided_rows<score_type_> const results {engine_matrix.data(), queries_count, candidates_count, row_stride};
+    status_t const status = engine(queries_view, candidates_view, results, trailing_args...);
+    sz_assert_(status == status_t::success_k);
+
+    // The empty shape is fully validated by the success status above - there are no cells to compare.
+    if (queries_count == 0 || candidates_count == 0) return;
+
+    fill_reference_matrix_<score_type_>(baseline, queries_view, candidates_view, reference_matrix, row_stride);
+    for (std::size_t query_index = 0; query_index != queries_count; ++query_index)
+        for (std::size_t candidate_index = 0; candidate_index != candidates_count; ++candidate_index) {
+            std::size_t const cell_offset = query_index * row_stride + candidate_index;
+            if (engine_matrix[cell_offset] == reference_matrix[cell_offset]) continue;
+            edit_distance_log_mismatch(queries_array[query_index], candidates_array[candidate_index],
+                                       reference_matrix[cell_offset], engine_matrix[cell_offset]);
+            sz_assert_(engine_matrix[cell_offset] == reference_matrix[cell_offset]);
+        }
+}
+
+/**
+ *  @brief Drives the @b symmetric self-similarity engine overload over one set and asserts the matrix is
+ *         symmetric with a zero diagonal (the Levenshtein distance of a string to itself is zero).
+ */
+template <typename engine_type_, typename... trailing_args_>
+static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t sequences_config,
+                                        trailing_args_ &&...trailing_args) {
+
+    std::vector<std::string> sequences_array;
+    arrow_strings_tape_t sequences_tape;
+    randomize_strings(sequences_config, sequences_array, sequences_tape);
+
+    arrow_strings_view_t const sequences_view = sequences_tape.view();
+    std::size_t const sequences_count = sequences_view.size();
+    std::size_t const row_stride = sequences_count;
+
+    unified_vector<sz_size_t> symmetric_matrix(sequences_count * sequences_count);
+    strided_rows<sz_size_t> const results {symmetric_matrix.data(), sequences_count, sequences_count, row_stride};
+    status_t const status = engine(sequences_view, results, trailing_args...);
+    sz_assert_(status == status_t::success_k);
+
+    // The diagonal-is-zero identity holds only for a zero match cost (a string aligned to itself pays nothing).
+    // The symmetry identity holds for any cost scheme, so it is always asserted.
+    for (std::size_t row_index = 0; row_index != sequences_count; ++row_index) {
+        sz_assert_(symmetric_matrix[row_index * row_stride + row_index] == static_cast<sz_size_t>(0));
+        for (std::size_t column_index = 0; column_index != sequences_count; ++column_index)
+            sz_assert_(symmetric_matrix[row_index * row_stride + column_index] ==
+                       symmetric_matrix[column_index * row_stride + row_index]);
+    }
+}
+
+/**
+ *  @brief Validates the cross-product and symmetric engine overloads cell-by-cell across every backend.
+ *
+ *  Complements the diagonal-only agreement suites: those drive the engines pairwise, whereas this pins the full
+ *  `Q x C` matrix and the symmetric one-set matrix directly produced by the new API, asserting each cell against
+ *  the dual-row baseline (cross) or the symmetry/zero-diagonal identities (symmetric).
+ */
+void test_similarities_cross_product() {
+    std::printf("  - testing cross-product and symmetric similarity matrices...\n");
+
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+    constexpr linear_gap_costs_t unit_linear {1};
+
+    constexpr linear_gap_costs_t blosum62_linear_cost {-4};
+    error_costs_32x32_t const blosum62_matrix = error_costs_32x32_t::blosum62();
+
+    // Mixed-length random strings keep the alphabet small so collisions and zero-distance cells appear naturally.
+    fuzzy_config_t const single_query {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const single_candidate {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const many_queries {"ABC", /* batch_size */ 7, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const many_candidates {"ABC", /* batch_size */ 5, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const square_set {"ABC", /* batch_size */ 6, /* min_string_length */ 0, /* max */ 24};
+    fuzzy_config_t const empty_set {"ABC", /* batch_size */ 0, /* min_string_length */ 1, /* max */ 24};
+
+    // Serial Levenshtein cross-product over the full set of shapes: 1xN, Nx1, square, rectangular, ragged, empty.
+    auto serial_levenshtein = [&]() {
+        return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear};
+    };
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, single_query,
+                                               many_candidates); // 1xN
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
+                                               single_candidate); // Nx1
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, square_set,
+                                               square_set); // square + ragged (min length 0)
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
+                                               many_candidates); // rectangular
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, empty_set,
+                                               many_candidates); // empty queries
+    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
+                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
+                                               empty_set); // empty candidates
+
+    // Serial Needleman-Wunsch and Smith-Waterman cross-products, rectangular shape.
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
+
+    // Serial symmetric self-similarity. The diagonal-is-zero identity needs a zero match cost, so both the
+    // linear and affine variants keep `unit_uniform` (match 0) while still exercising the affine gap path.
+    constexpr affine_gap_costs_t unit_affine {1, 1};
+    check_symmetric_cell_exact_(serial_levenshtein(), square_set);
+    check_symmetric_cell_exact_(
+        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_affine}, square_set);
+
+#if SZ_USE_ICELAKE
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear},
+        levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries, many_candidates);
+    check_symmetric_cell_exact_(
+        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}, square_set);
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
+#endif
+
+#if SZ_USE_CUDA
+    gpu_specs_t first_gpu_specs;
+    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
+
+    // CUDA cross-product and symmetric matrices stay small so device memory remains bounded.
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
+        levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries, many_candidates, cuda_executor_t {},
+        first_gpu_specs);
+    check_symmetric_cell_exact_(
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}, square_set,
+        cuda_executor_t {}, first_gpu_specs);
+#endif
+}
+
+#pragma endregion // Cross Product
 
 #pragma region Drivers
 
@@ -1116,54 +1369,60 @@ void test_similarities_memory_usage() {
 
         // Multi-threaded serial Levenshtein distance implementation
         check_similarities_fuzzy_<sz_size_t>( //
-            levenshtein_baselines_t {},            //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, experiment, 1);
+            levenshtein_baselines_t {},       //
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}), experiment, 1);
 
         // Multi-threaded serial Levenshtein distance implementation with weird linear costs
-        check_similarities_fuzzy_<sz_size_t>(                 //
+        check_similarities_fuzzy_<sz_size_t>(                      //
             levenshtein_baselines_t {weird_uniform, weird_linear}, //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
+            make_pairwise(
+                levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}),
             experiment, 1);
 
         // Multi-threaded serial Levenshtein distance implementation with weird affine costs
-        check_similarities_fuzzy_<sz_size_t>(                 //
+        check_similarities_fuzzy_<sz_size_t>(                      //
             levenshtein_baselines_t {weird_uniform, weird_affine}, //
-            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
+            make_pairwise(
+                levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}),
             experiment, 1);
 
 #if SZ_USE_ICELAKE
         // Ice Lake Levenshtein distance against Multi-threaded on CPU
         check_similarities_fuzzy_<sz_size_t>( //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {},
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}, experiment, 1);
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}),
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}), experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
         check_similarities_fuzzy_<sz_size_t>( //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear},
+            make_pairwise(
+                levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}),
+            make_pairwise(
+                levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_linear}),
             experiment, 1);
 
         // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
         check_similarities_fuzzy_<sz_size_t>( //
-            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
-            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine},
+            make_pairwise(
+                levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}),
+            make_pairwise(
+                levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {weird_uniform, weird_affine}),
             experiment, 1);
 #endif
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
-        check_similarities_fuzzy_<sz_size_t>(                                   //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-            levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, experiment, 10, cuda_executor_t {},
-            first_gpu_specs);
+        check_similarities_fuzzy_<sz_size_t>(                                                       //
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}), //
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}), experiment, 10,
+            cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
         // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-        check_similarities_fuzzy_<sz_size_t>(                                   //
-            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-            levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, experiment, 10, cuda_executor_t {},
-            first_gpu_specs);
+        check_similarities_fuzzy_<sz_size_t>(                                                       //
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}), //
+            make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}), experiment, 10,
+            cuda_executor_t {}, first_gpu_specs);
 #endif
     }
 }

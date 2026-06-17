@@ -689,6 +689,20 @@ typedef enum sz_similarity_objective_t {
 } sz_similarity_objective_t;
 
 /**
+ *  @brief Describes how a similarity kernel packs work across SIMD lanes (or a GPU warp's threads).
+ *
+ *  @b one_pair_per_walk_k vectorizes within a single (query, candidate) pair (anti-diagonal lanes) — the
+ *  intra-sequence form, used for one-off pairs and the ragged tail of a cross-product.
+ *  @b candidates_across_lanes_k vectorizes across many candidates of one shared query (one candidate per lane)
+ *  — the inter-sequence form that keeps every lane busy regardless of string length, the cross-product workhorse.
+ *  @sa sz_packing_one_pair_per_walk_k, sz_packing_candidates_across_lanes_k
+ */
+typedef enum sz_similarity_packing_t {
+    sz_packing_one_pair_per_walk_k = 0,
+    sz_packing_candidates_across_lanes_k = 1
+} sz_similarity_packing_t;
+
+/**
  *  @brief Describes the cost model for gap opening vs extension in string similarity algorithms.
  *  @sa sz_gaps_linear_k, sz_gaps_affine_k
  */

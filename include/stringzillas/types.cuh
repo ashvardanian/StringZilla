@@ -21,6 +21,8 @@
 #include <optional>  // `std::optional`
 #include <algorithm> // `std::sort`, `std::partition`
 
+#include <cub/device/device_merge_sort.cuh> // `cub::DeviceMergeSort` — moves the O(n log n) grouping sort onto the GPU
+
 namespace ashvardanian {
 namespace stringzillas {
 
@@ -494,6 +496,19 @@ struct warp_tasks_groups {
 };
 
 /**
+ *  @brief Orders warp-level tasks from the least to the most shared-memory-hungry: primarily by `bytes_per_cell`
+ *      (the kernel-family boundary), then by `density`. Marked `__host__ __device__` so the same predicate drives
+ *      the GPU `thrust::sort` and the host `std::sort` fallback.
+ */
+template <typename task_type_>
+struct warp_tasks_density_order_ {
+    __host__ __device__ bool operator()(task_type_ const &lhs, task_type_ const &rhs) const noexcept {
+        return lhs.bytes_per_cell == rhs.bytes_per_cell ? lhs.density < rhs.density
+                                                        : lhs.bytes_per_cell < rhs.bytes_per_cell;
+    }
+};
+
+/**
  *  Let's say you have a list of GPU tasks of similar nature, but all of them require different amount of
  *  shared memory for efficiency. Ideally, we want each warp to receive it's own task (independent of the
  *  others), and have enough shared memory for more than one warp per multiprocessor.
@@ -527,14 +542,18 @@ struct warp_tasks_groups {
  *  It's possible to have a very memory-efficient task, that allows for 32 warps per multiprocessor, and it would be
  *  best schedule them in the largest possible block size - 1024 threads.
  *
- *  @throws `std::bad_alloc` if the `std::sort` or `std::partition` fails to allocate memory.
+ *  @note The warp-level middle is sorted on the GPU with `cub::DeviceMergeSort` (the tasks live in unified memory);
+ *  its temporary storage is the caller-owned, grow-only @p grouping_scratch buffer (hoisted on the engine and
+ *  reused across calls — never a per-call `cudaMalloc`). If it cannot grow, the middle is left in partition order
+ *  — still correct, only less optimally grouped — so the routine never throws.
  *
  *  @post The @p tasks are sorted in-place, first containing the returned number of device-wide tasks,
  *  and then the warp-wide tasks grouped by ( @p bytes_per_cell, @p density ) pairs. Use @b `group_by`
  *  to navigate the output.
  */
-template <typename task_type_>
-warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_specs_t const &specs) noexcept(false) {
+template <typename task_type_, typename scratch_buffer_type_>
+warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, scratch_buffer_type_ &grouping_scratch,
+                                                  gpu_specs_t const &specs) noexcept {
 
     using task_t = task_type_;
     warp_tasks_groups<task_t> result;
@@ -552,12 +571,21 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
                        [](task_t const &task) { return task.density != infinite_warps_per_multiprocessor_k; }) -
         warp_tasks_begin;
 
-    // The remaining tasks will be sorted from smallest memory consumption to largest.
+    // The remaining tasks are sorted from smallest memory consumption to largest. The task array lives in unified
+    // memory, so the O(n log n) sort runs on the GPU via `cub::DeviceMergeSort`; the cheap O(n) partitions and the
+    // small-group merge below stay host-side.
     auto const warp_tasks_end = warp_tasks_begin + non_empty_tasks;
-    std::sort(warp_tasks_begin, warp_tasks_end, [](task_t const &lhs, task_t const &rhs) {
-        return lhs.bytes_per_cell == rhs.bytes_per_cell ? lhs.density < rhs.density
-                                                        : lhs.bytes_per_cell < rhs.bytes_per_cell;
-    });
+    if (non_empty_tasks > 1) {
+        warp_tasks_density_order_<task_t> const order {};
+        size_t temp_storage_bytes = 0;
+        cub::DeviceMergeSort::SortKeys(nullptr, temp_storage_bytes, warp_tasks_begin, non_empty_tasks, order);
+        if (grouping_scratch.try_resize(temp_storage_bytes) == status_t::success_k) {
+            cub::DeviceMergeSort::SortKeys(grouping_scratch.data(), temp_storage_bytes, warp_tasks_begin,
+                                           non_empty_tasks, order);
+            cudaDeviceSynchronize();
+        }
+        // On scratch-allocation failure the middle stays partition-ordered: correct, only less optimally grouped.
+    }
 
     result.device_level_tasks = {tasks.begin(), warp_tasks_begin};
     result.warp_level_tasks = {warp_tasks_begin, warp_tasks_end};

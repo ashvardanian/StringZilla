@@ -79,9 +79,21 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4); // ! this may be OOB
-            second_vec = sz_u32_load_unaligned(second_slice + i);                 // ! this may be OOB, but padded
-            first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
+            // Masked tail: the window packs 4 cells; phantom cells (`i + lane >= tasks_count`) would spill one
+            // char before `first_slice` / past `second_slice`, so use the wide contiguous load only when the
+            // whole window is in-bounds, otherwise assemble it lane-by-lane and default the phantom lanes to 0.
+            if (i + 4 <= tasks_count) {
+                first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4);
+                second_vec = sz_u32_load_unaligned(second_slice + i);
+                first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
+            }
+            else {
+                first_vec.u32 = 0, second_vec.u32 = 0;
+                for (unsigned lane = 0; lane < 4 && i + lane < tasks_count; ++lane) {
+                    first_vec.u8s[lane] = load_immutable_(first_slice + tasks_count - 1 - i - lane);
+                    second_vec.u8s[lane] = load_immutable_(second_slice + i + lane);
+                }
+            }
 
             // Equality comparison will output 0xFF for each matching byte.
             equality_vec.u32 = __vcmpeq4(first_vec.u32, second_vec.u32);
@@ -160,10 +172,13 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
             pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -269,9 +284,21 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
             pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
             pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
             pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4); // ! this may be OOB
-            second_vec = sz_u32_load_unaligned(second_slice + i);                 // ! this may be OOB, but padded
-            first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
+            // Masked tail: the window packs 4 cells; phantom cells (`i + lane >= tasks_count`) would spill one
+            // char before `first_slice` / past `second_slice`, so use the wide contiguous load only when the
+            // whole window is in-bounds, otherwise assemble it lane-by-lane and default the phantom lanes to 0.
+            if (i + 4 <= tasks_count) {
+                first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4);
+                second_vec = sz_u32_load_unaligned(second_slice + i);
+                first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
+            }
+            else {
+                first_vec.u32 = 0, second_vec.u32 = 0;
+                for (unsigned lane = 0; lane < 4 && i + lane < tasks_count; ++lane) {
+                    first_vec.u8s[lane] = load_immutable_(first_slice + tasks_count - 1 - i - lane);
+                    second_vec.u8s[lane] = load_immutable_(second_slice + i + lane);
+                }
+            }
 
             // Equality comparison will output 0xFF for each matching byte.
             equality_vec.u32 = __vcmpeq4(first_vec.u32, second_vec.u32);
@@ -371,10 +398,13 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
             pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
+            // Masked tail: the 2nd lane is a phantom cell on the final odd diagonal element; reading it would
+            // spill one char before `first_slice` / one past `second_slice`, so load it only when the cell is real.
+            bool const has_second_cell = i + 1 < tasks_count;
             first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            first_vec.u16s[1] = has_second_cell ? load_immutable_(first_slice + tasks_count - i - 2) : (char)0;
             second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
-            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
+            second_vec.u16s[1] = has_second_cell ? load_immutable_(second_slice + i + 1) : (char)0;
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
