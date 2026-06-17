@@ -170,18 +170,19 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_v128_(sz_u128_vec_t state_vec,
 
 #pragma region Hash with SIMD128 AES
 
-SZ_INTERNAL void sz_hash_minimal_init_v128_(sz_hash_minimal_t_ *state, sz_u64_t seed) {
-    sz_hash_minimal_init_serial_(state, seed);
+SZ_INTERNAL void sz_hash_state_short_init_v128_(sz_hash_state_aligned_for_short_t_ *state, sz_u64_t seed) {
+    sz_hash_state_short_init_serial_(state, seed);
 }
 
-SZ_INTERNAL void sz_hash_minimal_update_v128_(sz_hash_minimal_t_ *state, sz_u128_vec_t block) {
+SZ_INTERNAL void sz_hash_state_short_update_v128_(sz_hash_state_aligned_for_short_t_ *state, sz_u128_vec_t block) {
     v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     state->aes = sz_emulate_aesenc_v128_(state->aes, block);
     state->sum = sz_emulate_shuffle_epi8_v128_(state->sum, shuffle);
     state->sum.v128 = wasm_i64x2_add(state->sum.v128, block.v128);
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_v128_(sz_hash_minimal_t_ const *state, sz_size_t length) {
+SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_v128_(sz_hash_state_aligned_for_short_t_ const *state,
+                                                        sz_size_t length) {
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
     sz_u128_vec_t mixed = sz_emulate_aesenc_v128_(state->sum, state->aes);
@@ -189,44 +190,66 @@ SZ_INTERNAL sz_u64_t sz_hash_minimal_finalize_v128_(sz_hash_minimal_t_ const *st
     return mixed_in_register.u64s[0];
 }
 
-SZ_INTERNAL void sz_hash_state_update_v128_(sz_hash_state_t *state) {
-    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
-    sz_u128_vec_t *aes_vecs = (sz_u128_vec_t *)state->aes;
-    sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)state->sum;
-    sz_u128_vec_t *ins_vecs = (sz_u128_vec_t *)state->ins;
+/** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
+SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_v128_(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t_ state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
-        aes_vecs[lane_index] = sz_emulate_aesenc_v128_(aes_vecs[lane_index], ins_vecs[lane_index]);
-        sum_vecs[lane_index] = sz_emulate_shuffle_epi8_v128_(sum_vecs[lane_index], shuffle);
-        sum_vecs[lane_index].v128 = wasm_i64x2_add(sum_vecs[lane_index].v128, ins_vecs[lane_index].v128);
+        sz_size_t const offset = lane_index * 16;
+        state.aes.u128s[lane_index].v128 = wasm_v128_load(packed->aes + offset);
+        state.sum.u128s[lane_index].v128 = wasm_v128_load(packed->sum + offset);
+        state.ins.u128s[lane_index].v128 = wasm_v128_load(packed->ins + offset);
+    }
+    state.key.v128 = wasm_v128_load(packed->key);
+    state.ins_length = packed->ins_length;
+    return state;
+}
+
+/** @brief Stores the aligned internal twin back into the packed public state. */
+SZ_INTERNAL void sz_hash_state_store_v128_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        sz_size_t const offset = lane_index * 16;
+        wasm_v128_store(packed->aes + offset, state->aes.u128s[lane_index].v128);
+        wasm_v128_store(packed->sum + offset, state->sum.u128s[lane_index].v128);
+        wasm_v128_store(packed->ins + offset, state->ins.u128s[lane_index].v128);
+    }
+    wasm_v128_store(packed->key, state->key.v128);
+    packed->ins_length = state->ins_length;
+}
+
+SZ_INTERNAL void sz_hash_state_update_v128_(sz_hash_state_aligned_t_ *state) {
+    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
+        sz_u128_vec_t ins_vec = state->ins.u128s[lane_index];
+        state->aes.u128s[lane_index] = sz_emulate_aesenc_v128_(state->aes.u128s[lane_index], ins_vec);
+        state->sum.u128s[lane_index] = sz_emulate_shuffle_epi8_v128_(state->sum.u128s[lane_index], shuffle);
+        state->sum.u128s[lane_index].v128 = wasm_i64x2_add(state->sum.u128s[lane_index].v128, ins_vec.v128);
     }
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_t const *state) {
+SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_aligned_t_ state) {
     v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
-    sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
     sz_u128_vec_t key_with_length;
-    key_with_length.u64s[0] = key_u64s[0] + state->ins_length;
-    key_with_length.u64s[1] = key_u64s[1];
+    key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
+    key_with_length.u64s[1] = state.key.u64s[1];
 
-    sz_u128_vec_t const *aes_vecs = (sz_u128_vec_t const *)state->aes;
-    sz_u128_vec_t const *sum_vecs = (sz_u128_vec_t const *)state->sum;
-    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
+    sz_u128_vec_t ins0 = state.ins.u128s[0], ins1 = state.ins.u128s[1];
+    sz_u128_vec_t ins2 = state.ins.u128s[2], ins3 = state.ins.u128s[3];
 
     // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
     // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
     // digest defer it and share this single finalization with no state copy.
-    sz_u128_vec_t aes0 = sz_emulate_aesenc_v128_(aes_vecs[0], ins_vecs[0]);
-    sz_u128_vec_t aes1 = sz_emulate_aesenc_v128_(aes_vecs[1], ins_vecs[1]);
-    sz_u128_vec_t aes2 = sz_emulate_aesenc_v128_(aes_vecs[2], ins_vecs[2]);
-    sz_u128_vec_t aes3 = sz_emulate_aesenc_v128_(aes_vecs[3], ins_vecs[3]);
-    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_v128_(sum_vecs[0], shuffle);
-    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_v128_(sum_vecs[1], shuffle);
-    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_v128_(sum_vecs[2], shuffle);
-    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_v128_(sum_vecs[3], shuffle);
-    sum0.v128 = wasm_i64x2_add(sum0.v128, ins_vecs[0].v128);
-    sum1.v128 = wasm_i64x2_add(sum1.v128, ins_vecs[1].v128);
-    sum2.v128 = wasm_i64x2_add(sum2.v128, ins_vecs[2].v128);
-    sum3.v128 = wasm_i64x2_add(sum3.v128, ins_vecs[3].v128);
+    sz_u128_vec_t aes0 = sz_emulate_aesenc_v128_(state.aes.u128s[0], ins0);
+    sz_u128_vec_t aes1 = sz_emulate_aesenc_v128_(state.aes.u128s[1], ins1);
+    sz_u128_vec_t aes2 = sz_emulate_aesenc_v128_(state.aes.u128s[2], ins2);
+    sz_u128_vec_t aes3 = sz_emulate_aesenc_v128_(state.aes.u128s[3], ins3);
+    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[0], shuffle);
+    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[1], shuffle);
+    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[2], shuffle);
+    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[3], shuffle);
+    sum0.v128 = wasm_i64x2_add(sum0.v128, ins0.v128);
+    sum1.v128 = wasm_i64x2_add(sum1.v128, ins1.v128);
+    sum2.v128 = wasm_i64x2_add(sum2.v128, ins2.v128);
+    sum3.v128 = wasm_i64x2_add(sum3.v128, ins3.v128);
 
     sz_u128_vec_t mixed0 = sz_emulate_aesenc_v128_(sum0, aes0);
     sz_u128_vec_t mixed1 = sz_emulate_aesenc_v128_(sum1, aes1);
@@ -243,73 +266,72 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_t const *state) 
 
 SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_v128_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_v128_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.v128 = sz_load_partial_v128_(start, length);
-        sz_hash_minimal_update_v128_(&state, data_vec);
-        return sz_hash_minimal_finalize_v128_(&state, length);
+        sz_hash_state_short_update_v128_(&state, data_vec);
+        return sz_hash_state_short_finalize_v128_(&state, length);
     }
     else if (length <= 32) {
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_v128_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_v128_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
         data0_vec.v128 = wasm_v128_load(start);
         data1_vec.v128 = wasm_v128_load(start + length - 16);
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
-        sz_hash_minimal_update_v128_(&state, data0_vec);
-        sz_hash_minimal_update_v128_(&state, data1_vec);
-        return sz_hash_minimal_finalize_v128_(&state, length);
+        sz_hash_state_short_update_v128_(&state, data0_vec);
+        sz_hash_state_short_update_v128_(&state, data1_vec);
+        return sz_hash_state_short_finalize_v128_(&state, length);
     }
     else if (length <= 48) {
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_v128_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_v128_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
         data0_vec.v128 = wasm_v128_load(start);
         data1_vec.v128 = wasm_v128_load(start + 16);
         data2_vec.v128 = wasm_v128_load(start + length - 16);
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
-        sz_hash_minimal_update_v128_(&state, data0_vec);
-        sz_hash_minimal_update_v128_(&state, data1_vec);
-        sz_hash_minimal_update_v128_(&state, data2_vec);
-        return sz_hash_minimal_finalize_v128_(&state, length);
+        sz_hash_state_short_update_v128_(&state, data0_vec);
+        sz_hash_state_short_update_v128_(&state, data1_vec);
+        sz_hash_state_short_update_v128_(&state, data2_vec);
+        return sz_hash_state_short_finalize_v128_(&state, length);
     }
     else if (length <= 64) {
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_v128_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_v128_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
         data0_vec.v128 = wasm_v128_load(start);
         data1_vec.v128 = wasm_v128_load(start + 16);
         data2_vec.v128 = wasm_v128_load(start + 32);
         data3_vec.v128 = wasm_v128_load(start + length - 16);
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
-        sz_hash_minimal_update_v128_(&state, data0_vec);
-        sz_hash_minimal_update_v128_(&state, data1_vec);
-        sz_hash_minimal_update_v128_(&state, data2_vec);
-        sz_hash_minimal_update_v128_(&state, data3_vec);
-        return sz_hash_minimal_finalize_v128_(&state, length);
+        sz_hash_state_short_update_v128_(&state, data0_vec);
+        sz_hash_state_short_update_v128_(&state, data1_vec);
+        sz_hash_state_short_update_v128_(&state, data2_vec);
+        sz_hash_state_short_update_v128_(&state, data3_vec);
+        return sz_hash_state_short_finalize_v128_(&state, length);
     }
     else {
-        sz_align_(64) sz_hash_state_t state;
-        sz_hash_state_init_serial(&state, seed);
+        sz_align_(64) sz_hash_state_aligned_t_ state;
+        sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
         // buffered in `ins` for `sz_hash_state_finalize_v128_` to fold - the same deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
-                wasm_v128_store(state.ins + lane_index * 16,
-                                wasm_v128_load(start + state.ins_length + lane_index * 16));
+                state.ins.u128s[lane_index].v128 = wasm_v128_load(start + state.ins_length + lane_index * 16);
             sz_hash_state_update_v128_(&state);
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
         v128_t const zero_vec = wasm_u64x2_splat(0);
-        for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) wasm_v128_store(state.ins + lane_index * 16, zero_vec);
+        for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_vec;
         sz_size_t const tail_length = length - state.ins_length;
         for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
-            state.ins[byte_index] = start[state.ins_length + byte_index];
+            state.ins.u8s[byte_index] = start[state.ins_length + byte_index];
         state.ins_length = length;
-        return sz_hash_state_finalize_v128_(&state);
+        return sz_hash_state_finalize_v128_(state);
     }
 }
 
@@ -317,7 +339,9 @@ SZ_PUBLIC void sz_hash_state_init_v128(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_serial(state, seed);
 }
 
-SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+    // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
+    sz_hash_state_aligned_t_ state = sz_hash_state_load_v128_(packed);
 
     // `ins` is exactly one 64-byte block (four v128 lanes), so buffering is just: track how many bytes it holds,
     // absorb it only once it becomes interior (more bytes arrive - the deferral `digest` needs to choose
@@ -326,57 +350,55 @@ SZ_PUBLIC void sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text,
     // only `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded
     // for `finalize` to fold.
     v128_t const zero_vec = wasm_u64x2_splat(0);
-    sz_size_t buffered = state->ins_length % 64;
-    if (buffered == 0 && state->ins_length) buffered = 64;
+    sz_size_t buffered = state.ins_length % 64;
+    if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
-            sz_hash_state_update_v128_(state);
-            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
-                wasm_v128_store(state->ins + lane_index * 16, zero_vec);
+            sz_hash_state_update_v128_(&state);
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_vec;
             buffered = 0;
         }
         sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        for (sz_size_t byte_index = 0; byte_index < take; ++byte_index) state->ins[buffered + byte_index] = text[byte_index];
-        buffered += take, text += take, length -= take, state->ins_length += take;
+        for (sz_size_t byte_index = 0; byte_index < take; ++byte_index)
+            state.ins.u8s[buffered + byte_index] = text[byte_index];
+        buffered += take, text += take, length -= take, state.ins_length += take;
     }
+    sz_hash_state_store_v128_(packed, &state);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128(sz_hash_state_t const *state) {
-    sz_size_t length = state->ins_length;
+SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t_ state = sz_hash_state_load_v128_(packed);
+    sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
     // buffered in `ins`, and `sz_hash_state_finalize_v128_` folds it - so this is a plain, copy-free finalize
     // that reproduces one-shot `sz_hash` exactly. A length of exactly 64 uses the minimal (<=64) path below.
     if (length > 64) return sz_hash_state_finalize_v128_(state);
 
-    sz_u64_t const *key_u64s = (sz_u64_t const *)state->key;
-    sz_hash_minimal_t_ minimal_state;
-    minimal_state.key.u64s[0] = key_u64s[0];
-    minimal_state.key.u64s[1] = key_u64s[1];
-    minimal_state.aes = *(sz_u128_vec_t const *)state->aes;
-    minimal_state.sum = *(sz_u128_vec_t const *)state->sum;
-
-    sz_u128_vec_t const *ins_vecs = (sz_u128_vec_t const *)state->ins;
+    sz_hash_state_aligned_for_short_t_ minimal_state;
+    minimal_state.key = state.key;
+    minimal_state.aes = state.aes.u128s[0];
+    minimal_state.sum = state.sum.u128s[0];
     if (length <= 16) {
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
-        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[0]);
+        return sz_hash_state_short_finalize_v128_(&minimal_state, length);
     }
     else if (length <= 32) {
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
-        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[1]);
+        return sz_hash_state_short_finalize_v128_(&minimal_state, length);
     }
     else if (length <= 48) {
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[2]);
-        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[1]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[2]);
+        return sz_hash_state_short_finalize_v128_(&minimal_state, length);
     }
     else {
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[0]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[1]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[2]);
-        sz_hash_minimal_update_v128_(&minimal_state, ins_vecs[3]);
-        return sz_hash_minimal_finalize_v128_(&minimal_state, length);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[1]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[2]);
+        sz_hash_state_short_update_v128_(&minimal_state, state.ins.u128s[3]);
+        return sz_hash_state_short_finalize_v128_(&minimal_state, length);
     }
 }
 
@@ -404,11 +426,11 @@ SZ_PUBLIC void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64_t non
  */
 SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
                                                     sz_size_t length, sz_u64_t seed) {
-    sz_align_(16) sz_hash_minimal_t_ state;
-    sz_hash_minimal_init_v128_(&state, seed);
+    sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+    sz_hash_state_short_init_v128_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-        sz_hash_minimal_update_v128_(&state, text_lanes->u128s[lane_index]);
-    return sz_hash_minimal_finalize_v128_(&state, length);
+        sz_hash_state_short_update_v128_(&state, text_lanes->u128s[lane_index]);
+    return sz_hash_state_short_finalize_v128_(&state, length);
 }
 
 /**

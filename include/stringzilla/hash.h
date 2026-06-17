@@ -217,7 +217,7 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
  *
  *  @note Uses `packed` attribute to allow placement at arbitrary addresses without UBSAN warnings.
  *        This struct uses plain byte arrays to avoid implicit alignment requirements from SIMD types.
- *        The layout matches sz_hash_state_internal_t_ for safe casting between them.
+ *        The layout matches sz_hash_state_aligned_t_ for safe casting between them.
  */
 #if defined(_MSC_VER)
 #pragma pack(push, 1)
@@ -238,25 +238,6 @@ typedef struct __attribute__((packed)) sz_hash_state_t {
     sz_size_t ins_length;
 } sz_hash_state_t;
 #endif
-
-/**
- *  @brief Internal aligned version of sz_hash_state_t using SIMD union types.
- *         This is layout-compatible with sz_hash_state_t but provides convenient
- *         SIMD vector accessors for internal implementations.
- */
-typedef struct sz_hash_state_internal_t_ {
-    sz_u512_vec_t aes;
-    sz_u512_vec_t sum;
-    sz_u512_vec_t ins;
-    sz_u128_vec_t key;
-    sz_size_t ins_length;
-} sz_hash_state_internal_t_;
-
-typedef struct sz_hash_minimal_t_ {
-    sz_u128_vec_t aes;
-    sz_u128_vec_t sum;
-    sz_u128_vec_t key;
-} sz_hash_minimal_t_;
 
 /**
  *  @brief The state for incremental construction of a SHA256 hash.

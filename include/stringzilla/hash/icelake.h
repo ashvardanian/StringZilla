@@ -158,8 +158,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
     // the "logic" is identical to Haswell.
     if (length <= 16) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -167,13 +167,13 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
@@ -182,14 +182,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -199,15 +199,15 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -218,15 +218,15 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data3_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     // This is where the logic differs from Skylake-X and other pre-Ice Lake CPUs:
     else {
-        sz_align_(64) sz_hash_state_internal_t_ state;
+        sz_align_(64) sz_hash_state_aligned_t_ state;
         sz_hash_state_init_skylake((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
@@ -238,9 +238,10 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_siz
             state.sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state.sum.zmm, order), state.ins.zmm);
         }
         // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
-        state.ins.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
+        state.ins.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length),
+                                                start + state.ins_length);
         state.ins_length = length;
-        return sz_hash_state_finalize_westmere_((sz_hash_state_t const *)&state);
+        return sz_hash_state_finalize_westmere_(&state);
     }
 }
 
@@ -248,34 +249,56 @@ SZ_PUBLIC void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed)
     sz_hash_state_init_skylake(state, seed);
 }
 
+/** @brief Loads the packed public state into the aligned twin (one `_mm512_loadu_si512` per 64-byte field). */
+SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_icelake_(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t_ state;
+    state.aes.zmm = _mm512_loadu_si512((__m512i const *)packed->aes);
+    state.sum.zmm = _mm512_loadu_si512((__m512i const *)packed->sum);
+    state.ins.zmm = _mm512_loadu_si512((__m512i const *)packed->ins);
+    state.key.xmm = _mm_lddqu_si128((__m128i const *)packed->key);
+    state.ins_length = packed->ins_length;
+    return state;
+}
+
+/** @brief Stores the aligned twin back into the packed public state (one `_mm512_storeu_si512` per field). */
+SZ_INTERNAL void sz_hash_state_store_icelake_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+    _mm512_storeu_si512((__m512i *)packed->aes, state->aes.zmm);
+    _mm512_storeu_si512((__m512i *)packed->sum, state->sum.zmm);
+    _mm512_storeu_si512((__m512i *)packed->ins, state->ins.zmm);
+    _mm_storeu_si128((__m128i *)packed->key, state->key.xmm);
+    packed->ins_length = state->ins_length;
+}
+
+/** @brief Absorbs the buffered 64-byte block into the aligned state with a single VAES `VAESENC` over four lanes. */
+SZ_INTERNAL void sz_hash_state_update_icelake_(sz_hash_state_aligned_t_ *state) {
+    __m512i const order = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
+    state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm);
+    state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, order), state->ins.zmm);
+}
+
 SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
+    // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is exactly one 64-byte block (one ZMM), so buffering is just: track how many bytes it holds, absorb
     // it only once it becomes interior (more bytes arrive - the deferral `digest` needs to choose minimal/full by
-    // total length), and append incoming bytes with a masked load+store. The deferred trailing block reads back as
-    // `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The masked store touches only
-    // `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded for
-    // `finalize` to fold.
-    __m512i const order = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
-    sz_size_t buffered = state_ptr->ins_length % 64;
-    if (buffered == 0 && state_ptr->ins_length) buffered = 64;
+    // total length), and append incoming bytes. The deferred trailing block reads back as
+    // `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. Re-zeroing `ins` after each absorb
+    // keeps the high lanes zero-padded for `finalize` to fold.
+    sz_hash_state_aligned_t_ state = sz_hash_state_load_icelake_(state_ptr);
+    sz_size_t buffered = state.ins_length % 64;
+    if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
-            __m512i const block = _mm512_loadu_si512((__m512i const *)state_ptr->ins);
-            _mm512_storeu_si512((__m512i *)state_ptr->aes,
-                                _mm512_aesenc_epi128(_mm512_loadu_si512((__m512i const *)state_ptr->aes), block));
-            _mm512_storeu_si512(
-                (__m512i *)state_ptr->sum,
-                _mm512_add_epi64(_mm512_shuffle_epi8(_mm512_loadu_si512((__m512i const *)state_ptr->sum), order),
-                                 block));
-            _mm512_storeu_si512((__m512i *)state_ptr->ins, _mm512_setzero_si512());
+            sz_hash_state_update_icelake_(&state);
+            state.ins.zmm = _mm512_setzero_si512();
             buffered = 0;
         }
         sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        __mmask64 const mask = sz_u64_mask_until_(to_copy);
-        _mm512_mask_storeu_epi8(state_ptr->ins + buffered, mask, _mm512_maskz_loadu_epi8(mask, text));
-        buffered += to_copy, text += to_copy, length -= to_copy, state_ptr->ins_length += to_copy;
+        for (sz_size_t byte_index = 0; byte_index < to_copy; ++byte_index)
+            state.ins.u8s[buffered + byte_index] = (sz_u8_t)text[byte_index];
+        buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
+    sz_hash_state_store_icelake_(state_ptr, &state);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state) {
@@ -338,22 +361,22 @@ SZ_PUBLIC void sz_fill_random_icelake(sz_ptr_t output, sz_size_t length, sz_u64_
 }
 
 /**
- *  @brief A wider parallel analog of `sz_hash_minimal_t_`, which is not used for computing individual hashes,
+ *  @brief A wider parallel analog of `sz_hash_state_aligned_for_short_t_`, which is not used for computing individual hashes,
  *         but for parallel hashing of @b short 4x separate strings under 16 bytes long.
  *         Useful for higher-level Database and Machine Learning operations.
  */
-typedef struct sz_hash_minimal_x4_t_ {
+typedef struct sz_hash_state_aligned_for_short_x4_t_ {
     sz_u512_vec_t aes;
     sz_u512_vec_t sum;
     sz_u512_vec_t key;
-} sz_hash_minimal_x4_t_;
+} sz_hash_state_aligned_for_short_x4_t_;
 
 /**
  *  @brief Initializes the 4-wide parallel minimal hash state using VAES and AVX-512 intrinsics.
  *  @param state Pointer to the 4-wide minimal hash state to initialize.
  *  @param seed 64-bit seed XOR-ed with Pi constants replicated across all four 128-bit lanes.
  */
-SZ_INTERNAL void sz_hash_minimal_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, sz_u64_t seed) {
+SZ_INTERNAL void sz_hash_state_short_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_vec = _mm512_set1_epi64(seed);
@@ -385,9 +408,9 @@ SZ_INTERNAL void sz_hash_minimal_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, 
  *  @param length3 Total byte count for the fourth 128-bit lane.
  *  @return 256-bit vector containing four 64-bit hash values (one per lane).
  */
-SZ_INTERNAL __m256i sz_hash_minimal_x4_finalize_icelake_(sz_hash_minimal_x4_t_ const *state, //
-                                                         sz_size_t length0, sz_size_t length1, sz_size_t length2,
-                                                         sz_size_t length3) {
+SZ_INTERNAL __m256i sz_hash_state_short_x4_finalize_icelake_(sz_hash_state_aligned_for_short_x4_t_ const *state, //
+                                                             sz_size_t length0, sz_size_t length1, sz_size_t length2,
+                                                             sz_size_t length3) {
     __m512i const padded_lengths = _mm512_set_epi64(0, length3, 0, length2, 0, length1, 0, length0);
     // Mix the length into the key
     __m512i key_with_length = _mm512_add_epi64(state->key.zmm, padded_lengths);
@@ -407,7 +430,7 @@ SZ_INTERNAL __m256i sz_hash_minimal_x4_finalize_icelake_(sz_hash_minimal_x4_t_ c
  *  @param state Pointer to the 4-wide minimal hash state.
  *  @param blocks 512-bit register containing four 128-bit data blocks, one per lane.
  */
-SZ_INTERNAL void sz_hash_minimal_x4_update_icelake_(sz_hash_minimal_x4_t_ *state, __m512i blocks) {
+SZ_INTERNAL void sz_hash_state_short_x4_update_icelake_(sz_hash_state_aligned_for_short_x4_t_ *state, __m512i blocks) {
     __m512i const order = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, blocks);
     state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, order), blocks);
@@ -415,12 +438,12 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_icelake_(sz_hash_minimal_x4_t_ *state
 
 /**
  *  @brief Initializes the 4-wide parallel minimal state with four @b distinct seeds (one per lane).
- *         Unlike `sz_hash_minimal_x4_init_icelake_`, which seeds all four lanes identically to hash
+ *         Unlike `sz_hash_state_short_x4_init_icelake_`, which seeds all four lanes identically to hash
  *         four different strings, this seeds each lane differently to hash one string under four seeds.
  *  @param state Pointer to the 4-wide minimal hash state to initialize.
  *  @param seeds_vec Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the 512-bit register.
  */
-SZ_INTERNAL void sz_hash_multiseed_x4_init_icelake_(sz_hash_minimal_x4_t_ *state, __m512i seeds_vec) {
+SZ_INTERNAL void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t_ *state, __m512i seeds_vec) {
     state->key.zmm = seeds_vec;
     // Replicate the first 128 bits of each Pi half across all four lanes, then XOR the per-lane seeds.
     sz_u64_t const *pi = sz_hash_pi_constants_();
@@ -440,7 +463,8 @@ SZ_INTERNAL void sz_hash_multiseed_x4_init_icelake_(sz_hash_minimal_x4_t_ *state
  *                 builds it once and reuses it across all seed groups.
  *  @return 256-bit vector with four 64-bit hashes, one per lane.
  */
-SZ_INTERNAL __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_minimal_x4_t_ const *state, __m512i lengths) {
+SZ_INTERNAL __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_state_aligned_for_short_x4_t_ const *state,
+                                                           __m512i lengths) {
     __m512i key_with_length = _mm512_add_epi64(state->key.zmm, lengths);
     __m512i mixed = _mm512_aesenc_epi128(state->sum.zmm, state->aes.zmm);
     __m512i mixed_in_register = _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed, key_with_length), mixed);
@@ -485,12 +509,12 @@ SZ_PUBLIC void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,      
 
     sz_size_t seed_index = 0;
     for (; seed_index + 4 <= seeds_count; seed_index += 4) {
-        sz_hash_minimal_x4_t_ state;
+        sz_hash_state_aligned_for_short_x4_t_ state;
         __m512i const seeds_vec = _mm512_permutexvar_epi64(
             seed_spread, _mm512_castsi256_si512(_mm256_loadu_si256((__m256i const *)(seeds + seed_index))));
         sz_hash_multiseed_x4_init_icelake_(&state, seeds_vec);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_minimal_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
+            sz_hash_state_short_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
         _mm256_storeu_si256((__m256i *)(hashes + seed_index), sz_hash_multiseed_x4_finalize_icelake_(&state, lengths));
     }
 
@@ -498,12 +522,12 @@ SZ_PUBLIC void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,      
     // and stay entirely within VAES instead of dropping to a scalar AES-NI loop.
     if (seed_index < seeds_count) {
         __mmask8 const seed_mask = (__mmask8)((1u << (seeds_count - seed_index)) - 1);
-        sz_hash_minimal_x4_t_ state;
+        sz_hash_state_aligned_for_short_x4_t_ state;
         __m512i const seeds_vec = _mm512_permutexvar_epi64(
             seed_spread, _mm512_castsi256_si512(_mm256_maskz_loadu_epi64(seed_mask, seeds + seed_index)));
         sz_hash_multiseed_x4_init_icelake_(&state, seeds_vec);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_minimal_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
+            sz_hash_state_short_x4_update_icelake_(&state, broadcast_text_lanes[lane_index]);
         _mm256_mask_storeu_epi64(hashes + seed_index, seed_mask,
                                  sz_hash_multiseed_x4_finalize_icelake_(&state, lengths));
     }

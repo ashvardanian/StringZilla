@@ -109,8 +109,8 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
     //
     // For larger entries, we will use a separate loop afterwards to decrease the likelihood of collisions
     // on the shorter entries, that can benefit from vectorized processing.
-    sz_hash_minimal_x4_t_ batch_hashes_states_initial;
-    sz_hash_minimal_x4_init_icelake_(&batch_hashes_states_initial, seed);
+    sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states_initial;
+    sz_hash_state_short_x4_init_icelake_(&batch_hashes_states_initial, seed);
     sz_size_t count_longer = 0;
     for (sz_size_t small_position = 0; small_position < small_sequence->count;) {
         sz_string_view_t batch[4];
@@ -154,10 +154,10 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
-            sz_hash_minimal_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
-            batch_hashes.ymm = sz_hash_minimal_x4_finalize_icelake_(&batch_hashes_states, batch[0].length,
-                                                                    batch[1].length, batch[2].length, batch[3].length);
+            sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
+            batch_hashes.ymm = sz_hash_state_short_x4_finalize_icelake_(
+                &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);
             sz_assert_(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
             sz_assert_(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
             sz_assert_(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));
@@ -256,10 +256,10 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
-            sz_hash_minimal_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
-            batch_hashes.ymm = sz_hash_minimal_x4_finalize_icelake_(&batch_hashes_states, batch[0].length,
-                                                                    batch[1].length, batch[2].length, batch[3].length);
+            sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
+            batch_hashes.ymm = sz_hash_state_short_x4_finalize_icelake_(
+                &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);
             sz_assert_(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
             sz_assert_(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
             sz_assert_(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));

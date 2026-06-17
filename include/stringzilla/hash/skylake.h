@@ -146,8 +146,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -155,13 +155,13 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
@@ -170,14 +170,14 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -187,15 +187,15 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_minimal_t_ state;
-        sz_hash_minimal_init_westmere_aligned_(&state, seed);
+        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -206,71 +206,21 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 
         // Shuffle with the same mask
         __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_minimal_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_minimal_update_westmere_aligned_(&state, data3_vec.xmm, order);
-        return sz_hash_minimal_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
-    else {
-        sz_align_(64) sz_hash_state_internal_t_ state;
-        sz_hash_state_init_skylake((sz_hash_state_t *)&state, seed);
-
-        // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
-        // buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same deferral the streaming path uses.
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        for (; state.ins_length + 64 < length; state.ins_length += 64) {
-            state.ins.zmm = _mm512_loadu_epi8(start + state.ins_length);
-            state.aes.xmms[0] = _mm_aesenc_si128(state.aes.xmms[0], state.ins.xmms[0]);
-            state.aes.xmms[1] = _mm_aesenc_si128(state.aes.xmms[1], state.ins.xmms[1]);
-            state.aes.xmms[2] = _mm_aesenc_si128(state.aes.xmms[2], state.ins.xmms[2]);
-            state.aes.xmms[3] = _mm_aesenc_si128(state.aes.xmms[3], state.ins.xmms[3]);
-            state.sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[0], order), state.ins.xmms[0]);
-            state.sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[1], order), state.ins.xmms[1]);
-            state.sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[2], order), state.ins.xmms[2]);
-            state.sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state.sum.xmms[3], order), state.ins.xmms[3]);
-        }
-        // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
-        state.ins.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - state.ins_length), start + state.ins_length);
-        state.ins_length = length;
-        return sz_hash_state_finalize_westmere_((sz_hash_state_t const *)&state);
-    }
+    // Skylake has no VAES, so its four-lane AES-NI absorb has no throughput edge over Westmere; in 512-bit form it
+    // is in fact slower (per-lane `vextracti128` contends on the shuffle port). Skylake's win is the masked-load
+    // short path above, so inputs over one block defer to the full-clock pure-SSE Westmere kernel.
+    return sz_hash_westmere(start, length, seed);
 }
 
 SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
-
-    // `ins` is one 64-byte block; track how many bytes it holds (0..64; 64 == a full block deferred by an earlier
-    // call so `digest` can still choose minimal/full by total length), absorb it only once it becomes interior
-    // (more bytes arrive), and append with an AVX-512 masked load+store. Skylake lacks VAES, so the absorb is four
-    // AES-NI lanes. The masked store touches only [buffered, buffered+take); re-zeroing `ins` after each absorb
-    // keeps the high lanes zero-padded for `finalize` to fold.
-    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-    sz_size_t buffered = state_ptr->ins_length % 64;
-    if (buffered == 0 && state_ptr->ins_length) buffered = 64;
-    while (length) {
-        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
-            sz_u512_vec_t block, aes, sum;
-            block.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->ins);
-            aes.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->aes);
-            sum.zmm = _mm512_loadu_si512((__m512i const *)state_ptr->sum);
-            aes.xmms[0] = _mm_aesenc_si128(aes.xmms[0], block.xmms[0]);
-            aes.xmms[1] = _mm_aesenc_si128(aes.xmms[1], block.xmms[1]);
-            aes.xmms[2] = _mm_aesenc_si128(aes.xmms[2], block.xmms[2]);
-            aes.xmms[3] = _mm_aesenc_si128(aes.xmms[3], block.xmms[3]);
-            sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[0], order), block.xmms[0]);
-            sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[1], order), block.xmms[1]);
-            sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[2], order), block.xmms[2]);
-            sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(sum.xmms[3], order), block.xmms[3]);
-            _mm512_storeu_si512((__m512i *)state_ptr->aes, aes.zmm);
-            _mm512_storeu_si512((__m512i *)state_ptr->sum, sum.zmm);
-            _mm512_storeu_si512((__m512i *)state_ptr->ins, _mm512_setzero_si512());
-            buffered = 0;
-        }
-        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        __mmask64 const mask = sz_u64_mask_until_(to_copy);
-        _mm512_mask_storeu_epi8(state_ptr->ins + buffered, mask, _mm512_maskz_loadu_epi8(mask, text));
-        buffered += to_copy, text += to_copy, length -= to_copy, state_ptr->ins_length += to_copy;
-    }
+    // The four-lane AES-NI absorb has no edge over Westmere here (no VAES); defer streaming to its full-clock kernel.
+    sz_hash_state_update_westmere(state_ptr, text, length);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
