@@ -117,6 +117,8 @@ static PyTypeObject Utf8UncasedFindIteratorType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
+static struct PyModuleDef stringzilla_module;
+
 /**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
  *          native `mmap` module, as it exposes the address of the mapping in memory.
@@ -383,6 +385,71 @@ typedef struct {
     } data;
 
 } Strs;
+
+/**
+ *  @brief  Per-interpreter module state, holding the intrusive free-lists for `Str` and `Strs`.
+ *
+ *  Both objects churn heavily: nearly every `split`/iterate element and every slice mints a fresh
+ *  fixed-size header that is torn down moments later. Instead of round-tripping each header through
+ *  `PyObject_Malloc`/`PyObject_Free`, dealloc parks the dead header on a singly-linked free-list and
+ *  the allocation helper pops it back. The link is threaded through the dead object's own storage
+ *  (`Str::parent`, `Strs::data`), so the state needs only a head pointer and a counter per type - no
+ *  array. Living in module state keeps it per-interpreter and free-threading clean (no baked static).
+ */
+enum { sz_freelist_capacity_k = 64 }; //< Headers retained per interpreter, per type.
+
+typedef struct {
+    Str *str_freelist_head;        //< Intrusive list of dead `Str` headers (link via `parent`).
+    sz_size_t str_freelist_count;  //< Cached `Str` headers, never exceeds `sz_freelist_capacity_k`.
+    Strs *strs_freelist_head;      //< Intrusive list of dead `Strs` headers (link via `data`).
+    sz_size_t strs_freelist_count; //< Cached `Strs` headers, never exceeds `sz_freelist_capacity_k`.
+} stringzilla_state_t;
+
+#pragma endregion
+
+#pragma region Free-list
+
+/** @brief Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
+static stringzilla_state_t *stringzilla_state_(void) {
+    PyObject *module = PyState_FindModule(&stringzilla_module);
+    return module ? (stringzilla_state_t *)PyModule_GetState(module) : NULL;
+}
+
+/** @brief The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
+static Strs **Strs_freelist_next_(Strs *node) { return (Strs **)&node->data; }
+
+/** @brief Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
+static Str *Str_alloc_(void) {
+    stringzilla_state_t *state = stringzilla_state_();
+    if (state && state->str_freelist_head) {
+        Str *self = state->str_freelist_head;
+        state->str_freelist_head = (Str *)self->parent; // Unlink (the dead `parent` held `next`).
+        state->str_freelist_count--;
+        _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
+        self->parent = NULL;
+        self->memory.start = NULL;
+        self->memory.length = 0;
+        return self;
+    }
+    return (Str *)StrType.tp_alloc(&StrType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
+}
+
+/** @brief Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
+static Strs *Strs_alloc_(void) {
+    stringzilla_state_t *state = stringzilla_state_();
+    if (state && state->strs_freelist_head) {
+        Strs *self = state->strs_freelist_head;
+        state->strs_freelist_head = *Strs_freelist_next_(self); // Unlink (the dead `data` held `next`).
+        state->strs_freelist_count--;
+        _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
+        // Restore `tp_alloc`'s zero-init so a caller's early error path deallocs safely (the dealloc
+        // `switch` reads `layout`/`data`); `STRS_U32_TAPE_VIEW` with a NULL parent is a no-op to free.
+        self->layout = STRS_U32_TAPE_VIEW;
+        memset(&self->data, 0, sizeof(self->data));
+        return self;
+    }
+    return (Strs *)StrsType.tp_alloc(&StrsType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
+}
 
 #pragma endregion
 
@@ -1227,22 +1294,27 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    Str *self;
-    self = (Str *)type->tp_alloc(type, 0);
+    Str *self = Str_alloc_(); // `Str` is not a base type, so `type` is always `&StrType`.
     if (!self) {
         PyErr_SetString(PyExc_RuntimeError, "Couldn't allocate a Str handle!");
         return NULL;
     }
-
-    self->parent = NULL;
-    self->memory.start = NULL;
-    self->memory.length = 0;
     return (PyObject *)self;
 }
 
 static void Str_dealloc(Str *self) {
     if (self->parent) { Py_XDECREF(self->parent); }
     else if (self->memory.start) { free(self->memory.start); }
+
+    // Park the dead header on the free-list instead of freeing it, threading the `next` link through
+    // the now-unused `parent` field; fall through to a real free when the cache is full or absent.
+    stringzilla_state_t *state = stringzilla_state_();
+    if (state && state->str_freelist_count < sz_freelist_capacity_k) {
+        self->parent = (PyObject *)state->str_freelist_head;
+        state->str_freelist_head = self;
+        state->str_freelist_count++;
+        return;
+    }
     self->parent = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -1949,7 +2021,7 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
         }
 
         // Create a new `Str` object
-        Str *self_slice = (Str *)StrType.tp_alloc(&StrType, 0);
+        Str *self_slice = Str_alloc_();
         if (self_slice == NULL && PyErr_NoMemory()) return NULL;
 
         // Set its properties based on the slice
@@ -2183,7 +2255,7 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     getter(self, i, count, &memory_owner, &start, &length);
 
     // Create a new `Str` object
-    Str *view_copy = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *view_copy = Str_alloc_();
     if (view_copy == NULL && PyErr_NoMemory()) return NULL;
 
     view_copy->memory.start = start;
@@ -2218,7 +2290,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     if (result_count < 0) return NULL;
 
     // Create a new `Strs` object
-    Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    Strs *result = Strs_alloc_();
     if (result == NULL && PyErr_NoMemory()) return NULL;
 
     if (result_count == 0) {
@@ -4495,7 +4567,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
                         int skip_empty) {
     // Create Strs object
-    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    Strs *result = Strs_alloc_();
     if (!result) return NULL;
 
     // Use reordered subviews layout with the haystack as parent
@@ -4591,7 +4663,7 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
                          int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
                          int skip_empty) {
     // Create Strs object
-    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    Strs *result = Strs_alloc_();
     if (!result) return NULL;
 
     // Use reordered subviews layout with the haystack as parent
@@ -5489,7 +5561,7 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     }
 
     // Allocate a new Str instance
-    Str *result_str = PyObject_New(Str, &StrType);
+    Str *result_str = Str_alloc_();
     if (result_str == NULL) { return NULL; }
 
     // Calculate the total length of the new string
@@ -5622,7 +5694,7 @@ static PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize
     sz_cptr_t new_start = sz_find_byteset(text.start, text.length, &set);
     if (!new_start) {
         // Return empty string
-        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        Str *result = Str_alloc_();
         if (result == NULL && PyErr_NoMemory()) return NULL;
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -5632,7 +5704,7 @@ static PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize
 
     // Create a new Str object for the result
     sz_size_t new_length = text.length - (new_start - text.start);
-    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result = Str_alloc_();
     if (result == NULL && PyErr_NoMemory()) return NULL;
     result->memory.start = new_start;
     result->memory.length = new_length;
@@ -5710,7 +5782,7 @@ static PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize
     sz_cptr_t new_end = sz_rfind_byteset(text.start, text.length, &set);
     if (!new_end) {
         // Return empty string
-        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        Str *result = Str_alloc_();
         if (result == NULL && PyErr_NoMemory()) return NULL;
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -5720,7 +5792,7 @@ static PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize
 
     // Create a new Str object for the result
     sz_size_t new_length = new_end - text.start + 1;
-    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result = Str_alloc_();
     if (result == NULL && PyErr_NoMemory()) return NULL;
     result->memory.start = text.start;
     result->memory.length = new_length;
@@ -5798,7 +5870,7 @@ static PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_
     sz_cptr_t new_start = sz_find_byteset(text.start, text.length, &set);
     if (!new_start) {
         // Return empty string
-        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        Str *result = Str_alloc_();
         if (result == NULL && PyErr_NoMemory()) return NULL;
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -5811,7 +5883,7 @@ static PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_
     sz_cptr_t new_end = sz_rfind_byteset(new_start, remaining_length, &set);
     if (!new_end) {
         // Return empty string
-        Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+        Str *result = Str_alloc_();
         if (result == NULL && PyErr_NoMemory()) return NULL;
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -5821,7 +5893,7 @@ static PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_
 
     // Create a new Str object for the result
     sz_size_t new_length = new_end - new_start + 1;
-    Str *result = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result = Str_alloc_();
     if (result == NULL && PyErr_NoMemory()) return NULL;
     result->memory.start = new_start;
     result->memory.length = new_length;
@@ -5985,7 +6057,7 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
     } while (self->skip_empty && result_memory.length == 0);
 
     // Create a new `Str` object
-    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result_obj = Str_alloc_();
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     // Set its properties based on the slice
@@ -6111,7 +6183,7 @@ static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
     sz_cptr_t segment_start = self->suffix + self->batch_starts[i];
     sz_size_t segment_length = self->batch_lengths[i];
 
-    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result_obj = Str_alloc_();
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->memory.start = segment_start;
@@ -6230,7 +6302,7 @@ static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterato
     sz_cptr_t segment_start = self->suffix + self->batch_starts[i];
     sz_size_t segment_length = self->batch_lengths[i];
 
-    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result_obj = Str_alloc_();
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->memory.start = segment_start;
@@ -6318,7 +6390,7 @@ static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *sel
         else self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost word's end
     }
 
-    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result_obj = Str_alloc_();
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->memory.start = word_start;
@@ -6386,7 +6458,7 @@ static PyObject *Utf8UncasedFindIteratorType_next(Utf8UncasedFindIterator *self)
     if (!match) return NULL;
 
     // Create a new `Str` object for the matched region
-    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    Str *result_obj = Str_alloc_();
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->memory.start = match;
@@ -6906,7 +6978,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     }
 
     // Create a new Strs object for the reordered layout
-    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    Strs *result = Strs_alloc_();
     if (!result) {
         allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_NoMemory();
@@ -7125,7 +7197,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
 
     // Create a new Strs object for the sorted layout
-    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    Strs *result = Strs_alloc_();
     if (!result) {
         allocator.free(sorted_spans, result_count * sizeof(sz_string_view_t), allocator.handle);
         PyErr_NoMemory();
@@ -7243,7 +7315,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Create a new `Strs` object
-    Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    Strs *result = Strs_alloc_();
     if (result == NULL && PyErr_NoMemory()) return NULL;
 
     // Initialize the memory allocator with default malloc wrapper
@@ -8369,6 +8441,15 @@ static void Strs_dealloc(Strs *self) {
         break;
     }
 
+    // Park the dead header on the free-list instead of freeing it, threading the `next` link through
+    // the now-unused `data` union; fall through to a real free when the cache is full or absent.
+    stringzilla_state_t *state = stringzilla_state_();
+    if (state && state->strs_freelist_count < sz_freelist_capacity_k) {
+        *Strs_freelist_next_(self) = state->strs_freelist_head;
+        state->strs_freelist_head = self;
+        state->strs_freelist_count++;
+        return;
+    }
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -8556,7 +8637,25 @@ static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static void stringzilla_cleanup(PyObject *m) { sz_unused_(m); }
+static void stringzilla_cleanup(PyObject *m) {
+    // Drain both free-lists, releasing the headers parked for reuse during the interpreter's lifetime.
+    stringzilla_state_t *state = (stringzilla_state_t *)PyModule_GetState(m);
+    if (!state) return;
+    for (Str *node = state->str_freelist_head; node;) {
+        Str *next = (Str *)node->parent;
+        PyObject_Free(node);
+        node = next;
+    }
+    for (Strs *node = state->strs_freelist_head; node;) {
+        Strs *next = *Strs_freelist_next_(node);
+        PyObject_Free(node);
+        node = next;
+    }
+    state->str_freelist_head = NULL;
+    state->str_freelist_count = 0;
+    state->strs_freelist_head = NULL;
+    state->strs_freelist_count = 0;
+}
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
@@ -8637,7 +8736,7 @@ static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
     "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
-    -1,
+    sizeof(stringzilla_state_t), // Per-interpreter free-list state; also enables `PyState_FindModule`.
     stringzilla_methods,
     NULL,
     NULL,
