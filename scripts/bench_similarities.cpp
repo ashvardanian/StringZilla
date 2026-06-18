@@ -17,6 +17,9 @@
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
  *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
+ *  - `STRINGWARS_BATCH_PER_CORE=256` : Pairs scored per core; a CPU core and a GPU streaming-multiprocessor each
+ *      count as one core, so the per-device pair budget is `STRINGWARS_BATCH_PER_CORE * cores` and each
+ *      cross-product axis (queries, candidates) is its square root.
  *
  *  Unlike StringWars, the following additional environment variables are supported:
  *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.

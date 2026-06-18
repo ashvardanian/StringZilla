@@ -135,20 +135,27 @@ struct shape_t {
 };
 
 /**
- *  @brief Builds the list of benchmark shapes, scaling @b both dimensions under a cell budget.
+ *  @brief Builds the list of benchmark shapes, sizing the per-device batch to the hardware.
  *
- *  We deliberately scale the candidate axis alongside the query axis (instead of pinning it to a constant) so the
- *  cross-product tiling, lane packing and tier routing are all exercised. The all-pairs shapes grow squarely up
- *  to a per-tile pair budget; a separate pairwise (diagonal) batch gives an apples-to-apples per-pair baseline.
+ *  Batch sizing mirrors StringWars: @b `STRINGWARS_BATCH_PER_CORE` entries are processed per core, where a CPU
+ *  core counts as one core and a GPU @b streaming-multiprocessor counts as one core, so the per-device pair budget
+ *  auto-scales as `STRINGWARS_BATCH_PER_CORE * device_parallelism` (no fixed CPU/GPU multiplier). This is a 2-D
+ *  cross-product (queries x candidates), so that budget is split as a square: each axis grows with the @b square
+ *  @b root of `STRINGWARS_BATCH_PER_CORE * device_parallelism`. The sweep keeps a retrieval corner (one query vs a
+ *  full candidate corpus), the balanced square, and a skew either way; a pairwise diagonal is the per-pair baseline.
  *
- *  @sa `STRINGWARS_BATCH` (`env.batch_sizes_override`): when set, each override `N` is mapped onto a square-ish
- *      all-pairs shape `q(N) x c(min(N, budget/N))` plus a `q(N) x c(N)` pairwise diagonal, honoring the dataset
- *      size and the cell budget.
+ *  @param device_parallelism CPU logical cores for a CPU run, GPU streaming-multiprocessor count for a GPU run.
+ *  @sa `STRINGWARS_BATCH` (`env.batch_sizes_override`): explicit per-query counts, still honored when set.
  */
-inline std::vector<shape_t> make_similarity_shapes(environment_t const &env) {
-    // Cap the total scored pairs per tile so the largest shapes stay tractable; keep every block strictly
-    // smaller than the dataset (the callable needs `queries + candidates < tokens`).
-    std::size_t const pair_budget = SZ_DEBUG ? 256u : 256u * 1024u;
+inline std::vector<shape_t> make_similarity_shapes(environment_t const &env, std::size_t device_parallelism) {
+    // Per-core base matches StringWars `DEFAULT_BATCH_PER_CORE`; the env var overrides it.
+    std::size_t batch_per_core = SZ_DEBUG ? 16u : 256u;
+    if (char const *env_batch_per_core = std::getenv("STRINGWARS_BATCH_PER_CORE"))
+        batch_per_core = (std::max<std::size_t>)(1, std::stoull(env_batch_per_core));
+    // Total scored pairs per tile = per-core base * one entry per core/SM; each axis is its square root.
+    std::size_t const pair_budget = batch_per_core * (std::max<std::size_t>)(1, device_parallelism);
+    std::size_t square_side = 1; // integer floor-sqrt of `pair_budget`, no <cmath> dependency
+    while ((square_side + 1) * (square_side + 1) <= pair_budget) ++square_side;
     std::size_t const max_block = env.tokens.size() > 1 ? env.tokens.size() / 2 : 1;
 
     auto clamp_block = [&](std::size_t value) -> std::size_t {
@@ -179,13 +186,17 @@ inline std::vector<shape_t> make_similarity_shapes(environment_t const &env) {
         return shapes;
     }
 
-#if SZ_DEBUG
-    std::size_t const query_sizes[] = {1, 2, 16};
-#else
-    std::size_t const query_sizes[] = {1, 64, 1024, 16 * 1024};
-#endif
+    // Query-axis sweep anchored on the square side: pure retrieval (1 query), candidate-skew, balanced square,
+    // query-skew. `fit_all_pairs` derives the candidate axis as `pair_budget / queries`, so the balanced point is
+    // `square_side x square_side` and every shape holds about `pair_budget` pairs.
+    std::size_t const query_sizes[] = {
+        1,
+        (std::max<std::size_t>)(1, square_side / 8),
+        square_side,
+        square_side * 8,
+    };
     for (std::size_t queries_request : query_sizes) {
-        shapes.push_back(fit_all_pairs(queries_request)); // all-pairs, both dims scaled under the cell budget
+        shapes.push_back(fit_all_pairs(queries_request)); // all-pairs, both dims scaled under the pair budget
         shapes.push_back(fit_pairwise(queries_request));  // pairwise diagonal, apples-to-apples per-pair baseline
     }
     return shapes;
@@ -344,7 +355,13 @@ void bench_levenshtein(environment_t const &env) {
     gpu_specs_t specs;
     if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 #endif
-    std::vector<shape_t> shapes = make_similarity_shapes(env);
+    // One entry per core: GPU streaming multiprocessors when scoring on the device, CPU logical cores otherwise.
+#if SZ_USE_CUDA
+    std::size_t const device_parallelism = static_cast<std::size_t>(specs.streaming_multiprocessors);
+#else
+    std::size_t const device_parallelism = (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+#endif
+    std::vector<shape_t> shapes = make_similarity_shapes(env, device_parallelism);
     similarities_t results_linear_baseline, results_linear_accelerated;
     similarities_t results_affine_baseline, results_affine_accelerated;
     similarities_t results_utf8_baseline, results_utf8_accelerated;
@@ -545,7 +562,13 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     gpu_specs_t specs;
     if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 #endif
-    std::vector<shape_t> shapes = make_similarity_shapes(env);
+    // One entry per core: GPU streaming multiprocessors when scoring on the device, CPU logical cores otherwise.
+#if SZ_USE_CUDA
+    std::size_t const device_parallelism = static_cast<std::size_t>(specs.streaming_multiprocessors);
+#else
+    std::size_t const device_parallelism = (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+#endif
+    std::vector<shape_t> shapes = make_similarity_shapes(env, device_parallelism);
     similarities_t results_linear_global_baseline, results_linear_global_accelerated;
     similarities_t results_affine_global_baseline, results_affine_global_accelerated;
     similarities_t results_linear_local_baseline, results_linear_local_accelerated;
