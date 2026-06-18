@@ -1402,6 +1402,30 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}, utf8_baseline, utf8_queries,
             utf8_candidates);
+
+        // NON-UNIT and AFFINE UTF-8: the new rune candidate-lane batch path (vs the serial UTF-8 oracle at the same
+        // costs). Lengths fill the rune lanes; many candidates per query pin the rune u32-compare recurrence.
+        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_nonunit_oracle {nonunit_uniform,
+                                                                                                       nonunit_linear};
+        auto const utf8_nonunit_base = [&utf8_nonunit_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
+                                                              sz_size_t *out) {
+            strided_rows<sz_size_t> const cell {out, 1, 1, 1};
+            return utf8_nonunit_oracle(q, c, cell);
+        };
+        check_cross_product_cell_exact_<sz_size_t>(
+            levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {nonunit_uniform, nonunit_linear},
+            utf8_nonunit_base, utf8_queries, utf8_candidates);
+
+        levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
+                                                                                                     nonunit_affine};
+        auto const utf8_affine_base = [&utf8_affine_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
+                                                            sz_size_t *out) {
+            strided_rows<sz_size_t> const cell {out, 1, 1, 1};
+            return utf8_affine_oracle(q, c, cell);
+        };
+        check_cross_product_cell_exact_<sz_size_t>(
+            levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {nonunit_uniform, nonunit_affine},
+            utf8_affine_base, utf8_queries, utf8_candidates);
     }
 
     // Drive the Ice Lake `distances_8xN_` multi-word Myers (shorter side > 512). The diagonal-only and small-length
