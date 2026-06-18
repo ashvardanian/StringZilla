@@ -397,7 +397,15 @@ struct diagonal_memory_requirements {
         size_t diagonals_count = gap_type == sz_gaps_linear_k ? 3 : 7;
         size_t first_length_bytes = round_up_to_multiple<size_t>(first_length * bytes_per_char, register_width);
         size_t second_length_bytes = round_up_to_multiple<size_t>(second_length * bytes_per_char, register_width);
-        this->bytes_for_diagonals = diagonals_count * bytes_per_diagonal;
+        // The DP itself only ever indexes a band in `[0, max_diagonal_length)`, so the bands fit in exactly
+        // `diagonals_count * bytes_per_diagonal`. The hardware, however, services a read in whole transaction words
+        // of `register_width` bytes: a cell narrower than that word (`u8`/`u16`) is fetched by reading the word that
+        // encloses it, so reading the last cell of the final band reaches up to `register_width - bytes_per_cell`
+        // bytes beyond it. Between bands that overhang lands in the next band; past the final band it would read
+        // off the end of the (tightly packed, per-warp) GPU allocation. Reserve one transaction word so the widened
+        // read of the last cell is always backed by allocated memory.
+        size_t const widened_read_overhang = register_width > bytes_per_cell ? register_width - bytes_per_cell : 0;
+        this->bytes_for_diagonals = diagonals_count * bytes_per_diagonal + widened_read_overhang;
         this->total = this->bytes_for_diagonals + first_length_bytes + second_length_bytes;
     }
 };
