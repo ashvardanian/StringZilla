@@ -3405,6 +3405,7 @@ status_t cross_product_candidate_lanes_range_( //
 
     using narrow_t = remove_cvref<narrow_kernel_type_>;
     using wide_t = remove_cvref<wide_kernel_type_>;
+    using element_t = typename narrow_t::char_t; // ? `char` for byte engines, `rune_t` for the UTF-8 engines.
     using value_t = remove_cvref<decltype(results.data[0])>;
     // The narrow kernel has the most lanes (narrower cells), so its lane count bounds the transpose stride and the
     // per-block staging arrays; the wide kernel handles cells whose score escapes the narrow range but fits the wide.
@@ -3428,12 +3429,12 @@ status_t cross_product_candidate_lanes_range_( //
         if (query_length != 0 && candidate_length != 0 && fits_wide(query_length, candidate_length))
             longest_candidate = sz_max_of_two(longest_candidate, candidate_length);
     }
-    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(char);
+    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(element_t);
     size_t const walker_scratch =
         longest_candidate ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
                                           wide_kernel.scratch_space_needed(longest_candidate, specs))
                           : 0;
-    char *transposed = reinterpret_cast<char *>(scratch.data());
+    element_t *transposed = reinterpret_cast<element_t *>(scratch.data());
     scratch_space_t walker_scratch_space = scratch.subspan(transpose_bytes, walker_scratch);
     scratch_space_t fallback_scratch_space = scratch;
 
@@ -3455,7 +3456,7 @@ status_t cross_product_candidate_lanes_range_( //
     cross_cell_destination_t<value_t> destinations[narrow_lanes_k];
 
     // Row state, refreshed per query-row and read by the emit/tier closures below.
-    span<char const> query;
+    span<element_t const> query;
     size_t query_length = 0, seed_query_index = 0, row_base = 0, cell_index = cell_begin, row_end = cell_begin;
 
     // Transpose, dispatch, and scatter one full or partial lane block through the given kernel (narrow or wide).
@@ -3469,7 +3470,7 @@ status_t cross_product_candidate_lanes_range_( //
             for (size_t position = 0; position < lane_candidate.size(); ++position)
                 transposed[position * lane_capacity + lane_index] = lane_candidate[position];
         }
-        candidate_lanes_block<char> block;
+        candidate_lanes_block<element_t> block;
         block.transposed = transposed;
         block.lane_capacity = lane_capacity;
         block.lanes_count = lanes_count;
@@ -3579,6 +3580,7 @@ size_t cross_product_candidate_lanes_scratch_( //
     cpu_specs_t const &specs) noexcept {
 
     constexpr size_t narrow_lanes_k = remove_cvref<narrow_kernel_type_>::candidate_lanes_k;
+    using element_t = typename remove_cvref<narrow_kernel_type_>::char_t;
 
     size_t longest_query = 0, longest_query_index = 0, longest_candidate = 0, longest_candidate_index = 0;
     for (size_t index = 0; index < queries.size(); ++index)
@@ -3587,7 +3589,7 @@ size_t cross_product_candidate_lanes_scratch_( //
     for (size_t index = 0; index < candidates.size(); ++index)
         if (to_view(candidates[index]).size() > longest_candidate)
             longest_candidate = to_view(candidates[index]).size(), longest_candidate_index = index;
-    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(char);
+    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(element_t);
     size_t const walker_scratch =
         longest_candidate ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
                                           wide_kernel.scratch_space_needed(longest_candidate, specs))
