@@ -3613,7 +3613,6 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t candidate_lanes_k = 32;
-    static constexpr size_t score_range_limit_k = 60000; // ? `u16` headroom for the rune lane walker.
 
     using scoring_t = levenshtein_distance_utf8<gap_costs_t, capability_k>; // ? Per-pair rune DP fallback.
     using myers_t = levenshtein_distance_myers<rune_t, capability_k>;       // ? AVX-512 8-lane rune Myers fast path.
@@ -3638,15 +3637,6 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     /** @brief Whether the substitution/gap costs are the unit-cost edit distance the rune lane walker assumes. */
     bool is_unit_cost_() const noexcept {
         return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
-    }
-
-    /**
-     *  @brief Whether a `(query, candidate)` cell's worst-case distance stays inside the lane walker's `u16` range.
-     *      The byte length bounds the rune length (every rune is at least one byte), so the cheap byte-length test
-     *      is a safe conservative gate without transcoding the candidate first.
-     */
-    bool fits_lane_range_(size_t query_bytes, size_t candidate_bytes) const noexcept {
-        return sz_max_of_two(query_bytes, candidate_bytes) <= score_range_limit_k;
     }
 
     /** @brief Byte size of the cache-line-aligned UTF-32 transcode buffer for a string of @p byte_length bytes. */
@@ -3731,170 +3721,6 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 #pragma endregion - Cross-Product Cell Addressing
 
 #pragma region - Cross-Product Scoring
-
-    /**
-     *  @brief Transcodes a UTF-8 string into a contiguous UTF-32 rune buffer, returning the rune count (or
-     *      `SZ_SIZE_MAX` on invalid UTF-8). Mirrors the per-pair UTF-8 engine's export loop.
-     */
-    static size_t transcode_runes_(span<char_t const> utf8, rune_t *runes_out) noexcept {
-        rune_length_t rune_length;
-        size_t rune_count = 0;
-        for (size_t progress_utf8 = 0; progress_utf8 < utf8.size(); progress_utf8 += rune_length, ++rune_count) {
-            rune_length = sz_rune_parse_unchecked(utf8.data() + progress_utf8, runes_out + rune_count);
-            if (rune_length == sz_utf8_invalid_k) return SZ_SIZE_MAX;
-        }
-        return rune_count;
-    }
-
-    /**
-     *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the shared-query rune lane
-     *      walker (the candidate-lane DP), falling back to the per-pair rune scorer for the long tail. Kept as the
-     *      fallback for the affine / non-unit and huge-alphabet corners; the unit-cost linear path takes the faster
-     *      `score_range_` rune-Myers driver. Each cell scores `dist(query, candidate)` and writes it into the strided
-     *      @p results matrix (plus the mirror slot for symmetric self-similarity).
-     */
-    template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_lane_walker_(queries_type_ const &queries,
-                                                        candidates_type_ const &candidates, results_type_ &&results,
-                                                        cross_similarities_t cross_kind, size_t cell_begin,
-                                                        size_t cell_end, scratch_space_t scratch,
-                                                        cpu_specs_t const &specs) noexcept {
-
-        using value_t = remove_cvref<decltype(results.data[0])>;
-        size_t const candidates_count = candidates.size();
-
-        // The caller provides `scratch`, sized to the worst single cell (`worst_cell_scratch_`). Scan the slice for
-        // its longest lane-eligible query/candidate to carve the rune/transpose/walker sub-arenas; the global-worst
-        // sizing guarantees those offsets stay in bounds.
-        scoring_t dp {substituter_, gap_costs_};
-        lane_walker_t lane_walker {substituter_, gap_costs_};
-        size_t longest_query = 0, longest_candidate = 0;
-        for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
-            size_t query_index = 0, candidate_index = 0;
-            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
-            size_t const query_bytes = to_view(queries[query_index]).size();
-            size_t const candidate_bytes = to_view(candidates[candidate_index]).size();
-            if (query_bytes != 0 && candidate_bytes != 0 && fits_lane_range_(query_bytes, candidate_bytes)) {
-                longest_query = sz_max_of_two(longest_query, query_bytes);
-                longest_candidate = sz_max_of_two(longest_candidate, candidate_bytes);
-            }
-        }
-
-        size_t const query_rune_bytes = query_runes_bytes_(longest_query, specs);
-        size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(rune_t);
-        size_t const walker_scratch = longest_candidate ? lane_walker.scratch_space_needed(longest_candidate, specs) : 0;
-        rune_t *query_runes = reinterpret_cast<rune_t *>(scratch.data());
-        rune_t *transposed = reinterpret_cast<rune_t *>(scratch.data() + query_rune_bytes);
-        scratch_space_t walker_scratch_space = scratch.subspan(query_rune_bytes + transpose_bytes, walker_scratch);
-        scratch_space_t dp_scratch_space = scratch;
-
-        // Maps a query row and candidate column to their primary (and mirrored) destination slots.
-        auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-            cross_cell_destination_<value_t> destination;
-            destination.primary = results.data + query_index * results.row_stride + candidate_index;
-            if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
-                destination.mirror = results.data + candidate_index * results.row_stride + query_index;
-            return destination;
-        };
-
-        auto const scatter = [&](cross_cell_destination_<value_t> const &destination, size_t score) noexcept {
-            *destination.primary = static_cast<value_t>(score);
-            if (destination.mirror) *destination.mirror = static_cast<value_t>(score);
-        };
-
-        dummy_executor_t dummy;
-        size_t lengths[candidate_lanes_k];
-        cross_cell_destination_<value_t> destinations[candidate_lanes_k];
-        u16_t result_lanes[candidate_lanes_k];
-        for (size_t cell_index = cell_begin; cell_index != cell_end;) {
-            size_t query_index = 0, candidate_index = 0;
-            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
-            auto const query = to_view(queries[query_index]);
-            auto const candidate = to_view(candidates[candidate_index]);
-            size_t const query_bytes = query.size(), candidate_bytes = candidate.size();
-
-            // Empty cell: the only alignment is all-gaps, so the rune distance is the other side's rune count. The
-            // per-pair scorer transcodes and returns it; cheaper than a special-cased rune count here.
-            // Long tail: any cell whose rune length might escape the `u16` range walks the per-pair scorer.
-            if (query_bytes == 0 || candidate_bytes == 0 || !fits_lane_range_(query_bytes, candidate_bytes)) {
-                size_t result_distance = 0;
-                if (status_t status = dp(query, candidate, result_distance, dp_scratch_space, dummy, specs);
-                    status != status_t::success_k)
-                    return status;
-                scatter(destination_for(query_index, candidate_index), result_distance);
-                ++cell_index;
-                continue;
-            }
-
-            // Seed a shared-query block with this cell, then extend over consecutive same-query candidates that
-            // are non-empty and also fit the `u16` range, up to the 32-lane capacity. Seeding first guarantees
-            // forward progress even when no neighbor can join.
-            size_t const seed_query_index = query_index;
-            size_t const block_begin = cell_index;
-            index_t lanes_count = 1;
-            ++cell_index;
-            for (; cell_index != cell_end && lanes_count != candidate_lanes_k; ++cell_index, ++lanes_count) {
-                size_t next_query_index = 0, next_candidate_index = 0;
-                cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
-                if (next_query_index != seed_query_index) break;
-                auto const next_candidate = to_view(candidates[next_candidate_index]);
-                if (next_candidate.size() == 0 || !fits_lane_range_(query_bytes, next_candidate.size())) break;
-            }
-
-            // Transcode the shared query once for the whole block.
-            size_t const query_rune_count = transcode_runes_(query, query_runes);
-            if (query_rune_count == SZ_SIZE_MAX) return status_t::invalid_utf8_k;
-
-            // Transcode every lane's candidate into column-major rune order in one pass, recording its exact rune
-            // length and the block's longest rune count (which bounds the walked rows).
-            size_t block_longest = 0;
-            for (index_t lane_index = 0; lane_index < lanes_count; ++lane_index) {
-                size_t fill_query_index = 0, fill_candidate_index = 0;
-                cell_to_indices_(block_begin + lane_index, candidates_count, cross_kind, fill_query_index,
-                                 fill_candidate_index);
-                auto const lane_candidate = to_view(candidates[fill_candidate_index]);
-                destinations[lane_index] = destination_for(fill_query_index, fill_candidate_index);
-
-                rune_length_t rune_length;
-                size_t rune_count = 0;
-                for (size_t progress_utf8 = 0; progress_utf8 < lane_candidate.size();
-                     progress_utf8 += rune_length, ++rune_count) {
-                    rune_t rune;
-                    rune_length = sz_rune_parse_unchecked(lane_candidate.data() + progress_utf8, &rune);
-                    if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
-                    transposed[rune_count * candidate_lanes_k + lane_index] = rune;
-                }
-                lengths[lane_index] = rune_count;
-                block_longest = sz_max_of_two(block_longest, rune_count);
-            }
-
-            // Zero the columns the walker reads but the transcode left untouched: each live lane's ragged tail
-            // `[lengths[lane], block_longest)`, and every dead lane `[lanes_count, 32)` across all columns. The walker
-            // loads all 32 lanes per column, so this keeps it sanitizer-clean; each lane's Dynamic Programming is
-            // independent, so the padding never affects a live lane's latched result (mirrors the byte engines).
-            for (index_t lane_index = 0; lane_index < lanes_count; ++lane_index)
-                for (size_t column = lengths[lane_index]; column < block_longest; ++column)
-                    transposed[column * candidate_lanes_k + lane_index] = 0;
-            for (size_t lane_index = lanes_count; lane_index < candidate_lanes_k; ++lane_index)
-                for (size_t column = 0; column < block_longest; ++column)
-                    transposed[column * candidate_lanes_k + lane_index] = 0;
-
-            candidate_lanes_block<rune_t> block;
-            block.transposed = transposed;
-            block.lane_capacity = candidate_lanes_k;
-            block.lanes_count = lanes_count;
-            block.lengths = lengths;
-            block.longest_candidate = block_longest;
-
-            span<rune_t const> const query_runes_view {query_runes, query_rune_count};
-            if (status_t status = lane_walker(query_runes_view, block, result_lanes, walker_scratch_space, specs);
-                status != status_t::success_k)
-                return status;
-            for (index_t lane_index = 0; lane_index < lanes_count; ++lane_index)
-                scatter(destinations[lane_index], (size_t)result_lanes[lane_index]);
-        }
-        return status_t::success_k;
-    }
 
     /**
      *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the 8-lane rune Myers - the
