@@ -2700,6 +2700,117 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_candidates_per_cuda_
 }
 
 /**
+ *  @brief Multi-word bit-parallel Myers (unit-cost Levenshtein) sharing one query's @b Peq across a row of candidates.
+ *         One @b WARP owns one query: its 32 lanes cooperatively build the query's `words_count_ * 256`-entry
+ *         match-bitmask table once into shared memory, then stride over the query's candidates (one candidate per
+ *         lane in flight), each lane running an independent multi-word Myers scan that reuses the shared table.
+ *
+ *  @note Cross-product, non-symmetric, unit-cost ONLY, queries up to `words_count_ * 64` bytes. Myers is symmetric
+ *        in its two operands, so the table is built on the query regardless of which side is shorter; the candidate
+ *        is the scanned text and may be of any length. Tasks are query-major: query `q` owns the contiguous run
+ *        `[q * candidates_count, (q + 1) * candidates_count)`, so runs are implicit (no sort). This amortizes the
+ *        per-query table build (the per-pair kernels rebuild it for every candidate). The per-lane Myers state
+ *        (`vertical_positives` / `vertical_negatives`) is held in compile-time-sized register arrays of
+ *        `words_count_`; the inner ripple uses the runtime `words` (`<= words_count_`), so a wider instantiation
+ *        still handles narrower queries. With `words_count_ == 1` this matches the single-word warp kernel.
+ */
+template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k,
+          unsigned words_count_ = 1>
+__global__ __launch_bounds__(256, 4) void levenshtein_myers_words_candidates_per_cuda_warp_( //
+    task_type_ *tasks, size_t queries_count, size_t candidates_count) {
+
+    unsigned const warp_in_block = threadIdx.x >> 5, lane = threadIdx.x & 31u;
+    extern __shared__ u64_t shared_match_masks[]; // [warps_per_block][words_count_ * 256]
+    u64_t *const match_masks = shared_match_masks + static_cast<size_t>(warp_in_block) * (words_count_ * 256);
+    size_t const warp_index = (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) >> 5;
+    size_t const warps_per_device = (static_cast<size_t>(gridDim.x) * blockDim.x) >> 5;
+    if (candidates_count == 0 || queries_count == 0) return;
+
+    // Spread each query's candidate row across multiple warps so the device stays full even with few queries:
+    // split into `(query_index, segment)` work-units, each segment owning a contiguous slice of the candidate row.
+    size_t segments_per_query = (warps_per_device + queries_count - 1) / queries_count;
+    if (segments_per_query < 1) segments_per_query = 1;
+    if (segments_per_query > candidates_count) segments_per_query = candidates_count;
+    size_t const seg_size = (candidates_count + segments_per_query - 1) / segments_per_query;
+    size_t const total_segments = queries_count * segments_per_query;
+
+    for (size_t work = warp_index; work < total_segments; work += warps_per_device) {
+        size_t const query_index = work / segments_per_query;
+        size_t const segment = work % segments_per_query;
+        size_t const cand_begin = segment * seg_size;
+        if (cand_begin >= candidates_count) continue;
+        size_t cand_end = cand_begin + seg_size;
+        if (cand_end > candidates_count) cand_end = candidates_count;
+
+        task_type_ const &row_head = tasks[query_index * candidates_count];
+        char_type_ const *const query_ptr = row_head.query.data();
+        u32_t const query_length = static_cast<u32_t>(row_head.query.size());
+
+        // Build this query's multi-word `Peq` once into shared (all 32 lanes cooperate); the row reuses it.
+        for (unsigned slot = lane; slot < words_count_ * 256u; slot += 32u) match_masks[slot] = 0;
+        __syncwarp();
+        for (u32_t position = lane; position < query_length; position += 32u)
+            atomicOr(reinterpret_cast<unsigned long long *>(
+                         &match_masks[(position >> 6) * 256 + static_cast<u8_t>(query_ptr[position])]),
+                     (u64_t)1 << (position & 63u));
+        __syncwarp();
+
+        u32_t const words = (query_length + 63u) >> 6; // <= words_count_ by construction (gated on host)
+        u32_t const last_word = words ? words - 1u : 0u, last_bit = query_length ? (query_length - 1u) & 63u : 0u;
+        for (size_t candidate_in_row = cand_begin + lane; candidate_in_row < cand_end; candidate_in_row += 32u) {
+            task_type_ &task = tasks[query_index * candidates_count + candidate_in_row];
+            // The candidate is the side that is not the query (pointer identity; query is one of shorter/longer).
+            char_type_ const *const candidate_ptr = task.shorter.data() == query_ptr ? task.longer.data()
+                                                                                     : task.shorter.data();
+            size_t const candidate_length = task.shorter.data() == query_ptr ? task.longer.size() : task.shorter.size();
+            if (query_length == 0) {
+                task.result = candidate_length;
+                continue;
+            }
+
+            u64_t vertical_positives[words_count_];
+            u64_t vertical_negatives[words_count_];
+            for (unsigned word = 0; word < words_count_; ++word)
+                vertical_positives[word] = ~(u64_t)0, vertical_negatives[word] = 0;
+            size_t distance = query_length;
+            for (size_t candidate_position = 0; candidate_position != candidate_length; ++candidate_position) {
+                u8_t const symbol = static_cast<u8_t>(candidate_ptr[candidate_position]);
+                u64_t addition_carry = 0;
+                u64_t horizontal_positive_carry = 1, horizontal_negative_carry = 0; // top-row boundary into word 0 is +1
+                for (u32_t word = 0; word != words; ++word) {
+                    u64_t const pattern_matches = match_masks[word * 256 + symbol]; // SHARED
+                    u64_t const vertical_positive = vertical_positives[word];
+                    u64_t const vertical_negative = vertical_negatives[word];
+
+                    // 65-bit add: (Eq & VP) + VP + addition_carry, rippling the carry-out into the next word.
+                    u64_t const addition_term = pattern_matches & vertical_positive;
+                    u64_t const sum_low = addition_term + vertical_positive;
+                    u64_t const sum = sum_low + addition_carry;
+                    addition_carry = (sum_low < addition_term) | (sum < sum_low);
+
+                    u64_t const diagonal_zero = (sum ^ vertical_positive) | pattern_matches | vertical_negative;
+                    u64_t horizontal_positive = vertical_negative | ~(diagonal_zero | vertical_positive);
+                    u64_t horizontal_negative = vertical_positive & diagonal_zero;
+                    if (word == last_word) {
+                        distance += (horizontal_positive >> last_bit) & 1;
+                        distance -= (horizontal_negative >> last_bit) & 1;
+                    }
+                    u64_t const next_horizontal_positive_carry = horizontal_positive >> 63;
+                    u64_t const next_horizontal_negative_carry = horizontal_negative >> 63;
+                    horizontal_positive = (horizontal_positive << 1) | horizontal_positive_carry;
+                    horizontal_negative = (horizontal_negative << 1) | horizontal_negative_carry;
+                    horizontal_positive_carry = next_horizontal_positive_carry;
+                    horizontal_negative_carry = next_horizontal_negative_carry;
+                    vertical_positives[word] = horizontal_negative | ~(diagonal_zero | horizontal_positive);
+                    vertical_negatives[word] = horizontal_positive & diagonal_zero;
+                }
+            }
+            task.result = distance;
+        }
+    }
+}
+
+/**
  *  @brief Levenshtein distances with @b one-thread-per-pair using only register memory, for short inputs.
  *
  *  Each thread runs a full register-resident DP (@ref register_levenshtein). Inputs are conceptually
@@ -3150,8 +3261,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         // thread-per-pair kernel for shorter <= 64, and one size-generic thread-per-pair kernel for shorter > 64
         // of any length (no word-count cap). Null for the affine engine, which never routes to Myers.
         kernel_shape_t myers_word1, myers_generic;
-        /** @brief Per-query `Peq`-reuse across a row of candidates (cross-product). */
-        kernel_shape_t myers_candidates_warp;
+        /** @brief Per-query multi-word `Peq`-reuse across a row of candidates: 1/2/4 words (shorter <= 64/128/256). */
+        kernel_shape_t myers_candidates_warp1, myers_candidates_warp2, myers_candidates_warp4;
         /** @brief Device-side per-cell task build (all-pairs or symmetric). */
         kernel_shape_t materialize_tasks;
         /** @brief Device-side scatter of task results into the row-major matrix. */
@@ -3253,12 +3364,28 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 cuda_kernels.myers_generic,
                 (void const *)&levenshtein_myers_generic_per_cuda_thread_<task_t, char_t, capability_k>, 256, 0, true);
             if (status.status != status_t::success_k) return {cuda_kernels, status};
-            // Per-query `Peq`-reuse kernel: 256 threads = 8 warps, each warp owns 256 `u64_t` of shared `Peq`.
-            static constexpr unsigned myers_candidates_shared_k = (256u / 32u) * 256u * sizeof(u64_t);
+            // Per-query multi-word `Peq`-reuse kernels: 256 threads = 8 warps, each warp owns `words_count * 256`
+            // `u64_t` of shared `Peq` (1/2/4 words covering shorter <= 64/128/256).
+            static constexpr unsigned myers_candidates_shared1_k = (256u / 32u) * 1u * 256u * sizeof(u64_t);
+            static constexpr unsigned myers_candidates_shared2_k = (256u / 32u) * 2u * 256u * sizeof(u64_t);
+            static constexpr unsigned myers_candidates_shared4_k = (256u / 32u) * 4u * 256u * sizeof(u64_t);
+            // Single-word (<= 64) keeps the dedicated hand-tuned kernel: its scalar VP/VN recurrence is ~2.3x
+            // faster than the generic multi-word body specialized to one word (whose carry bookkeeping is dead
+            // weight at a single word). The 2/4-word variants below use the generalized shared-`Peq` kernel.
             status = resolve_kernel_shape(
-                cuda_kernels.myers_candidates_warp,
+                cuda_kernels.myers_candidates_warp1,
                 (void const *)&levenshtein_myers_candidates_per_cuda_warp_<task_t, char_t, capability_k>, 256,
-                myers_candidates_shared_k, true);
+                myers_candidates_shared1_k, true);
+            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            status = resolve_kernel_shape(
+                cuda_kernels.myers_candidates_warp2,
+                (void const *)&levenshtein_myers_words_candidates_per_cuda_warp_<task_t, char_t, capability_k, 2u>, 256,
+                myers_candidates_shared2_k, true);
+            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            status = resolve_kernel_shape(
+                cuda_kernels.myers_candidates_warp4,
+                (void const *)&levenshtein_myers_words_candidates_per_cuda_warp_<task_t, char_t, capability_k, 4u>, 256,
+                myers_candidates_shared4_k, true);
             if (status.status != status_t::success_k) return {cuda_kernels, status};
         }
         // Device-side task materialization (all-pairs or symmetric); grid is sized from the cell count, so no
@@ -3472,12 +3599,16 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         size_t const candidates_count = cross_candidates_count_;
         size_t const queries_count = candidates_count ? tasks.size() / candidates_count : 0;
         bool const reuse_eligible = is_unit_cost && cross_kind_ == cross_similarities_t::all_pairs_k &&
-                                    cross_max_query_length_ <= 64 && candidates_count >= reuse_min_candidates_k &&
+                                    cross_max_query_length_ <= 256u && candidates_count >= reuse_min_candidates_k &&
                                     queries_count != 0 && queries_count * candidates_count == tasks.size();
         if (reuse_eligible) {
-            kernel_shape_t const &shape = kernel_table.myers_candidates_warp;
+            unsigned const reuse_words = (static_cast<unsigned>(cross_max_query_length_) + 63u) >> 6; // 1,2,3,4
+            kernel_shape_t const &shape = reuse_words <= 1 ? kernel_table.myers_candidates_warp1
+                                          : reuse_words <= 2 ? kernel_table.myers_candidates_warp2
+                                                             : kernel_table.myers_candidates_warp4; // 3 or 4 words
+            unsigned const reuse_words_rounded = reuse_words <= 1 ? 1u : reuse_words <= 2 ? 2u : 4u;
+            unsigned const reuse_shared_k = (256u / 32u) * reuse_words_rounded * 256u * (unsigned)sizeof(u64_t);
             unsigned const blocks = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
-            static constexpr unsigned reuse_shared_k = (256u / 32u) * 256u * sizeof(u64_t);
             task_t *tasks_ptr = tasks.data();
             size_t queries_count_arg = queries_count, candidates_count_arg = candidates_count;
             void *reuse_args[3] = {(void *)&tasks_ptr, (void *)&queries_count_arg, (void *)&candidates_count_arg};
