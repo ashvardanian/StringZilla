@@ -419,6 +419,481 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     }
 };
 
+/**
+ *  @brief NEON Myers/Hyyr\xc3\xb6 unit-cost @b rune (UTF-32) Levenshtein for AArch64, scoring two independent pairs at
+ *      once with one Myers integer per `uint64x2_t` lane - the rune twin of the byte `levenshtein_distance_myers`, and
+ *      the NEON 2-lane shrink of the Ice Lake eight-lane rune Myers. The scan is bit-for-bit identical to the byte
+ *      2x64 / 2xN family; the only delta is the `Peq` source. A byte pattern indexes a dense 256-row table, but a rune
+ *      pattern (up to 0x10FFFF distinct keys) cannot, so each lane builds a small @b open-addressing hash over its own
+ *      pattern's distinct runes (capacity `next_pow2(2*distinct)`, load factor <= 0.5), and per text position each lane
+ *      scalar-probes its hash for the current text rune to assemble that lane's `Eq` bitmask word(s). A text rune absent
+ *      from a lane's pattern hits the lane's permanently-zero `absent_row`, i.e. an all-zero `Eq` (matches nothing) -
+ *      the same semantics as a byte miss. The hash math (multiply-shift `hash_rune`, the `empty_slot_k` sentinel, the
+ *      linear-probe build/lookup) is reused verbatim from the Ice Lake rune Myers and the serial rune oracle
+ *      (`levenshtein_distance_myers<rune_t, sz_cap_serial_k>`) so all three stay bit-exact.
+ *      - `distances_2x64_`            - 2 single-word rune Myers (shorter <= 64 runes), one 64-bit integer per lane;
+ *      - `distances_2x_multiword_<words_count_>` - 2 multi-word rune Myers with a compile-time word count, covering
+ *        shorter in `(64, 64 * words_count_]` runes;
+ *      - `distances_2x_multiword_large_` - the runtime-`words_count` sibling for the long tail (shorter > 512 runes).
+ *      As in the NEON byte Myers, NEON has no lane-mask registers and no qword gather, so the per-lane `active`
+ *      predicate is a `uint64x2_t` of all-ones / all-zeros built with `vcgtq_u64`, the `Peq` rows are gathered scalar
+ *      per lane, and the boolean recurrence uses raw `vandq_u64` / `vorrq_u64` / `veorq_u64` / `vbicq_u64`.
+ */
+template <sz_capability_t capability_>
+struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capability_ & sz_cap_neon_k) != 0>> {
+
+    using char_t = rune_t;
+    using index_t = u32_t;
+    static constexpr index_t lanes_k = 2;
+
+    /** @brief Sentinel rune marking an empty hash slot (`rune_t` never reaches `0xFFFFFFFF`; valid <= 0x10FFFF). */
+    static constexpr rune_t empty_slot_k = static_cast<rune_t>(0xFFFFFFFFu);
+
+    levenshtein_distance_myers() noexcept {}
+
+    /** @brief Number of 64-bit words spanning a @p shorter_length-rune pattern, i.e. `ceil(shorter_length / 64)`. */
+    static size_t words_count_for(size_t shorter_length) noexcept { return divide_round_up<size_t>(shorter_length, 64); }
+
+    /**
+     *  @brief Open-addressing capacity (a power of two) for a pattern of @p distinct_upper_bound distinct runes. The
+     *      pattern has at most `shorter_length` distinct runes, so passing the longest shorter side is a safe upper
+     *      bound for the whole 2-lane group. The `2 *` keeps the load factor <= 0.5 for cheap linear probing;
+     *      `sz_size_bit_ceil` rounds to a power of two so the multiply-shift hash maps cleanly onto the slot range.
+     */
+    static index_t hash_capacity_for(size_t distinct_upper_bound) noexcept {
+        size_t const slots_wanted = sz_max_of_two(2 * distinct_upper_bound, (size_t)1);
+        return static_cast<index_t>(sz_size_bit_ceil(slots_wanted));
+    }
+
+    /**
+     *  @brief Multiply-shift hash of a rune into `[0, capacity)`; @p capacity must be a power of two. The 64-bit
+     *      Fibonacci multiply spreads the rune's bits into the high word, then a single mask selects the slot - no
+     *      `>> 64` undefined shift at the `capacity == 1` boundary.
+     */
+    static index_t hash_rune(rune_t rune, index_t capacity) noexcept {
+        u64_t const mixed = static_cast<u64_t>(static_cast<u32_t>(rune)) * 0x9E3779B97F4A7C15ull;
+        return static_cast<index_t>((mixed >> 32) & static_cast<u64_t>(capacity - 1));
+    }
+
+    /**
+     *  @brief Scratch bytes the 2-lane rune `Peq` needs for a group whose longest shorter side is @p max_shorter
+     *      runes: two per-lane hash tables (slot keys + `words_count` bitmask words per slot) plus one shared
+     *      permanently-zero `absent_row`. This is the single source of truth for both the scratch sizing in the
+     *      cross-product engine and the carving inside the kernels, so the two can never disagree.
+     */
+    static size_t scratch_bytes_for(size_t max_shorter) noexcept {
+        size_t const words_count = words_count_for(sz_max_of_two(max_shorter, (size_t)1));
+        size_t const capacity = hash_capacity_for(sz_max_of_two(max_shorter, (size_t)1));
+        size_t const slot_keys_bytes = sizeof(rune_t) * capacity * lanes_k;
+        size_t const slot_masks_bytes = sizeof(u64_t) * capacity * words_count * lanes_k;
+        size_t const absent_row_bytes = sizeof(u64_t) * words_count;
+        return slot_keys_bytes + slot_masks_bytes + absent_row_bytes;
+    }
+
+#pragma region - Per-Lane Hash Peq
+
+    /**
+     *  @brief Carves the 2-lane hash `Peq` out of @p scratch_space and builds it from each lane's shorter side. Every
+     *      lane shares the group-wide @p capacity and @p words_count (so the inner scan loops one common word range,
+     *      exactly like the byte 2xN kernel); a lane's pattern is hashed into its own slot region. Returns `false`
+     *      when @p scratch_space is too small. On success @p slot_keys / @p slot_masks / @p absent_row point into
+     *      @p scratch_space and the lane tables are populated; @p absent_row is the all-zero row probed for misses.
+     */
+    static bool build_lane_hashes_(span<char_t const> const *shorters, index_t pairs_active, index_t capacity,
+                                   size_t words_count, scratch_space_t scratch_space, rune_t *&slot_keys,
+                                   u64_t *&slot_masks, u64_t *&absent_row) noexcept {
+        size_t const slot_keys_bytes = sizeof(rune_t) * capacity * lanes_k;
+        size_t const slot_masks_bytes = sizeof(u64_t) * capacity * words_count * lanes_k;
+        size_t const absent_row_bytes = sizeof(u64_t) * words_count;
+        if (scratch_space.size() < slot_keys_bytes + slot_masks_bytes + absent_row_bytes) return false;
+
+        slot_keys = reinterpret_cast<rune_t *>(scratch_space.data());
+        slot_masks = reinterpret_cast<u64_t *>(scratch_space.data() + slot_keys_bytes);
+        absent_row = reinterpret_cast<u64_t *>(scratch_space.data() + slot_keys_bytes + slot_masks_bytes);
+
+        for (size_t word = 0; word != words_count; ++word) absent_row[word] = 0;
+        // Clear every slot of every lane (including dead lanes, so their probes land on the empty sentinel -> miss).
+        for (size_t slot = 0; slot != (size_t)capacity * lanes_k; ++slot) slot_keys[slot] = empty_slot_k;
+
+        for (index_t lane = 0; lane != pairs_active; ++lane) {
+            rune_t *const lane_keys = slot_keys + (size_t)lane * capacity;
+            u64_t *const lane_masks = slot_masks + (size_t)lane * capacity * words_count;
+            index_t const shorter_length = (index_t)shorters[lane].size();
+            char_t const *const shorter = shorters[lane].data();
+            for (index_t position = 0; position != shorter_length; ++position) {
+                rune_t const rune = shorter[position];
+                index_t slot = hash_rune(rune, capacity);
+                for (;; slot = (slot + 1) & (capacity - 1)) {
+                    if (lane_keys[slot] == rune) break;
+                    if (lane_keys[slot] == empty_slot_k) {
+                        lane_keys[slot] = rune;
+                        for (size_t word = 0; word != words_count; ++word)
+                            lane_masks[(size_t)slot * words_count + word] = 0;
+                        break;
+                    }
+                }
+                lane_masks[(size_t)slot * words_count + (position >> 6)] |= (u64_t)1 << (position & 63);
+            }
+        }
+        return true;
+    }
+
+    /**
+     *  @brief Probes lane @p lane's hash for text rune @p symbol, returning a pointer to its `words_count` bitmask
+     *      words - the slot's row if the rune is in the lane's pattern, or the shared all-zero @p absent_row (a
+     *      whole-row miss) otherwise. Mirrors the serial rune oracle's lookup verbatim.
+     */
+    static u64_t const *lane_match_row_(rune_t const *slot_keys, u64_t const *slot_masks, u64_t const *absent_row,
+                                        index_t lane, index_t capacity, size_t words_count, rune_t symbol) noexcept {
+        rune_t const *const lane_keys = slot_keys + (size_t)lane * capacity;
+        u64_t const *const lane_masks = slot_masks + (size_t)lane * capacity * words_count;
+        for (index_t slot = hash_rune(symbol, capacity);; slot = (slot + 1) & (capacity - 1)) {
+            rune_t const key = lane_keys[slot];
+            if (key == symbol) return &lane_masks[(size_t)slot * words_count];
+            if (key == empty_slot_k) break;
+        }
+        return absent_row;
+    }
+
+#pragma endregion - Per-Lane Hash Peq
+
+    /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
+    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept {
+        return vcgtq_u64(value, vdupq_n_u64(0));
+    }
+
+    /**
+     *  @brief Two independent single-word rune Myers distances, one per `uint64x2_t` lane (each shorter side <= 64
+     *      runes). The scan is verbatim the byte `distances_2x64_`; only the `Eq` source differs - per text position
+     *      each lane hash-probes its rune to a single 64-bit bitmask, and the two masks are assembled into one vector.
+     *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
+     */
+    template <typename results_writer_>
+    status_t distances_2x64_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+                             scratch_space_t scratch_space) const noexcept {
+
+        size_t max_longer = 0, max_shorter = 0;
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
+            max_shorter = sz_max_of_two(max_shorter, pairs.shorters[lane_index].size());
+        }
+        index_t const capacity = hash_capacity_for(sz_max_of_two(max_shorter, (size_t)1));
+        rune_t *slot_keys = nullptr;
+        u64_t *slot_masks = nullptr, *absent_row = nullptr;
+        if (!build_lane_hashes_(pairs.shorters.data(), (index_t)pairs.lanes_count(), capacity, 1, scratch_space,
+                                slot_keys, slot_masks, absent_row))
+            return status_t::bad_alloc_k;
+
+        alignas(16) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
+        alignas(16) u64_t vertical_positive_init[lanes_k] = {0};
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            index_t const shorter_length = (index_t)pairs.shorters[lane_index].size();
+            top_bits[lane_index] = (u64_t)1 << (shorter_length - 1);
+            shorter_lengths[lane_index] = shorter_length;
+            longer_lengths[lane_index] = pairs.longers[lane_index].size();
+            // VP = the low `shorter_length` bits set; a 64-bit shift is undefined, so build full-width as `~0`.
+            vertical_positive_init[lane_index] =
+                shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
+        }
+
+        uint64x2_t const one = vdupq_n_u64(1);
+        uint64x2_t const top_mask = vld1q_u64(top_bits), longer_vec = vld1q_u64(longer_lengths);
+        uint64x2_t vertical_positive = vld1q_u64(vertical_positive_init);
+        uint64x2_t vertical_negative = vdupq_n_u64(0);
+        uint64x2_t score = vld1q_u64(shorter_lengths);
+
+        for (size_t position = 0; position != max_longer; ++position) {
+            uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
+            // Per-lane hash probe of the current text rune -> one 64-bit `Eq` mask per lane, assembled into one vector.
+            alignas(16) u64_t equality_lanes[lanes_k] = {0};
+            for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
+                if (position < pairs.longers[lane_index].size()) {
+                    rune_t const symbol = pairs.longers[lane_index].data()[position];
+                    equality_lanes[lane_index] =
+                        lane_match_row_(slot_keys, slot_masks, absent_row, lane_index, capacity, 1, symbol)[0];
+                }
+            uint64x2_t const equality = vld1q_u64(equality_lanes);
+
+            uint64x2_t const carry_in = vorrq_u64(equality, vertical_negative);
+            // Xh = (((Eq & VP) + VP) ^ VP) | Eq.
+            uint64x2_t const sum = vaddq_u64(vandq_u64(equality, vertical_positive), vertical_positive);
+            uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive), equality);
+            // Ph = VN | ~(D | VP).
+            uint64x2_t horizontal_positive =
+                vorrq_u64(vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
+            uint64x2_t horizontal_negative = vandq_u64(vertical_positive, diagonal);
+
+            uint64x2_t const add_step =
+                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+            uint64x2_t const sub_step =
+                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+            score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
+
+            horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), one);
+            horizontal_negative = vshlq_n_u64(horizontal_negative, 1);
+            // Pv' = Hn | ~(carry_in | Hp).
+            uint64x2_t const next_positive = vorrq_u64(
+                horizontal_negative,
+                vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+            uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
+            vertical_positive = vbslq_u64(active, next_positive, vertical_positive);
+            vertical_negative = vbslq_u64(active, next_negative, vertical_negative);
+        }
+
+        alignas(16) u64_t final_scores[lanes_k];
+        vst1q_u64(final_scores, score);
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
+            results[pairs.positions[lane_index]] = (size_t)final_scores[lane_index];
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Two independent compile-time multi-word rune Myers distances, one pair per `uint64x2_t` lane, covering
+     *      shorter sides in `(64, 64 * words_count_]` runes. The scan is verbatim the byte
+     *      `distances_2x_multiword_<words_count_>` (two intra-lane ripples: the 65-bit `(Eq & VP) + VP + addition_carry`
+     *      and the bit63->bit0 shift carries; neither crosses a lane); only the `Eq` source differs - each lane probes
+     *      its hash once per text rune and reads the resulting row's `words_count_` bitmask words.
+     *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
+     */
+    template <size_t words_count_, typename results_writer_>
+    status_t distances_2x_multiword_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+                                     scratch_space_t scratch_space) const noexcept {
+
+        constexpr size_t words_count = words_count_;
+
+        size_t max_longer = 0, max_shorter = 0;
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
+            max_shorter = sz_max_of_two(max_shorter, pairs.shorters[lane_index].size());
+        }
+        index_t const capacity = hash_capacity_for(sz_max_of_two(max_shorter, (size_t)1));
+        rune_t *slot_keys = nullptr;
+        u64_t *slot_masks = nullptr, *absent_row = nullptr;
+        if (!build_lane_hashes_(pairs.shorters.data(), (index_t)pairs.lanes_count(), capacity, words_count,
+                                scratch_space, slot_keys, slot_masks, absent_row))
+            return status_t::bad_alloc_k;
+
+        alignas(16) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            index_t const shorter_length = (index_t)pairs.shorters[lane_index].size();
+            top_bits[lane_index] = (u64_t)1 << ((shorter_length - 1) & 63);
+            shorter_lengths[lane_index] = shorter_length;
+            longer_lengths[lane_index] = pairs.longers[lane_index].size();
+        }
+
+        // Each lane keeps `words_count_` 64-bit Myers words on the stack; word `w` of every lane lives in one vector.
+        uint64x2_t vertical_positive[words_count_];
+        uint64x2_t vertical_negative[words_count_];
+        for (size_t word = 0; word != words_count; ++word) {
+            vertical_positive[word] = vdupq_n_u64(~(u64_t)0);
+            vertical_negative[word] = vdupq_n_u64(0);
+        }
+
+        uint64x2_t const one = vdupq_n_u64(1);
+        uint64x2_t const top_mask = vld1q_u64(top_bits), longer_vec = vld1q_u64(longer_lengths);
+        uint64x2_t score = vld1q_u64(shorter_lengths);
+        constexpr size_t last_word = words_count_ - 1;
+
+        for (size_t position = 0; position != max_longer; ++position) {
+            uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
+            // Per-lane hash probe of the current text rune -> the lane's `words_count` bitmask row (or `absent_row`).
+            u64_t const *match_rows[lanes_k];
+            for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
+                bool const lane_active =
+                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                rune_t const symbol = lane_active ? pairs.longers[lane_index].data()[position] : empty_slot_k;
+                match_rows[lane_index] = lane_active ? lane_match_row_(slot_keys, slot_masks, absent_row, lane_index,
+                                                                      capacity, words_count, symbol)
+                                                     : absent_row;
+            }
+
+            uint64x2_t addition_carry = vdupq_n_u64(0);              // ? 0/1 per lane, the `(Eq&VP)+VP` ripple.
+            uint64x2_t horizontal_positive_carry = one;             // ? Word 0 seeds the leading 1.
+            uint64x2_t horizontal_negative_carry = vdupq_n_u64(0);
+
+            for (size_t word = 0; word != words_count; ++word) {
+                alignas(16) u64_t equality_words[lanes_k] = {0};
+                for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
+                    equality_words[lane_index] =
+                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
+                            ? match_rows[lane_index][word]
+                            : 0;
+                uint64x2_t const equality = vld1q_u64(equality_words);
+
+                uint64x2_t const vertical_positive_word = vertical_positive[word];
+                uint64x2_t const vertical_negative_word = vertical_negative[word];
+
+                // sum = (Eq & VP) + VP + addition_carry, tracking the per-lane carry-out low->high across words.
+                uint64x2_t const summand = vandq_u64(equality, vertical_positive_word);
+                uint64x2_t const sum_low = vaddq_u64(summand, vertical_positive_word);
+                uint64x2_t const carry_from_summand = vcltq_u64(sum_low, summand);
+                uint64x2_t const sum = vaddq_u64(sum_low, addition_carry);
+                uint64x2_t const carry_from_incoming = vcltq_u64(sum, sum_low);
+                addition_carry = vandq_u64(vorrq_u64(carry_from_summand, carry_from_incoming), one);
+
+                uint64x2_t const carry_in = vorrq_u64(equality, vertical_negative_word); // ? Eq | VN
+                // Xh = (sum ^ VP) | Eq | VN == (sum ^ VP) | carry_in.
+                uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive_word), carry_in);
+                uint64x2_t horizontal_positive = vorrq_u64( // ? VN | ~(D | VP)
+                    vertical_negative_word,
+                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive_word));
+                uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal); // ? VP & D
+
+                if (word == last_word) {
+                    uint64x2_t const add_step =
+                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step =
+                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
+                }
+
+                // Save each word's bit63 as the next word's bit0 carry, then shift up by one.
+                uint64x2_t const next_positive_carry = vshrq_n_u64(horizontal_positive, 63);
+                uint64x2_t const next_negative_carry = vshrq_n_u64(horizontal_negative, 63);
+                horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), horizontal_positive_carry);
+                horizontal_negative = vorrq_u64(vshlq_n_u64(horizontal_negative, 1), horizontal_negative_carry);
+                horizontal_positive_carry = next_positive_carry;
+                horizontal_negative_carry = next_negative_carry;
+
+                // Pv' = Hn | ~(carry_in | Hp); applied only to active lanes.
+                uint64x2_t const next_positive = vorrq_u64(
+                    horizontal_negative,
+                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
+                vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
+                vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
+            }
+        }
+
+        alignas(16) u64_t final_scores[lanes_k];
+        vst1q_u64(final_scores, score);
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
+            results[pairs.positions[lane_index]] = (size_t)final_scores[lane_index];
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief The runtime-`words_count` sibling of `distances_2x_multiword_<words_count_>` for the long tail (shorter >
+     *      512 runes). Each lane carries its own `ceil(shorter / 64)`-word Myers integer; the group shares a single
+     *      @p words_count so every lane loops the same word range. The per-word state lives in a fixed-capacity stack
+     *      array indexed at runtime; the math is identical to the templated variant.
+     *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
+     */
+    template <typename results_writer_>
+    status_t distances_2x_multiword_large_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+                                           scratch_space_t scratch_space) const noexcept {
+
+        static constexpr size_t stack_words_capacity_k = 64; // ? Covers shorter sides up to 4096 runes on the stack.
+
+        size_t max_longer = 0, max_shorter = 0;
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
+            max_shorter = sz_max_of_two(max_shorter, pairs.shorters[lane_index].size());
+        }
+        size_t const words_count = words_count_for(sz_max_of_two(max_shorter, (size_t)1));
+        if (words_count == 0 || words_count > stack_words_capacity_k) return status_t::bad_alloc_k;
+        index_t const capacity = hash_capacity_for(sz_max_of_two(max_shorter, (size_t)1));
+        rune_t *slot_keys = nullptr;
+        u64_t *slot_masks = nullptr, *absent_row = nullptr;
+        if (!build_lane_hashes_(pairs.shorters.data(), (index_t)pairs.lanes_count(), capacity, words_count,
+                                scratch_space, slot_keys, slot_masks, absent_row))
+            return status_t::bad_alloc_k;
+
+        alignas(16) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
+            index_t const shorter_length = (index_t)pairs.shorters[lane_index].size();
+            top_bits[lane_index] = (u64_t)1 << ((shorter_length - 1) & 63);
+            shorter_lengths[lane_index] = shorter_length;
+            longer_lengths[lane_index] = pairs.longers[lane_index].size();
+        }
+
+        // Each lane keeps `words_count` 64-bit Myers words; word `w` of every lane lives in one vector.
+        uint64x2_t vertical_positive[stack_words_capacity_k];
+        uint64x2_t vertical_negative[stack_words_capacity_k];
+        for (size_t word = 0; word != words_count; ++word) {
+            vertical_positive[word] = vdupq_n_u64(~(u64_t)0);
+            vertical_negative[word] = vdupq_n_u64(0);
+        }
+
+        uint64x2_t const one = vdupq_n_u64(1);
+        uint64x2_t const top_mask = vld1q_u64(top_bits), longer_vec = vld1q_u64(longer_lengths);
+        uint64x2_t score = vld1q_u64(shorter_lengths);
+        size_t const last_word = words_count - 1;
+
+        for (size_t position = 0; position != max_longer; ++position) {
+            uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
+            u64_t const *match_rows[lanes_k];
+            for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
+                bool const lane_active =
+                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                rune_t const symbol = lane_active ? pairs.longers[lane_index].data()[position] : empty_slot_k;
+                match_rows[lane_index] = lane_active ? lane_match_row_(slot_keys, slot_masks, absent_row, lane_index,
+                                                                      capacity, words_count, symbol)
+                                                     : absent_row;
+            }
+
+            uint64x2_t addition_carry = vdupq_n_u64(0);
+            uint64x2_t horizontal_positive_carry = one;
+            uint64x2_t horizontal_negative_carry = vdupq_n_u64(0);
+
+            for (size_t word = 0; word != words_count; ++word) {
+                alignas(16) u64_t equality_words[lanes_k] = {0};
+                for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
+                    equality_words[lane_index] =
+                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
+                            ? match_rows[lane_index][word]
+                            : 0;
+                uint64x2_t const equality = vld1q_u64(equality_words);
+
+                uint64x2_t const vertical_positive_word = vertical_positive[word];
+                uint64x2_t const vertical_negative_word = vertical_negative[word];
+
+                uint64x2_t const summand = vandq_u64(equality, vertical_positive_word);
+                uint64x2_t const sum_low = vaddq_u64(summand, vertical_positive_word);
+                uint64x2_t const carry_from_summand = vcltq_u64(sum_low, summand);
+                uint64x2_t const sum = vaddq_u64(sum_low, addition_carry);
+                uint64x2_t const carry_from_incoming = vcltq_u64(sum, sum_low);
+                addition_carry = vandq_u64(vorrq_u64(carry_from_summand, carry_from_incoming), one);
+
+                uint64x2_t const carry_in = vorrq_u64(equality, vertical_negative_word);
+                uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive_word), carry_in);
+                uint64x2_t horizontal_positive = vorrq_u64(
+                    vertical_negative_word,
+                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive_word));
+                uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal);
+
+                if (word == last_word) {
+                    uint64x2_t const add_step =
+                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step =
+                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
+                }
+
+                uint64x2_t const next_positive_carry = vshrq_n_u64(horizontal_positive, 63);
+                uint64x2_t const next_negative_carry = vshrq_n_u64(horizontal_negative, 63);
+                horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), horizontal_positive_carry);
+                horizontal_negative = vorrq_u64(vshlq_n_u64(horizontal_negative, 1), horizontal_negative_carry);
+                horizontal_positive_carry = next_positive_carry;
+                horizontal_negative_carry = next_negative_carry;
+
+                uint64x2_t const next_positive = vorrq_u64(
+                    horizontal_negative,
+                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
+                vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
+                vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
+            }
+        }
+
+        alignas(16) u64_t final_scores[lanes_k];
+        vst1q_u64(final_scores, score);
+        for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
+            results[pairs.positions[lane_index]] = (size_t)final_scores[lane_index];
+        return status_t::success_k;
+    }
+};
+
 #pragma endregion Bit-Parallel Myers
 
 /** @brief Redirects the NEON horizontal-walker specialization to the serial version. The Wagner-Fischer
@@ -5756,17 +6231,18 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 };
 
 /**
- *  @brief Batched UTF-8 @b Levenshtein distances on NEON, transcoding both operands to @b runes (UTF-32) and packing
- *      a shared query's candidates into the unit-cost rune `candidate_lane_walker` (8-lane `u16` cells), falling back
- *      to the per-pair anti-diagonal rune Dynamic Programming scorer for the long tail (rune counts that escape `u16`,
- *      empty cells, or non-unit costs).
+ *  @brief Batched UTF-8 @b Levenshtein distances on NEON. For unit costs, transcodes both operands to @b runes
+ *      (UTF-32) and batches consecutive cells whose shorter rune side shares the same `ceil(shorter / 64)` word bucket
+ *      into the 2-lane rune `levenshtein_distance_myers` (the rune twin of the byte Myers driver), exactly mirroring
+ *      the Ice Lake rune-Myers UTF-8 engine. The per-pair anti-diagonal rune Dynamic Programming scorer is the long
+ *      tail / fallback (empty cells, invalid UTF-8, shorter > 4096 runes), and the same per-pair scorer also handles
+ *      every non-unit / affine case.
  *
- *  Mirrors the NEON byte-level `levenshtein_distances` cross-product engine - live cells walked query-major, grouped
- *  into shared-query blocks, transcoded into a reusable column-major rune scratch buffer (the layout the rune lane
- *  walker reads), scored, and scattered into the strided result matrix (plus the mirror slot for symmetric
- *  self-similarity) - but the alphabet is 32-bit code points instead of bytes. A byte length is an upper bound on the
- *  rune count, so tier gating and the `u16` saturation bound key on byte lengths (no transcode needed to decide). The
- *  per-pair rune `levenshtein_distance_utf8` fallback transcodes its operands internally from their byte spans.
+ *  Mirrors the NEON byte-level `levenshtein_distances` cross-product engine - live cells walked query-major, batched
+ *  into same-bucket groups, transcoded into a reusable rune arena, scored, and scattered into the strided result
+ *  matrix (plus the mirror slot for symmetric self-similarity) - but the alphabet is 32-bit code points instead of
+ *  bytes, so the per-lane `Peq` is the rune-keyed open-addressing hash instead of a dense 256-row table. A byte length
+ *  is an upper bound on the rune count, so tier gating keys on byte lengths (no transcode needed to decide).
  */
 template <typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capability_,
@@ -5780,10 +6256,12 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     static constexpr size_t candidate_lanes_k = 8; // ? 8 candidate runes per block while distances fit `u16`.
     static constexpr size_t fits_u16_k = 512;      // ? Tier limit (in bytes, an upper bound on runes) before the DP tail.
 
-    using scoring_t = levenshtein_distance_utf8<gap_costs_t, capability_k>; // ? Per-pair rune DP fallback.
+    using scoring_t = levenshtein_distance_utf8<gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
+    using myers_t = levenshtein_distance_myers<rune_t, capability_k>;       // ? NEON 2-lane rune Myers fast path.
     using lane_walker_t =
         candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_neon_k, (int)candidate_lanes_k, void>;
+    static constexpr index_t myers_lanes_k = myers_t::lanes_k;
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -5863,13 +6341,20 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(rune_t);
         size_t const walker_scratch = longest_candidate ? lane_walker.scratch_space_needed(longest_candidate, specs) : 0;
         size_t const lane_path = query_runes_bytes + transpose_bytes + walker_scratch;
+        // The rune-Myers fast path transcodes up to `myers_lanes_k` pairs' runes into one arena (a rune is at least one
+        // byte, so byte length bounds rune count) and builds the 2-lane hash `Peq` for the longest shorter side.
+        size_t const myers_transcode_bytes =
+            round_up_to_multiple((size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t),
+                                 specs.cache_line_width);
+        size_t const myers_peq_bytes = myers_t::scratch_bytes_for(sz_min_of_two(longest_query, longest_candidate));
+        size_t const myers_path = myers_transcode_bytes + myers_peq_bytes;
         size_t dp_scratch = 0;
-        if (queries.size() && candidates.size() && !fits_lane_(longest_query, longest_candidate)) {
+        if (queries.size() && candidates.size()) {
             scoring_t dp {substituter_, gap_costs_};
             dp_scratch = dp.scratch_space_needed(to_view(queries[longest_query_index]),
                                                  to_view(candidates[longest_candidate_index]), specs);
         }
-        return sz_max_of_two(lane_path, dp_scratch);
+        return sz_max_of_two(sz_max_of_two(lane_path, myers_path), dp_scratch);
     }
 
 #pragma endregion - Cross-Product Scratch Sizing
@@ -5888,15 +6373,237 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     }
 
     /**
-     *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the shared-query rune lane
-     *      walker, falling back to the per-pair anti-diagonal rune scorer for the long tail. Each cell scores the
-     *      UTF-8 Levenshtein `dist(query, candidate)` and writes it into the strided @p results matrix (plus the mirror
-     *      slot for symmetric self-similarity).
+     *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the 2-lane rune Myers - the
+     *      unit-cost-linear UTF-8 fast path. Each cell is transcoded to runes, and consecutive cells whose shorter rune
+     *      side shares the same `ceil(shorter / 64)` word bucket are batched into one rune-Myers call (single word for
+     *      shorter <= 64, the compile-time `distances_2x_multiword_<W>` for buckets 2..8, the runtime sibling beyond),
+     *      exactly the Ice Lake rune-Myers driver's grouping at a quarter of the lane width. Empty cells, invalid UTF-8,
+     *      and lone shorter > 4096 cells fall back to the per-pair rune scorer. Writes each distance into the strided
+     *      @p results matrix (plus the mirror slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
     [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
                                             results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
                                             size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
+
+        using value_t = remove_cvref<decltype(results.data[0])>;
+        size_t const candidates_count = candidates.size();
+
+        // Carve the slice's worst transcode area off the front of scratch (a rune is >= 1 byte, so byte length bounds
+        // rune count) and leave the tail for the per-call 2-lane Myers `Peq`. The global-worst sizing from
+        // `worst_cell_scratch_` guarantees this split stays in bounds for any slice.
+        size_t longest_query = 0, longest_candidate = 0;
+        for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
+            size_t query_index = 0, candidate_index = 0;
+            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+            longest_query = sz_max_of_two(longest_query, to_view(queries[query_index]).size());
+            longest_candidate = sz_max_of_two(longest_candidate, to_view(candidates[candidate_index]).size());
+        }
+        size_t const transcode_bytes =
+            round_up_to_multiple((size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t),
+                                 specs.cache_line_width);
+        rune_t *const rune_arena = reinterpret_cast<rune_t *>(scratch.data());
+        size_t const rune_arena_runes = transcode_bytes / sizeof(rune_t);
+        scratch_space_t const peq_scratch = transcode_bytes <= scratch.size()
+                                                ? scratch.subspan(transcode_bytes, scratch.size() - transcode_bytes)
+                                                : scratch_space_t {};
+        scratch_space_t const dp_scratch_space = scratch;
+
+        scoring_t dp {substituter_, gap_costs_};
+        dummy_executor_t dummy;
+
+        auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
+            cross_cell_destination_<value_t> destination;
+            destination.primary = results.data + query_index * results.row_stride + candidate_index;
+            if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
+                destination.mirror = results.data + candidate_index * results.row_stride + query_index;
+            return destination;
+        };
+        auto const scatter = [&](cross_cell_destination_<value_t> const &destination, size_t score) noexcept {
+            *destination.primary = static_cast<value_t>(score);
+            if (destination.mirror) *destination.mirror = static_cast<value_t>(score);
+        };
+
+        // The cross-cell writer the rune-Myers kernels assign through: lane-local index -> destination slot(s).
+        struct cross_cell_writer_ {
+            cross_cell_destination_<value_t> const *destinations = nullptr;
+            struct cell_proxy_ {
+                cross_cell_destination_<value_t> destination;
+                cell_proxy_ &operator=(size_t value) noexcept {
+                    *destination.primary = static_cast<value_t>(value);
+                    if (destination.mirror) *destination.mirror = static_cast<value_t>(value);
+                    return *this;
+                }
+            };
+            cell_proxy_ operator[](size_t lane_index) const noexcept { return cell_proxy_ {destinations[lane_index]}; }
+        };
+
+        myers_t myers;
+
+        // Transcode one cell's shorter/longer sides into the rune arena at byte offset `arena_used` (in runes),
+        // returning false on invalid UTF-8 or arena overflow. The shorter rune side is the Myers pattern.
+        auto const transcode_cell = [&](span<char const> query, span<char const> candidate, size_t &arena_used,
+                                        span<rune_t const> &shorter_runes, span<rune_t const> &longer_runes) noexcept
+            -> bool {
+            size_t const query_offset = arena_used;
+            size_t query_runes_count = 0;
+            rune_length_t rune_length {};
+            for (size_t progress = 0; progress < query.size(); progress += rune_length, ++query_runes_count) {
+                if (query_offset + query_runes_count >= rune_arena_runes) return false;
+                rune_length = sz_rune_parse_unchecked(query.data() + progress, rune_arena + query_offset + query_runes_count);
+                if (rune_length == sz_utf8_invalid_k) return false;
+            }
+            size_t const candidate_offset = query_offset + query_runes_count;
+            size_t candidate_runes_count = 0;
+            for (size_t progress = 0; progress < candidate.size(); progress += rune_length, ++candidate_runes_count) {
+                if (candidate_offset + candidate_runes_count >= rune_arena_runes) return false;
+                rune_length = sz_rune_parse_unchecked(candidate.data() + progress,
+                                                      rune_arena + candidate_offset + candidate_runes_count);
+                if (rune_length == sz_utf8_invalid_k) return false;
+            }
+            arena_used = candidate_offset + candidate_runes_count;
+            span<rune_t const> const query_view {rune_arena + query_offset, query_runes_count};
+            span<rune_t const> const candidate_view {rune_arena + candidate_offset, candidate_runes_count};
+            bool const query_is_shorter = query_runes_count <= candidate_runes_count;
+            shorter_runes = query_is_shorter ? query_view : candidate_view;
+            longer_runes = query_is_shorter ? candidate_view : query_view;
+            return true;
+        };
+
+        static constexpr size_t stack_words_capacity_k = 64; // ? `distances_2x_multiword_large_` covers shorter <= 4096 runes.
+        for (size_t cell_index = cell_begin; cell_index != cell_end;) {
+            size_t query_index = 0, candidate_index = 0;
+            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+            auto const query = to_view(queries[query_index]);
+            auto const candidate = to_view(candidates[candidate_index]);
+
+            // Empty cell, or a side whose byte length might escape the rune Myers stack capacity, takes the per-pair
+            // rune scorer. An empty side makes the distance the other side's rune count, which the per-pair scorer
+            // returns; the byte length is a safe conservative gate for the > 4096-rune long tail (rune >= 1 byte).
+            bool const fits_myers = query.size() != 0 && candidate.size() != 0 &&
+                                    sz_min_of_two(query.size(), candidate.size()) <= stack_words_capacity_k * 64;
+            if (!fits_myers || !peq_scratch.size()) {
+                size_t result_distance = 0;
+                if (status_t status = dp(query, candidate, result_distance, dp_scratch_space, dummy, specs);
+                    status != status_t::success_k)
+                    return status;
+                scatter(destination_for(query_index, candidate_index), result_distance);
+                ++cell_index;
+                continue;
+            }
+
+            // Seed the group with this cell. Transcoding determines the exact shorter rune count and thus the word
+            // bucket every grouped lane must share.
+            size_t arena_used = 0;
+            span<rune_t const> group_shorters[myers_lanes_k], group_longers[myers_lanes_k];
+            size_t group_positions[myers_lanes_k];
+            cross_cell_destination_<value_t> group_destinations[myers_lanes_k];
+            size_t group_query_indices[myers_lanes_k], group_candidate_indices[myers_lanes_k];
+            span<rune_t const> seed_shorter, seed_longer;
+            if (!transcode_cell(query, candidate, arena_used, seed_shorter, seed_longer)) {
+                size_t result_distance = 0;
+                if (status_t status = dp(query, candidate, result_distance, dp_scratch_space, dummy, specs);
+                    status != status_t::success_k)
+                    return status;
+                scatter(destination_for(query_index, candidate_index), result_distance);
+                ++cell_index;
+                continue;
+            }
+            size_t const seed_shorter_runes = seed_shorter.size();
+            // A lone empty-after-transcode shorter side cannot seed Myers (the top-bit read underflows); the per-pair
+            // scorer handles it (its distance is the longer side's rune count).
+            if (seed_shorter_runes == 0) {
+                size_t result_distance = 0;
+                if (status_t status = dp(query, candidate, result_distance, dp_scratch_space, dummy, specs);
+                    status != status_t::success_k)
+                    return status;
+                scatter(destination_for(query_index, candidate_index), result_distance);
+                ++cell_index;
+                continue;
+            }
+            size_t const seed_bucket = divide_round_up<size_t>(seed_shorter_runes, 64);
+            group_shorters[0] = seed_shorter;
+            group_longers[0] = seed_longer;
+            group_positions[0] = 0;
+            group_destinations[0] = destination_for(query_index, candidate_index);
+            group_query_indices[0] = query_index;
+            group_candidate_indices[0] = candidate_index;
+            index_t group = 1;
+            ++cell_index;
+            for (; cell_index != cell_end && group != myers_lanes_k; ++cell_index) {
+                size_t next_query_index = 0, next_candidate_index = 0;
+                cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
+                auto const next_query = to_view(queries[next_query_index]);
+                auto const next_candidate = to_view(candidates[next_candidate_index]);
+                if (next_query.size() == 0 || next_candidate.size() == 0 ||
+                    sz_min_of_two(next_query.size(), next_candidate.size()) > stack_words_capacity_k * 64)
+                    break;
+                size_t const arena_before = arena_used;
+                span<rune_t const> next_shorter, next_longer;
+                if (!transcode_cell(next_query, next_candidate, arena_used, next_shorter, next_longer)) {
+                    arena_used = arena_before; // ? Invalid UTF-8 or arena full: do not consume this cell here.
+                    break;
+                }
+                if (next_shorter.size() == 0 || divide_round_up<size_t>(next_shorter.size(), 64) != seed_bucket) {
+                    arena_used = arena_before; // ? Different bucket / empty pattern: leave it for the next group.
+                    break;
+                }
+                group_shorters[group] = next_shorter;
+                group_longers[group] = next_longer;
+                group_positions[group] = group;
+                group_destinations[group] = destination_for(next_query_index, next_candidate_index);
+                group_query_indices[group] = next_query_index;
+                group_candidate_indices[group] = next_candidate_index;
+                ++group;
+            }
+
+            cross_cell_writer_ group_writer;
+            group_writer.destinations = group_destinations;
+            status_t status = status_t::success_k;
+            lane_pairs_view<rune_t> const group_pairs {
+                {group_shorters, group}, {group_longers, group}, {group_positions, group}};
+            switch (seed_bucket) {
+            case 1: status = myers.distances_2x64_(group_pairs, group_writer, peq_scratch); break;
+            case 2: status = myers.template distances_2x_multiword_<2>(group_pairs, group_writer, peq_scratch); break;
+            case 3: status = myers.template distances_2x_multiword_<3>(group_pairs, group_writer, peq_scratch); break;
+            case 4: status = myers.template distances_2x_multiword_<4>(group_pairs, group_writer, peq_scratch); break;
+            case 5: status = myers.template distances_2x_multiword_<5>(group_pairs, group_writer, peq_scratch); break;
+            case 6: status = myers.template distances_2x_multiword_<6>(group_pairs, group_writer, peq_scratch); break;
+            case 7: status = myers.template distances_2x_multiword_<7>(group_pairs, group_writer, peq_scratch); break;
+            case 8: status = myers.template distances_2x_multiword_<8>(group_pairs, group_writer, peq_scratch); break;
+            default: status = myers.distances_2x_multiword_large_(group_pairs, group_writer, peq_scratch); break;
+            }
+            if (status == status_t::success_k) continue;
+            // Defensive scratch-shortfall fallback: score every grouped pair through the per-pair UTF-8 rune DP over
+            // its original cell (the `dp` scorer owns its own scratch via `dp_scratch_space`). Mirrors the Ice Lake
+            // rune-Myers driver's group fallback; `worst_cell_scratch_` sizes the `Peq` so this should not trigger.
+            for (index_t lane = 0; lane != group; ++lane) {
+                size_t lane_score = 0;
+                auto const lane_query = to_view(queries[group_query_indices[lane]]);
+                auto const lane_candidate = to_view(candidates[group_candidate_indices[lane]]);
+                if (status_t lane_status = dp(lane_query, lane_candidate, lane_score, dp_scratch_space, dummy, specs);
+                    lane_status != status_t::success_k)
+                    return lane_status;
+                scatter(group_destinations[lane], lane_score);
+            }
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the shared-query rune lane
+     *      walker, falling back to the per-pair anti-diagonal rune scorer for the long tail. Retained as the secondary
+     *      driver; the unit-cost-linear path now takes the faster `score_range_` rune-Myers driver, and this lane
+     *      walker remains available for the candidate-DP shape. Each cell scores the UTF-8 Levenshtein
+     *      `dist(query, candidate)` and writes it into the strided @p results matrix (plus the mirror slot for
+     *      symmetric self-similarity).
+     */
+    template <typename queries_type_, typename candidates_type_, typename results_type_>
+    [[gnu::noinline]] status_t score_range_lane_walker_(queries_type_ const &queries,
+                                                        candidates_type_ const &candidates, results_type_ &&results,
+                                                        cross_similarities_t cross_kind, size_t cell_begin,
+                                                        size_t cell_end, scratch_space_t scratch,
+                                                        cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
