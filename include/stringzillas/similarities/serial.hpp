@@ -3393,39 +3393,46 @@ SZ_INLINE int candidate_length_bucket_(size_t length) noexcept {
  *  @param fits `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the kernel's range.
  *  @param empty_cell `(query_length, candidate_length) -> score`: the all-gap score for a degenerate (empty) cell.
  */
-template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
-          typename results_type_, typename fits_type_, typename empty_cell_type_>
+template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
+          typename candidates_type_, typename results_type_, typename fits_narrow_type_, typename fits_wide_type_,
+          typename empty_cell_type_>
 status_t cross_product_candidate_lanes_range_( //
-    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
-    results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin, size_t cell_end, fits_type_ &&fits,
-    empty_cell_type_ &&empty_cell, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
+    narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
+    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+    cross_similarities_t cross_kind, size_t cell_begin, size_t cell_end, fits_narrow_type_ &&fits_narrow,
+    fits_wide_type_ &&fits_wide, empty_cell_type_ &&empty_cell, scratch_space_t scratch,
+    cpu_specs_t const &specs) noexcept {
 
-    using kernel_t = remove_cvref<kernel_type_>;
-    using lane_score_t = typename kernel_t::score_t;
+    using narrow_t = remove_cvref<narrow_kernel_type_>;
+    using wide_t = remove_cvref<wide_kernel_type_>;
     using value_t = remove_cvref<decltype(results.data[0])>;
-    constexpr size_t candidate_lanes_k = kernel_t::candidate_lanes_k;
+    // The narrow kernel has the most lanes (narrower cells), so its lane count bounds the transpose stride and the
+    // per-block staging arrays; the wide kernel handles cells whose score escapes the narrow range but fits the wide.
+    constexpr size_t narrow_lanes_k = narrow_t::candidate_lanes_k;
     // The per-pair fallback writes its native score type (unsigned distance for minimization, signed score for
-    // maximization), which may differ from the result matrix's `value_t` (e.g. a benchmark stores Levenshtein
-    // distances in a signed matrix). Score into the fallback's own type, then cast to `value_t` on scatter.
+    // maximization), which may differ from the result matrix's `value_t`; score into the fallback's own type.
     using fallback_score_t =
-        typename std::conditional<kernel_t::objective_k == sz_minimize_distance_k, size_t, ssize_t>::type;
+        typename std::conditional<narrow_t::objective_k == sz_minimize_distance_k, size_t, ssize_t>::type;
 
     bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
     size_t const candidates_count = candidates.size();
 
-    // Size the transpose buffer to the longest candidate any batchable cell in this range can present.
+    // Size the transpose buffer to the widest lane block (narrow kernel) and the walker arena to the larger of the
+    // two kernels' needs, over the longest candidate any batchable cell can present.
     size_t longest_candidate = 0;
     for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
         size_t query_index = 0, candidate_index = 0;
         cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
         size_t const query_length = to_view(queries[query_index]).size();
         size_t const candidate_length = to_view(candidates[candidate_index]).size();
-        if (query_length != 0 && candidate_length != 0 && fits(query_length, candidate_length))
+        if (query_length != 0 && candidate_length != 0 && fits_wide(query_length, candidate_length))
             longest_candidate = sz_max_of_two(longest_candidate, candidate_length);
     }
-
-    size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(char);
-    size_t const walker_scratch = longest_candidate ? kernel.scratch_space_needed(longest_candidate, specs) : 0;
+    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(char);
+    size_t const walker_scratch =
+        longest_candidate ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
+                                          wide_kernel.scratch_space_needed(longest_candidate, specs))
+                          : 0;
     char *transposed = reinterpret_cast<char *>(scratch.data());
     scratch_space_t walker_scratch_space = scratch.subspan(transpose_bytes, walker_scratch);
     scratch_space_t fallback_scratch_space = scratch;
@@ -3443,47 +3450,87 @@ status_t cross_product_candidate_lanes_range_( //
     };
 
     dummy_executor_t dummy;
-    size_t lengths[candidate_lanes_k];
-    size_t block_candidates[candidate_lanes_k];
-    cross_cell_destination_t<value_t> destinations[candidate_lanes_k];
-    lane_score_t result_lanes[candidate_lanes_k];
+    size_t lengths[narrow_lanes_k];
+    size_t block_candidates[narrow_lanes_k];
+    cross_cell_destination_t<value_t> destinations[narrow_lanes_k];
 
-    // Transpose, dispatch, and scatter one full or partial lane block of the current query-row + length bucket.
-    auto const emit_block = [&](span<char const> query, size_t lanes_count, size_t block_longest) noexcept {
-        for (size_t position = 0; position != candidate_lanes_k * block_longest; ++position) transposed[position] = 0;
+    // Row state, refreshed per query-row and read by the emit/tier closures below.
+    span<char const> query;
+    size_t query_length = 0, seed_query_index = 0, row_base = 0, cell_index = cell_begin, row_end = cell_begin;
+
+    // Transpose, dispatch, and scatter one full or partial lane block through the given kernel (narrow or wide).
+    auto const emit_block = [&](auto &chosen_kernel, size_t lanes_count, size_t block_longest) noexcept {
+        using chosen_t = remove_cvref<decltype(chosen_kernel)>;
+        constexpr size_t lane_capacity = chosen_t::candidate_lanes_k;
+        typename chosen_t::score_t result_lanes[narrow_lanes_k];
+        for (size_t position = 0; position != lane_capacity * block_longest; ++position) transposed[position] = 0;
         for (size_t lane_index = 0; lane_index != lanes_count; ++lane_index) {
             auto const lane_candidate = to_view(candidates[block_candidates[lane_index]]);
             for (size_t position = 0; position < lane_candidate.size(); ++position)
-                transposed[position * candidate_lanes_k + lane_index] = lane_candidate[position];
+                transposed[position * lane_capacity + lane_index] = lane_candidate[position];
         }
         candidate_lanes_block<char> block;
         block.transposed = transposed;
-        block.lane_capacity = candidate_lanes_k;
+        block.lane_capacity = lane_capacity;
         block.lanes_count = lanes_count;
         block.lengths = lengths;
         block.longest_candidate = block_longest;
-        status_t status = kernel(query, block, result_lanes, walker_scratch_space, specs);
+        status_t status = chosen_kernel(query, block, result_lanes, walker_scratch_space, specs);
         if (status != status_t::success_k) return status;
         for (size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
             scatter(destinations[lane_index], static_cast<value_t>(result_lanes[lane_index]));
         return status_t::success_k;
     };
 
-    size_t cell_index = cell_begin;
+    // Score every cell of the current row that belongs to one width tier (`in_tier(candidate_length)`), grouping by
+    // dyadic length bucket so each block's lanes carry similar lengths, and dispatching through `chosen_kernel`.
+    auto const run_tier = [&](auto &chosen_kernel, auto &&in_tier, size_t lane_capacity) noexcept {
+        int max_bucket = -1;
+        for (size_t r = cell_index; r != row_end; ++r) {
+            size_t const candidate_length = to_view(candidates[r - row_base]).size();
+            if (candidate_length == 0 || !in_tier(candidate_length)) continue;
+            int const bucket = candidate_length_bucket_(candidate_length);
+            if (bucket > max_bucket) max_bucket = bucket;
+        }
+        for (int bucket = 0; bucket <= max_bucket; ++bucket) {
+            size_t lanes_count = 0, block_longest = 0;
+            for (size_t r = cell_index; r != row_end; ++r) {
+                size_t const candidate_index = r - row_base;
+                size_t const candidate_length = to_view(candidates[candidate_index]).size();
+                if (candidate_length == 0 || !in_tier(candidate_length)) continue;
+                if (candidate_length_bucket_(candidate_length) != bucket) continue;
+                block_candidates[lanes_count] = candidate_index;
+                lengths[lanes_count] = candidate_length;
+                destinations[lanes_count] = destination_for(seed_query_index, candidate_index);
+                block_longest = sz_max_of_two(block_longest, candidate_length);
+                ++lanes_count;
+                if (lanes_count == lane_capacity) {
+                    if (status_t status = emit_block(chosen_kernel, lanes_count, block_longest);
+                        status != status_t::success_k)
+                        return status;
+                    lanes_count = 0, block_longest = 0;
+                }
+            }
+            if (lanes_count)
+                if (status_t status = emit_block(chosen_kernel, lanes_count, block_longest);
+                    status != status_t::success_k)
+                    return status;
+        }
+        return status_t::success_k;
+    };
+
     while (cell_index != cell_end) {
-        size_t seed_query_index = 0, seed_candidate_index = 0;
+        size_t seed_candidate_index = 0;
         cross_cell_to_indices_(cell_index, candidates_count, cross_kind, seed_query_index, seed_candidate_index);
-        auto const query = to_view(queries[seed_query_index]);
-        size_t const query_length = query.size();
+        query = to_view(queries[seed_query_index]);
+        query_length = query.size();
         // Cells of one query-row are contiguous in flat index for both layouts; derive the row base to map back.
-        size_t const row_base =
-            is_symmetric ? seed_query_index * (seed_query_index + 1) / 2 : seed_query_index * candidates_count;
+        row_base = is_symmetric ? seed_query_index * (seed_query_index + 1) / 2 : seed_query_index * candidates_count;
         size_t const row_full_end =
             is_symmetric ? row_base + seed_query_index + 1 : row_base + candidates_count;
-        size_t const row_end = sz_min_of_two(row_full_end, cell_end);
+        row_end = sz_min_of_two(row_full_end, cell_end);
 
-        // Pass 1: score the degenerate and out-of-range cells individually; learn the row's largest length bucket.
-        int max_bucket = -1;
+        // Degenerate (empty) cells and cells whose score escapes even the wide range are scored individually.
         for (size_t r = cell_index; r != row_end; ++r) {
             size_t const candidate_index = r - row_base;
             size_t const candidate_length = to_view(candidates[candidate_index]).size();
@@ -3492,44 +3539,29 @@ status_t cross_product_candidate_lanes_range_( //
                         static_cast<value_t>(empty_cell(query_length, candidate_length)));
                 continue;
             }
-            if (!fits(query_length, candidate_length)) {
+            if (!fits_wide(query_length, candidate_length)) {
                 fallback_score_t result_score = 0;
                 if (status_t status = fallback(query, to_view(candidates[candidate_index]), result_score,
                                                fallback_scratch_space, dummy, specs);
                     status != status_t::success_k)
                     return status;
                 scatter(destination_for(seed_query_index, candidate_index), static_cast<value_t>(result_score));
-                continue;
             }
-            int const bucket = candidate_length_bucket_(candidate_length);
-            if (bucket > max_bucket) max_bucket = bucket;
         }
 
-        // Pass 2: per length bucket, pack same-bucket candidates into dense lane blocks and dispatch them.
-        for (int bucket = 0; bucket <= max_bucket; ++bucket) {
-            size_t lanes_count = 0, block_longest = 0;
-            for (size_t r = cell_index; r != row_end; ++r) {
-                size_t const candidate_index = r - row_base;
-                size_t const candidate_length = to_view(candidates[candidate_index]).size();
-                if (query_length == 0 || candidate_length == 0 || !fits(query_length, candidate_length)) continue;
-                if (candidate_length_bucket_(candidate_length) != bucket) continue;
-                block_candidates[lanes_count] = candidate_index;
-                lengths[lanes_count] = candidate_length;
-                destinations[lanes_count] = destination_for(seed_query_index, candidate_index);
-                block_longest = sz_max_of_two(block_longest, candidate_length);
-                ++lanes_count;
-                if (lanes_count == candidate_lanes_k) {
-                    if (status_t status = emit_block(query, lanes_count, block_longest);
-                        status != status_t::success_k)
-                        return status;
-                    lanes_count = 0, block_longest = 0;
-                }
-            }
-            if (lanes_count) {
-                if (status_t status = emit_block(query, lanes_count, block_longest); status != status_t::success_k)
-                    return status;
-            }
-        }
+        // Narrow tier (fits the narrow range), then the wide tier (escapes narrow but fits wide).
+        auto const fits_narrow_tier = [&](size_t candidate_length) noexcept {
+            return fits_narrow(query_length, candidate_length);
+        };
+        auto const fits_wide_tier = [&](size_t candidate_length) noexcept {
+            return !fits_narrow(query_length, candidate_length) && fits_wide(query_length, candidate_length);
+        };
+        if (status_t status = run_tier(narrow_kernel, fits_narrow_tier, narrow_t::candidate_lanes_k);
+            status != status_t::success_k)
+            return status;
+        if (status_t status = run_tier(wide_kernel, fits_wide_tier, wide_t::candidate_lanes_k);
+            status != status_t::success_k)
+            return status;
         cell_index = row_end;
     }
     return status_t::success_k;
@@ -3539,14 +3571,14 @@ status_t cross_product_candidate_lanes_range_( //
  *  @brief Worst-case single-worker scratch for the shared candidate-lane driver, in O(Q+C): the transposed block plus
  *      the lane-walker arena for the longest candidate, or the per-pair fallback arena for the longest cell.
  */
-template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
-          typename fits_type_>
+template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
+          typename candidates_type_, typename fits_wide_type_>
 size_t cross_product_candidate_lanes_scratch_( //
-    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
-    fits_type_ &&fits, cpu_specs_t const &specs) noexcept {
+    narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
+    queries_type_ const &queries, candidates_type_ const &candidates, fits_wide_type_ &&fits_wide,
+    cpu_specs_t const &specs) noexcept {
 
-    using kernel_t = remove_cvref<kernel_type_>;
-    constexpr size_t candidate_lanes_k = kernel_t::candidate_lanes_k;
+    constexpr size_t narrow_lanes_k = remove_cvref<narrow_kernel_type_>::candidate_lanes_k;
 
     size_t longest_query = 0, longest_query_index = 0, longest_candidate = 0, longest_candidate_index = 0;
     for (size_t index = 0; index < queries.size(); ++index)
@@ -3555,10 +3587,13 @@ size_t cross_product_candidate_lanes_scratch_( //
     for (size_t index = 0; index < candidates.size(); ++index)
         if (to_view(candidates[index]).size() > longest_candidate)
             longest_candidate = to_view(candidates[index]).size(), longest_candidate_index = index;
-    size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(char);
-    size_t const walker_scratch = longest_candidate ? kernel.scratch_space_needed(longest_candidate, specs) : 0;
+    size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(char);
+    size_t const walker_scratch =
+        longest_candidate ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
+                                          wide_kernel.scratch_space_needed(longest_candidate, specs))
+                          : 0;
     size_t fallback_scratch = 0;
-    if (queries.size() && candidates.size() && !fits(longest_query, longest_candidate))
+    if (queries.size() && candidates.size() && !fits_wide(longest_query, longest_candidate))
         fallback_scratch = fallback.scratch_space_needed(to_view(queries[longest_query_index]),
                                                          to_view(candidates[longest_candidate_index]), specs);
     return sz_max_of_two(transpose_bytes + walker_scratch, fallback_scratch);
@@ -3568,17 +3603,19 @@ size_t cross_product_candidate_lanes_scratch_( //
  *  @brief Parallel wrapper for the shared candidate-lane driver: sizes the engine-owned @p scratch_buffer for all
  *      workers, then hands each worker a contiguous live-cell slice and its own scratch partition.
  */
-template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
-          typename results_type_, typename scratch_buffer_type_, typename executor_type_, typename fits_type_,
-          typename empty_cell_type_>
+template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
+          typename candidates_type_, typename results_type_, typename scratch_buffer_type_, typename executor_type_,
+          typename fits_narrow_type_, typename fits_wide_type_, typename empty_cell_type_>
 status_t cross_product_candidate_lanes_parallel_( //
-    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
-    results_type_ &&results, cross_similarities_t cross_kind, scratch_buffer_type_ &scratch_buffer,
-    executor_type_ &&executor, fits_type_ &&fits, empty_cell_type_ &&empty_cell, cpu_specs_t const &specs) noexcept {
+    narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
+    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+    cross_similarities_t cross_kind, scratch_buffer_type_ &scratch_buffer, executor_type_ &&executor,
+    fits_narrow_type_ &&fits_narrow, fits_wide_type_ &&fits_wide, empty_cell_type_ &&empty_cell,
+    cpu_specs_t const &specs) noexcept {
 
     size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
-    size_t const worker_scratch = cross_product_candidate_lanes_scratch_(kernel, fallback, queries, candidates,
-                                                                         fits, specs);
+    size_t const worker_scratch = cross_product_candidate_lanes_scratch_(narrow_kernel, wide_kernel, fallback, queries,
+                                                                         candidates, fits_wide, specs);
     size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
     if (status_t status = scratch_buffer.try_resize(worker_scratch * workers); status != status_t::success_k)
         return status;
@@ -3588,9 +3625,10 @@ status_t cross_product_candidate_lanes_parallel_( //
         if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
         size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
         scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(worker * worker_scratch, worker_scratch);
-        status_t status = cross_product_candidate_lanes_range_(kernel, fallback, queries, candidates, results,
-                                                               cross_kind, cell_begin, cell_begin + length, fits,
-                                                               empty_cell, slice, specs);
+        status_t status = cross_product_candidate_lanes_range_(narrow_kernel, wide_kernel, fallback, queries,
+                                                               candidates, results, cross_kind, cell_begin,
+                                                               cell_begin + length, fits_narrow, fits_wide, empty_cell,
+                                                               slice, specs);
         if (status != status_t::success_k) error.store(status);
     });
     return error.load();
