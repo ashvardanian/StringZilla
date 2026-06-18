@@ -2773,6 +2773,131 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
 };
 
 /**
+ *  @brief Inter-sequence Haswell walker: one query against up to 8 candidates packed one-per-lane, 32-bit cells.
+ *
+ *  Width-mirror of the 16-lane `u16` linear uniform Levenshtein walker, widened to `u32` cells so each `__m256i`
+ *  holds 8 lanes. The candidate characters remain `char`/`u8`: only 8 of them are live per column, loaded into the
+ *  low 8 bytes of a `__m128i` (`_mm_loadl_epi64`) and compared against the broadcast query character with
+ *  `_mm_cmpeq_epi8`, yielding 8 bytes of `0xFF` (match) or `0x00` (mismatch) that sign-extend to 8 `i32` lanes via
+ *  `_mm256_cvtepi8_epi32`; `_mm256_blendv_epi8` then selects the configured `match` cost on equal lanes and
+ *  `mismatch` on the rest as the diagonal substitution penalty, while deletion and insertion each add the uniform
+ *  `gap` cost. The recurrence `cell = min(substitution, min(deletion, insertion))` advances all 8 lanes in lockstep
+ *  over `_mm256_min_epu32`. This serves the @b non-unit uniform-cost Levenshtein cells whose all-gap path would
+ *  overflow `u16`; the unit-cost case is handled by the Myers fast path and never reaches here.
+ *
+ *  @note The cells are `u32`, so the kernel is only valid while every reachable score stays below 4294967295; the
+ *      longest reachable cell is the all-gap path `max(query, candidate) * gap`. Enforcing that bound (a cost-dependent
+ *      length limit) is the caller's dispatch contract; the kernel performs no runtime range check.
+ *  @note Requires Intel Haswell generation CPUs or newer (AVX2).
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_haswell_k, 8, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = linear_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_haswell_k;
+    static constexpr size_t candidate_lanes_k = 8;
+
+    // The `u32` lane recurrence hardcodes `_mm256_min_epu32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds two score rows of `longest_candidate + 1` lane-vectors (8 `u32` cells each). */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += row_bytes; // previous row
+        amount += row_bytes; // current row
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 8 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Two row buffers carved from the byte span; each lane-vector lives at `row + column * 8`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+
+        // The recurrence honors the engine's configured uniform costs: `match`/`mismatch` on the diagonal and a
+        // single `gap` on either deletion or insertion. The unit-cost case (match 0, mismatch 1, gap 1) is served by
+        // the Myers fast path, so this kernel only ever runs for non-unit costs.
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const gap_cost = static_cast<score_t>(gap_costs_.open_or_extend);
+        __m256i const match_vec = _mm256_set1_epi32(static_cast<int>(match_cost));
+        __m256i const mismatch_vec = _mm256_set1_epi32(static_cast<int>(mismatch_cost));
+        __m256i const gap_vec = _mm256_set1_epi32(static_cast<int>(gap_cost));
+
+        // Row 0: the empty query prefix against every candidate prefix is a run of `column` gaps, identical
+        // across lanes (later masked per-lane at latch time by reading each lane's own final column).
+        for (size_t column = 0; column <= longest_candidate; ++column)
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row + column * candidate_lanes_k),
+                                _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(column * gap_cost))));
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            __m128i const query_char_vec = _mm_set1_epi8(query[query_position - 1]);
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row),
+                                _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(query_position * gap_cost))));
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                // Only 8 candidate bytes are live this column; load them into the low 8 bytes of a `__m128i`.
+                __m128i const candidate_chars_vec =
+                    _mm_loadl_epi64(reinterpret_cast<__m128i const *>(candidates.position(column - 1)));
+                __m256i const diagonal_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + (column - 1) * candidate_lanes_k));
+                __m256i const deletion_source_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + column * candidate_lanes_k));
+                __m256i const insertion_source_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(current_row + (column - 1) * candidate_lanes_k));
+
+                // `cmpeq` yields `0xFF` (-1) on a match, `0x00` on a mismatch, per byte; sign-extend to 8 `i32` so the
+                // mask selects `match` on equal lanes and `mismatch` on the rest as the diagonal substitution penalty.
+                __m128i const equal_i8_vec = _mm_cmpeq_epi8(query_char_vec, candidate_chars_vec);
+                __m256i const equal_i32_vec = _mm256_cvtepi8_epi32(equal_i8_vec);
+                __m256i const mismatch_addend_vec = _mm256_blendv_epi8(mismatch_vec, match_vec, equal_i32_vec);
+                __m256i const cost_if_substitution_vec = _mm256_add_epi32(diagonal_vec, mismatch_addend_vec);
+                __m256i const cost_if_deletion_vec = _mm256_add_epi32(deletion_source_vec, gap_vec);
+                __m256i const cost_if_insertion_vec = _mm256_add_epi32(insertion_source_vec, gap_vec);
+                __m256i const cell_score_vec = _mm256_min_epu32(
+                    cost_if_substitution_vec, _mm256_min_epu32(cost_if_deletion_vec, cost_if_insertion_vec));
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row + column * candidate_lanes_k),
+                                    cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
  *  @brief Inter-sequence Haswell walker: one query against up to 16 candidates packed one-per-lane, @b affine-gap
  *         (Gotoh) unit-class Levenshtein over unsigned 16-bit cells, distance minimization, global alignment.
  *
@@ -2905,6 +3030,156 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
                 __m256i const cost_if_gap_vec = _mm256_min_epu16(vertical_vec, horizontal_vec);
 
                 __m256i const cell_score_vec = _mm256_min_epu16(cost_if_substitution_vec, cost_if_gap_vec);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k), vertical_vec);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row + column * candidate_lanes_k),
+                                    cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence Haswell walker: one query against up to 8 candidates packed one-per-lane, @b affine-gap
+ *         (Gotoh) unit-class Levenshtein over unsigned 32-bit cells, distance minimization, global alignment.
+ *
+ *  Width-mirror of the 16-lane uniform `u16` affine walker, widened to `u32` cells so each `__m256i` holds 8 lanes.
+ *  The diagonal substitution term is identical (a `_mm_cmpeq_epi8` mask, here sign-extended to 8 `i32` lanes via
+ *  `_mm256_cvtepi8_epi32`, selecting the `match` cost on equal lanes and `mismatch` on the rest), and the single gap
+ *  term is the branchless Gotoh E/F tracks over `_mm256_min_epu32` so the recurrence stays in non-negative distance
+ *  space:
+ *      F[column] = min(M_up + open,   F_up + extend)        // vertical track: a gap in the candidate
+ *      E         = min(M_left + open, E_left + extend)       // horizontal track: a gap in the query
+ *      M[column] = min(M_diagonal + substitution, min(E, F))
+ *  The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
+ *  cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary. A
+ *  large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *
+ *  @note The cells are unsigned `u32`, so the kernel is only valid while every reachable score - plus the
+ *      `discard_bias` headroom - stays below 4294967295; enforcing that bound is the caller's dispatch contract.
+ *  @note Requires Intel Haswell generation CPUs or newer (AVX2).
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_haswell_k, 8, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = affine_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_haswell_k;
+    static constexpr size_t candidate_lanes_k = 8;
+
+    // The `u32` lane recurrence hardcodes `_mm256_min_epu32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit affine candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    affine_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds three `u32` rows of `longest_candidate + 1` lane-vectors: previous/current M plus the F. */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous M row
+        amount += score_row_bytes; // current M row
+        amount += score_row_bytes; // F (vertical gap) row, carried across rows
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 8 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Three row buffers carved from the byte span; each lane-vector lives at `row + column * 8`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+        score_t *vertical_row = current_row + row_stride;
+
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const open = static_cast<score_t>(gap_costs_.open);
+        score_t const extend = static_cast<score_t>(gap_costs_.extend);
+        __m256i const match_vec = _mm256_set1_epi32(static_cast<int>(match_cost));
+        __m256i const mismatch_vec = _mm256_set1_epi32(static_cast<int>(mismatch_cost));
+        __m256i const open_vec = _mm256_set1_epi32(static_cast<int>(open));
+        __m256i const extend_vec = _mm256_set1_epi32(static_cast<int>(extend));
+        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
+        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u32`.
+        __m256i const discard_bias_vec = _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(2000000000)));
+
+        // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
+        // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
+        _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row), _mm256_setzero_si256());
+        _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row), discard_bias_vec);
+        for (size_t column = 1; column <= longest_candidate; ++column) {
+            __m256i const boundary_vec =
+                _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend * (u32_t)(column - 1))));
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row + column * candidate_lanes_k), boundary_vec);
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k),
+                                _mm256_add_epi32(discard_bias_vec, boundary_vec));
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            __m128i const query_char_vec = _mm_set1_epi8(query[query_position - 1]);
+
+            // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
+            // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
+            __m256i const left_boundary_vec =
+                _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend * (u32_t)(query_position - 1))));
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row), left_boundary_vec);
+            __m256i horizontal_vec = _mm256_add_epi32(discard_bias_vec, left_boundary_vec);
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                __m128i const candidate_chars_vec =
+                    _mm_loadl_epi64(reinterpret_cast<__m128i const *>(candidates.position(column - 1)));
+                __m256i const diagonal_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + (column - 1) * candidate_lanes_k));
+                __m256i const up_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + column * candidate_lanes_k));
+                __m256i const left_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(current_row + (column - 1) * candidate_lanes_k));
+                __m256i const up_vertical_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(vertical_row + column * candidate_lanes_k));
+
+                // `cmpeq` yields `0xFF` (-1) on a match, `0x00` on a mismatch, per byte; sign-extend to 8 `i32` so the
+                // mask selects `match` on equal lanes and `mismatch` on the rest as the diagonal substitution penalty.
+                __m128i const equal_i8_vec = _mm_cmpeq_epi8(query_char_vec, candidate_chars_vec);
+                __m256i const equal_i32_vec = _mm256_cvtepi8_epi32(equal_i8_vec);
+                __m256i const substitution_addend_vec = _mm256_blendv_epi8(mismatch_vec, match_vec, equal_i32_vec);
+                __m256i const cost_if_substitution_vec = _mm256_add_epi32(diagonal_vec, substitution_addend_vec);
+
+                // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
+                __m256i const vertical_vec = _mm256_min_epu32(_mm256_add_epi32(up_vec, open_vec),
+                                                              _mm256_add_epi32(up_vertical_vec, extend_vec));
+                horizontal_vec = _mm256_min_epu32(_mm256_add_epi32(left_vec, open_vec),
+                                                  _mm256_add_epi32(horizontal_vec, extend_vec));
+                __m256i const cost_if_gap_vec = _mm256_min_epu32(vertical_vec, horizontal_vec);
+
+                __m256i const cell_score_vec = _mm256_min_epu32(cost_if_substitution_vec, cost_if_gap_vec);
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k), vertical_vec);
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row + column * candidate_lanes_k),
                                     cell_score_vec);
@@ -3146,6 +3421,246 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
 
         if constexpr (is_local_k) {
             alignas(32) i16_t final_max[candidate_lanes_k];
+            _mm256_store_si256(reinterpret_cast<__m256i *>(final_max), running_max_vec);
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+                result_lanes[lane_index] = final_max[lane_index];
+        }
+        else {
+            // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+                size_t const candidate_length = candidates.lengths[lane_index];
+                result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+            }
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence Haswell walker: one query against up to 8 candidates packed one-per-lane, weighted
+ *         Needleman-Wunsch / Smith-Waterman with 32-class substitution costs, @b linear @b or @b affine gaps,
+ *         32-bit signed cells. One body covering both gap models and both localities, resolved with `if constexpr`.
+ *
+ *  Width-mirror of the 16-lane weighted `i16` walker, widened to `i32` cells so each `__m256i` holds 8 lanes. The
+ *  unit `cmpeq -> +1` substitution term is the resident-row class lookup of `class_lookup_haswell_t`, and the
+ *  objective is @b maximization, so the base recurrence is `cell = max(diag + substitution, gap_term)` over signed
+ *  `i32` cells. The query character is fixed for an entire Dynamic Programming row, so its class is scalar: per row
+ *  the cost row `class_substitution_costs[query_class][0..31]` is made resident with `reload_row`. Inside the column
+ *  loop only the 8 live candidate bytes index that resident row through the two-stage `lookup32`, yielding 8 signed
+ *  `i8` substitution costs that sign-extend to 8 `i32` lanes via `_mm256_cvtepi8_epi32`.
+ *
+ *  The two compile-time axes:
+ *  - @b gap_costs_type_ : linear collapses the gap term to `max(up, left) + gap`; affine (Gotoh) replaces it with the
+ *    branchless E/F tracks:
+ *        F[column] = max(M_up + open,   F_up + extend)        // vertical track: a gap in the candidate
+ *        E         = max(M_left + open, E_left + extend)       // horizontal track: a gap in the query
+ *        M[column] = max(M_diagonal + substitution, max(E, F))
+ *    The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
+ *    cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary.
+ *  - @b locality_ : global (Needleman-Wunsch) seeds the boundary with the gap run and latches each lane's bottom-right
+ *    corner; local (Smith-Waterman) zeroes the boundary, clamps every cell to zero, and latches a per-lane running
+ *    maximum updated only for columns within each lane's own candidate length so a shorter candidate's zero-padded
+ *    tail columns cannot inflate its score.
+ *
+ *  @note The cells are signed `i32`, so the kernel is only valid while every reachable score stays within
+ *      `[-2147483648, 2147483647]` (global) or `[0, 2147483647]` (local); enforcing that bound is the caller's
+ *      dispatch contract, the kernel performs no runtime range check.
+ *  @note Requires Intel Haswell generation CPUs or newer (AVX2).
+ */
+template <sz_similarity_objective_t objective_, typename gap_costs_type_, sz_similarity_locality_t locality_>
+struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_,
+                             sz_cap_haswell_k, 8, void> {
+
+    using char_t = char;
+    using score_t = i32_t;
+    using substituter_t = error_costs_32x32_t;
+    using gap_costs_t = gap_costs_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = sz_cap_haswell_k;
+    static constexpr size_t candidate_lanes_k = 8;
+
+    static constexpr bool is_affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
+    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+
+    // The signed `i32` recurrence hardcodes `_mm256_max_epi32`; minimization would need a different blend.
+    static_assert(objective_ == sz_maximize_score_k,
+                  "The weighted candidate-lane kernel only implements score maximization (Needleman-Wunsch / "
+                  "Smith-Waterman).");
+
+    substituter_t substituter_ {};
+    gap_costs_type_ gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, gap_costs_type_ gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Scratch holds the `i32` score rows of `longest_candidate + 1` lane-vectors (8 cells each): two rows for
+     *      a linear gap (previous/current M), three for an affine gap (previous/current M plus the carried F track).
+     */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous M row
+        amount += score_row_bytes; // current M row
+        if constexpr (is_affine_k) amount += score_row_bytes; // F (vertical gap) row, carried across rows
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 8 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+
+        class_lookup_haswell_t lookup;
+        lookup.reload_classes(substituter_.byte_to_class);
+
+        __m256i const zero_vec = _mm256_setzero_si256();
+
+        // Per-gap-model constants and the affine F track row; each is consumed only in the matching `if constexpr`
+        // branch, so the unused ones in the other instantiation are explicitly tolerated.
+        [[maybe_unused]] error_cost_t gap = 0, open = 0, extend = 0;
+        [[maybe_unused]] __m256i gap_vec = zero_vec, open_vec = zero_vec, extend_vec = zero_vec,
+                                 discard_bias_vec = zero_vec;
+        [[maybe_unused]] score_t *vertical_row = nullptr;
+        if constexpr (is_affine_k) {
+            open = gap_costs_.open;
+            extend = gap_costs_.extend;
+            open_vec = _mm256_set1_epi32(static_cast<int>(open));
+            extend_vec = _mm256_set1_epi32(static_cast<int>(extend));
+            // The supplementary tracks are seeded with a value of higher magnitude than the primary so they are
+            // discarded until a real opening exists; mirrors the serial `init_gap` of `(open + extend) + boundary`.
+            discard_bias_vec = _mm256_set1_epi32(static_cast<int>(open + extend));
+            vertical_row = current_row + row_stride;
+        }
+        else {
+            gap = gap_costs_.open_or_extend;
+            gap_vec = _mm256_set1_epi32(static_cast<int>(gap));
+        }
+
+        // Local alignment gates a per-lane running maximum by candidate length so a shorter candidate's padded columns
+        // are excluded; AVX2 has no mask registers, so a `cmpgt` mask blends the running max with the candidate.
+        [[maybe_unused]] alignas(32) i32_t lane_lengths[candidate_lanes_k] = {0};
+        [[maybe_unused]] __m256i lane_lengths_vec = zero_vec;
+        [[maybe_unused]] __m256i running_max_vec = zero_vec;
+        if constexpr (is_local_k) {
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+                lane_lengths[lane_index] = static_cast<i32_t>(candidates.lengths[lane_index]);
+            lane_lengths_vec = _mm256_load_si256(reinterpret_cast<__m256i const *>(lane_lengths));
+        }
+
+        // Row 0 boundary: local zeroes both tracks (an alignment may begin anywhere); global seeds the gap run.
+        if constexpr (is_local_k) {
+            for (size_t column = 0; column <= longest_candidate; ++column) {
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row + column * candidate_lanes_k), zero_vec);
+                if constexpr (is_affine_k)
+                    _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k),
+                                        discard_bias_vec);
+            }
+        }
+        else if constexpr (is_affine_k) {
+            // Row 0: one opening plus `column - 1` extensions; the vertical-gap row is seeded with the discarded
+            // magnitude so the first real row cannot reuse it.
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row), zero_vec);
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row), _mm256_add_epi32(discard_bias_vec, zero_vec));
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                __m256i const boundary_vec =
+                    _mm256_set1_epi32(static_cast<int>(static_cast<i32_t>(open + extend * (i32_t)(column - 1))));
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row + column * candidate_lanes_k), boundary_vec);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k),
+                                    _mm256_add_epi32(discard_bias_vec, boundary_vec));
+            }
+        }
+        else {
+            // Row 0: a run of `gap * column`, identical across lanes (masked per-lane at latch by each lane's column).
+            for (size_t column = 0; column <= longest_candidate; ++column)
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(previous_row + column * candidate_lanes_k),
+                                    _mm256_set1_epi32(static_cast<int>(static_cast<i32_t>(gap * (i32_t)column))));
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            // The query character is fixed for the whole row, so its class and cost row are scalar.
+            u8_t const query_class = substituter_.byte_to_class[(u8_t)query[query_position - 1]];
+            lookup.reload_row(&substituter_.class_substitution_costs[query_class][0]);
+
+            // First-column boundary of the M (and affine E) tracks for this row.
+            [[maybe_unused]] __m256i horizontal_vec = zero_vec;
+            if constexpr (is_local_k) { _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row), zero_vec); }
+            else if constexpr (is_affine_k) {
+                __m256i const left_boundary_vec = _mm256_set1_epi32(
+                    static_cast<int>(static_cast<i32_t>(open + extend * (i32_t)(query_position - 1))));
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row), left_boundary_vec);
+                horizontal_vec = _mm256_add_epi32(discard_bias_vec, left_boundary_vec);
+            }
+            else {
+                _mm256_storeu_si256(
+                    reinterpret_cast<__m256i *>(current_row),
+                    _mm256_set1_epi32(static_cast<int>(static_cast<i32_t>(gap * (i32_t)query_position))));
+            }
+            if constexpr (is_local_k && is_affine_k) horizontal_vec = discard_bias_vec;
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                // Only 8 candidate bytes are live this column; place them in the low half of a `u256_vec_t` so
+                // `lookup32` produces this column's 8 signed `i8` substitution costs in the low bytes of its low half.
+                u256_vec_t candidate_chars_vec;
+                candidate_chars_vec.ymm = _mm256_castsi128_si256(
+                    _mm_loadl_epi64(reinterpret_cast<__m128i const *>(candidates.position(column - 1))));
+                __m256i const diagonal_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + (column - 1) * candidate_lanes_k));
+                __m256i const up_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(previous_row + column * candidate_lanes_k));
+                __m256i const left_vec =
+                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(current_row + (column - 1) * candidate_lanes_k));
+
+                u256_vec_t const cost_i8_vec = lookup.lookup32(candidate_chars_vec);
+                __m256i const cost_i32_vec = _mm256_cvtepi8_epi32(_mm256_castsi256_si128(cost_i8_vec.ymm));
+
+                __m256i const cost_if_substitution_vec = _mm256_add_epi32(diagonal_vec, cost_i32_vec);
+                __m256i cost_if_gap_vec;
+                if constexpr (is_affine_k) {
+                    // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
+                    __m256i const up_vertical_vec =
+                        _mm256_loadu_si256(reinterpret_cast<__m256i const *>(vertical_row + column * candidate_lanes_k));
+                    __m256i const vertical_vec = _mm256_max_epi32(_mm256_add_epi32(up_vec, open_vec),
+                                                                  _mm256_add_epi32(up_vertical_vec, extend_vec));
+                    horizontal_vec = _mm256_max_epi32(_mm256_add_epi32(left_vec, open_vec),
+                                                      _mm256_add_epi32(horizontal_vec, extend_vec));
+                    cost_if_gap_vec = _mm256_max_epi32(vertical_vec, horizontal_vec);
+                    _mm256_storeu_si256(reinterpret_cast<__m256i *>(vertical_row + column * candidate_lanes_k),
+                                        vertical_vec);
+                }
+                else { cost_if_gap_vec = _mm256_add_epi32(_mm256_max_epi32(up_vec, left_vec), gap_vec); }
+
+                __m256i cell_score_vec = _mm256_max_epi32(cost_if_substitution_vec, cost_if_gap_vec);
+                if constexpr (is_local_k) cell_score_vec = _mm256_max_epi32(zero_vec, cell_score_vec);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(current_row + column * candidate_lanes_k),
+                                    cell_score_vec);
+
+                // Fold this column into the running maximum only for lanes whose candidate reaches it.
+                if constexpr (is_local_k) {
+                    __m256i const column_live_vec =
+                        _mm256_cmpgt_epi32(lane_lengths_vec, _mm256_set1_epi32(static_cast<int>(column - 1)));
+                    __m256i const folded_max_vec = _mm256_max_epi32(running_max_vec, cell_score_vec);
+                    running_max_vec = _mm256_blendv_epi8(running_max_vec, folded_max_vec, column_live_vec);
+                }
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        if constexpr (is_local_k) {
+            alignas(32) i32_t final_max[candidate_lanes_k];
             _mm256_store_si256(reinterpret_cast<__m256i *>(final_max), running_max_vec);
             for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
                 result_lanes[lane_index] = final_max[lane_index];

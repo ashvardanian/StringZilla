@@ -3562,6 +3562,125 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
 };
 
 /**
+ *  @brief Inter-sequence NEON walker: one query against up to 4 candidates packed one-per-lane, 32-bit cells.
+ *
+ *  Width-mirror of the 8-lane `u16` walker, widened to `u32` cells so each `uint32x4_t` holds 4 lanes. The candidate
+ *  characters remain `char`/`u8`: 4 of them widen through `vmovl_u8` then `vmovl_u16(vget_low_u16(...))` into a 4-lane
+ *  `u32` vector and compare against the broadcast query character with `vceqq_u32`, yielding a full-width `0xFFFFFFFF`
+ *  (match) / `0x00000000` (mismatch) mask; `vbslq_u32` then selects the configured `match` cost on equal lanes and
+ *  `mismatch` on the rest as the diagonal substitution penalty, while deletion and insertion each add the uniform
+ *  `gap` cost. The recurrence `cell = min(substitution, min(deletion, insertion))` advances all 4 lanes over
+ *  `vminq_u32`. Halving the lane count to 4 quadruples the representable score range to the `u32` window, serving
+ *  candidates whose reachable scores exceed the `u16` contract.
+ *
+ *  @note The cells are `u32`, so the kernel is only valid while every reachable score stays below 4294967295; the
+ *      longest reachable cell is the all-gap path `max(query, candidate) * gap`. Enforcing that bound (a cost-dependent
+ *      length limit) is the caller's dispatch contract; the kernel performs no runtime range check.
+ *  @note Requires Arm NEON CPUs.
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_neon_k, 4, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = linear_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_neon_k;
+    static constexpr size_t candidate_lanes_k = 4;
+
+    // The `u32` lane recurrence hardcodes `vminq_u32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds two score rows of `longest_candidate + 1` lane-vectors (4 `u32` cells each). */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += row_bytes; // previous row
+        amount += row_bytes; // current row
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 4 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Two row buffers carved from the byte span; each lane-vector lives at `row + column * 4`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+
+        // The recurrence honors the engine's configured uniform costs: `match`/`mismatch` on the diagonal and a
+        // single `gap` on either deletion or insertion. The unit-cost case (match 0, mismatch 1, gap 1) is served by
+        // the Myers fast path, so this kernel only ever runs for non-unit costs.
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const gap_cost = static_cast<score_t>(gap_costs_.open_or_extend);
+        uint32x4_t const match_vec = vdupq_n_u32(match_cost);
+        uint32x4_t const mismatch_vec = vdupq_n_u32(mismatch_cost);
+        uint32x4_t const gap_vec = vdupq_n_u32(gap_cost);
+
+        // Row 0: the empty query prefix against every candidate prefix is a run of `column` gaps, identical
+        // across lanes (later masked per-lane at latch time by reading each lane's own final column).
+        for (size_t column = 0; column <= longest_candidate; ++column)
+            vst1q_u32(previous_row + column * candidate_lanes_k,
+                      vdupq_n_u32(static_cast<u32_t>(column * gap_cost)));
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            uint32x4_t const query_char_vec = vdupq_n_u32(static_cast<u32_t>((u8_t)query[query_position - 1]));
+            vst1q_u32(current_row, vdupq_n_u32(static_cast<u32_t>(query_position * gap_cost)));
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                uint8x8_t const candidate_chars_u8_vec = vld1_u8((u8_t const *)candidates.position(column - 1));
+                uint16x8_t const candidate_chars_u16_vec = vmovl_u8(candidate_chars_u8_vec);
+                uint32x4_t const candidate_chars_vec = vmovl_u16(vget_low_u16(candidate_chars_u16_vec));
+                uint32x4_t const diagonal_vec = vld1q_u32(previous_row + (column - 1) * candidate_lanes_k);
+                uint32x4_t const deletion_source_vec = vld1q_u32(previous_row + column * candidate_lanes_k);
+                uint32x4_t const insertion_source_vec = vld1q_u32(current_row + (column - 1) * candidate_lanes_k);
+
+                // Widen the 4 candidate bytes to `u32` and compare against the broadcast query character so the mask
+                // is a full-width `0xFFFFFFFF` (match) / `0x00000000` (mismatch); `vbslq_u32` then selects `match` on
+                // equal lanes and `mismatch` on the rest as the diagonal substitution penalty.
+                uint32x4_t const equal_u32_vec = vceqq_u32(query_char_vec, candidate_chars_vec);
+                uint32x4_t const substitution_addend_vec = vbslq_u32(equal_u32_vec, match_vec, mismatch_vec);
+                uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
+                uint32x4_t const cost_if_deletion_vec = vaddq_u32(deletion_source_vec, gap_vec);
+                uint32x4_t const cost_if_insertion_vec = vaddq_u32(insertion_source_vec, gap_vec);
+                uint32x4_t const cell_score_vec =
+                    vminq_u32(cost_if_substitution_vec, vminq_u32(cost_if_deletion_vec, cost_if_insertion_vec));
+                vst1q_u32(current_row + column * candidate_lanes_k, cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
  *  @brief Inter-sequence NEON walker: one @b rune (UTF-32) query against up to 8 rune candidates packed
  *         one-per-lane, unit-cost Levenshtein with 16-bit cells.
  *
@@ -3935,6 +4054,256 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     }
 };
 
+/**
+ *  @brief Inter-sequence NEON walker: one query against up to 4 candidates packed one-per-lane, weighted
+ *         (32 x 32) substitution Needleman-Wunsch / Smith-Waterman with signed 32-bit cells. Maximization over
+ *         `vmaxq_s32`.
+ *
+ *  Width-mirror of the 8-lane `i16` weighted walker, widened to `i32` cells so each `int32x4_t` holds 4 lanes. The
+ *  candidate characters remain `char`/`u8`: only the low 4 of every loaded column carry live candidates, so the
+ *  per-column class cache stores 4 `u8` classes and the per-cell substitution costs (gathered as `i8` by the shared
+ *  table lookup) sign-extend through the `vmovl` chain into 4 `i32` cells. Halving the lane count to 4 doubles the
+ *  representable score range to the signed `i32` window, so this serves candidates whose reachable scores exceed the
+ *  `i16` contract while staying within `[-2147483648, 2147483647]` global (`[0, 2147483647]` local). Linear and affine
+ *  gaps, global and local, all share this body exactly as the `i16` sibling does.
+ *
+ *  @note Signed `i32` cells; valid while every reachable score stays within the caller's contracted `i32` range.
+ *  @note Requires Arm NEON CPUs.
+ */
+template <typename gap_costs_type_, sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
+struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_, sz_cap_neon_k,
+                             4, void> {
+
+    using char_t = char;
+    using score_t = i32_t;
+    using substituter_t = error_costs_32x32_t;
+    using gap_costs_t = gap_costs_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = sz_cap_neon_k;
+    static constexpr size_t candidate_lanes_k = 4;
+    static constexpr bool is_affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
+    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+
+    // The signed `i32` recurrence hardcodes `vmaxq_s32`; minimization would need a different blend.
+    static_assert(objective_ == sz_maximize_score_k,
+                  "The weighted candidate-lane kernel only implements score maximization (Needleman-Wunsch / "
+                  "Smith-Waterman).");
+
+    substituter_t substituter_ {};
+    gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Scratch holds the score rows of `longest_candidate + 1` lane-vectors (4 `i32` cells each), plus one
+     *      cached candidate-class lane-vector (4 `u8`) per candidate position. The linear gap needs two score rows;
+     *      the affine gap needs two more deletion-track rows (the insertion track is a running per-lane register).
+     */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        // One extra lane-vector pads the class cache so the per-column `vld1_u8` (8 bytes) on the final column,
+        // which only consumes its low 4 lanes, never reads past the buffer end.
+        size_t const class_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(u8_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous score row
+        amount += score_row_bytes; // current score row
+        if constexpr (is_affine_k) {
+            amount += score_row_bytes; // previous deletion-track row (F_up)
+            amount += score_row_bytes; // current deletion-track row (F)
+        }
+        amount += class_bytes; // cached candidate classes
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 4 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Carve the score rows (and, for affine, the deletion-track rows) from the byte span, then the class cache.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+        score_t *previous_deletes = nullptr;
+        score_t *current_deletes = nullptr;
+        u8_t *candidate_classes;
+        if constexpr (is_affine_k) {
+            previous_deletes = current_row + row_stride;
+            current_deletes = previous_deletes + row_stride;
+            candidate_classes = reinterpret_cast<u8_t *>(current_deletes + row_stride);
+        }
+        else { candidate_classes = reinterpret_cast<u8_t *>(current_row + row_stride); }
+
+        // The (32 x 32) cost matrix is symmetric across the two operand orderings here, so no transpose is needed:
+        // the query class is the first operand and the candidate class the second, matching `class_substitution_costs`.
+        substitution_lookup_neon_t lookup;
+        lookup.reload_classes(substituter_.byte_to_class);
+        lookup.reload_costs(substituter_.class_substitution_costs, false);
+
+        // Pre-classify every candidate column once; the 4 candidate bytes per column are loop-invariant in rows.
+        // Only the low 4 lanes carry live candidates: we classify a 16-lane vector and store its low 8 classes at the
+        // 4-wide column stride. Successive columns overwrite the spilled high 4 lanes with their own low 4; the padded
+        // class cache (see `scratch_space_needed`) absorbs the final column's spill.
+        for (size_t column = 0; column < longest_candidate; ++column) {
+            uint8x8_t const candidate_chars_low = vld1_u8((u8_t const *)candidates.position(column));
+            uint8x16_t const candidate_chars_vec = vcombine_u8(candidate_chars_low, vdup_n_u8(0));
+            uint8x16_t const candidate_classes_vec = lookup.classify16(candidate_chars_vec);
+            vst1_u8(candidate_classes + column * candidate_lanes_k, vget_low_u8(candidate_classes_vec));
+        }
+
+        int32x4_t const zero_vec = vdupq_n_s32(0);
+        // Gap-cost broadcasts: linear keeps a single `gap`, affine keeps `open` / `extend`. `gap` doubles as `open`
+        // (with `extend` zero) so the boundary fills and the local-affine sentinel share one expression per variant.
+        [[maybe_unused]] int32x4_t gap_vec {};
+        [[maybe_unused]] int32x4_t open_vec {};
+        [[maybe_unused]] int32x4_t extend_vec {};
+        error_cost_t open = 0;
+        error_cost_t extend = 0;
+        if constexpr (is_affine_k) {
+            open = gap_costs_.open;
+            extend = gap_costs_.extend;
+            open_vec = vdupq_n_s32(static_cast<i32_t>(open));
+            extend_vec = vdupq_n_s32(static_cast<i32_t>(extend));
+        }
+        else {
+            open = gap_costs_.open_or_extend;
+            gap_vec = vdupq_n_s32(static_cast<i32_t>(open));
+        }
+        // The discarded gap-track sentinel for local affine: extending it never beats opening fresh.
+        [[maybe_unused]] int32x4_t const sentinel_vec = vdupq_n_s32(static_cast<i32_t>(open + extend));
+
+        // Per-lane candidate lengths gate the local running-maximum so a shorter candidate's padded columns are
+        // excluded; the global latch reads each lane's own final column instead and needs neither.
+        [[maybe_unused]] alignas(16) i32_t lane_lengths[candidate_lanes_k] = {0};
+        [[maybe_unused]] int32x4_t lane_lengths_vec = zero_vec;
+        [[maybe_unused]] int32x4_t running_max_vec = zero_vec;
+        if constexpr (is_local_k) {
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+                lane_lengths[lane_index] = static_cast<i32_t>(candidates.lengths[lane_index]);
+            lane_lengths_vec = vld1q_s32(lane_lengths);
+        }
+
+        // Row 0 (boundary). Local: the boundary row and column are zero (an alignment may begin at any cell). Global:
+        // the empty query prefix against every candidate prefix is an all-gap run.
+        for (size_t column = 0; column <= longest_candidate; ++column) {
+            if constexpr (is_local_k) {
+                vst1q_s32(previous_row + column * candidate_lanes_k, zero_vec);
+                if constexpr (is_affine_k)
+                    vst1q_s32(previous_deletes + column * candidate_lanes_k, sentinel_vec);
+            }
+            else if constexpr (is_affine_k) {
+                // Column 0 is 0; column j (>= 1) costs `open + extend * (j - 1)`. The deletion track is seeded with
+                // the discarded `open + extend + boundary` sentinel so the first vertical gap in row 1 pays `open`.
+                i32_t const boundary = static_cast<i32_t>(column ? open + extend * (i32_t)(column - 1) : 0);
+                vst1q_s32(previous_row + column * candidate_lanes_k, vdupq_n_s32(boundary));
+                vst1q_s32(previous_deletes + column * candidate_lanes_k,
+                          vdupq_n_s32(static_cast<i32_t>(open + extend + boundary)));
+            }
+            else {
+                // Linear: a run of `gap * column`, identical across lanes (masked per-lane at latch time).
+                vst1q_s32(previous_row + column * candidate_lanes_k,
+                          vdupq_n_s32(static_cast<i32_t>(open * (i32_t)column)));
+            }
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            // The query character is fixed for the whole row, so its class is scalar and broadcast across lanes.
+            u8_t const query_class = substituter_.byte_to_class[(u8_t)query[query_position - 1]];
+            uint8x16_t const query_class_vec = vdupq_n_u8(query_class);
+
+            [[maybe_unused]] int32x4_t running_inserts_vec = zero_vec;
+            // Column 0 (left boundary). Local: zero. Global linear: `gap * query_position`. Global affine: the
+            // all-deletion cell `open + extend * (query_position - 1)`; the insertion track resets to the sentinel.
+            if constexpr (is_local_k) {
+                vst1q_s32(current_row, zero_vec);
+                if constexpr (is_affine_k) {
+                    vst1q_s32(current_deletes, sentinel_vec);
+                    running_inserts_vec = sentinel_vec;
+                }
+            }
+            else if constexpr (is_affine_k) {
+                i32_t const row_boundary = static_cast<i32_t>(open + extend * (i32_t)(query_position - 1));
+                vst1q_s32(current_row, vdupq_n_s32(row_boundary));
+                vst1q_s32(current_deletes, vdupq_n_s32(static_cast<i32_t>(open + extend + row_boundary)));
+                running_inserts_vec = vdupq_n_s32(static_cast<i32_t>(open + extend + row_boundary));
+            }
+            else { vst1q_s32(current_row, vdupq_n_s32(static_cast<i32_t>(open * (i32_t)query_position))); }
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                // Only the low 4 lanes carry live classes; the `vld1_u8` reads 8 bytes (a padded class lane-vector
+                // backs the final column's over-read) and the `vmovl` chain discards the high 4 lanes.
+                uint8x8_t const candidate_classes_low =
+                    vld1_u8(candidate_classes + (column - 1) * candidate_lanes_k);
+                uint8x16_t const candidate_classes_vec = vcombine_u8(candidate_classes_low, vdup_n_u8(0));
+                int32x4_t const diagonal_vec = vld1q_s32(previous_row + (column - 1) * candidate_lanes_k);
+                int32x4_t const up_vec = vld1q_s32(previous_row + column * candidate_lanes_k);
+                int32x4_t const left_vec = vld1q_s32(current_row + (column - 1) * candidate_lanes_k);
+
+                int32x4_t cost_if_gap_vec;
+                if constexpr (is_affine_k) {
+                    int32x4_t const up_deletes_vec = vld1q_s32(previous_deletes + column * candidate_lanes_k);
+                    // Gotoh deletion track (vertical): open a gap from the cell above, or extend the running deletion.
+                    int32x4_t const delete_vec =
+                        vmaxq_s32(vaddq_s32(up_vec, open_vec), vaddq_s32(up_deletes_vec, extend_vec));
+                    // Gotoh insertion track (horizontal): open a gap from the cell to the left, or extend the running one.
+                    int32x4_t const insert_vec =
+                        vmaxq_s32(vaddq_s32(left_vec, open_vec), vaddq_s32(running_inserts_vec, extend_vec));
+                    running_inserts_vec = insert_vec;
+                    vst1q_s32(current_deletes + column * candidate_lanes_k, delete_vec);
+                    cost_if_gap_vec = vmaxq_s32(delete_vec, insert_vec);
+                }
+                else { cost_if_gap_vec = vaddq_s32(vmaxq_s32(up_vec, left_vec), gap_vec); }
+
+                // Gather 16 substitution costs and sign-extend the low 4 `i8` lanes through the `vmovl` chain into 4
+                // `i32` cells (`i8` -> `i16` -> `i32`).
+                int8x16_t const cost_i8_vec = lookup.lookup16(query_class_vec, candidate_classes_vec);
+                int16x8_t const cost_i16_vec = vmovl_s8(vget_low_s8(cost_i8_vec));
+                int32x4_t const cost_i32_vec = vmovl_s16(vget_low_s16(cost_i16_vec));
+
+                int32x4_t const cost_if_substitution_vec = vaddq_s32(diagonal_vec, cost_i32_vec);
+                int32x4_t cell_score_vec = vmaxq_s32(cost_if_substitution_vec, cost_if_gap_vec);
+                if constexpr (is_local_k) cell_score_vec = vmaxq_s32(zero_vec, cell_score_vec);
+                vst1q_s32(current_row + column * candidate_lanes_k, cell_score_vec);
+
+                if constexpr (is_local_k) {
+                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
+                    int32x4_t const column_live =
+                        vcgtq_s32(lane_lengths_vec, vdupq_n_s32(static_cast<i32_t>(column - 1)));
+                    int32x4_t const masked_cell_vec = vandq_s32(cell_score_vec, column_live);
+                    running_max_vec = vmaxq_s32(running_max_vec, masked_cell_vec);
+                }
+            }
+            trivial_swap(previous_row, current_row);
+            if constexpr (is_affine_k) trivial_swap(previous_deletes, current_deletes);
+        }
+
+        if constexpr (is_local_k) {
+            alignas(16) i32_t final_max[candidate_lanes_k];
+            vst1q_s32(final_max, running_max_vec);
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+                result_lanes[lane_index] = final_max[lane_index];
+        }
+        else {
+            // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+                size_t const candidate_length = candidates.lengths[lane_index];
+                result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+            }
+        }
+        return status_t::success_k;
+    }
+};
+
 #pragma endregion - Weighted Candidate-Lane Walker
 
 /**
@@ -4066,6 +4435,151 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
                 uint16x8_t const cell_score_vec = vminq_u16(cost_if_substitution_vec, cost_if_gap_vec);
                 vst1q_u16(vertical_row + column * candidate_lanes_k, vertical_vec);
                 vst1q_u16(current_row + column * candidate_lanes_k, cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence NEON walker: one query against up to 4 candidates packed one-per-lane, unit-substitution
+ *         @b affine-gap Levenshtein with unsigned 32-bit cells. Minimization over `vminq_u32`.
+ *
+ *  Width-mirror of the 8-lane affine `u16` walker, widened to `u32` cells so each `uint32x4_t` holds 4 lanes. The
+ *  diagonal term keeps the `match`/`mismatch` blend (a `vceqq_u32` mask over the 4 candidate bytes widened to `u32`,
+ *  selecting `match` on equal lanes and `mismatch` on the rest), and the gap term keeps the branchless Gotoh E/F
+ *  tracks over `vminq_u32` so the recurrence stays in non-negative distance space:
+ *      F[column] = min(M_up + open,   F_up + extend)        // vertical track: a gap in the candidate
+ *      E         = min(M_left + open, E_left + extend)       // horizontal track: a gap in the query
+ *      M[column] = min(M_diagonal + substitution, min(E, F))
+ *  The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
+ *  cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary. A
+ *  large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *  Halving the lane count to 4 quadruples the representable score range to the `u32` window, serving candidates whose
+ *  reachable scores exceed the `u16` contract.
+ *
+ *  @note The cells are unsigned `u32`, so the kernel is only valid while every reachable score - plus the
+ *      `discard_bias` headroom - stays below 4294967295; enforcing that bound is the caller's dispatch contract.
+ *  @note Requires Arm NEON CPUs.
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_neon_k, 4, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = affine_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_neon_k;
+    static constexpr size_t candidate_lanes_k = 4;
+
+    // The `u32` lane recurrence hardcodes `vminq_u32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit affine candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    affine_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds three `u32` rows of `longest_candidate + 1` lane-vectors: previous/current M plus the F. */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous M row
+        amount += score_row_bytes; // current M row
+        amount += score_row_bytes; // F (vertical gap) row, carried across rows
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 4 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Three row buffers carved from the byte span; each lane-vector lives at `row + column * 4`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+        score_t *vertical_row = current_row + row_stride;
+
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const open = static_cast<score_t>(gap_costs_.open);
+        score_t const extend = static_cast<score_t>(gap_costs_.extend);
+        uint32x4_t const match_vec = vdupq_n_u32(match_cost);
+        uint32x4_t const mismatch_vec = vdupq_n_u32(mismatch_cost);
+        uint32x4_t const open_vec = vdupq_n_u32(open);
+        uint32x4_t const extend_vec = vdupq_n_u32(extend);
+        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
+        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u32`.
+        uint32x4_t const discard_bias_vec = vdupq_n_u32(static_cast<u32_t>(2000000000));
+
+        // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
+        // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
+        vst1q_u32(previous_row, vdupq_n_u32(0));
+        vst1q_u32(vertical_row, discard_bias_vec);
+        for (size_t column = 1; column <= longest_candidate; ++column) {
+            uint32x4_t const boundary_vec =
+                vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(column - 1)));
+            vst1q_u32(previous_row + column * candidate_lanes_k, boundary_vec);
+            vst1q_u32(vertical_row + column * candidate_lanes_k, vaddq_u32(discard_bias_vec, boundary_vec));
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            uint32x4_t const query_char_vec = vdupq_n_u32(static_cast<u32_t>((u8_t)query[query_position - 1]));
+
+            // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
+            // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
+            uint32x4_t const left_boundary_vec =
+                vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(query_position - 1)));
+            vst1q_u32(current_row, left_boundary_vec);
+            uint32x4_t horizontal_vec = vaddq_u32(discard_bias_vec, left_boundary_vec);
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                uint8x8_t const candidate_chars_u8_vec = vld1_u8((u8_t const *)candidates.position(column - 1));
+                uint16x8_t const candidate_chars_u16_vec = vmovl_u8(candidate_chars_u8_vec);
+                uint32x4_t const candidate_chars_vec = vmovl_u16(vget_low_u16(candidate_chars_u16_vec));
+                uint32x4_t const diagonal_vec = vld1q_u32(previous_row + (column - 1) * candidate_lanes_k);
+                uint32x4_t const up_vec = vld1q_u32(previous_row + column * candidate_lanes_k);
+                uint32x4_t const left_vec = vld1q_u32(current_row + (column - 1) * candidate_lanes_k);
+                uint32x4_t const up_vertical_vec = vld1q_u32(vertical_row + column * candidate_lanes_k);
+
+                // Widen the 4 candidate bytes to `u32` and compare against the broadcast query character so the mask
+                // is a full-width `0xFFFFFFFF` (match) / `0x00000000` (mismatch); `vbslq_u32` then selects `match` on
+                // equal lanes and `mismatch` on the rest as the diagonal substitution penalty.
+                uint32x4_t const equal_u32_vec = vceqq_u32(query_char_vec, candidate_chars_vec);
+                uint32x4_t const substitution_addend_vec = vbslq_u32(equal_u32_vec, match_vec, mismatch_vec);
+                uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
+
+                // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
+                uint32x4_t const vertical_vec =
+                    vminq_u32(vaddq_u32(up_vec, open_vec), vaddq_u32(up_vertical_vec, extend_vec));
+                horizontal_vec = vminq_u32(vaddq_u32(left_vec, open_vec), vaddq_u32(horizontal_vec, extend_vec));
+                uint32x4_t const cost_if_gap_vec = vminq_u32(vertical_vec, horizontal_vec);
+
+                uint32x4_t const cell_score_vec = vminq_u32(cost_if_substitution_vec, cost_if_gap_vec);
+                vst1q_u32(vertical_row + column * candidate_lanes_k, vertical_vec);
+                vst1q_u32(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
         }

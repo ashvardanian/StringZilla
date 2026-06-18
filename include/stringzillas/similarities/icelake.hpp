@@ -2316,8 +2316,7 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
             _mm512_storeu_si512(current_row,
                                 _mm512_set1_epi16(static_cast<short>(static_cast<u16_t>(query_position * gap_cost))));
             for (size_t column = 1; column <= longest_candidate; ++column) {
-                __m256i const candidate_chars_vec =
-                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(candidates.position(column - 1)));
+                __m256i const candidate_chars_vec = _mm256_loadu_epi8(candidates.position(column - 1));
                 __m512i const diagonal_vec = _mm512_loadu_si512(previous_row + (column - 1) * candidate_lanes_k);
                 __m512i const deletion_source_vec = _mm512_loadu_si512(previous_row + column * candidate_lanes_k);
                 __m512i const insertion_source_vec = _mm512_loadu_si512(current_row + (column - 1) * candidate_lanes_k);
@@ -2332,6 +2331,119 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
                 __m512i const cell_score_vec = _mm512_min_epu16(
                     cost_if_substitution_vec, _mm512_min_epu16(cost_if_deletion_vec, cost_if_insertion_vec));
                 _mm512_storeu_si512(current_row + column * candidate_lanes_k, cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence Ice Lake walker: one query against up to 16 candidates packed one-per-lane, 32-bit cells.
+ *
+ *  Width-twin of the 32-lane uniform `u16` linear walker, widened to `u32` cells so each `__m512i` holds 16 lanes.
+ *  Only the low 16 candidate bytes are live, so they load as a 128-bit `__m128i` and compare against the broadcast
+ *  query character with `_mm_cmpeq_epi8_mask`, yielding a `__mmask16` that selects `match` on equal lanes and
+ *  `mismatch` on the rest as the diagonal substitution penalty, while deletion and insertion each add the uniform
+ *  `gap` cost. The recurrence `cell = min(substitution, min(deletion, insertion))` advances all 16 lanes in lockstep
+ *  over `_mm512_min_epu32`. Used when the worst-case score escapes the `u16` walker's 65535 range but stays below
+ *  the much wider `u32` ceiling; the unit-cost case is handled by the Myers fast path and never reaches here.
+ *
+ *  @note The cells are `u32`, so the kernel is only valid while every reachable score stays below 2^32 - 1; the
+ *      longest reachable cell is the all-gap path `max(query, candidate) * gap`. Enforcing that bound (a
+ *      cost-dependent length limit) is the caller's dispatch contract; the kernel performs no runtime range check.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_icelake_k, 16, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = linear_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
+    static constexpr size_t candidate_lanes_k = 16;
+
+    // The `u32` lane recurrence hardcodes `_mm512_min_epu32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds two score rows of `longest_candidate + 1` lane-vectors (16 `u32` cells each). */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += row_bytes; // previous row
+        amount += row_bytes; // current row
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 16 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Two row buffers carved from the byte span; each lane-vector lives at `row + column * 16`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const gap_cost = static_cast<score_t>(gap_costs_.open_or_extend);
+        __m512i const match_vec = _mm512_set1_epi32(static_cast<int>(match_cost));
+        __m512i const mismatch_vec = _mm512_set1_epi32(static_cast<int>(mismatch_cost));
+        __m512i const gap_vec = _mm512_set1_epi32(static_cast<int>(gap_cost));
+
+        // Row 0: the empty query prefix against every candidate prefix is a run of `column` gaps, identical
+        // across lanes (later masked per-lane at latch time by reading each lane's own final column).
+        for (size_t column = 0; column <= longest_candidate; ++column)
+            _mm512_storeu_epi32(previous_row + column * candidate_lanes_k,
+                                _mm512_set1_epi32(static_cast<int>(static_cast<u32_t>(column * gap_cost))));
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            __m128i const query_char_vec = _mm_set1_epi8(query[query_position - 1]);
+            _mm512_storeu_epi32(current_row,
+                                _mm512_set1_epi32(static_cast<int>(static_cast<u32_t>(query_position * gap_cost))));
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                __m128i const candidate_chars_vec = _mm_loadu_epi8(candidates.position(column - 1));
+                __m512i const diagonal_vec = _mm512_loadu_epi32(previous_row + (column - 1) * candidate_lanes_k);
+                __m512i const deletion_source_vec = _mm512_loadu_epi32(previous_row + column * candidate_lanes_k);
+                __m512i const insertion_source_vec = _mm512_loadu_epi32(current_row + (column - 1) * candidate_lanes_k);
+
+                // `cmpeq` yields a `__mmask16` set on equal lanes; the mask blend selects `match` on those lanes and
+                // `mismatch` on the rest as the diagonal substitution penalty.
+                __mmask16 const equal_mask = _mm_cmpeq_epi8_mask(query_char_vec, candidate_chars_vec);
+                __m512i const mismatch_addend_vec = _mm512_mask_blend_epi32(equal_mask, mismatch_vec, match_vec);
+                __m512i const cost_if_substitution_vec = _mm512_add_epi32(diagonal_vec, mismatch_addend_vec);
+                __m512i const cost_if_deletion_vec = _mm512_add_epi32(deletion_source_vec, gap_vec);
+                __m512i const cost_if_insertion_vec = _mm512_add_epi32(insertion_source_vec, gap_vec);
+                __m512i const cell_score_vec = _mm512_min_epu32(
+                    cost_if_substitution_vec, _mm512_min_epu32(cost_if_deletion_vec, cost_if_insertion_vec));
+                _mm512_storeu_epi32(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
         }
@@ -2452,8 +2564,7 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
             __m512i horizontal_vec = _mm512_add_epi16(discard_bias_vec, left_boundary_vec);
 
             for (size_t column = 1; column <= longest_candidate; ++column) {
-                __m256i const candidate_chars_vec =
-                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(candidates.position(column - 1)));
+                __m256i const candidate_chars_vec = _mm256_loadu_epi8(candidates.position(column - 1));
                 __m512i const diagonal_vec = _mm512_loadu_si512(previous_row + (column - 1) * candidate_lanes_k);
                 __m512i const up_vec = _mm512_loadu_si512(previous_row + column * candidate_lanes_k);
                 __m512i const left_vec = _mm512_loadu_si512(current_row + (column - 1) * candidate_lanes_k);
@@ -2475,6 +2586,148 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
                 __m512i const cell_score_vec = _mm512_min_epu16(cost_if_substitution_vec, cost_if_gap_vec);
                 _mm512_storeu_si512(vertical_row + column * candidate_lanes_k, vertical_vec);
                 _mm512_storeu_si512(current_row + column * candidate_lanes_k, cell_score_vec);
+            }
+            trivial_swap(previous_row, current_row);
+        }
+
+        // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+            size_t const candidate_length = candidates.lengths[lane_index];
+            result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence Ice Lake walker: one query against up to 16 candidates packed one-per-lane, unit-class
+ *         @b affine-gap Levenshtein distance, 32-bit unsigned cells. Distance minimization only.
+ *
+ *  Width-twin of the 32-lane uniform `u16` affine walker, widened to `u32` cells so each `__m512i` holds 16 lanes.
+ *  The diagonal substitution term is the same unit-class blend (a `_mm_cmpeq_epi8_mask` over the 16 live candidate
+ *  bytes selecting the `match` cost on equal lanes and `mismatch` on the rest), and the single gap term is the
+ *  branchless Gotoh E/F tracks over `_mm512_min_epu32` so the recurrence stays in non-negative distance space:
+ *      F[column] = min(M_up + open,   F_up + extend)        // vertical track: a gap in the candidate
+ *      E         = min(M_left + open, E_left + extend)       // horizontal track: a gap in the query
+ *      M[column] = min(M_diagonal + substitution, min(E, F))
+ *  The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
+ *  cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary. A
+ *  large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *
+ *  @note The cells are unsigned `u32`, so the kernel is only valid while every reachable score - plus the
+ *      `discard_bias` headroom - stays below 2^32 - 1; enforcing that bound is the caller's dispatch contract.
+ *  @note Requires Intel Ice Lake generation CPUs or newer (AVX-512).
+ */
+template <sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_gap_costs_t, objective_,
+                             sz_similarity_global_k, sz_cap_icelake_k, 16, void> {
+
+    using char_t = char;
+    using score_t = u32_t;
+    using substituter_t = uniform_substitution_costs_t;
+    using gap_costs_t = affine_gap_costs_t;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
+    static constexpr size_t candidate_lanes_k = 16;
+
+    // The `u32` lane recurrence hardcodes `_mm512_min_epu32`; maximization would need a different blend.
+    static_assert(objective_ == sz_minimize_distance_k,
+                  "The 32-bit affine candidate-lane kernel only implements distance minimization (Levenshtein).");
+
+    substituter_t substituter_ {};
+    affine_gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, affine_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
+
+    /** @brief Scratch holds three `u32` rows of `longest_candidate + 1` lane-vectors: previous/current M plus the F. */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous M row
+        amount += score_row_bytes; // current M row
+        amount += score_row_bytes; // F (vertical gap) row, carried across rows
+        return amount;
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 16 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Three row buffers carved from the byte span; each lane-vector lives at `row + column * 16`.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+        score_t *vertical_row = current_row + row_stride;
+
+        score_t const match_cost = static_cast<score_t>(substituter_.match);
+        score_t const mismatch_cost = static_cast<score_t>(substituter_.mismatch);
+        score_t const open = static_cast<score_t>(gap_costs_.open);
+        score_t const extend = static_cast<score_t>(gap_costs_.extend);
+        __m512i const match_vec = _mm512_set1_epi32(static_cast<int>(match_cost));
+        __m512i const mismatch_vec = _mm512_set1_epi32(static_cast<int>(mismatch_cost));
+        __m512i const open_vec = _mm512_set1_epi32(static_cast<int>(open));
+        __m512i const extend_vec = _mm512_set1_epi32(static_cast<int>(extend));
+        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
+        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u32`.
+        __m512i const discard_bias_vec = _mm512_set1_epi32(static_cast<int>(static_cast<u32_t>(2000000000)));
+
+        // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
+        // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
+        _mm512_storeu_epi32(previous_row, _mm512_setzero_si512());
+        _mm512_storeu_epi32(vertical_row, discard_bias_vec);
+        for (size_t column = 1; column <= longest_candidate; ++column) {
+            __m512i const boundary_vec =
+                _mm512_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend * (u32_t)(column - 1))));
+            _mm512_storeu_epi32(previous_row + column * candidate_lanes_k, boundary_vec);
+            _mm512_storeu_epi32(vertical_row + column * candidate_lanes_k,
+                                _mm512_add_epi32(discard_bias_vec, boundary_vec));
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            __m128i const query_char_vec = _mm_set1_epi8(query[query_position - 1]);
+
+            // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
+            // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
+            __m512i const left_boundary_vec =
+                _mm512_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend * (u32_t)(query_position - 1))));
+            _mm512_storeu_epi32(current_row, left_boundary_vec);
+            __m512i horizontal_vec = _mm512_add_epi32(discard_bias_vec, left_boundary_vec);
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                __m128i const candidate_chars_vec = _mm_loadu_epi8(candidates.position(column - 1));
+                __m512i const diagonal_vec = _mm512_loadu_epi32(previous_row + (column - 1) * candidate_lanes_k);
+                __m512i const up_vec = _mm512_loadu_epi32(previous_row + column * candidate_lanes_k);
+                __m512i const left_vec = _mm512_loadu_epi32(current_row + (column - 1) * candidate_lanes_k);
+                __m512i const up_vertical_vec = _mm512_loadu_epi32(vertical_row + column * candidate_lanes_k);
+
+                // `cmpeq` yields a `__mmask16` set on equal lanes; the mask blend selects `match` on those lanes and
+                // `mismatch` on the rest as the diagonal substitution penalty.
+                __mmask16 const equal_mask = _mm_cmpeq_epi8_mask(query_char_vec, candidate_chars_vec);
+                __m512i const substitution_addend_vec = _mm512_mask_blend_epi32(equal_mask, mismatch_vec, match_vec);
+                __m512i const cost_if_substitution_vec = _mm512_add_epi32(diagonal_vec, substitution_addend_vec);
+
+                // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
+                __m512i const vertical_vec = _mm512_min_epu32(_mm512_add_epi32(up_vec, open_vec),
+                                                              _mm512_add_epi32(up_vertical_vec, extend_vec));
+                horizontal_vec = _mm512_min_epu32(_mm512_add_epi32(left_vec, open_vec),
+                                                  _mm512_add_epi32(horizontal_vec, extend_vec));
+                __m512i const cost_if_gap_vec = _mm512_min_epu32(vertical_vec, horizontal_vec);
+
+                __m512i const cell_score_vec = _mm512_min_epu32(cost_if_substitution_vec, cost_if_gap_vec);
+                _mm512_storeu_epi32(vertical_row + column * candidate_lanes_k, vertical_vec);
+                _mm512_storeu_epi32(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
         }
@@ -6382,13 +6635,11 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
 
         // Pre-classify every candidate column once; the 32 candidate bytes per column are loop-invariant in rows.
         for (size_t column = 0; column < longest_candidate; ++column) {
-            __m256i const candidate_chars_vec =
-                _mm256_loadu_si256(reinterpret_cast<__m256i const *>(candidates.position(column)));
+            __m256i const candidate_chars_vec = _mm256_loadu_epi8(candidates.position(column));
             __m512i const candidate_chars_zvec = _mm512_castsi256_si512(candidate_chars_vec);
             __m256i const candidate_classes_vec =
                 classify32_(candidate_chars_zvec, byte_to_class_vecs, is_third_or_fourth_vec, is_second_or_fourth_vec);
-            _mm256_storeu_si256(reinterpret_cast<__m256i *>(candidate_classes + column * candidate_lanes_k),
-                                candidate_classes_vec);
+            _mm256_storeu_epi8(candidate_classes + column * candidate_lanes_k, candidate_classes_vec);
         }
 
         __m512i const zero_vec = _mm512_setzero_si512();
@@ -6437,8 +6688,8 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
         for (size_t query_position = 1; query_position <= query_length; ++query_position) {
             // The query character is fixed for the whole row, so its class and cost row are scalar.
             u8_t const query_class = substituter_.byte_to_class[(u8_t)query[query_position - 1]];
-            __m512i const cost_row_vec = _mm512_castsi256_si512(_mm256_loadu_si256(
-                reinterpret_cast<__m256i const *>(&substituter_.class_substitution_costs[query_class][0])));
+            __m512i const cost_row_vec =
+                _mm512_castsi256_si512(_mm256_loadu_epi8(&substituter_.class_substitution_costs[query_class][0]));
 
             // First column of this row. Local: zero (affine insertion track `(open + extend)`). Global linear:
             // `gap * row`. Global affine: `open + extend * (row - 1)`, insertion track discarded.
@@ -6458,8 +6709,8 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
             }
 
             for (size_t column = 1; column <= longest_candidate; ++column) {
-                __m256i const candidate_classes_vec = _mm256_loadu_si256(
-                    reinterpret_cast<__m256i const *>(candidate_classes + (column - 1) * candidate_lanes_k));
+                __m256i const candidate_classes_vec =
+                    _mm256_loadu_epi8(candidate_classes + (column - 1) * candidate_lanes_k);
                 __m512i const diagonal_vec = _mm512_loadu_si512(previous_row + (column - 1) * candidate_lanes_k);
 
                 // Gather the 32 substitution costs of this column from the resident query-class cost row, then
@@ -6520,6 +6771,308 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
 
         if constexpr (is_local_k) {
             alignas(64) i16_t final_max[candidate_lanes_k];
+            _mm512_store_si512(final_max, running_max_vec);
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+                result_lanes[lane_index] = final_max[lane_index];
+        }
+        else {
+            // Latch each live lane's result from its own final column; ragged lengths mean different columns per lane.
+            for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
+                size_t const candidate_length = candidates.lengths[lane_index];
+                result_lanes[lane_index] = previous_row[candidate_length * candidate_lanes_k + lane_index];
+            }
+        }
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Inter-sequence Ice Lake walker: one query against up to 16 candidates packed one-per-lane, weighted
+ *         Needleman-Wunsch / Smith-Waterman with 32-class substitution costs, 32-bit signed cells.
+ *
+ *  Width-twin of the 32-lane signed `i16` weighted walker, widened to `i32` cells so each `__m512i` holds 16 lanes.
+ *  ONE body per `i32` score-width, templated over `(gap_costs_type_, locality_, objective_)` and resolved at compile
+ *  time, collapsing the four explicit walkers (linear/affine x global/local). Only the low 16 candidate bytes are
+ *  live: they load as a 128-bit `__m128i`, classify through the same 256-entry `byte_to_class` table, index the
+ *  resident query-class cost row with a single `VPERMB`, and the 16 signed `i8` substitution costs sign-extend to
+ *  16 `i32` lanes via `_mm512_cvtepi8_epi32`. The objective is @b maximization, so the linear recurrence is
+ *  `cell = max(diag + substitution, max(up, left) + gap)` over signed `i32` cells with a (typically negative) gap.
+ *  Used when the worst-case score escapes the `i16` walker's `[-32768, 32767]` range but stays within `i32`.
+ *
+ *  When @p gap_costs_type_ is `affine_gap_costs_t` the linear single-`gap` step is replaced by the branchless Gotoh
+ *  recurrence carrying the `E`/`F` tracks, reproduced with raw `_mm512_max_epi32` / `_mm512_add_epi32`. When
+ *  @p locality_ is `sz_similarity_local_k` the cell clamps to zero (Smith-Waterman) through the substitution branch
+ *  in the affine case, the boundary row/column is zero, and a per-lane running maximum gated by each lane's
+ *  candidate length is the result rather than the bottom-right corner.
+ *
+ *  @note The cells are signed `i32`, so the kernel is only valid while every reachable score stays within
+ *      `[INT32_MIN, INT32_MAX]` (global) or `[0, INT32_MAX]` (local); enforcing that bound is the caller's dispatch
+ *      contract, the kernel performs no runtime range check.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_similarity_objective_t objective_>
+struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_,
+                             sz_cap_icelake_k, 16, void> {
+
+    using char_t = char;
+    using score_t = i32_t;
+    using substituter_t = error_costs_32x32_t;
+    using gap_costs_t = gap_costs_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = sz_cap_icelake_k;
+    static constexpr size_t candidate_lanes_k = 16;
+
+    /** @brief Compile-time switch between the linear single-gap and affine Gotoh `E`/`F`-track recurrences. */
+    static constexpr bool is_affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
+    /** @brief Compile-time switch between the global corner result and the local clamp + running-maximum. */
+    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+
+    static_assert(is_affine_k || is_same_type<gap_costs_type_, linear_gap_costs_t>::value,
+                  "The weighted candidate-lane kernel only supports linear and affine gap costs.");
+    // The signed `i32` recurrence hardcodes `_mm512_max_epi32`; minimization would need a different blend.
+    static_assert(objective_ == sz_maximize_score_k,
+                  "The weighted candidate-lane kernel only implements score maximization (Needleman-Wunsch / "
+                  "Smith-Waterman).");
+
+    substituter_t substituter_ {};
+    gap_costs_t gap_costs_ {};
+
+    candidate_lane_walker() noexcept {}
+    candidate_lane_walker(substituter_t subs, gap_costs_t gaps) noexcept : substituter_(subs), gap_costs_(gaps) {}
+
+    /**
+     *  @brief Scratch holds the score rows of `longest_candidate + 1` lane-vectors (16 `i32` cells each) plus one
+     *      cached candidate-class lane-vector (16 `u8`) per candidate position. The linear recurrence needs two score
+     *      rows (previous/current primary); the affine recurrence needs five (primary previous/current, deletion
+     *      track `F` previous/current, and the current insertion track `E`).
+     */
+    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
+        size_t const score_row_bytes = candidate_lanes_k * (longest_candidate + 1) * sizeof(score_t);
+        size_t const class_bytes = candidate_lanes_k * longest_candidate * sizeof(u8_t);
+        scratch_amount_t amount {specs.cache_line_width};
+        amount += score_row_bytes; // previous primary row
+        amount += score_row_bytes; // current primary row
+        if constexpr (is_affine_k) {
+            amount += score_row_bytes; // previous deletion track `F`
+            amount += score_row_bytes; // current deletion track `F`
+            amount += score_row_bytes; // current insertion track `E`
+        }
+        amount += class_bytes; // cached candidate classes
+        return amount;
+    }
+
+    /** @brief Linear single-step gap; `0` when the gap model is affine (the affine tracks are read instead). */
+    SZ_INLINE error_cost_t read_linear_gap_() const noexcept {
+        if constexpr (is_affine_k) { return (error_cost_t)0; }
+        else { return gap_costs_.open_or_extend; }
+    }
+
+    /** @brief Affine gap-open cost; `0` when the gap model is linear. */
+    SZ_INLINE error_cost_t read_affine_open_() const noexcept {
+        if constexpr (is_affine_k) { return gap_costs_.open; }
+        else { return (error_cost_t)0; }
+    }
+
+    /** @brief Affine gap-extend cost; `0` when the gap model is linear. */
+    SZ_INLINE error_cost_t read_affine_extend_() const noexcept {
+        if constexpr (is_affine_k) { return gap_costs_.extend; }
+        else { return (error_cost_t)0; }
+    }
+
+    /** @brief Maps the 16 live candidate bytes of one column to their classes via the 256-entry table. */
+    SZ_INLINE __m128i classify16_(__m512i const text_vec, __m512i const (&byte_to_class_vecs)[4],
+                                  __m512i const is_third_or_fourth_vec,
+                                  __m512i const is_second_or_fourth_vec) const noexcept {
+        __m512i const shuffled0 = _mm512_permutexvar_epi8(text_vec, byte_to_class_vecs[0]);
+        __m512i const shuffled1 = _mm512_permutexvar_epi8(text_vec, byte_to_class_vecs[1]);
+        __m512i const shuffled2 = _mm512_permutexvar_epi8(text_vec, byte_to_class_vecs[2]);
+        __m512i const shuffled3 = _mm512_permutexvar_epi8(text_vec, byte_to_class_vecs[3]);
+        __mmask64 const is_third_or_fourth = _mm512_test_epi8_mask(text_vec, is_third_or_fourth_vec);
+        __mmask64 const is_second_or_fourth = _mm512_test_epi8_mask(text_vec, is_second_or_fourth_vec);
+        __m512i const class_vec = _mm512_mask_blend_epi8(
+            is_third_or_fourth, _mm512_mask_blend_epi8(is_second_or_fourth, shuffled0, shuffled1),
+            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled2, shuffled3));
+        return _mm512_castsi512_si128(class_vec);
+    }
+
+    /**
+     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
+     *  @param[in] candidates Transposed block of up to 16 candidates (see `candidate_lanes_block`).
+     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
+     *      lane back to its candidate index for the strided result matrix.
+     */
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
+                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
+        sz_unused_(specs);
+        size_t const query_length = query.size();
+        size_t const longest_candidate = candidates.longest_candidate;
+        size_t const row_stride = candidate_lanes_k * (longest_candidate + 1);
+
+        // Carve the score rows (two for linear, five for affine), then a `u8` candidate-class cache, all contiguously
+        // from the over-reserved byte span.
+        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
+        score_t *current_row = previous_row + row_stride;
+        score_t *previous_deletes = nullptr;
+        score_t *current_deletes = nullptr;
+        score_t *current_inserts = nullptr;
+        u8_t *candidate_classes = nullptr;
+        if constexpr (is_affine_k) {
+            previous_deletes = current_row + row_stride;
+            current_deletes = previous_deletes + row_stride;
+            current_inserts = current_deletes + row_stride;
+            candidate_classes = reinterpret_cast<u8_t *>(current_inserts + row_stride);
+        }
+        else { candidate_classes = reinterpret_cast<u8_t *>(current_row + row_stride); }
+
+        // Load the 256-entry `byte_to_class` table for the 4x `VPERMB`-blend classifier.
+        __m512i byte_to_class_vecs[4];
+        byte_to_class_vecs[0] = _mm512_loadu_si512(substituter_.byte_to_class + 64 * 0);
+        byte_to_class_vecs[1] = _mm512_loadu_si512(substituter_.byte_to_class + 64 * 1);
+        byte_to_class_vecs[2] = _mm512_loadu_si512(substituter_.byte_to_class + 64 * 2);
+        byte_to_class_vecs[3] = _mm512_loadu_si512(substituter_.byte_to_class + 64 * 3);
+        __m512i const is_third_or_fourth_vec = _mm512_set1_epi8((char)0x80);
+        __m512i const is_second_or_fourth_vec = _mm512_set1_epi8((char)0x40);
+
+        // Pre-classify every candidate column once; the 16 live candidate bytes per column are loop-invariant in rows.
+        for (size_t column = 0; column < longest_candidate; ++column) {
+            __m128i const candidate_chars_vec = _mm_loadu_epi8(candidates.position(column));
+            __m512i const candidate_chars_zvec = _mm512_castsi128_si512(candidate_chars_vec);
+            __m128i const candidate_classes_vec =
+                classify16_(candidate_chars_zvec, byte_to_class_vecs, is_third_or_fourth_vec, is_second_or_fourth_vec);
+            _mm_storeu_epi8(candidate_classes + column * candidate_lanes_k, candidate_classes_vec);
+        }
+
+        __m512i const zero_vec = _mm512_setzero_si512();
+
+        // Gap costs: a single `gap` for linear, separate `open`/`extend` (with the discarded `(open + extend)` `E`/`F`
+        // boundary) for affine. Each member is read only on its own compile-time branch.
+        error_cost_t const gap = read_linear_gap_();
+        error_cost_t const gap_open = read_affine_open_();
+        error_cost_t const gap_extend = read_affine_extend_();
+        __m512i const gap_vec = _mm512_set1_epi32(static_cast<int>(gap));
+        __m512i const gap_open_vec = _mm512_set1_epi32(static_cast<int>(gap_open));
+        __m512i const gap_extend_vec = _mm512_set1_epi32(static_cast<int>(gap_extend));
+        __m512i const gap_boundary_vec = _mm512_set1_epi32(static_cast<int>(gap_open + gap_extend));
+
+        // Per-lane candidate lengths gate the local running-maximum so a shorter candidate's padded columns are excluded.
+        alignas(64) i32_t lane_lengths[candidate_lanes_k] = {0};
+        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
+            lane_lengths[lane_index] = static_cast<i32_t>(candidates.lengths[lane_index]);
+        __m512i const lane_lengths_vec = _mm512_load_si512(lane_lengths);
+        __m512i running_max_vec = zero_vec;
+
+        // Row 0 boundaries. Local: zero primary row (an alignment may begin anywhere), affine deletion track resets to
+        // `(open + extend)`. Global linear: `gap * column`. Global affine: `open + extend * (column - 1)` (and 0 corner),
+        // the deletion track `(open + extend)` higher in magnitude, discarding it.
+        for (size_t column = 0; column <= longest_candidate; ++column) {
+            if constexpr (is_local_k) {
+                _mm512_storeu_epi32(previous_row + column * candidate_lanes_k, zero_vec);
+                if constexpr (is_affine_k)
+                    _mm512_storeu_epi32(previous_deletes + column * candidate_lanes_k, gap_boundary_vec);
+            }
+            else if constexpr (is_affine_k) {
+                i32_t const score_boundary =
+                    column ? static_cast<i32_t>(gap_open + gap_extend * (i32_t)(column - 1)) : (i32_t)0;
+                i32_t const gap_boundary = static_cast<i32_t>((gap_open + gap_extend) + score_boundary);
+                _mm512_storeu_epi32(previous_row + column * candidate_lanes_k,
+                                    _mm512_set1_epi32(static_cast<int>(score_boundary)));
+                _mm512_storeu_epi32(previous_deletes + column * candidate_lanes_k,
+                                    _mm512_set1_epi32(static_cast<int>(gap_boundary)));
+            }
+            else {
+                _mm512_storeu_epi32(previous_row + column * candidate_lanes_k,
+                                    _mm512_set1_epi32(static_cast<int>(static_cast<i32_t>(gap * (i32_t)column))));
+            }
+        }
+
+        for (size_t query_position = 1; query_position <= query_length; ++query_position) {
+            // The query character is fixed for the whole row, so its class and cost row are scalar.
+            u8_t const query_class = substituter_.byte_to_class[(u8_t)query[query_position - 1]];
+            __m512i const cost_row_vec = _mm512_castsi256_si512(
+                _mm256_loadu_epi8(&substituter_.class_substitution_costs[query_class][0]));
+
+            // First column of this row. Local: zero (affine insertion track `(open + extend)`). Global linear:
+            // `gap * row`. Global affine: `open + extend * (row - 1)`, insertion track discarded.
+            if constexpr (is_local_k) {
+                _mm512_storeu_epi32(current_row, zero_vec);
+                if constexpr (is_affine_k) _mm512_storeu_epi32(current_inserts, gap_boundary_vec);
+            }
+            else if constexpr (is_affine_k) {
+                i32_t const row_score_boundary = static_cast<i32_t>(gap_open + gap_extend * (i32_t)(query_position - 1));
+                i32_t const row_gap_boundary = static_cast<i32_t>((gap_open + gap_extend) + row_score_boundary);
+                _mm512_storeu_epi32(current_row, _mm512_set1_epi32(static_cast<int>(row_score_boundary)));
+                _mm512_storeu_epi32(current_inserts, _mm512_set1_epi32(static_cast<int>(row_gap_boundary)));
+            }
+            else {
+                _mm512_storeu_epi32(current_row,
+                                    _mm512_set1_epi32(static_cast<int>(static_cast<i32_t>(gap * (i32_t)query_position))));
+            }
+
+            for (size_t column = 1; column <= longest_candidate; ++column) {
+                __m128i const candidate_classes_vec =
+                    _mm_loadu_epi8(candidate_classes + (column - 1) * candidate_lanes_k);
+                __m512i const diagonal_vec = _mm512_loadu_epi32(previous_row + (column - 1) * candidate_lanes_k);
+
+                // Gather the 16 substitution costs of this column from the resident query-class cost row, then
+                // sign-extend the 16 `i8` lanes into 16 `i32` cells.
+                __m128i const cost_i8_vec = _mm512_castsi512_si128(
+                    _mm512_permutexvar_epi8(_mm512_castsi128_si512(candidate_classes_vec), cost_row_vec));
+                __m512i const cost_i32_vec = _mm512_cvtepi8_epi32(cost_i8_vec);
+                __m512i const cost_if_substitution_vec = _mm512_add_epi32(diagonal_vec, cost_i32_vec);
+
+                __m512i cell_score_vec;
+                if constexpr (is_affine_k) {
+                    __m512i const up_score_vec = _mm512_loadu_epi32(previous_row + column * candidate_lanes_k);
+                    __m512i const left_score_vec = _mm512_loadu_epi32(current_row + (column - 1) * candidate_lanes_k);
+                    __m512i const up_delete_vec = _mm512_loadu_epi32(previous_deletes + column * candidate_lanes_k);
+                    __m512i const left_insert_vec =
+                        _mm512_loadu_epi32(current_inserts + (column - 1) * candidate_lanes_k);
+
+                    // Branchless Gotoh tracks: open a fresh gap from the orthogonal primary cell, or extend the track.
+                    __m512i const insert_vec = _mm512_max_epi32(_mm512_add_epi32(left_score_vec, gap_open_vec),
+                                                                _mm512_add_epi32(left_insert_vec, gap_extend_vec));
+                    __m512i const delete_vec = _mm512_max_epi32(_mm512_add_epi32(up_score_vec, gap_open_vec),
+                                                                _mm512_add_epi32(up_delete_vec, gap_extend_vec));
+                    if constexpr (is_local_k) {
+                        // The local reset enters through the substitution branch: `max(sub, 0)`, so the cell is
+                        // `max(E, F, max(sub, 0))` and stays clamped at or above zero.
+                        __m512i const substitution_or_reset_vec = _mm512_max_epi32(cost_if_substitution_vec, zero_vec);
+                        cell_score_vec =
+                            _mm512_max_epi32(substitution_or_reset_vec, _mm512_max_epi32(insert_vec, delete_vec));
+                    }
+                    else {
+                        cell_score_vec =
+                            _mm512_max_epi32(cost_if_substitution_vec, _mm512_max_epi32(insert_vec, delete_vec));
+                    }
+                    _mm512_storeu_epi32(current_inserts + column * candidate_lanes_k, insert_vec);
+                    _mm512_storeu_epi32(current_deletes + column * candidate_lanes_k, delete_vec);
+                }
+                else {
+                    __m512i const up_vec = _mm512_loadu_epi32(previous_row + column * candidate_lanes_k);
+                    __m512i const left_vec = _mm512_loadu_epi32(current_row + (column - 1) * candidate_lanes_k);
+                    __m512i const cost_if_gap_vec = _mm512_add_epi32(_mm512_max_epi32(up_vec, left_vec), gap_vec);
+                    cell_score_vec = _mm512_max_epi32(cost_if_substitution_vec, cost_if_gap_vec);
+                    if constexpr (is_local_k) cell_score_vec = _mm512_max_epi32(zero_vec, cell_score_vec);
+                }
+
+                _mm512_storeu_epi32(current_row + column * candidate_lanes_k, cell_score_vec);
+
+                if constexpr (is_local_k) {
+                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
+                    __mmask16 const column_live =
+                        _mm512_cmpgt_epi32_mask(lane_lengths_vec, _mm512_set1_epi32(static_cast<int>(column - 1)));
+                    running_max_vec =
+                        _mm512_mask_max_epi32(running_max_vec, column_live, running_max_vec, cell_score_vec);
+                }
+            }
+            trivial_swap(previous_row, current_row);
+            if constexpr (is_affine_k) trivial_swap(previous_deletes, current_deletes);
+        }
+
+        if constexpr (is_local_k) {
+            alignas(64) i32_t final_max[candidate_lanes_k];
             _mm512_store_si512(final_max, running_max_vec);
             for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index)
                 result_lanes[lane_index] = final_max[lane_index];
