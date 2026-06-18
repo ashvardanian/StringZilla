@@ -1826,16 +1826,34 @@ __host__ __device__ __forceinline__ u32_t levenshtein_task_dense_tier(cuda_simil
     return levenshtein_tier_device_k;
 }
 
+/**
+ *  @brief Dyadic length bucket `bit_width(length - 1)` for one task, mirroring the CPU `candidate_length_bucket_`.
+ *         Two lengths in one bucket differ by less than 2x, so radix-sorting on this field (instead of the raw
+ *         length) groups tasks into power-of-two length bands within a priority tier -> uniform-depth launches.
+ *         Host-portable: uses `__clzll` on device and the `sz_u64_clz` SWAR/intrinsic wrapper on the host.
+ */
+__host__ __device__ __forceinline__ u64_t levenshtein_length_dyadic_bucket(u64_t length) noexcept {
+    if (length <= 1) return 0;
+#ifdef __CUDA_ARCH__
+    return static_cast<u64_t>(64 - __clzll(static_cast<unsigned long long>(length - 1)));
+#else
+    return static_cast<u64_t>(64 - sz_u64_clz(static_cast<sz_u64_t>(length - 1)));
+#endif
+}
+
 /** @brief Packs one task into the MSB-ordered radix-sort key described above. */
 template <typename char_type_>
 __host__ __device__ __forceinline__ u64_t levenshtein_pack_tier_key(cuda_similarity_task<char_type_> const &task,
                                                                     u32_t original_index,
                                                                     levenshtein_tier_mode_t mode) noexcept {
     u64_t const priority = levenshtein_task_tier_priority(task, mode);
-    // Saturate (not wrap) so the ascending sub-sort stays monotonic in length: the size-generic Myers tier covers
-    // ANY shorter length, including beyond this field's range, and must never wrap below the `<= 64` word1 tasks.
+    // Bucket the length dyadically (`bit_width(L - 1)`) instead of using the raw length, so the ascending sub-sort
+    // groups tasks into power-of-two length bands - uniform launch depth - while staying monotonic. The bucket is
+    // already saturated by construction (it never exceeds ~bit_width(SZ_SIZE_MAX), far under the field width), and
+    // the size-generic Myers tier still sorts above the `<= 64` word1 tasks.
     u64_t const shorter_max = (1ull << levenshtein_shorter_length_bits_k) - 1ull;
-    u64_t const shorter = sz_min_of_two(static_cast<u64_t>(task.shorter.size()), shorter_max);
+    u64_t const shorter = sz_min_of_two(levenshtein_length_dyadic_bucket(static_cast<u64_t>(task.shorter.size())),
+                                        shorter_max);
     u64_t const index = original_index;
     u64_t key = 0;
     key |= priority << levenshtein_tier_priority_shift_k;
@@ -4003,8 +4021,10 @@ template <typename char_type_>
 __host__ __device__ __forceinline__ u64_t
 weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task, u32_t original_index) noexcept {
     u64_t const priority = weighted_task_dense_tier(task);
+    // Dyadic length bucket (see @ref levenshtein_length_dyadic_bucket) so both engine families bucket identically.
     u64_t const shorter_max = (1ull << levenshtein_shorter_length_bits_k) - 1ull;
-    u64_t const shorter = sz_min_of_two(static_cast<u64_t>(task.shorter.size()), shorter_max);
+    u64_t const shorter = sz_min_of_two(levenshtein_length_dyadic_bucket(static_cast<u64_t>(task.shorter.size())),
+                                        shorter_max);
     u64_t const index = original_index;
     u64_t key = 0;
     key |= priority << levenshtein_tier_priority_shift_k;
