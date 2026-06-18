@@ -1686,6 +1686,23 @@ void test_similarities_cross_product() {
                                                reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
     check_cross_product_cell_exact_<sz_size_t>(cuda_levenshtein(), unit_baseline, reuse_queries_generic,
                                                reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
+
+    // Weighted NW/SW on the device across the 129-512 length band, which now routes to the warp anti-diagonal
+    // kernel (the thread-per-pair batch tier was a local-memory pessimization there). Uniform mid-lengths and a
+    // mixed 1..512 set pin the rerouted band cell-by-cell against the serial oracle.
+    fuzzy_config_t const weighted_mid_200 {"ABC", /* batch */ 6, /* min */ 200, /* max */ 200};
+    fuzzy_config_t const weighted_mid_mixed {"ABC", /* batch */ 8, /* min */ 1, /* max */ 512};
+    fuzzy_config_t const weighted_candidates {"ABC", /* batch */ 40, /* min */ 1, /* max */ 512};
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, weighted_candidates,
+        cuda_executor_t {}, first_gpu_specs);
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_mixed, weighted_candidates,
+        cuda_executor_t {}, first_gpu_specs);
 #endif
 }
 

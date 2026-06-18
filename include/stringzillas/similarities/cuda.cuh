@@ -1585,12 +1585,14 @@ inline static constexpr unsigned register_text_limit_k = 128;
 /**
  *  @brief Max string length (chars) for the NW/SW @b thread-per-pair @b batch tier (above @ref register_text_limit_k).
  *
- *  Measured on H100: the NW/SW thread-per-pair scorer beats the tiled wavefront for every pair below ~512 (160 GCUPS
- *  @L<=256, 115 @512), then collapses as the per-thread DP row spills to local memory; the tiled wavefront is flat
- *  ~128 GCUPS at all lengths and wins from ~512 up. So the register tier (<=128) and this batch tier (<=512) both run
- *  thread-per-pair, and only pairs at/above this crossover are promoted to the tiled device wavefront. Tunable.
+ *  Re-measured on H100 (device-timed, blosum62): the thread-per-pair scorer's per-thread DP row spills to local
+ *  memory as soon as it exceeds the register tier, so the old wide batch tier collapsed to ~60-190 GCUPS over
+ *  160-512 chars, while the lane-split warp anti-diagonal kernel sustains ~420-660 there (3-7x faster). The batch
+ *  tier is therefore kept only as wide as the register tier: pairs longer than @ref register_text_limit_k route
+ *  straight to the warp kernel, and only the longest (@ref tiled_promotion_min_shorter_k) reach the tiled
+ *  device wavefront. Tunable.
  */
-inline static constexpr unsigned batch_text_limit_k = 512;
+inline static constexpr unsigned batch_text_limit_k = 128;
 
 /**
  *  @brief Shorter-length at/above which a pair is promoted from the warp tier to the @b device (tiled) tier.
