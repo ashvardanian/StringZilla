@@ -194,6 +194,17 @@ struct cuda_status_t {
     CUresult driver_error = CUDA_SUCCESS;
     float elapsed_milliseconds = 0.0;
 
+    /**
+     *  @brief Padding that pushes `sizeof(cuda_status_t)` past 16 bytes so the SysV ABI returns it in
+     *         memory (sret) rather than in the `RAX:RDX` register pair.
+     *
+     *  At exactly 16 bytes the struct is register-returned, and both NVCC 12.x and host g++ miscompile
+     *  the leading `status`/`cuda_error` eightbyte of large translation units (the elapsed-time eightbyte
+     *  survives) - the engine succeeds yet the caller reads a garbage status. Forcing the memory-return
+     *  class side-steps the codegen bug for every engine without touching the call sites.
+     */
+    sz_u64_t reserved_ = 0;
+
     inline operator status_t() const noexcept { return status; }
 };
 
