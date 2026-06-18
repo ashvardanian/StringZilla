@@ -572,7 +572,7 @@ struct horizontal_walker;
  *  candidate-lane kernel is validated against.
  *
  *  @tparam candidate_lanes_ Number of candidates packed side-by-side (64 for 8-bit cells, 32 for 16-bit).
- *  @sa `candidate_lanes_block_t`, `sz_packing_candidates_across_lanes_k`.
+ *  @sa `candidate_lanes_block`, `sz_packing_candidates_across_lanes_k`.
  */
 template <                                                       //
     typename char_or_rune_type_ = char,                          //
@@ -628,11 +628,11 @@ struct candidate_lane_walker<char_or_rune_type_, score_type_, substituter_type_,
 
     /**
      *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
-     *  @param[in] candidates Transposed block of up to `candidate_lanes_` candidates (see `candidate_lanes_block_t`).
+     *  @param[in] candidates Transposed block of up to `candidate_lanes_` candidates (see `candidate_lanes_block`).
      *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
      *      lane back to its candidate index for the strided result matrix.
      */
-    status_t operator()(span<char_t const> query, candidate_lanes_block_t<char_t> candidates, score_t *result_lanes,
+    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
                         scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
         sz_unused_(specs);
         error_cost_t const gap = gap_costs_.open_or_extend;
@@ -2125,21 +2125,57 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
     levenshtein_distance_myers() noexcept {}
 
-    /** @brief Byte offset of the bit-parallel `match_masks[words_count][256]` table. */
+    /**
+     *  @brief Largest @b shorter-side length whose per-word `vertical_positives` / `vertical_negatives` state fits
+     *      the on-stack arrays. Above this the generic path parks that state in scratch instead. Eight 64-bit words
+     *      mirrors the widest unrolled tier (512 runes) and the Ice Lake lockstep family.
+     */
+    static constexpr size_t stack_words_capacity_k = 8;
+
+    /** @brief Number of 64-bit words spanning a @p shorter_length-rune pattern, i.e. `ceil(shorter_length / 64)`. */
+    static constexpr size_t words_count_for(size_t shorter_length) noexcept { return (shorter_length + 63) / 64; }
+
+    /**
+     *  @brief Number of 64-bit words the dispatch in `operator()` actually allocates for a @p shorter_length-rune
+     *      pattern. The unrolled tiers round up to the next power of two (1/2/4/8 words for shorter <= 64/128/256/512)
+     *      so their templates line up with the Ice Lake lockstep family; the generic tier above 512 uses the exact
+     *      `ceil(shorter / 64)`. `layout()` must size the `Peq` table to this so the scratch never falls short.
+     */
+    static constexpr size_t dispatch_words_count_for(size_t shorter_length) noexcept {
+        return shorter_length <= 64    ? 1
+               : shorter_length <= 128 ? 2
+               : shorter_length <= 256 ? 4
+               : shorter_length <= 512 ? 8
+                                       : words_count_for(shorter_length);
+    }
+
+    /** @brief Byte offsets of this walker's scratch sub-buffers. */
     struct layout_t {
-        size_t match_masks = 0; // ? The per-word `Peq` tables (256 entries each).
-        size_t total = 0;       // ? Bytes this walker touches; doubles as its scratch-size estimate.
+        /** @brief The per-word `Peq` tables (256 entries each). */
+        size_t match_masks = 0;
+        /** @brief The generic path's per-word `vertical_positives` state (zero for the on-stack tiers). */
+        size_t vertical_positives = 0;
+        /** @brief The generic path's per-word `vertical_negatives` state (zero for the on-stack tiers). */
+        size_t vertical_negatives = 0;
+        /** @brief Bytes this walker touches; doubles as its scratch-size estimate. */
+        size_t total = 0;
         constexpr operator size_t() const noexcept { return total; }
     };
 
     /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
     layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
         size_t const shorter_length = sz_min_of_two(first.size(), second.size());
-        // Must match the tier the dispatch in `operator()` picks (1/2/4/8 words -> shorter <= 64/128/256/512).
-        size_t const words_count = shorter_length <= 64 ? 1 : shorter_length <= 128 ? 2 : shorter_length <= 256 ? 4 : 8;
+        // The small tiers pick 1/2/4/8 words (shorter <= 64/128/256/512); above that the generic path spans
+        // `ceil(shorter / 64)` words. Either way the `Peq` table needs one 256-entry row per word.
+        size_t const words_count = dispatch_words_count_for(shorter_length);
         scratch_amount_t amount {specs.cache_line_width};
         layout_t at;
         at.match_masks = amount, amount += sizeof(u64_t) * words_count * 256;
+        // Only the generic path (above the on-stack capacity) parks its vertical state in scratch.
+        if (words_count > stack_words_capacity_k) {
+            at.vertical_positives = amount, amount += sizeof(u64_t) * words_count;
+            at.vertical_negatives = amount, amount += sizeof(u64_t) * words_count;
+        }
         at.total = amount;
         return at;
     }
@@ -2221,6 +2257,95 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         return status_t::success_k;
     }
 
+    /**
+     *  @brief Bit-parallel Myers/Hyyrö unit-cost Levenshtein for one pair of @b any @p shorter size, carrying the
+     *      horizontal deltas across a run-time `words_count = ceil(shorter / 64)` of 64-bit blocks. Exact edit
+     *      distance in O(longer * words_count) word-operations, 64 DP cells per machine word, no DP matrix.
+     *
+     *  Uses the same recurrence as `unrolled_` but with a run-time block count. The `Peq` `match_masks` table lives
+     *  in the supplied scratch (`256 * words_count` u64 entries - the dominant memory cost, ~2KiB per block). The
+     *  per-block `vertical_positives` / `vertical_negatives` state stays on the stack up to `stack_words_capacity_k`
+     *  blocks and otherwise spills into scratch, so the hot loop never touches the heap.
+     */
+    inline status_t generic_(span<char const> shorter, span<char const> longer, size_t &result_ref,
+                             scratch_space_t scratch_space) const noexcept {
+        size_t const shorter_length = shorter.size();
+        size_t const longer_length = longer.size();
+        // Empty pattern: the distance is the text length, and the top-bit read below would underflow.
+        if (shorter_length == 0) {
+            result_ref = longer_length;
+            return status_t::success_k;
+        }
+        size_t const words_count = words_count_for(shorter_length);
+        size_t const match_masks_bytes = sizeof(u64_t) * words_count * 256;
+        size_t const vertical_bytes = words_count > stack_words_capacity_k ? sizeof(u64_t) * words_count : 0;
+        if (scratch_space.size() < match_masks_bytes + 2 * vertical_bytes) return status_t::bad_alloc_k;
+
+        u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data());
+        // The vertical state lives on the stack for the common case and in scratch for very long patterns, so the
+        // inner loop is allocation-free either way. The `Peq` table starts at the (cache-line-aligned) front; the
+        // vertical state is parked at the very end of scratch, sidestepping `layout()`'s internal alignment padding
+        // between sub-buffers so the offsets here cannot disagree with the sizing in `scratch_space_needed`.
+        u64_t stack_vertical_positives[stack_words_capacity_k], stack_vertical_negatives[stack_words_capacity_k];
+        u64_t *vertical_positives = stack_vertical_positives;
+        u64_t *vertical_negatives = stack_vertical_negatives;
+        if (words_count > stack_words_capacity_k) {
+            std::byte *const scratch_end = scratch_space.data() + scratch_space.size();
+            vertical_negatives = reinterpret_cast<u64_t *>(scratch_end - vertical_bytes);
+            vertical_positives = reinterpret_cast<u64_t *>(scratch_end - 2 * vertical_bytes);
+        }
+
+        // Build the `Peq` table: clear every touched character's blocks, then set the shorter side's match bits. The
+        // scratch is uninitialized (and may hold a previous walker's bytes), so each row is `match_masks[char][word]`
+        // laid out as `match_masks[char * words_count + word]`.
+        for (size_t position = 0; position != shorter_length; ++position)
+            for (size_t word = 0; word != words_count; ++word)
+                match_masks[(size_t)(u8_t)shorter[position] * words_count + word] = 0;
+        for (size_t position = 0; position != longer_length; ++position)
+            for (size_t word = 0; word != words_count; ++word)
+                match_masks[(size_t)(u8_t)longer[position] * words_count + word] = 0;
+        for (size_t position = 0; position != shorter_length; ++position)
+            match_masks[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |= (u64_t)1 << (position & 63);
+
+        for (size_t word = 0; word != words_count; ++word)
+            vertical_positives[word] = ~(u64_t)0, vertical_negatives[word] = 0;
+        size_t const last_word = (shorter_length - 1) >> 6, last_bit = (shorter_length - 1) & 63;
+        size_t distance = shorter_length;
+        for (size_t longer_position = 0; longer_position != longer_length; ++longer_position) {
+            u8_t const symbol = (u8_t)longer[longer_position];
+            u64_t const *const match_row = &match_masks[(size_t)symbol * words_count];
+            u64_t horizontal_positive_carry = 1, horizontal_negative_carry = 0; // Top-row boundary into block 0 is +1.
+            for (size_t word = 0; word != words_count; ++word) {
+                u64_t const pattern_matches = match_row[word];
+                u64_t const vertical_carry = pattern_matches | vertical_negatives[word];
+                u64_t const matched_with_carry = pattern_matches | horizontal_negative_carry;
+                u64_t const diagonal_zero =
+                    (((matched_with_carry & vertical_positives[word]) + vertical_positives[word]) ^
+                     vertical_positives[word]) |
+                    matched_with_carry;
+                u64_t horizontal_positive = vertical_negatives[word] | ~(diagonal_zero | vertical_positives[word]);
+                u64_t horizontal_negative = vertical_positives[word] & diagonal_zero;
+                if (word == last_word) {
+                    distance += (horizontal_positive >> last_bit) & 1;
+                    distance -= (horizontal_negative >> last_bit) & 1;
+                }
+                u64_t const horizontal_positive_carry_next = horizontal_positive >> 63;
+                u64_t const horizontal_negative_carry_next = horizontal_negative >> 63;
+                horizontal_positive = (horizontal_positive << 1) | horizontal_positive_carry;
+                horizontal_negative = (horizontal_negative << 1) | horizontal_negative_carry;
+                horizontal_positive_carry = horizontal_positive_carry_next;
+                horizontal_negative_carry = horizontal_negative_carry_next;
+                vertical_positives[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
+                vertical_negatives[word] = horizontal_positive & vertical_carry;
+            }
+        }
+
+        for (size_t position = 0; position != shorter_length; ++position)
+            match_masks[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] = 0;
+        result_ref = distance;
+        return status_t::success_k;
+    }
+
     inline status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
                                scratch_space_t scratch_space) noexcept {
         bool const first_is_shorter = first.size() <= second.size();
@@ -2230,7 +2355,207 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         if (shorter_length <= 64) return unrolled_<1>(shorter, longer, result_ref, scratch_space);
         if (shorter_length <= 128) return unrolled_<2>(shorter, longer, result_ref, scratch_space);
         if (shorter_length <= 256) return unrolled_<4>(shorter, longer, result_ref, scratch_space);
-        return unrolled_<8>(shorter, longer, result_ref, scratch_space); // shorter <= 512
+        if (shorter_length <= 512) return unrolled_<8>(shorter, longer, result_ref, scratch_space);
+        return generic_(shorter, longer, result_ref, scratch_space); // any longer shorter side
+    }
+};
+
+/**
+ *  @brief Bit-parallel Myers/Hyyrö unit-cost Levenshtein for two @b UTF-32 (rune) strings on the serial backend.
+ *
+ *  The Myers scan (`vertical_positives` / `vertical_negatives`, the horizontal `+1`/`-1` carries, the multi-word
+ *  low->high ripple and the distance probe) operates @b only on the per-symbol `Peq` bitmask words and is therefore
+ *  independent of the key type. The byte specialization (`levenshtein_distance_myers<char, sz_cap_serial_k>`, the
+ *  byte oracle) indexes a dense 256-entry `Peq` table by the symbol byte; a 4-byte `rune_t` key cannot index a dense
+ *  table, so this specialization swaps the dense table for an @b open-addressing hash (rune -> `words_count` bitmask
+ *  words). The recurrence below is the same one the byte oracle runs, only the per-symbol `match_row` lookup changes:
+ *  a text rune absent from the pattern hashes to an all-zero row, which is exactly correct (it matches nothing).
+ */
+template <>
+struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
+
+    using char_t = rune_t;
+    using index_t = u32_t;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
+
+    levenshtein_distance_myers() noexcept {}
+
+    /**
+     *  @brief Largest @b shorter-side length whose per-word `vertical_positives` / `vertical_negatives` state fits the
+     *      on-stack arrays. Above this the state spills into scratch, mirroring the byte walker's policy.
+     */
+    static constexpr size_t stack_words_capacity_k = 8;
+
+    /** @brief Number of 64-bit words spanning a @p shorter_length-rune pattern, i.e. `ceil(shorter_length / 64)`. */
+    static constexpr size_t words_count_for(size_t shorter_length) noexcept {
+        return divide_round_up<size_t>(shorter_length, 64);
+    }
+
+    /**
+     *  @brief Open-addressing capacity (a power of two) for a pattern of @p distinct_upper_bound distinct runes. The
+     *      pattern has at most `shorter_length` distinct runes, so passing `shorter_length` is a safe upper bound. The
+     *      `2 *` keeps the load factor <= 0.5 for cheap linear probing; `sz_size_bit_ceil` rounds to a power of two so
+     *      the multiply-shift hash maps cleanly onto the slot range. Always at least one slot.
+     */
+    static index_t hash_capacity_for(size_t distinct_upper_bound) noexcept {
+        size_t const slots_wanted = sz_max_of_two(2 * distinct_upper_bound, (size_t)1);
+        return static_cast<index_t>(sz_size_bit_ceil(slots_wanted));
+    }
+
+    /** @brief Sentinel rune marking an empty hash slot (`rune_t` never reaches `0xFFFFFFFF`; valid <= 0x10FFFF). */
+    static constexpr rune_t empty_slot_k = static_cast<rune_t>(0xFFFFFFFFu);
+
+    /**
+     *  @brief Multiply-shift hash of a rune into `[0, capacity)`; @p capacity must be a power of two. The 64-bit
+     *      Fibonacci multiply spreads the rune's bits into the high word, then a single mask selects the slot - no
+     *      `>> 64` undefined shift at the `capacity == 1` boundary.
+     */
+    static index_t hash_rune(rune_t rune, index_t capacity) noexcept {
+        u64_t const mixed = static_cast<u64_t>(static_cast<u32_t>(rune)) * 0x9E3779B97F4A7C15ull;
+        return static_cast<index_t>((mixed >> 32) & static_cast<u64_t>(capacity - 1));
+    }
+
+    /** @brief Byte offsets of this walker's scratch sub-buffers. */
+    struct layout_t {
+        /** @brief The open-addressing slot keys (`hash_capacity` runes). */
+        size_t slot_keys = 0;
+        /** @brief The per-slot `Peq` bitmask words (`hash_capacity * words_count` u64 entries). */
+        size_t slot_masks = 0;
+        /** @brief A permanently-zero bitmask row (`words_count` u64) returned for runes absent from the pattern. */
+        size_t absent_row = 0;
+        /** @brief The per-word `vertical_positives` state when it spills past the on-stack capacity. */
+        size_t vertical_positives = 0;
+        /** @brief The per-word `vertical_negatives` state when it spills past the on-stack capacity. */
+        size_t vertical_negatives = 0;
+        /** @brief Bytes this walker touches; doubles as its scratch-size estimate. */
+        size_t total = 0;
+        constexpr operator size_t() const noexcept { return total; }
+    };
+
+    /** @brief The single source of truth for this walker's scratch size and sub-buffer offsets. */
+    layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
+        size_t const shorter_length = sz_min_of_two(first.size(), second.size());
+        size_t const words_count = words_count_for(shorter_length);
+        index_t const capacity = hash_capacity_for(shorter_length);
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t at;
+        at.slot_keys = amount, amount += sizeof(rune_t) * capacity;
+        at.slot_masks = amount, amount += sizeof(u64_t) * static_cast<size_t>(capacity) * words_count;
+        at.absent_row = amount, amount += sizeof(u64_t) * words_count;
+        if (words_count > stack_words_capacity_k) {
+            at.vertical_positives = amount, amount += sizeof(u64_t) * words_count;
+            at.vertical_negatives = amount, amount += sizeof(u64_t) * words_count;
+        }
+        at.total = amount;
+        return at;
+    }
+
+    inline status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                               scratch_space_t scratch_space) const noexcept {
+        bool const first_is_shorter = first.size() <= second.size();
+        span<char_t const> shorter = first_is_shorter ? first : second;
+        span<char_t const> longer = first_is_shorter ? second : first;
+        size_t const shorter_length = shorter.size();
+        size_t const longer_length = longer.size();
+
+        // Empty pattern: the distance is the text length, and the top-bit read below would underflow.
+        if (shorter_length == 0) {
+            result_ref = longer_length;
+            return status_t::success_k;
+        }
+
+        size_t const words_count = words_count_for(shorter_length);
+        index_t const capacity = hash_capacity_for(shorter_length);
+        // Carve the hash from the (caller-aligned) front of scratch and park the optional vertical-state spill at the
+        // very end - exactly the byte `generic_` policy. This sidesteps `layout()`'s inter-buffer cache-line padding,
+        // so the offsets here can never disagree with the (padded, hence larger) size from `scratch_space_needed`.
+        size_t const slot_keys_bytes = sizeof(rune_t) * capacity;
+        size_t const slot_masks_bytes = sizeof(u64_t) * static_cast<size_t>(capacity) * words_count;
+        size_t const absent_row_bytes = sizeof(u64_t) * words_count;
+        size_t const vertical_bytes = words_count > stack_words_capacity_k ? sizeof(u64_t) * words_count : 0;
+        if (scratch_space.size() < slot_keys_bytes + slot_masks_bytes + absent_row_bytes + 2 * vertical_bytes)
+            return status_t::bad_alloc_k;
+
+        rune_t *const slot_keys = reinterpret_cast<rune_t *>(scratch_space.data());
+        u64_t *const slot_masks = reinterpret_cast<u64_t *>(scratch_space.data() + slot_keys_bytes);
+        u64_t *const absent_row =
+            reinterpret_cast<u64_t *>(scratch_space.data() + slot_keys_bytes + slot_masks_bytes);
+
+        // The vertical state lives on the stack for the common case and in scratch for very long patterns, so the
+        // inner loop is allocation-free either way.
+        u64_t stack_vertical_positives[stack_words_capacity_k], stack_vertical_negatives[stack_words_capacity_k];
+        u64_t *vertical_positives = stack_vertical_positives;
+        u64_t *vertical_negatives = stack_vertical_negatives;
+        if (words_count > stack_words_capacity_k) {
+            std::byte *const scratch_end = scratch_space.data() + scratch_space.size();
+            vertical_negatives = reinterpret_cast<u64_t *>(scratch_end - vertical_bytes);
+            vertical_positives = reinterpret_cast<u64_t *>(scratch_end - 2 * vertical_bytes);
+        }
+
+        // Build the open-addressing `Peq` hash: clear keys to the empty sentinel and the absent row to zero, then
+        // insert each pattern rune and set its match bit in the slot's `words_count` bitmask words.
+        for (index_t slot = 0; slot != capacity; ++slot) slot_keys[slot] = empty_slot_k;
+        for (size_t word = 0; word != words_count; ++word) absent_row[word] = 0;
+        for (size_t position = 0; position != shorter_length; ++position) {
+            rune_t const rune = shorter[position];
+            index_t slot = hash_rune(rune, capacity);
+            for (;; slot = (slot + 1) & (capacity - 1)) {
+                if (slot_keys[slot] == rune) break;
+                if (slot_keys[slot] == empty_slot_k) {
+                    slot_keys[slot] = rune;
+                    for (size_t word = 0; word != words_count; ++word)
+                        slot_masks[static_cast<size_t>(slot) * words_count + word] = 0;
+                    break;
+                }
+            }
+            slot_masks[static_cast<size_t>(slot) * words_count + (position >> 6)] |= (u64_t)1 << (position & 63);
+        }
+
+        for (size_t word = 0; word != words_count; ++word)
+            vertical_positives[word] = ~(u64_t)0, vertical_negatives[word] = 0;
+        size_t const last_word = (shorter_length - 1) >> 6, last_bit = (shorter_length - 1) & 63;
+        size_t distance = shorter_length;
+        for (size_t longer_position = 0; longer_position != longer_length; ++longer_position) {
+            rune_t const symbol = longer[longer_position];
+            // Look up the rune's bitmask row: probe to its slot, or the permanently-zero `absent_row` if the rune is
+            // not in the pattern (a text rune absent from the pattern matches nothing -> all-zero `Peq`, correct).
+            u64_t const *match_row = absent_row;
+            for (index_t slot = hash_rune(symbol, capacity);; slot = (slot + 1) & (capacity - 1)) {
+                rune_t const key = slot_keys[slot];
+                if (key == symbol) {
+                    match_row = &slot_masks[static_cast<size_t>(slot) * words_count];
+                    break;
+                }
+                if (key == empty_slot_k) break;
+            }
+            u64_t horizontal_positive_carry = 1, horizontal_negative_carry = 0; // Top-row boundary into block 0 is +1.
+            for (size_t word = 0; word != words_count; ++word) {
+                u64_t const pattern_matches = match_row[word];
+                u64_t const vertical_carry = pattern_matches | vertical_negatives[word];
+                u64_t const matched_with_carry = pattern_matches | horizontal_negative_carry;
+                u64_t const diagonal_zero =
+                    (((matched_with_carry & vertical_positives[word]) + vertical_positives[word]) ^
+                     vertical_positives[word]) |
+                    matched_with_carry;
+                u64_t horizontal_positive = vertical_negatives[word] | ~(diagonal_zero | vertical_positives[word]);
+                u64_t horizontal_negative = vertical_positives[word] & diagonal_zero;
+                if (word == last_word) {
+                    distance += (horizontal_positive >> last_bit) & 1;
+                    distance -= (horizontal_negative >> last_bit) & 1;
+                }
+                u64_t const horizontal_positive_carry_next = horizontal_positive >> 63;
+                u64_t const horizontal_negative_carry_next = horizontal_negative >> 63;
+                horizontal_positive = (horizontal_positive << 1) | horizontal_positive_carry;
+                horizontal_negative = (horizontal_negative << 1) | horizontal_negative_carry;
+                horizontal_positive_carry = horizontal_positive_carry_next;
+                horizontal_negative_carry = horizontal_negative_carry_next;
+                vertical_positives[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
+                vertical_negatives[word] = horizontal_positive & vertical_carry;
+            }
+        }
+
+        result_ref = distance;
+        return status_t::success_k;
     }
 };
 
@@ -2260,6 +2585,12 @@ struct levenshtein_distance {
     static constexpr sz_capability_t capability_serialized_k = serialize_capability(capability_k);
 
     using myers_t = levenshtein_distance_myers<char_t, capability_serialized_k>;
+    /**
+     *  @brief Whether the resolved `myers_t` covers @b any shorter-side length. Only the scalar serial walker has
+     *      the generic multi-word path; the SIMD lockstep families top out at their widest 512-rune tier, so for
+     *      them the Myers fast path stays bounded and longer shorter sides fall through to the anti-diagonal DP.
+     */
+    static constexpr bool myers_handles_any_length_k = capability_serialized_k == sz_cap_serial_k;
     using horizontal_u8_t =                                                        //
         horizontal_walker<char_t, u8_t, uniform_substitution_costs_t, gap_costs_t, //
                           sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
@@ -2296,10 +2627,13 @@ struct levenshtein_distance {
                 return linear_backend.scratch_space_needed(first, second, specs);
             }
 
-        // Myers fast path, only when the shorter side fits its 512-rune limit (matches the guard in `operator()`).
+        // Bit-parallel Myers path (matches the guard in `operator()`). The scalar serial walker covers any
+        // shorter-side length - its generic tier above 512 runes still beats the anti-diagonal DP - while the
+        // SIMD lockstep families stay bounded to their widest 512-rune tier. Its `layout()` sizes both the `Peq`
+        // table and, for very long patterns, the spilled vertical state.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
-                (std::min)(first.size(), second.size()) <= 512) {
+                (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512)) {
                 return myers_t {}.layout(first, second, specs);
             }
 
@@ -2344,11 +2678,12 @@ struct levenshtein_distance {
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
             }
 
-        // Bit-parallel Myers fast path (~5x DP on short unit-cost pairs); only when the shorter side fits Myers'
-        // 512-rune limit, otherwise fall through to the anti-diagonal DP below.
+        // Bit-parallel Myers fast path (~5x DP on short unit-cost pairs, and still ~25x the anti-diagonal DP on the
+        // scalar generic tier above 512 runes). The serial walker covers any shorter-side length; the SIMD lockstep
+        // families stay bounded to 512 and fall through to the anti-diagonal DP below for longer shorter sides.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
-                (std::min)(first.size(), second.size()) <= 512)
+                (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512))
                 return myers_t {}(first, second, result_ref, scratch_space);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
@@ -2435,6 +2770,15 @@ struct levenshtein_distance_utf8 {
     using linearized_fallback_t = levenshtein_distance<char, linear_gap_costs_t, capability_k>;
     using ascii_fallback_t = levenshtein_distance<char, gap_costs_t, capability_k>;
 
+    /** @brief Bit-parallel rune Myers fast path for unit-cost linear UTF-8 Levenshtein (rune-keyed `Peq`, R8). */
+    using rune_myers_t = levenshtein_distance_myers<rune_t, sz_cap_serial_k>;
+    /**
+     *  @brief Whether the rune Myers fast path is reachable for this backend. Only the serial rune Myers exists
+     *      (its `Peq` is an open-addressing hash, ISA-independent); SIMD UTF-8 backends keep the rune diagonal walker
+     *      until they grow their own rune-keyed Myers, so they stay on the diagonal path below.
+     */
+    static constexpr bool rune_myers_available_k = capability_serialized_k == sz_cap_serial_k;
+
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
 
@@ -2458,7 +2802,20 @@ struct levenshtein_distance_utf8 {
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(rune_t), specs.cache_line_width);
-        size_t const utf8_path = transcode_bytes + rune_requirements.total;
+        size_t utf8_path = transcode_bytes + rune_requirements.total;
+
+        // The unit-cost-linear UTF-8 path scores the transcoded runes with the rune Myers walker instead of the rune
+        // diagonal. Its `Peq` hash + vertical state can outsize the diagonal's two rune rows, so widen the reserve.
+        // The Myers `layout()` reads only the rune-count via `.size()`; the worst case is one rune per UTF-8 byte.
+        if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)
+            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1) {
+                span<rune_t const> const first_runes_upper_bound {nullptr, first.size()};
+                span<rune_t const> const second_runes_upper_bound {nullptr, second.size()};
+                size_t const myers_path =
+                    transcode_bytes +
+                    rune_myers_t {}.layout(first_runes_upper_bound, second_runes_upper_bound, specs).total;
+                utf8_path = sz_max_of_two(utf8_path, myers_path);
+            }
 
         // The pure-ASCII shortcut bypasses transcoding and runs the char fallback over the whole buffer instead.
         size_t const ascii_path = ascii_fallback_t {substituter_, gap_costs_}.scratch_space_needed(first, second,
@@ -2530,6 +2887,13 @@ struct levenshtein_distance_utf8 {
 
         span<rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
         span<rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
+
+        // Bit-parallel rune Myers fast path: ~20-30x the rune anti-diagonal DP at L >= 256 (the rune-keyed `Peq`
+        // hash lookup does not erode Myers' advantage). Unit-cost linear only (match 0, mismatch 1, gap 1); the rune
+        // diagonal walker below remains the oracle for non-unit / affine costs. Bit-exact with that diagonal.
+        if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)
+            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1)
+                return rune_myers_t {}(first_utf32, second_utf32, result_ref, walker_scratch);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16) {
@@ -2973,6 +3337,267 @@ status_t cross_in_parallel_(                           //
     return error.load();
 }
 
+#pragma region - Shared Candidate-Lane Cross-Product Driver
+
+/**
+ *  @brief A destination for one scored cell: the primary matrix slot, plus an optional mirror slot for the symmetric
+ *      self-similarity case (lower triangle scored once, written to both `[i][j]` and `[j][i]`).
+ */
+template <typename value_type_>
+struct cross_cell_destination_t {
+    value_type_ *primary = nullptr;
+    value_type_ *mirror = nullptr;
+};
+
+/** @brief The number of live cells: the full rectangle, or the lower triangle (incl. diagonal) when symmetric. */
+SZ_INLINE size_t cross_live_cells_count_(size_t queries_count, size_t candidates_count,
+                                         cross_similarities_t cross_kind) noexcept {
+    if (cross_kind == cross_similarities_t::symmetric_k) return queries_count * (queries_count + 1) / 2;
+    return queries_count * candidates_count;
+}
+
+/** @brief Decodes a flat live-cell index into its `(query_index, candidate_index)` grid coordinates. */
+SZ_INLINE void cross_cell_to_indices_(size_t cell_index, size_t candidates_count, cross_similarities_t cross_kind,
+                                      size_t &query_index, size_t &candidate_index) noexcept {
+    if (cross_kind == cross_similarities_t::symmetric_k) {
+        size_t row = 0;
+        while ((row + 1) * (row + 2) / 2 <= cell_index) ++row;
+        query_index = row;
+        candidate_index = cell_index - row * (row + 1) / 2;
+    }
+    else {
+        query_index = cell_index / candidates_count;
+        candidate_index = cell_index % candidates_count;
+    }
+}
+
+/**
+ *  @brief Dyadic length bucket of a candidate: `bit_width(length - 1)`. Two candidates in one bucket differ in length
+ *      by less than 2x, so packing a lane block from a single bucket bounds the transpose zero-padding waste - the
+ *      lane-fill tiling that turns ragged rows into dense kernels (R6).
+ */
+SZ_INLINE int candidate_length_bucket_(size_t length) noexcept {
+    return length <= 1 ? 0 : (int)(64 - sz_u64_clz((sz_u64_t)(length - 1)));
+}
+
+/**
+ *  @brief Host-side orchestration loop shared by every @b byte candidate-lane engine (Needleman-Wunsch,
+ *      Smith-Waterman, and non-unit Levenshtein, across haswell / icelake / neon). Contains @b no SIMD and @b no
+ *      kernel code: it walks the live cells `[cell_begin, cell_end)` one query-row at a time, groups each row's
+ *      candidates into @b dyadic length buckets so a block's lanes carry similar lengths (minimal zero-pad),
+ *      transposes each block into column-major lane order, dispatches it to the per-backend @p kernel, and scatters
+ *      the lane results into the strided matrix. Empty cells and cells whose worst-case score escapes the kernel's
+ *      range are scored individually through the per-pair @p fallback. The @p kernel and @p fallback are passed by
+ *      reference; nothing is shared at the kernel level - per the design, only the host driver is consolidated.
+ *
+ *  @param fits `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the kernel's range.
+ *  @param empty_cell `(query_length, candidate_length) -> score`: the all-gap score for a degenerate (empty) cell.
+ */
+template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
+          typename results_type_, typename fits_type_, typename empty_cell_type_>
+status_t cross_product_candidate_lanes_range_( //
+    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
+    results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin, size_t cell_end, fits_type_ &&fits,
+    empty_cell_type_ &&empty_cell, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
+
+    using kernel_t = remove_cvref<kernel_type_>;
+    using lane_score_t = typename kernel_t::score_t;
+    using value_t = remove_cvref<decltype(results.data[0])>;
+    constexpr size_t candidate_lanes_k = kernel_t::candidate_lanes_k;
+    // The per-pair fallback writes its native score type (unsigned distance for minimization, signed score for
+    // maximization), which may differ from the result matrix's `value_t` (e.g. a benchmark stores Levenshtein
+    // distances in a signed matrix). Score into the fallback's own type, then cast to `value_t` on scatter.
+    using fallback_score_t =
+        typename std::conditional<kernel_t::objective_k == sz_minimize_distance_k, size_t, ssize_t>::type;
+
+    bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
+    size_t const candidates_count = candidates.size();
+
+    // Size the transpose buffer to the longest candidate any batchable cell in this range can present.
+    size_t longest_candidate = 0;
+    for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
+        size_t query_index = 0, candidate_index = 0;
+        cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+        size_t const query_length = to_view(queries[query_index]).size();
+        size_t const candidate_length = to_view(candidates[candidate_index]).size();
+        if (query_length != 0 && candidate_length != 0 && fits(query_length, candidate_length))
+            longest_candidate = sz_max_of_two(longest_candidate, candidate_length);
+    }
+
+    size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(char);
+    size_t const walker_scratch = longest_candidate ? kernel.scratch_space_needed(longest_candidate, specs) : 0;
+    char *transposed = reinterpret_cast<char *>(scratch.data());
+    scratch_space_t walker_scratch_space = scratch.subspan(transpose_bytes, walker_scratch);
+    scratch_space_t fallback_scratch_space = scratch;
+
+    auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
+        cross_cell_destination_t<value_t> destination;
+        destination.primary = results.data + query_index * results.row_stride + candidate_index;
+        if (is_symmetric && candidate_index != query_index)
+            destination.mirror = results.data + candidate_index * results.row_stride + query_index;
+        return destination;
+    };
+    auto const scatter = [&](cross_cell_destination_t<value_t> const &destination, value_t score) noexcept {
+        *destination.primary = score;
+        if (destination.mirror) *destination.mirror = score;
+    };
+
+    dummy_executor_t dummy;
+    size_t lengths[candidate_lanes_k];
+    size_t block_candidates[candidate_lanes_k];
+    cross_cell_destination_t<value_t> destinations[candidate_lanes_k];
+    lane_score_t result_lanes[candidate_lanes_k];
+
+    // Transpose, dispatch, and scatter one full or partial lane block of the current query-row + length bucket.
+    auto const emit_block = [&](span<char const> query, size_t lanes_count, size_t block_longest) noexcept {
+        for (size_t position = 0; position != candidate_lanes_k * block_longest; ++position) transposed[position] = 0;
+        for (size_t lane_index = 0; lane_index != lanes_count; ++lane_index) {
+            auto const lane_candidate = to_view(candidates[block_candidates[lane_index]]);
+            for (size_t position = 0; position < lane_candidate.size(); ++position)
+                transposed[position * candidate_lanes_k + lane_index] = lane_candidate[position];
+        }
+        candidate_lanes_block<char> block;
+        block.transposed = transposed;
+        block.lane_capacity = candidate_lanes_k;
+        block.lanes_count = lanes_count;
+        block.lengths = lengths;
+        block.longest_candidate = block_longest;
+        status_t status = kernel(query, block, result_lanes, walker_scratch_space, specs);
+        if (status != status_t::success_k) return status;
+        for (size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
+            scatter(destinations[lane_index], static_cast<value_t>(result_lanes[lane_index]));
+        return status_t::success_k;
+    };
+
+    size_t cell_index = cell_begin;
+    while (cell_index != cell_end) {
+        size_t seed_query_index = 0, seed_candidate_index = 0;
+        cross_cell_to_indices_(cell_index, candidates_count, cross_kind, seed_query_index, seed_candidate_index);
+        auto const query = to_view(queries[seed_query_index]);
+        size_t const query_length = query.size();
+        // Cells of one query-row are contiguous in flat index for both layouts; derive the row base to map back.
+        size_t const row_base =
+            is_symmetric ? seed_query_index * (seed_query_index + 1) / 2 : seed_query_index * candidates_count;
+        size_t const row_full_end =
+            is_symmetric ? row_base + seed_query_index + 1 : row_base + candidates_count;
+        size_t const row_end = sz_min_of_two(row_full_end, cell_end);
+
+        // Pass 1: score the degenerate and out-of-range cells individually; learn the row's largest length bucket.
+        int max_bucket = -1;
+        for (size_t r = cell_index; r != row_end; ++r) {
+            size_t const candidate_index = r - row_base;
+            size_t const candidate_length = to_view(candidates[candidate_index]).size();
+            if (query_length == 0 || candidate_length == 0) {
+                scatter(destination_for(seed_query_index, candidate_index),
+                        static_cast<value_t>(empty_cell(query_length, candidate_length)));
+                continue;
+            }
+            if (!fits(query_length, candidate_length)) {
+                fallback_score_t result_score = 0;
+                if (status_t status = fallback(query, to_view(candidates[candidate_index]), result_score,
+                                               fallback_scratch_space, dummy, specs);
+                    status != status_t::success_k)
+                    return status;
+                scatter(destination_for(seed_query_index, candidate_index), static_cast<value_t>(result_score));
+                continue;
+            }
+            int const bucket = candidate_length_bucket_(candidate_length);
+            if (bucket > max_bucket) max_bucket = bucket;
+        }
+
+        // Pass 2: per length bucket, pack same-bucket candidates into dense lane blocks and dispatch them.
+        for (int bucket = 0; bucket <= max_bucket; ++bucket) {
+            size_t lanes_count = 0, block_longest = 0;
+            for (size_t r = cell_index; r != row_end; ++r) {
+                size_t const candidate_index = r - row_base;
+                size_t const candidate_length = to_view(candidates[candidate_index]).size();
+                if (query_length == 0 || candidate_length == 0 || !fits(query_length, candidate_length)) continue;
+                if (candidate_length_bucket_(candidate_length) != bucket) continue;
+                block_candidates[lanes_count] = candidate_index;
+                lengths[lanes_count] = candidate_length;
+                destinations[lanes_count] = destination_for(seed_query_index, candidate_index);
+                block_longest = sz_max_of_two(block_longest, candidate_length);
+                ++lanes_count;
+                if (lanes_count == candidate_lanes_k) {
+                    if (status_t status = emit_block(query, lanes_count, block_longest);
+                        status != status_t::success_k)
+                        return status;
+                    lanes_count = 0, block_longest = 0;
+                }
+            }
+            if (lanes_count) {
+                if (status_t status = emit_block(query, lanes_count, block_longest); status != status_t::success_k)
+                    return status;
+            }
+        }
+        cell_index = row_end;
+    }
+    return status_t::success_k;
+}
+
+/**
+ *  @brief Worst-case single-worker scratch for the shared candidate-lane driver, in O(Q+C): the transposed block plus
+ *      the lane-walker arena for the longest candidate, or the per-pair fallback arena for the longest cell.
+ */
+template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
+          typename fits_type_>
+size_t cross_product_candidate_lanes_scratch_( //
+    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
+    fits_type_ &&fits, cpu_specs_t const &specs) noexcept {
+
+    using kernel_t = remove_cvref<kernel_type_>;
+    constexpr size_t candidate_lanes_k = kernel_t::candidate_lanes_k;
+
+    size_t longest_query = 0, longest_query_index = 0, longest_candidate = 0, longest_candidate_index = 0;
+    for (size_t index = 0; index < queries.size(); ++index)
+        if (to_view(queries[index]).size() > longest_query)
+            longest_query = to_view(queries[index]).size(), longest_query_index = index;
+    for (size_t index = 0; index < candidates.size(); ++index)
+        if (to_view(candidates[index]).size() > longest_candidate)
+            longest_candidate = to_view(candidates[index]).size(), longest_candidate_index = index;
+    size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(char);
+    size_t const walker_scratch = longest_candidate ? kernel.scratch_space_needed(longest_candidate, specs) : 0;
+    size_t fallback_scratch = 0;
+    if (queries.size() && candidates.size() && !fits(longest_query, longest_candidate))
+        fallback_scratch = fallback.scratch_space_needed(to_view(queries[longest_query_index]),
+                                                         to_view(candidates[longest_candidate_index]), specs);
+    return sz_max_of_two(transpose_bytes + walker_scratch, fallback_scratch);
+}
+
+/**
+ *  @brief Parallel wrapper for the shared candidate-lane driver: sizes the engine-owned @p scratch_buffer for all
+ *      workers, then hands each worker a contiguous live-cell slice and its own scratch partition.
+ */
+template <typename kernel_type_, typename fallback_type_, typename queries_type_, typename candidates_type_,
+          typename results_type_, typename scratch_buffer_type_, typename executor_type_, typename fits_type_,
+          typename empty_cell_type_>
+status_t cross_product_candidate_lanes_parallel_( //
+    kernel_type_ &kernel, fallback_type_ &fallback, queries_type_ const &queries, candidates_type_ const &candidates,
+    results_type_ &&results, cross_similarities_t cross_kind, scratch_buffer_type_ &scratch_buffer,
+    executor_type_ &&executor, fits_type_ &&fits, empty_cell_type_ &&empty_cell, cpu_specs_t const &specs) noexcept {
+
+    size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
+    size_t const worker_scratch = cross_product_candidate_lanes_scratch_(kernel, fallback, queries, candidates,
+                                                                         fits, specs);
+    size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
+    if (status_t status = scratch_buffer.try_resize(worker_scratch * workers); status != status_t::success_k)
+        return status;
+    std::atomic<size_t> next_worker {0};
+    std::atomic<status_t> error {status_t::success_k};
+    executor.for_slices(cells_count, [&](size_t cell_begin, size_t length) noexcept {
+        if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
+        size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
+        scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(worker * worker_scratch, worker_scratch);
+        status_t status = cross_product_candidate_lanes_range_(kernel, fallback, queries, candidates, results,
+                                                               cross_kind, cell_begin, cell_begin + length, fits,
+                                                               empty_cell, slice, specs);
+        if (status != status_t::success_k) error.store(status);
+    });
+    return error.load();
+}
+
+#pragma endregion - Shared Candidate-Lane Cross-Product Driver
+
 template <                       //
     typename gap_costs_type_,    //
     typename allocator_type_,    //
@@ -3002,8 +3627,8 @@ struct levenshtein_distances {
                           allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
-    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
+    // The concrete `strided_rows<value_type_>` parameter disambiguates the two-set and symmetric overloads by type
+    // alone, since `SZ_HAS_CONCEPTS_` is off repo-wide for the GCC concepts bug.
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                         strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
@@ -3064,8 +3689,6 @@ struct levenshtein_distances_utf8 {
                                allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
-    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                         strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
@@ -3127,8 +3750,6 @@ struct needleman_wunsch_scores {
     needleman_wunsch_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
-    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                         strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
@@ -3190,8 +3811,6 @@ struct smith_waterman_scores {
     smith_waterman_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
-    // Concrete `strided_rows<value_type_>` results parameter disambiguates the two-set and symmetric overloads by
-    // type alone (no concepts needed; `SZ_HAS_CONCEPTS_` is currently off repo-wide for the GCC concepts bug).
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                         strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {

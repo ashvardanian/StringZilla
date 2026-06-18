@@ -194,7 +194,7 @@ enum class cross_similarities_t {
  *  result at its own final column, and @p longest_candidate bounds the row count of the walk.
  */
 template <typename char_type_>
-struct candidate_lanes_block_t {
+struct candidate_lanes_block {
     char_type_ const *transposed = nullptr;
     size_t lane_capacity = 0;        // ? SIMD width: 64 (u8), 32 (u16); also the transpose stride.
     size_t lanes_count = 0;          // ? Live candidates in this block, `<= lane_capacity` (tail underfills).
@@ -207,6 +207,20 @@ struct candidate_lanes_block_t {
     constexpr char_type_ character_of_lane(size_t lane_index, size_t position_index) const noexcept {
         return transposed[position_index * lane_capacity + lane_index];
     }
+};
+
+/**
+ *  @brief A batch of independent `(shorter, longer)` string pairs for one inter-sequence bit-parallel Myers launch -
+ *      one pair per SIMD lane. The kernels score every lane's pair in lockstep; `positions[lane_index]` maps a lane
+ *      to its destination slot in the caller's results writer. The active lane count is `shorters.size()`.
+ */
+template <typename char_type_>
+struct lane_pairs_view {
+    span<span<char_type_ const> const> shorters;
+    span<span<char_type_ const> const> longers;
+    span<size_t const> positions;
+
+    constexpr size_t lanes_count() const noexcept { return shorters.size(); }
 };
 
 /**
@@ -449,6 +463,26 @@ class safe_vector {
                 for (size_type i = new_size; i < size_; ++i) data_[i].~value_type();
         }
 
+        size_ = new_size;
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Resizes WITHOUT constructing, destroying, or moving any element - the caller guarantees to overwrite
+     *         every live element before reading it. On growth it allocates fresh storage and discards the old
+     *         contents (no element move), so it is safe even when the storage lives in @b device memory the host
+     *         cannot dereference (e.g. a `device_alloc`-backed task array). Requires a trivially-destructible type.
+     */
+    status_t try_resize_uninitialized(size_type new_size) noexcept {
+        static_assert(std::is_trivially_destructible<value_type>::value,
+                      "try_resize_uninitialized requires a trivially-destructible value type");
+        if (new_size > capacity_) {
+            value_type *new_data = (value_type *)alloc_.allocate(new_size);
+            if (!new_data) return status_t::bad_alloc_k;
+            if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
+            data_ = new_data;
+            capacity_ = new_size;
+        }
         size_ = new_size;
         return status_t::success_k;
     }

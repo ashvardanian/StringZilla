@@ -46,18 +46,18 @@ extern template struct levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_ca
 extern template struct levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 #endif
 
-// Needleman-Wunsch (global) and Smith-Waterman (local) share the `cuda_weighted_scores` base, which owns the heavy
-// out-of-class `run_trampoline_`; the `needleman_wunsch_scores`/`smith_waterman_scores` wrappers only inherit it, so
-// externing the base is what keeps the kernels out of the consumer TUs.
-extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_cap_cuda_k>;
-extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_cap_cuda_k>;
-extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_cap_cuda_k>;
-extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_cap_cuda_k>;
+// Needleman-Wunsch (global) and Smith-Waterman (local) are now independent GPU engine structs (no base class); each
+// holds its own `cuda_cross_buffers` and forwards to the shared weighted free functions. Externing each engine's
+// instantiation keeps its kernels out of the consumer TUs. Each provider `.cu` emits the matching definition.
+extern template struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+extern template struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+extern template struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+extern template struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 #if SZ_USE_HOPPER
-extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_caps_ckh_k>;
-extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_global_k, sz_caps_ckh_k>;
-extern template struct cuda_weighted_scores<linear_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_caps_ckh_k>;
-extern template struct cuda_weighted_scores<affine_gap_costs_t, ualloc_t, sz_similarity_local_k, sz_caps_ckh_k>;
+extern template struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+extern template struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+extern template struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+extern template struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 #endif
 
 } // namespace stringzillas
