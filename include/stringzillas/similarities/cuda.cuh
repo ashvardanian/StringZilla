@@ -2636,8 +2636,24 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_candidates_per_cuda_
     u64_t *const match_masks = shared_match_masks + static_cast<size_t>(warp_in_block) * 256;
     size_t const warp_index = (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) >> 5;
     size_t const warps_per_device = (static_cast<size_t>(gridDim.x) * blockDim.x) >> 5;
+    if (candidates_count == 0 || queries_count == 0) return;
 
-    for (size_t query_index = warp_index; query_index < queries_count; query_index += warps_per_device) {
+    // Spread each query's candidate row across multiple warps so the device stays full even with few queries:
+    // split into `(query_index, segment)` work-units, each segment owning a contiguous slice of the candidate row.
+    size_t segments_per_query = (warps_per_device + queries_count - 1) / queries_count;
+    if (segments_per_query < 1) segments_per_query = 1;
+    if (segments_per_query > candidates_count) segments_per_query = candidates_count;
+    size_t const seg_size = (candidates_count + segments_per_query - 1) / segments_per_query;
+    size_t const total_segments = queries_count * segments_per_query;
+
+    for (size_t work = warp_index; work < total_segments; work += warps_per_device) {
+        size_t const query_index = work / segments_per_query;
+        size_t const segment = work % segments_per_query;
+        size_t const cand_begin = segment * seg_size;
+        if (cand_begin >= candidates_count) continue;
+        size_t cand_end = cand_begin + seg_size;
+        if (cand_end > candidates_count) cand_end = candidates_count;
+
         task_type_ const &row_head = tasks[query_index * candidates_count];
         char_type_ const *const query_ptr = row_head.query.data();
         u32_t const query_length = static_cast<u32_t>(row_head.query.size());
@@ -2651,7 +2667,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_candidates_per_cuda_
         __syncwarp();
 
         u64_t const top_bit = query_length ? ((u64_t)1 << (query_length - 1)) : 0;
-        for (size_t candidate_in_row = lane; candidate_in_row < candidates_count; candidate_in_row += 32u) {
+        for (size_t candidate_in_row = cand_begin + lane; candidate_in_row < cand_end; candidate_in_row += 32u) {
             task_type_ &task = tasks[query_index * candidates_count + candidate_in_row];
             // The candidate is the side that is not the query (pointer identity; query is one of shorter/longer).
             char_type_ const *const candidate_ptr = task.shorter.data() == query_ptr ? task.longer.data()
