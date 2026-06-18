@@ -1664,6 +1664,28 @@ void test_similarities_cross_product() {
         levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
         levenshtein_baselines_t {unit_uniform, unit_linear}, reuse_queries, reuse_candidates, cuda_executor_t {},
         first_gpu_specs);
+
+    // Multi-word `Peq`-in-shared reuse: queries of 65-256 bytes route to the 2/3/4-word warp-reuse kernels (the
+    // single-word case above caps at 24). The candidate (scanned) side may exceed 256; the query (Peq) side bounds
+    // the word count. Each case fills a candidate row wider than a warp so the reuse path fires, and pins every
+    // cell against the serial oracle - the only coverage of the >64-byte device fast path.
+    auto cuda_levenshtein = [&]() {
+        return levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear};
+    };
+    fuzzy_config_t const reuse_candidates_wide {"ABC", /* batch_size */ 48, /* min */ 1, /* max */ 300};
+    fuzzy_config_t const reuse_queries_mixed_words {"ABC", /* batch */ 6, /* min */ 1, /* max */ 256}; // spans W1..W4
+    fuzzy_config_t const reuse_queries_w2 {"ABC", /* batch */ 5, /* min */ 65, /* max */ 128};         // 2 words
+    fuzzy_config_t const reuse_queries_w4 {"ABC", /* batch */ 5, /* min */ 193, /* max */ 256};        // 4 words
+    fuzzy_config_t const reuse_queries_generic {"ABC", /* batch */ 4, /* min */ 400, /* max */ 600}; // > 256 -> generic
+    levenshtein_baselines_t const unit_baseline {unit_uniform, unit_linear};
+    check_cross_product_cell_exact_<sz_size_t>(cuda_levenshtein(), unit_baseline, reuse_queries_mixed_words,
+                                               reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
+    check_cross_product_cell_exact_<sz_size_t>(cuda_levenshtein(), unit_baseline, reuse_queries_w2,
+                                               reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
+    check_cross_product_cell_exact_<sz_size_t>(cuda_levenshtein(), unit_baseline, reuse_queries_w4,
+                                               reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
+    check_cross_product_cell_exact_<sz_size_t>(cuda_levenshtein(), unit_baseline, reuse_queries_generic,
+                                               reuse_candidates_wide, cuda_executor_t {}, first_gpu_specs);
 #endif
 }
 
