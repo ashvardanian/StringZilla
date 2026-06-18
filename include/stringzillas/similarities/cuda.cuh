@@ -3726,7 +3726,7 @@ load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const 
  *         gathers the per-cell substitution cost via the class substituter, and - for local scoring - clamps cells
  *         to zero and tracks a column-guarded running maximum (padded columns >ll are excluded).
  */
-template <unsigned max_text_length_, sz_similarity_locality_t locality_>
+template <unsigned max_text_length_, sz_similarity_locality_t locality_, sz_capability_t capability_ = sz_cap_cuda_k>
 struct register_weighted {
     static constexpr unsigned max_text_length_k = max_text_length_;
     static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
@@ -3770,11 +3770,30 @@ struct register_weighted {
                 u32_t const cell_score_vec = __vmaxs2(__vaddss2(diagonal_vec, cost_of_substitution_vec),
                                                       __vaddss2(top_vec, gap_cost_vec));
                 i16_t cell_low = (i16_t)(cell_score_vec & 0xFFFF), cell_high = (i16_t)(cell_score_vec >> 16);
-                cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
-                cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
+                // Sequential left (horizontal) fold + local clamp. Mirrors the maximize branch of `tiled_dp_cell_`:
+                // `__viaddmax_s32(a,b,c) == max(a + b, c)` for the gap fold; the Smith-Waterman clamp-to-0 stays at the
+                // end (the high-cell fold reads the un-clamped low cell, matching the scalar path bit-for-bit).
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+                if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(i16_t) <= 4) {
+                    int const gap = (int)gap_cost;
+                    cell_low = (i16_t)__viaddmax_s32((int)left_cell, gap, (int)cell_low);
+                    cell_high = (i16_t)__viaddmax_s32((int)cell_low, gap, (int)cell_high);
+                    if constexpr (is_local_k) {
+                        cell_low = std::max<i16_t>(cell_low, 0);
+                        cell_high = std::max<i16_t>(cell_high, 0);
+                    }
+                }
+                else
+#endif
+                {
+                    cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
+                    cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
+                    if constexpr (is_local_k) {
+                        cell_low = std::max<i16_t>(cell_low, 0);
+                        cell_high = std::max<i16_t>(cell_high, 0);
+                    }
+                }
                 if constexpr (is_local_k) {
-                    cell_low = std::max<i16_t>(cell_low, 0);
-                    cell_high = std::max<i16_t>(cell_high, 0);
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
                     if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
                     if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
@@ -3803,7 +3822,7 @@ __global__ __launch_bounds__(256, 2) void weighted_per_cuda_thread_( //
     error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_weighted<max_text_length_, locality_> nw_sw_computer;
+    register_weighted<max_text_length_, locality_, capability_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
@@ -3821,7 +3840,7 @@ __global__ __launch_bounds__(256, 2) void weighted_per_cuda_thread_( //
  *         second register row holds the insertion matrix @b I (`ins_vec_`) and the deletion matrix @b D is carried
  *         as a scalar across the row, so gap opening and extension are priced separately.
  */
-template <unsigned max_text_length_, sz_similarity_locality_t locality_>
+template <unsigned max_text_length_, sz_similarity_locality_t locality_, sz_capability_t capability_ = sz_cap_cuda_k>
 struct register_weighted_affine {
     static constexpr unsigned max_text_length_k = max_text_length_;
     static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
@@ -3881,14 +3900,36 @@ struct register_weighted_affine {
                                                            insertion_vec);
                 i16_t const match_or_insert_low = (i16_t)(match_or_insert_vec & 0xFFFF);
                 i16_t const match_or_insert_high = (i16_t)(match_or_insert_vec >> 16);
-                // Deletion D carries left across the row (sequential): cell 0 then cell 1.
-                i16_t const deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
-                i16_t cell_low = std::max(match_or_insert_low, deletion_low);
-                i16_t const deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
-                i16_t cell_high = std::max(match_or_insert_high, deletion_high);
+                // Deletion D carries left across the row (sequential): cell 0 then cell 1. The open/extend fold is the
+                // affine H-track of `tiled_dp_cell_affine_`: `__viaddmax_s32(left_m, open, left_h + extend)`, then the
+                // 2-way `max(match_or_insert, deletion)`. The Smith-Waterman clamp-to-0 stays at the end (the next
+                // deletion fold reads the un-clamped `cell_low`, matching the scalar path bit-for-bit).
+                i16_t deletion_low, cell_low, deletion_high, cell_high;
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+                if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(i16_t) <= 4) {
+                    int const open_i = (int)open, extend_i = (int)extend;
+                    deletion_low = (i16_t)__viaddmax_s32((int)left_cell, open_i, (int)left_deletion + extend_i);
+                    cell_low = std::max(match_or_insert_low, deletion_low);
+                    deletion_high = (i16_t)__viaddmax_s32((int)cell_low, open_i, (int)deletion_low + extend_i);
+                    cell_high = std::max(match_or_insert_high, deletion_high);
+                    if constexpr (is_local_k) {
+                        cell_low = std::max<i16_t>(cell_low, 0);
+                        cell_high = std::max<i16_t>(cell_high, 0);
+                    }
+                }
+                else
+#endif
+                {
+                    deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
+                    cell_low = std::max(match_or_insert_low, deletion_low);
+                    deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
+                    cell_high = std::max(match_or_insert_high, deletion_high);
+                    if constexpr (is_local_k) {
+                        cell_low = std::max<i16_t>(cell_low, 0);
+                        cell_high = std::max<i16_t>(cell_high, 0);
+                    }
+                }
                 if constexpr (is_local_k) {
-                    cell_low = std::max<i16_t>(cell_low, 0);
-                    cell_high = std::max<i16_t>(cell_high, 0);
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
                     if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
                     if (column_high <= longer_length) best_score = std::max(best_score, cell_high);
@@ -3919,7 +3960,7 @@ __global__ __launch_bounds__(256, 2) void weighted_affine_per_cuda_thread_( //
     error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_weighted_affine<max_text_length_, locality_> nw_sw_computer;
+    register_weighted_affine<max_text_length_, locality_, capability_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
