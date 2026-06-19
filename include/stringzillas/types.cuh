@@ -22,8 +22,8 @@
 #include <optional>  // `std::optional`
 #include <algorithm> // `std::sort`
 
-#include <cub/device/device_merge_sort.cuh>        // `cub::DeviceMergeSort` — moves the O(n log n) grouping sort onto the GPU
-#include <cub/device/device_partition.cuh>         // `cub::DevicePartition` — device/warp/empty tier split
+#include <cub/device/device_merge_sort.cuh> // `cub::DeviceMergeSort` — moves the O(n log n) grouping sort onto the GPU
+#include <cub/device/device_partition.cuh>  // `cub::DevicePartition` — device/warp/empty tier split
 #include <cub/device/device_run_length_encode.cuh> // `cub::DeviceRunLengthEncode` — warp-tier group run lengths
 #include <cub/device/device_scan.cuh>              // `cub::DeviceScan` — group begin offsets via exclusive sum
 #include <cub/device/device_segmented_reduce.cuh>  // `cub::DeviceSegmentedReduce` — per-group max memory requirement
@@ -421,6 +421,11 @@ struct kernel_shape_t {
     unsigned blocks_per_multiprocessor = 0; // ? 0 when the grid depends on per-launch shared memory (warp tier)
 };
 
+/** @brief Selects the micro-tile march variant of the device-tiled scorer. `fast_k` is the store-free hot path
+ *         for a full, non-corner tile (or any full tile when local); `checked_k` runs the bounds-checked path
+ *         with result capture for corner / partial-edge tiles. */
+enum class tile_march_t : bool { fast_k = true, checked_k = false };
+
 /**
  *  @brief Resolves one kernel symbol into a `kernel_shape_t`: its `CUfunction`, an optionally-raised shared-memory
  *         ceiling, and - when @p precompute_occupancy - its co-resident block count for fixed-shape kernels.
@@ -724,11 +729,11 @@ template <typename task_type_, typename scratch_buffer_type_, typename task_buff
           typename key_buffer_type_, typename size_buffer_type_, typename descriptor_buffer_type_>
 warp_tasks_groups<task_type_> warp_tasks_grouping( //
     span<task_type_> tasks, gpu_specs_t const &specs, cudaStream_t stream,
-    scratch_buffer_type_ &grouping_scratch,  // grow-only CUB temporary storage (bytes)
-    task_buffer_type_ &partition_scratch,    // grow-only task ping-pong for the two device partitions
-    count_buffer_type_ &counts_scratch,      // device-accessible 2-slot partition selected-counts
-    key_buffer_type_ &group_keys_scratch,    // device-accessible unique composite keys + run count
-    size_buffer_type_ &group_sizes_scratch,  // device-accessible run lengths, begin offsets, per-group max memory
+    scratch_buffer_type_ &grouping_scratch, // grow-only CUB temporary storage (bytes)
+    task_buffer_type_ &partition_scratch,   // grow-only task ping-pong for the two device partitions
+    count_buffer_type_ &counts_scratch,     // device-accessible 2-slot partition selected-counts
+    key_buffer_type_ &group_keys_scratch,   // device-accessible unique composite keys + run count
+    size_buffer_type_ &group_sizes_scratch, // device-accessible run lengths, begin offsets, per-group max memory
     descriptor_buffer_type_ &group_descriptors, size_t &group_count) noexcept {
 
     using task_t = task_type_;
@@ -807,7 +812,7 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     u32_t *const unique_keys = group_keys_scratch.data();
     u32_t *const run_count_out = unique_keys + warp_level_count;
     size_t *const run_lengths = group_sizes_scratch.data();
-    size_t *const begin_offsets = run_lengths + warp_level_count;        // `warp_level_count + 1` slots (trailing end)
+    size_t *const begin_offsets = run_lengths + warp_level_count; // `warp_level_count + 1` slots (trailing end)
     size_t *const group_max_memory = begin_offsets + (warp_level_count + 1);
 
     warp_tasks_group_key_functor_<task_t> const key_functor {warp_tasks_begin};
@@ -817,7 +822,8 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     {
         size_t rle_bytes = 0;
         if (cub::DeviceRunLengthEncode::Encode(nullptr, rle_bytes, key_iterator, unique_keys, run_lengths,
-                                               run_count_out, static_cast<int>(warp_level_count), stream) != cudaSuccess)
+                                               run_count_out, static_cast<int>(warp_level_count),
+                                               stream) != cudaSuccess)
             return result;
         if (grouping_scratch.try_resize_uninitialized(rle_bytes) == status_t::bad_alloc_k) return result;
         if (cub::DeviceRunLengthEncode::Encode(grouping_scratch.data(), rle_bytes, key_iterator, unique_keys,

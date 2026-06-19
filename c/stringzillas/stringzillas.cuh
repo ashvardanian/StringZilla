@@ -453,6 +453,9 @@ struct levenshtein_utf8_backends_t {
 #if SZ_USE_NEON
         szs::levenshtein_utf8_neon_t, // ! `szs::affine_levenshtein_utf8_neon_t` is linear-only for now
 #endif
+#if SZ_USE_CUDA
+        szs::levenshtein_utf8_cuda_t, // ! linear unit-cost register tier only (see `levenshtein_distances_utf8` CUDA)
+#endif
         szs::levenshtein_utf8_serial_t, szs::affine_levenshtein_utf8_serial_t>
         variants;
 
@@ -486,8 +489,28 @@ sz_status_t szs_levenshtein_distances_utf8_for_(                                
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
-            // No GPU backends for UTF8 Levenshtein distances yet
-            result = propagate_error(sz::status_t::unknown_k, error_message);
+#if SZ_USE_CUDA
+            if (std::holds_alternative<gpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<gpu_scope_t>(device->variants);
+                szs::cuda_status_t status = engine_variant(    //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = propagate_error(status, error_message);
+            }
+            // Try ephemeral GPU on default scope (device 0)
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                szs::cuda_status_t status = ctx.status != sz::status_t::success_k
+                                                ? ctx.status
+                                                : engine_variant( //
+                                                      a_container, b_container, results_strided, ctx.executor,
+                                                      ctx.specs);
+                result = propagate_error(status, error_message);
+            }
+            else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
+#else
+            result = propagate_error(sz::status_t::missing_gpu_k, error_message);
+#endif // SZ_USE_CUDA
         }
         // CPU backends are only compatible with CPU scopes
         else {

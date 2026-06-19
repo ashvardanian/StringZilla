@@ -24,7 +24,7 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-#pragma region - Baseline Rolling Hashers
+#pragma region Baseline Rolling Hashers
 
 /**
  *  @brief The default reproducibility seed for fingerprint engines.
@@ -594,9 +594,9 @@ struct floating_rolling_hasher<f64_t> {
     state_t discarding_multiplier_ = 0.0;
 };
 
-#pragma endregion - Baseline Rolling Hashers
+#pragma endregion Baseline Rolling Hashers
 
-#pragma region - Optimized Rolling MinHashers
+#pragma region Optimized Rolling MinHashers
 
 template <size_t dimensions_ = SZ_SIZE_MAX, typename hash_type_ = u32_t, typename count_type_ = u32_t>
 void merge_count_min_sketches(                                                                           //
@@ -1326,7 +1326,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
     }
 };
 
-#pragma endregion - Optimized Rolling MinHashers
+#pragma endregion Optimized Rolling MinHashers
 
 } // namespace stringzillas
 } // namespace ashvardanian

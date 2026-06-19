@@ -28,7 +28,7 @@ namespace stringzillas {
 #pragma GCC target("+simd")
 #endif
 
-#pragma region Bit-Parallel Myers
+#pragma region Bit Parallel Myers
 
 /**
  *  @brief NEON Myers/Hyyr\xc3\xb6 unit-cost Levenshtein for AArch64, scoring two independent pairs at once with one
@@ -40,7 +40,7 @@ namespace stringzillas {
  *        in `(64, 64 * words_count_]`; the word state lives in stack arrays so the loop unrolls and the
  *        `vertical_positive` / `vertical_negative` words register-promote;
  *      - `distances_2x_multiword_large_` - the runtime-`words_count` sibling for the long tail (shorter > 512), where
- *        instantiating one variant per word count is no longer worthwhile.
+ *        instantiating one variant per word count is not worthwhile.
  *      The multi-word kernels carry two intra-lane ripples (the 65-bit `(Eq & VP) + VP + addition_carry` and the
  *      `horizontal_positive` / `horizontal_negative` bit63->bit0 shift); neither ever crosses a lane. NEON has no
  *      lane-mask registers and no qword gather, so the per-lane `active` predicate is a `uint64x2_t` of all-ones /
@@ -71,9 +71,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     }
 
     /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept {
-        return vcgtq_u64(value, vdupq_n_u64(0));
-    }
+    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
 
     /**
      *  @brief Two independent single-word Myers distances, one per `uint64x2_t` lane (each shorter side <= 64).
@@ -81,7 +79,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      64-bit Myers integer. @p scratch_space holds the `Peq[2][256]` table (`match_masks_bytes_k`).
      */
     template <typename results_writer_>
-    status_t distances_2x64_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                              scratch_space_t scratch_space) const noexcept {
 
         if (scratch_space.size() < match_masks_bytes_k) return status_t::bad_alloc_k;
@@ -108,8 +106,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             longer_lengths[lane_index] = longer_length;
             // VP = the low `shorter_length` bits set; a 64-bit shift is undefined, so build it as `~0 >> (64 - len)`
             // for full-width and the plain mask otherwise (the scalar oracle's `(1 << len) - 1`).
-            vertical_positive_init[lane_index] =
-                shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
+            vertical_positive_init[lane_index] = shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
             max_longer = sz_max_of_two(max_longer, longer_length);
         }
 
@@ -133,23 +130,22 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             uint64x2_t const sum = vaddq_u64(vandq_u64(equality, vertical_positive), vertical_positive);
             uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive), equality);
             // Ph = VN | ~(D | VP) = VN | ~D & ~VP -> `vbic(vbic(ones, D), VP)` then OR; expressed via OR-NOT.
-            uint64x2_t horizontal_positive =
-                vorrq_u64(vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
+            uint64x2_t horizontal_positive = vorrq_u64(
+                vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
             uint64x2_t horizontal_negative = vandq_u64(vertical_positive, diagonal);
 
             // score += active & ((Ph & top) != 0); score -= active & ((Hn & top) != 0).
-            uint64x2_t const add_step =
-                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-            uint64x2_t const sub_step =
-                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+            uint64x2_t const add_step = vandq_u64(
+                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+            uint64x2_t const sub_step = vandq_u64(
+                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
             score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
 
             horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), one);
             horizontal_negative = vshlq_n_u64(horizontal_negative, 1);
             // Pv' = Mh | ~(Xv | Ph) = Hn | ~(carry_in | Hp).
             uint64x2_t const next_positive = vorrq_u64(
-                horizontal_negative,
-                vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
             uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
             vertical_positive = vbslq_u64(active, next_positive, vertical_positive);
             vertical_negative = vbslq_u64(active, next_negative, vertical_negative);
@@ -174,7 +170,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      `match_masks + lane * 256 * words_count_`, entry `[symbol * words_count_ + word]`).
      */
     template <size_t words_count_, typename results_writer_>
-    status_t distances_2x_multiword_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x_multiword_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                                      scratch_space_t scratch_space) const noexcept {
 
         constexpr size_t words_count = words_count_;
@@ -194,8 +190,8 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             char_t const *const shorter = pairs.shorters[lane_index].data();
             u64_t *const lane_table = match_masks + (size_t)lane_index * 256 * words_count;
             for (index_t position = 0; position != shorter_length; ++position)
-                lane_table[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |=
-                    (u64_t)1 << (position & 63);
+                lane_table[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |= (u64_t)1
+                                                                                               << (position & 63);
             top_bits[lane_index] = (u64_t)1 << ((shorter_length - 1) & 63);
             shorter_lengths[lane_index] = shorter_length;
             longer_lengths[lane_index] = pairs.longers[lane_index].size();
@@ -219,24 +215,25 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             // Per-lane base offset of the current character's word row inside that lane's table.
             u64_t base_offsets[lanes_k] = {0};
             for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
-                bool const lane_active =
-                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                bool const lane_active = lane_index < pairs.lanes_count() &&
+                                         position < pairs.longers[lane_index].size();
                 u8_t const symbol = lane_active ? (u8_t)pairs.longers[lane_index].data()[position] : 0;
-                base_offsets[lane_index] =
-                    lane_active ? (u64_t)lane_index * 256 * words_count + (u64_t)symbol * words_count : 0;
+                base_offsets[lane_index] = lane_active
+                                               ? (u64_t)lane_index * 256 * words_count + (u64_t)symbol * words_count
+                                               : 0;
             }
 
-            uint64x2_t addition_carry = vdupq_n_u64(0);              // ? 0/1 per lane, the `(Eq&VP)+VP` ripple.
-            uint64x2_t horizontal_positive_carry = one;             // ? Word 0 seeds the leading 1.
+            uint64x2_t addition_carry = vdupq_n_u64(0); // ? 0/1 per lane, the `(Eq&VP)+VP` ripple.
+            uint64x2_t horizontal_positive_carry = one; // ? Word 0 seeds the leading 1.
             uint64x2_t horizontal_negative_carry = vdupq_n_u64(0);
 
             for (size_t word = 0; word != words_count; ++word) {
                 alignas(16) u64_t equality_words[lanes_k] = {0};
                 for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
-                    equality_words[lane_index] =
-                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
-                            ? match_masks[(size_t)base_offsets[lane_index] + word]
-                            : 0;
+                    equality_words[lane_index] = (lane_index < pairs.lanes_count() &&
+                                                  position < pairs.longers[lane_index].size())
+                                                     ? match_masks[(size_t)base_offsets[lane_index] + word]
+                                                     : 0;
                 uint64x2_t const equality = vld1q_u64(equality_words);
 
                 uint64x2_t const vertical_positive_word = vertical_positive[word];
@@ -259,10 +256,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                 uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal); // ? VP & D
 
                 if (word == last_word) {
-                    uint64x2_t const add_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-                    uint64x2_t const sub_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    uint64x2_t const add_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
                     score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
                 }
 
@@ -276,8 +273,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
                 // Pv' = Mh | ~(Xv | Ph) = Hn | ~(carry_in | Hp); applied only to active lanes.
                 uint64x2_t const next_positive = vorrq_u64(
-                    horizontal_negative,
-                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                    horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
                 uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
                 vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
                 vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
@@ -293,7 +289,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
     /**
      *  @brief The runtime-`words_count` sibling of `distances_2x_multiword_<words_count_>` for the long tail
-     *      (shorter > 512), where instantiating one variant per exact word count is no longer worthwhile. Each lane
+     *      (shorter > 512), where instantiating one variant per exact word count is not worthwhile. Each lane
      *      carries its own `ceil(shorter / 64)`-word Myers integer; the group shares a single @p words_count so every
      *      lane loops the same word range. The per-word state lives in a fixed-capacity stack array indexed at runtime;
      *      the math is identical to the templated variant.
@@ -302,7 +298,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      `match_masks + lane * 256 * words_count`, entry `[symbol * words_count + word]`).
      */
     template <typename results_writer_>
-    status_t distances_2x_multiword_large_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x_multiword_large_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                                            scratch_space_t scratch_space) const noexcept {
 
         static constexpr size_t stack_words_capacity_k = 64; // ? Covers shorter sides up to 4096 on the stack.
@@ -326,8 +322,8 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             char_t const *const shorter = pairs.shorters[lane_index].data();
             u64_t *const lane_table = match_masks + (size_t)lane_index * 256 * words_count;
             for (index_t position = 0; position != shorter_length; ++position)
-                lane_table[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |=
-                    (u64_t)1 << (position & 63);
+                lane_table[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |= (u64_t)1
+                                                                                               << (position & 63);
             top_bits[lane_index] = (u64_t)1 << ((shorter_length - 1) & 63);
             shorter_lengths[lane_index] = shorter_length;
             longer_lengths[lane_index] = pairs.longers[lane_index].size();
@@ -350,11 +346,12 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
             u64_t base_offsets[lanes_k] = {0};
             for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
-                bool const lane_active =
-                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                bool const lane_active = lane_index < pairs.lanes_count() &&
+                                         position < pairs.longers[lane_index].size();
                 u8_t const symbol = lane_active ? (u8_t)pairs.longers[lane_index].data()[position] : 0;
-                base_offsets[lane_index] =
-                    lane_active ? (u64_t)lane_index * 256 * words_count + (u64_t)symbol * words_count : 0;
+                base_offsets[lane_index] = lane_active
+                                               ? (u64_t)lane_index * 256 * words_count + (u64_t)symbol * words_count
+                                               : 0;
             }
 
             uint64x2_t addition_carry = vdupq_n_u64(0);
@@ -364,10 +361,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             for (size_t word = 0; word != words_count; ++word) {
                 alignas(16) u64_t equality_words[lanes_k] = {0};
                 for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
-                    equality_words[lane_index] =
-                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
-                            ? match_masks[(size_t)base_offsets[lane_index] + word]
-                            : 0;
+                    equality_words[lane_index] = (lane_index < pairs.lanes_count() &&
+                                                  position < pairs.longers[lane_index].size())
+                                                     ? match_masks[(size_t)base_offsets[lane_index] + word]
+                                                     : 0;
                 uint64x2_t const equality = vld1q_u64(equality_words);
 
                 uint64x2_t const vertical_positive_word = vertical_positive[word];
@@ -388,10 +385,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                 uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal);
 
                 if (word == last_word) {
-                    uint64x2_t const add_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-                    uint64x2_t const sub_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    uint64x2_t const add_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
                     score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
                 }
 
@@ -403,8 +400,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                 horizontal_negative_carry = next_negative_carry;
 
                 uint64x2_t const next_positive = vorrq_u64(
-                    horizontal_negative,
-                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                    horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
                 uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
                 vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
                 vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
@@ -452,7 +448,9 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
     levenshtein_distance_myers() noexcept {}
 
     /** @brief Number of 64-bit words spanning a @p shorter_length-rune pattern, i.e. `ceil(shorter_length / 64)`. */
-    static size_t words_count_for(size_t shorter_length) noexcept { return divide_round_up<size_t>(shorter_length, 64); }
+    static size_t words_count_for(size_t shorter_length) noexcept {
+        return divide_round_up<size_t>(shorter_length, 64);
+    }
 
     /**
      *  @brief Open-addressing capacity (a power of two) for a pattern of @p distinct_upper_bound distinct runes. The
@@ -490,7 +488,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
         return slot_keys_bytes + slot_masks_bytes + absent_row_bytes;
     }
 
-#pragma region - Per-Lane Hash Peq
+#pragma region Per Lane Hash Peq
 
     /**
      *  @brief Carves the 2-lane hash `Peq` out of @p scratch_space and builds it from each lane's shorter side. Every
@@ -555,12 +553,10 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
         return absent_row;
     }
 
-#pragma endregion - Per-Lane Hash Peq
+#pragma endregion Per Lane Hash Peq
 
     /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept {
-        return vcgtq_u64(value, vdupq_n_u64(0));
-    }
+    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
 
     /**
      *  @brief Two independent single-word rune Myers distances, one per `uint64x2_t` lane (each shorter side <= 64
@@ -569,7 +565,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
      *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
      */
     template <typename results_writer_>
-    status_t distances_2x64_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                              scratch_space_t scratch_space) const noexcept {
 
         size_t max_longer = 0, max_shorter = 0;
@@ -592,8 +588,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             shorter_lengths[lane_index] = shorter_length;
             longer_lengths[lane_index] = pairs.longers[lane_index].size();
             // VP = the low `shorter_length` bits set; a 64-bit shift is undefined, so build full-width as `~0`.
-            vertical_positive_init[lane_index] =
-                shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
+            vertical_positive_init[lane_index] = shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
         }
 
         uint64x2_t const one = vdupq_n_u64(1);
@@ -609,8 +604,8 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
                 if (position < pairs.longers[lane_index].size()) {
                     rune_t const symbol = pairs.longers[lane_index].data()[position];
-                    equality_lanes[lane_index] =
-                        lane_match_row_(slot_keys, slot_masks, absent_row, lane_index, capacity, 1, symbol)[0];
+                    equality_lanes[lane_index] = lane_match_row_(slot_keys, slot_masks, absent_row, lane_index,
+                                                                 capacity, 1, symbol)[0];
                 }
             uint64x2_t const equality = vld1q_u64(equality_lanes);
 
@@ -619,22 +614,21 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             uint64x2_t const sum = vaddq_u64(vandq_u64(equality, vertical_positive), vertical_positive);
             uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive), equality);
             // Ph = VN | ~(D | VP).
-            uint64x2_t horizontal_positive =
-                vorrq_u64(vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
+            uint64x2_t horizontal_positive = vorrq_u64(
+                vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
             uint64x2_t horizontal_negative = vandq_u64(vertical_positive, diagonal);
 
-            uint64x2_t const add_step =
-                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-            uint64x2_t const sub_step =
-                vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+            uint64x2_t const add_step = vandq_u64(
+                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+            uint64x2_t const sub_step = vandq_u64(
+                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
             score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
 
             horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), one);
             horizontal_negative = vshlq_n_u64(horizontal_negative, 1);
             // Pv' = Hn | ~(carry_in | Hp).
             uint64x2_t const next_positive = vorrq_u64(
-                horizontal_negative,
-                vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
             uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
             vertical_positive = vbslq_u64(active, next_positive, vertical_positive);
             vertical_negative = vbslq_u64(active, next_negative, vertical_negative);
@@ -656,7 +650,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
      *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
      */
     template <size_t words_count_, typename results_writer_>
-    status_t distances_2x_multiword_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x_multiword_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                                      scratch_space_t scratch_space) const noexcept {
 
         constexpr size_t words_count = words_count_;
@@ -699,25 +693,25 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             // Per-lane hash probe of the current text rune -> the lane's `words_count` bitmask row (or `absent_row`).
             u64_t const *match_rows[lanes_k];
             for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
-                bool const lane_active =
-                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                bool const lane_active = lane_index < pairs.lanes_count() &&
+                                         position < pairs.longers[lane_index].size();
                 rune_t const symbol = lane_active ? pairs.longers[lane_index].data()[position] : empty_slot_k;
                 match_rows[lane_index] = lane_active ? lane_match_row_(slot_keys, slot_masks, absent_row, lane_index,
-                                                                      capacity, words_count, symbol)
+                                                                       capacity, words_count, symbol)
                                                      : absent_row;
             }
 
-            uint64x2_t addition_carry = vdupq_n_u64(0);              // ? 0/1 per lane, the `(Eq&VP)+VP` ripple.
-            uint64x2_t horizontal_positive_carry = one;             // ? Word 0 seeds the leading 1.
+            uint64x2_t addition_carry = vdupq_n_u64(0); // ? 0/1 per lane, the `(Eq&VP)+VP` ripple.
+            uint64x2_t horizontal_positive_carry = one; // ? Word 0 seeds the leading 1.
             uint64x2_t horizontal_negative_carry = vdupq_n_u64(0);
 
             for (size_t word = 0; word != words_count; ++word) {
                 alignas(16) u64_t equality_words[lanes_k] = {0};
                 for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
-                    equality_words[lane_index] =
-                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
-                            ? match_rows[lane_index][word]
-                            : 0;
+                    equality_words[lane_index] = (lane_index < pairs.lanes_count() &&
+                                                  position < pairs.longers[lane_index].size())
+                                                     ? match_rows[lane_index][word]
+                                                     : 0;
                 uint64x2_t const equality = vld1q_u64(equality_words);
 
                 uint64x2_t const vertical_positive_word = vertical_positive[word];
@@ -740,10 +734,10 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
                 uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal); // ? VP & D
 
                 if (word == last_word) {
-                    uint64x2_t const add_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-                    uint64x2_t const sub_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    uint64x2_t const add_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
                     score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
                 }
 
@@ -757,8 +751,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
 
                 // Pv' = Hn | ~(carry_in | Hp); applied only to active lanes.
                 uint64x2_t const next_positive = vorrq_u64(
-                    horizontal_negative,
-                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                    horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
                 uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
                 vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
                 vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
@@ -780,7 +773,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
      *      @p scratch_space holds the 2-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
      */
     template <typename results_writer_>
-    status_t distances_2x_multiword_large_(lane_pairs_view<char_t> pairs, results_writer_ &results,
+    status_t distances_2x_multiword_large_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                                            scratch_space_t scratch_space) const noexcept {
 
         static constexpr size_t stack_words_capacity_k = 64; // ? Covers shorter sides up to 4096 runes on the stack.
@@ -824,11 +817,11 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
             u64_t const *match_rows[lanes_k];
             for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index) {
-                bool const lane_active =
-                    lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size();
+                bool const lane_active = lane_index < pairs.lanes_count() &&
+                                         position < pairs.longers[lane_index].size();
                 rune_t const symbol = lane_active ? pairs.longers[lane_index].data()[position] : empty_slot_k;
                 match_rows[lane_index] = lane_active ? lane_match_row_(slot_keys, slot_masks, absent_row, lane_index,
-                                                                      capacity, words_count, symbol)
+                                                                       capacity, words_count, symbol)
                                                      : absent_row;
             }
 
@@ -839,10 +832,10 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
             for (size_t word = 0; word != words_count; ++word) {
                 alignas(16) u64_t equality_words[lanes_k] = {0};
                 for (index_t lane_index = 0; lane_index != lanes_k; ++lane_index)
-                    equality_words[lane_index] =
-                        (lane_index < pairs.lanes_count() && position < pairs.longers[lane_index].size())
-                            ? match_rows[lane_index][word]
-                            : 0;
+                    equality_words[lane_index] = (lane_index < pairs.lanes_count() &&
+                                                  position < pairs.longers[lane_index].size())
+                                                     ? match_rows[lane_index][word]
+                                                     : 0;
                 uint64x2_t const equality = vld1q_u64(equality_words);
 
                 uint64x2_t const vertical_positive_word = vertical_positive[word];
@@ -863,10 +856,10 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
                 uint64x2_t horizontal_negative = vandq_u64(vertical_positive_word, diagonal);
 
                 if (word == last_word) {
-                    uint64x2_t const add_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-                    uint64x2_t const sub_step =
-                        vandq_u64(vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
+                    uint64x2_t const add_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
+                    uint64x2_t const sub_step = vandq_u64(
+                        vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
                     score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
                 }
 
@@ -878,8 +871,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
                 horizontal_negative_carry = next_negative_carry;
 
                 uint64x2_t const next_positive = vorrq_u64(
-                    horizontal_negative,
-                    vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
+                    horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
                 uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
                 vertical_positive[word] = vbslq_u64(active, next_positive, vertical_positive_word);
                 vertical_negative[word] = vbslq_u64(active, next_negative, vertical_negative_word);
@@ -894,7 +886,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
     }
 };
 
-#pragma endregion Bit-Parallel Myers
+#pragma endregion Bit Parallel Myers
 
 /** @brief Redirects the NEON horizontal-walker specialization to the serial version. The Wagner-Fischer
  *         tiny-input path is not worth vectorizing, so it shares the serial implementation. */
@@ -3812,7 +3804,7 @@ struct smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_ca
     }
 };
 
-#pragma region NEON Inter-Sequence Candidate Lanes
+#pragma region NEON Inter Sequence Candidate Lanes
 
 /**
  *  @brief Inter-sequence NEON walker: one query against up to 16 candidates packed one-per-lane, 8-bit cells.
@@ -3902,8 +3894,8 @@ struct candidate_lane_walker<char, u8_t, uniform_substitution_costs_t, linear_ga
                 uint8x16_t const cost_if_substitution_vec = vsubq_u8(diagonal_vec, mismatch_mask);
                 uint8x16_t const cost_if_deletion_vec = vaddq_u8(deletion_source_vec, one_vec);
                 uint8x16_t const cost_if_insertion_vec = vaddq_u8(insertion_source_vec, one_vec);
-                uint8x16_t const cell_score_vec =
-                    vminq_u8(cost_if_substitution_vec, vminq_u8(cost_if_deletion_vec, cost_if_insertion_vec));
+                uint8x16_t const cell_score_vec = vminq_u8(cost_if_substitution_vec,
+                                                           vminq_u8(cost_if_deletion_vec, cost_if_insertion_vec));
                 vst1q_u8(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
@@ -3999,8 +3991,7 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
         // Row 0: the empty query prefix against every candidate prefix is a run of `column` gaps, identical
         // across lanes (later masked per-lane at latch time by reading each lane's own final column).
         for (size_t column = 0; column <= longest_candidate; ++column)
-            vst1q_u16(previous_row + column * candidate_lanes_k,
-                      vdupq_n_u16(static_cast<u16_t>(column * gap_cost)));
+            vst1q_u16(previous_row + column * candidate_lanes_k, vdupq_n_u16(static_cast<u16_t>(column * gap_cost)));
 
         for (size_t query_position = 1; query_position <= query_length; ++query_position) {
             uint16x8_t const query_char_vec = vdupq_n_u16(static_cast<u16_t>((u8_t)query[query_position - 1]));
@@ -4020,8 +4011,8 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, linear_g
                 uint16x8_t const cost_if_substitution_vec = vaddq_u16(diagonal_vec, substitution_addend_vec);
                 uint16x8_t const cost_if_deletion_vec = vaddq_u16(deletion_source_vec, gap_vec);
                 uint16x8_t const cost_if_insertion_vec = vaddq_u16(insertion_source_vec, gap_vec);
-                uint16x8_t const cell_score_vec =
-                    vminq_u16(cost_if_substitution_vec, vminq_u16(cost_if_deletion_vec, cost_if_insertion_vec));
+                uint16x8_t const cell_score_vec = vminq_u16(cost_if_substitution_vec,
+                                                            vminq_u16(cost_if_deletion_vec, cost_if_insertion_vec));
                 vst1q_u16(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
@@ -4117,8 +4108,7 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_g
         // Row 0: the empty query prefix against every candidate prefix is a run of `column` gaps, identical
         // across lanes (later masked per-lane at latch time by reading each lane's own final column).
         for (size_t column = 0; column <= longest_candidate; ++column)
-            vst1q_u32(previous_row + column * candidate_lanes_k,
-                      vdupq_n_u32(static_cast<u32_t>(column * gap_cost)));
+            vst1q_u32(previous_row + column * candidate_lanes_k, vdupq_n_u32(static_cast<u32_t>(column * gap_cost)));
 
         for (size_t query_position = 1; query_position <= query_length; ++query_position) {
             uint32x4_t const query_char_vec = vdupq_n_u32(static_cast<u32_t>((u8_t)query[query_position - 1]));
@@ -4139,8 +4129,8 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_g
                 uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
                 uint32x4_t const cost_if_deletion_vec = vaddq_u32(deletion_source_vec, gap_vec);
                 uint32x4_t const cost_if_insertion_vec = vaddq_u32(insertion_source_vec, gap_vec);
-                uint32x4_t const cell_score_vec =
-                    vminq_u32(cost_if_substitution_vec, vminq_u32(cost_if_deletion_vec, cost_if_insertion_vec));
+                uint32x4_t const cell_score_vec = vminq_u32(cost_if_substitution_vec,
+                                                            vminq_u32(cost_if_deletion_vec, cost_if_insertion_vec));
                 vst1q_u32(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
@@ -4266,8 +4256,8 @@ struct candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, linear
                 uint16x8_t const cost_if_substitution_vec = vaddq_u16(diagonal_vec, substitution_addend_vec);
                 uint16x8_t const cost_if_deletion_vec = vaddq_u16(deletion_source_vec, gap_vec);
                 uint16x8_t const cost_if_insertion_vec = vaddq_u16(insertion_source_vec, gap_vec);
-                uint16x8_t const cell_score_vec =
-                    vminq_u16(cost_if_substitution_vec, vminq_u16(cost_if_deletion_vec, cost_if_insertion_vec));
+                uint16x8_t const cell_score_vec = vminq_u16(cost_if_substitution_vec,
+                                                            vminq_u16(cost_if_deletion_vec, cost_if_insertion_vec));
                 vst1q_u16(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
@@ -4381,8 +4371,8 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, linear
                 uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
                 uint32x4_t const cost_if_deletion_vec = vaddq_u32(deletion_source_vec, gap_vec);
                 uint32x4_t const cost_if_insertion_vec = vaddq_u32(insertion_source_vec, gap_vec);
-                uint32x4_t const cell_score_vec =
-                    vminq_u32(cost_if_substitution_vec, vminq_u32(cost_if_deletion_vec, cost_if_insertion_vec));
+                uint32x4_t const cell_score_vec = vminq_u32(cost_if_substitution_vec,
+                                                            vminq_u32(cost_if_deletion_vec, cost_if_insertion_vec));
                 vst1q_u32(current_row + column * candidate_lanes_k, cell_score_vec);
             }
             trivial_swap(previous_row, current_row);
@@ -4496,8 +4486,8 @@ struct candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, affine
 
             // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
             // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
-            uint16x8_t const left_boundary_vec =
-                vdupq_n_u16(static_cast<u16_t>(open + extend * (u16_t)(query_position - 1)));
+            uint16x8_t const left_boundary_vec = vdupq_n_u16(
+                static_cast<u16_t>(open + extend * (u16_t)(query_position - 1)));
             vst1q_u16(current_row, left_boundary_vec);
             uint16x8_t horizontal_vec = vaddq_u16(discard_bias_vec, left_boundary_vec);
 
@@ -4521,8 +4511,8 @@ struct candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, affine
                 uint16x8_t const cost_if_substitution_vec = vaddq_u16(diagonal_vec, substitution_addend_vec);
 
                 // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
-                uint16x8_t const vertical_vec =
-                    vminq_u16(vaddq_u16(up_vec, open_vec), vaddq_u16(up_vertical_vec, extend_vec));
+                uint16x8_t const vertical_vec = vminq_u16(vaddq_u16(up_vec, open_vec),
+                                                          vaddq_u16(up_vertical_vec, extend_vec));
                 horizontal_vec = vminq_u16(vaddq_u16(left_vec, open_vec), vaddq_u16(horizontal_vec, extend_vec));
                 uint16x8_t const cost_if_gap_vec = vminq_u16(vertical_vec, horizontal_vec);
 
@@ -4639,8 +4629,8 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine
 
             // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
             // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
-            uint32x4_t const left_boundary_vec =
-                vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(query_position - 1)));
+            uint32x4_t const left_boundary_vec = vdupq_n_u32(
+                static_cast<u32_t>(open + extend * (u32_t)(query_position - 1)));
             vst1q_u32(current_row, left_boundary_vec);
             uint32x4_t horizontal_vec = vaddq_u32(discard_bias_vec, left_boundary_vec);
 
@@ -4660,8 +4650,8 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine
                 uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
 
                 // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
-                uint32x4_t const vertical_vec =
-                    vminq_u32(vaddq_u32(up_vec, open_vec), vaddq_u32(up_vertical_vec, extend_vec));
+                uint32x4_t const vertical_vec = vminq_u32(vaddq_u32(up_vec, open_vec),
+                                                          vaddq_u32(up_vertical_vec, extend_vec));
                 horizontal_vec = vminq_u32(vaddq_u32(left_vec, open_vec), vaddq_u32(horizontal_vec, extend_vec));
                 uint32x4_t const cost_if_gap_vec = vminq_u32(vertical_vec, horizontal_vec);
 
@@ -4681,7 +4671,7 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine
     }
 };
 
-#pragma region - Weighted Candidate-Lane Walker
+#pragma region Weighted Candidate Lane Walker
 
 /**
  *  @brief Inter-sequence NEON walker: one query against up to 8 candidates packed one-per-lane, weighted
@@ -4714,8 +4704,8 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine
  *  @note Requires Arm NEON CPUs.
  */
 template <typename gap_costs_type_, sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_, sz_cap_neon_k,
-                             8, void> {
+struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_, sz_cap_neon_k, 8,
+                             void> {
 
     using char_t = char;
     using score_t = i16_t;
@@ -4730,9 +4720,8 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
     // The signed `i16` recurrence hardcodes `vmaxq_s16`; minimization would need a different blend.
-    static_assert(objective_ == sz_maximize_score_k,
-                  "The weighted candidate-lane kernel only implements score maximization (Needleman-Wunsch / "
-                  "Smith-Waterman).");
+    static_assert(objective_ == sz_maximize_score_k, "The weighted candidate-lane kernel only implements score "
+                                                     "maximization (Needleman-Wunsch / " "Smith-Waterman).");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -4837,8 +4826,7 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
         for (size_t column = 0; column <= longest_candidate; ++column) {
             if constexpr (is_local_k) {
                 vst1q_s16(previous_row + column * candidate_lanes_k, zero_vec);
-                if constexpr (is_affine_k)
-                    vst1q_s16(previous_deletes + column * candidate_lanes_k, sentinel_vec);
+                if constexpr (is_affine_k) vst1q_s16(previous_deletes + column * candidate_lanes_k, sentinel_vec);
             }
             else if constexpr (is_affine_k) {
                 // Column 0 is 0; column j (>= 1) costs `open + extend * (j - 1)`. The deletion track is seeded with
@@ -4879,8 +4867,7 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
             else { vst1q_s16(current_row, vdupq_n_s16(static_cast<i16_t>(open * (i16_t)query_position))); }
 
             for (size_t column = 1; column <= longest_candidate; ++column) {
-                uint8x8_t const candidate_classes_low =
-                    vld1_u8(candidate_classes + (column - 1) * candidate_lanes_k);
+                uint8x8_t const candidate_classes_low = vld1_u8(candidate_classes + (column - 1) * candidate_lanes_k);
                 uint8x16_t const candidate_classes_vec = vcombine_u8(candidate_classes_low, vdup_n_u8(0));
                 int16x8_t const diagonal_vec = vld1q_s16(previous_row + (column - 1) * candidate_lanes_k);
                 int16x8_t const up_vec = vld1q_s16(previous_row + column * candidate_lanes_k);
@@ -4890,11 +4877,11 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
                 if constexpr (is_affine_k) {
                     int16x8_t const up_deletes_vec = vld1q_s16(previous_deletes + column * candidate_lanes_k);
                     // Gotoh deletion track (vertical): open a gap from the cell above, or extend the running deletion.
-                    int16x8_t const delete_vec =
-                        vmaxq_s16(vaddq_s16(up_vec, open_vec), vaddq_s16(up_deletes_vec, extend_vec));
+                    int16x8_t const delete_vec = vmaxq_s16(vaddq_s16(up_vec, open_vec),
+                                                           vaddq_s16(up_deletes_vec, extend_vec));
                     // Gotoh insertion track (horizontal): open a gap from the cell to the left, or extend the running one.
-                    int16x8_t const insert_vec =
-                        vmaxq_s16(vaddq_s16(left_vec, open_vec), vaddq_s16(running_inserts_vec, extend_vec));
+                    int16x8_t const insert_vec = vmaxq_s16(vaddq_s16(left_vec, open_vec),
+                                                           vaddq_s16(running_inserts_vec, extend_vec));
                     running_inserts_vec = insert_vec;
                     vst1q_s16(current_deletes + column * candidate_lanes_k, delete_vec);
                     cost_if_gap_vec = vmaxq_s16(delete_vec, insert_vec);
@@ -4912,8 +4899,8 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
 
                 if constexpr (is_local_k) {
                     // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int16x8_t const column_live =
-                        vcgtq_s16(lane_lengths_vec, vdupq_n_s16(static_cast<i16_t>(column - 1)));
+                    int16x8_t const column_live = vcgtq_s16(lane_lengths_vec,
+                                                            vdupq_n_s16(static_cast<i16_t>(column - 1)));
                     int16x8_t const masked_cell_vec = vandq_s16(cell_score_vec, column_live);
                     running_max_vec = vmaxq_s16(running_max_vec, masked_cell_vec);
                 }
@@ -4956,8 +4943,8 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
  *  @note Requires Arm NEON CPUs.
  */
 template <typename gap_costs_type_, sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_, sz_cap_neon_k,
-                             4, void> {
+struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, objective_, locality_, sz_cap_neon_k, 4,
+                             void> {
 
     using char_t = char;
     using score_t = i32_t;
@@ -4972,9 +4959,8 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
     // The signed `i32` recurrence hardcodes `vmaxq_s32`; minimization would need a different blend.
-    static_assert(objective_ == sz_maximize_score_k,
-                  "The weighted candidate-lane kernel only implements score maximization (Needleman-Wunsch / "
-                  "Smith-Waterman).");
+    static_assert(objective_ == sz_maximize_score_k, "The weighted candidate-lane kernel only implements score "
+                                                     "maximization (Needleman-Wunsch / " "Smith-Waterman).");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -5083,8 +5069,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
         for (size_t column = 0; column <= longest_candidate; ++column) {
             if constexpr (is_local_k) {
                 vst1q_s32(previous_row + column * candidate_lanes_k, zero_vec);
-                if constexpr (is_affine_k)
-                    vst1q_s32(previous_deletes + column * candidate_lanes_k, sentinel_vec);
+                if constexpr (is_affine_k) vst1q_s32(previous_deletes + column * candidate_lanes_k, sentinel_vec);
             }
             else if constexpr (is_affine_k) {
                 // Column 0 is 0; column j (>= 1) costs `open + extend * (j - 1)`. The deletion track is seeded with
@@ -5127,8 +5112,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
             for (size_t column = 1; column <= longest_candidate; ++column) {
                 // Only the low 4 lanes carry live classes; the `vld1_u8` reads 8 bytes (a padded class lane-vector
                 // backs the final column's over-read) and the `vmovl` chain discards the high 4 lanes.
-                uint8x8_t const candidate_classes_low =
-                    vld1_u8(candidate_classes + (column - 1) * candidate_lanes_k);
+                uint8x8_t const candidate_classes_low = vld1_u8(candidate_classes + (column - 1) * candidate_lanes_k);
                 uint8x16_t const candidate_classes_vec = vcombine_u8(candidate_classes_low, vdup_n_u8(0));
                 int32x4_t const diagonal_vec = vld1q_s32(previous_row + (column - 1) * candidate_lanes_k);
                 int32x4_t const up_vec = vld1q_s32(previous_row + column * candidate_lanes_k);
@@ -5138,11 +5122,11 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
                 if constexpr (is_affine_k) {
                     int32x4_t const up_deletes_vec = vld1q_s32(previous_deletes + column * candidate_lanes_k);
                     // Gotoh deletion track (vertical): open a gap from the cell above, or extend the running deletion.
-                    int32x4_t const delete_vec =
-                        vmaxq_s32(vaddq_s32(up_vec, open_vec), vaddq_s32(up_deletes_vec, extend_vec));
+                    int32x4_t const delete_vec = vmaxq_s32(vaddq_s32(up_vec, open_vec),
+                                                           vaddq_s32(up_deletes_vec, extend_vec));
                     // Gotoh insertion track (horizontal): open a gap from the cell to the left, or extend the running one.
-                    int32x4_t const insert_vec =
-                        vmaxq_s32(vaddq_s32(left_vec, open_vec), vaddq_s32(running_inserts_vec, extend_vec));
+                    int32x4_t const insert_vec = vmaxq_s32(vaddq_s32(left_vec, open_vec),
+                                                           vaddq_s32(running_inserts_vec, extend_vec));
                     running_inserts_vec = insert_vec;
                     vst1q_s32(current_deletes + column * candidate_lanes_k, delete_vec);
                     cost_if_gap_vec = vmaxq_s32(delete_vec, insert_vec);
@@ -5162,8 +5146,8 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
 
                 if constexpr (is_local_k) {
                     // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int32x4_t const column_live =
-                        vcgtq_s32(lane_lengths_vec, vdupq_n_s32(static_cast<i32_t>(column - 1)));
+                    int32x4_t const column_live = vcgtq_s32(lane_lengths_vec,
+                                                            vdupq_n_s32(static_cast<i32_t>(column - 1)));
                     int32x4_t const masked_cell_vec = vandq_s32(cell_score_vec, column_live);
                     running_max_vec = vmaxq_s32(running_max_vec, masked_cell_vec);
                 }
@@ -5189,7 +5173,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     }
 };
 
-#pragma endregion - Weighted Candidate-Lane Walker
+#pragma endregion Weighted Candidate Lane Walker
 
 /**
  *  @brief Inter-sequence NEON walker: one query against up to 8 candidates packed one-per-lane, unit-substitution
@@ -5280,8 +5264,7 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
         vst1q_u16(previous_row, vdupq_n_u16(0));
         vst1q_u16(vertical_row, discard_bias_vec);
         for (size_t column = 1; column <= longest_candidate; ++column) {
-            uint16x8_t const boundary_vec =
-                vdupq_n_u16(static_cast<u16_t>(open + extend * (u16_t)(column - 1)));
+            uint16x8_t const boundary_vec = vdupq_n_u16(static_cast<u16_t>(open + extend * (u16_t)(column - 1)));
             vst1q_u16(previous_row + column * candidate_lanes_k, boundary_vec);
             vst1q_u16(vertical_row + column * candidate_lanes_k, vaddq_u16(discard_bias_vec, boundary_vec));
         }
@@ -5291,8 +5274,8 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
 
             // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
             // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
-            uint16x8_t const left_boundary_vec =
-                vdupq_n_u16(static_cast<u16_t>(open + extend * (u16_t)(query_position - 1)));
+            uint16x8_t const left_boundary_vec = vdupq_n_u16(
+                static_cast<u16_t>(open + extend * (u16_t)(query_position - 1)));
             vst1q_u16(current_row, left_boundary_vec);
             uint16x8_t horizontal_vec = vaddq_u16(discard_bias_vec, left_boundary_vec);
 
@@ -5312,8 +5295,8 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
                 uint16x8_t const cost_if_substitution_vec = vaddq_u16(diagonal_vec, substitution_addend_vec);
 
                 // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
-                uint16x8_t const vertical_vec =
-                    vminq_u16(vaddq_u16(up_vec, open_vec), vaddq_u16(up_vertical_vec, extend_vec));
+                uint16x8_t const vertical_vec = vminq_u16(vaddq_u16(up_vec, open_vec),
+                                                          vaddq_u16(up_vertical_vec, extend_vec));
                 horizontal_vec = vminq_u16(vaddq_u16(left_vec, open_vec), vaddq_u16(horizontal_vec, extend_vec));
                 uint16x8_t const cost_if_gap_vec = vminq_u16(vertical_vec, horizontal_vec);
 
@@ -5424,8 +5407,7 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_g
         vst1q_u32(previous_row, vdupq_n_u32(0));
         vst1q_u32(vertical_row, discard_bias_vec);
         for (size_t column = 1; column <= longest_candidate; ++column) {
-            uint32x4_t const boundary_vec =
-                vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(column - 1)));
+            uint32x4_t const boundary_vec = vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(column - 1)));
             vst1q_u32(previous_row + column * candidate_lanes_k, boundary_vec);
             vst1q_u32(vertical_row + column * candidate_lanes_k, vaddq_u32(discard_bias_vec, boundary_vec));
         }
@@ -5435,8 +5417,8 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_g
 
             // First-column boundary of this row: `M = open + extend * (query_position - 1)`, and the rolling
             // horizontal `E` register reseeded with the discarded magnitude added to that left boundary.
-            uint32x4_t const left_boundary_vec =
-                vdupq_n_u32(static_cast<u32_t>(open + extend * (u32_t)(query_position - 1)));
+            uint32x4_t const left_boundary_vec = vdupq_n_u32(
+                static_cast<u32_t>(open + extend * (u32_t)(query_position - 1)));
             vst1q_u32(current_row, left_boundary_vec);
             uint32x4_t horizontal_vec = vaddq_u32(discard_bias_vec, left_boundary_vec);
 
@@ -5457,8 +5439,8 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_g
                 uint32x4_t const cost_if_substitution_vec = vaddq_u32(diagonal_vec, substitution_addend_vec);
 
                 // Gotoh tracks: vertical `F` from the cell above, horizontal `E` from the cell to the left.
-                uint32x4_t const vertical_vec =
-                    vminq_u32(vaddq_u32(up_vec, open_vec), vaddq_u32(up_vertical_vec, extend_vec));
+                uint32x4_t const vertical_vec = vminq_u32(vaddq_u32(up_vec, open_vec),
+                                                          vaddq_u32(up_vertical_vec, extend_vec));
                 horizontal_vec = vminq_u32(vaddq_u32(left_vec, open_vec), vaddq_u32(horizontal_vec, extend_vec));
                 uint32x4_t const cost_if_gap_vec = vminq_u32(vertical_vec, horizontal_vec);
 
@@ -5501,8 +5483,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     using index_t = u32_t;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr size_t candidate_lanes_k = 8;     // ? `u16` lanes for the non-unit candidate-lane walker.
-    static constexpr size_t u16_reach_limit_k = 60000; // ? `u16` headroom for the non-unit lane walker.
+    static constexpr size_t candidate_lanes_k = 8;          // ? `u16` lanes for the non-unit candidate-lane walker.
+    static constexpr size_t u16_reach_limit_k = 60000;      // ? `u16` headroom for the non-unit lane walker.
     static constexpr size_t u32_reach_limit_k = 1500000000; // ? `u32` headroom for the wide non-unit lane walker.
 
     using scoring_t = levenshtein_distance<char, gap_costs_t, capability_k>; // ? Per-pair DP fallback.
@@ -5511,9 +5493,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_neon_k, (int)candidate_lanes_k,
                               void>; // ? NEON non-unit shared-query `u16` lanes.
-    using lane_walker_wide_t =
-        candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, gap_costs_t, sz_minimize_distance_k,
-                              sz_similarity_global_k, sz_cap_neon_k, 4, void>; // ? NEON non-unit shared-query `u32` lanes.
+    using lane_walker_wide_t = candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, gap_costs_t,
+                                                     sz_minimize_distance_k, sz_similarity_global_k, sz_cap_neon_k, 4,
+                                                     void>; // ? NEON non-unit shared-query `u32` lanes.
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -5576,7 +5558,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         return sz_max_of_two(sz_max_of_two(myers_scratch, dp_scratch), twoxN_scratch);
     }
 
-#pragma region - Cross-Product Cell Addressing
+#pragma region Cross Product Cell Addressing
 
     /**
      *  @brief A destination for one scored cell: the primary matrix slot plus an optional mirror slot. The Myers
@@ -5634,9 +5616,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         }
     }
 
-#pragma endregion - Cross-Product Cell Addressing
+#pragma endregion Cross Product Cell Addressing
 
-#pragma region - Cross-Product Scoring
+#pragma region Cross Product Scoring
 
     /**
      *  @brief Scores the live cells `[cell_begin, cell_end)` of the cross-product with the lockstep NEON Myers family,
@@ -5648,7 +5630,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename queries_type_, typename candidates_type_, typename results_type_>
     [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
                                             results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
+                                            size_t cell_end, scratch_space_t scratch,
+                                            cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -5712,42 +5695,35 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
             cross_cell_writer_<value_t> group_writer;
             group_writer.destinations = group_destinations;
-            lane_pairs_view<char> const group_pairs {
-                {group_shorters, group}, {group_longers, group}, {group_positions, group}};
-            // The single-word kernel covers bucket 1 (shorter <= 64); the compile-time variants cover buckets 2..8
-            // (shorter <= 512); buckets beyond that take the runtime sibling, or - for a lone long cell - the
-            // single-pair anti-diagonal DP to avoid a ragged regression.
-            status_t status = status_t::success_k;
-            switch (seed_bucket) {
-            case 1: status = myers.distances_2x64_(group_pairs, group_writer, scratch); break;
-            case 2: status = myers.template distances_2x_multiword_<2>(group_pairs, group_writer, scratch); break;
-            case 3: status = myers.template distances_2x_multiword_<3>(group_pairs, group_writer, scratch); break;
-            case 4: status = myers.template distances_2x_multiword_<4>(group_pairs, group_writer, scratch); break;
-            case 5: status = myers.template distances_2x_multiword_<5>(group_pairs, group_writer, scratch); break;
-            case 6: status = myers.template distances_2x_multiword_<6>(group_pairs, group_writer, scratch); break;
-            case 7: status = myers.template distances_2x_multiword_<7>(group_pairs, group_writer, scratch); break;
-            case 8: status = myers.template distances_2x_multiword_<8>(group_pairs, group_writer, scratch); break;
-            default:
-                if (group >= 2)
-                    status = myers.distances_2x_multiword_large_(group_pairs, group_writer, scratch);
-                else {
-                    // A lone shorter > 512 cell: keep the single-pair anti-diagonal DP, no ragged regression.
-                    size_t result_score = 0;
-                    if (status_t const lone_status =
-                            dp(group_shorters[0], group_longers[0], result_score, scratch, dummy, specs);
-                        lone_status != status_t::success_k)
-                        return lone_status;
-                    cross_cell_writer_<value_t> {&group_destinations[0]}[0] = result_score;
-                    continue;
-                }
-                break;
+            lane_pairs_view<char> const group_pairs {{group_shorters, group},
+                                                     {group_longers, group},
+                                                     {group_positions, group}};
+            // A lone shorter > 512 cell keeps the single-pair anti-diagonal DP, avoiding a ragged regression.
+            if (seed_bucket > 8 && group < 2) {
+                size_t result_score = 0;
+                if (status_t const lone_status = dp(group_shorters[0], group_longers[0], result_score, scratch, dummy,
+                                                    specs);
+                    lone_status != status_t::success_k)
+                    return lone_status;
+                cross_cell_writer_<value_t> {&group_destinations[0]}[0] = result_score;
+                continue;
             }
+            // Bucket 1 (shorter <= 64) takes the single-word kernel, 2..8 the compile-time multiword variant; longer
+            // groups take the runtime sibling.
+            status_t status = dispatch_word_bucket_<1, 8>(
+                seed_bucket,
+                [&](auto bucket) {
+                    if constexpr (bucket.value == 1) return myers.distances_2x64_(group_pairs, group_writer, scratch);
+                    else
+                        return myers.template distances_2x_multiword_<bucket.value>(group_pairs, group_writer, scratch);
+                },
+                [&] { return myers.distances_2x_multiword_large_(group_pairs, group_writer, scratch); });
             if (status == status_t::success_k) continue;
             // Defensive scratch-shortfall fallback: score every grouped pair through the DP.
             for (index_t lane = 0; lane != group; ++lane) {
                 size_t lane_score = 0;
-                if (status_t const lane_status =
-                        dp(group_shorters[lane], group_longers[lane], lane_score, scratch, dummy, specs);
+                if (status_t const lane_status = dp(group_shorters[lane], group_longers[lane], lane_score, scratch,
+                                                    dummy, specs);
                     lane_status != status_t::success_k)
                     return lane_status;
                 cross_cell_writer_<value_t> {&group_destinations[lane]}[0] = lane_score;
@@ -5772,16 +5748,16 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
             size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
             scratch_space_t slice = scratch_space_t(score_scratch_).subspan(worker * worker_scratch, worker_scratch);
-            status_t status =
-                score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length, slice, specs);
+            status_t status = score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length,
+                                           slice, specs);
             if (status != status_t::success_k) error.store(status);
         });
         return error.load();
     }
 
-#pragma endregion - Cross-Product Scoring
+#pragma endregion Cross Product Scoring
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `u16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -5839,8 +5815,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             scoring_t fallback {substituter_, gap_costs_};
             return cross_product_candidate_lanes_parallel_(
                 narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-                std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-                specs);
+                std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(),
+                empty_cell_policy_(), specs);
         }
         return score_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
                                std::forward<executor_type_>(executor), specs);
@@ -5873,22 +5849,22 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_()) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
             scoring_t fallback {substituter_, gap_costs_};
             return cross_product_candidate_lanes_parallel_(
-                narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-                std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-                specs);
+                narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k,
+                score_scratch_, std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(),
+                empty_cell_policy_(), specs);
         }
         return score_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                std::forward<executor_type_>(executor), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -5911,8 +5887,8 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     using index_t = u32_t;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr size_t candidate_lanes_k = 8;     // ? `u16` lanes for the affine candidate-lane walker.
-    static constexpr size_t u16_reach_limit_k = 50000; // ? `u16` headroom below the lane walker's discard bias.
+    static constexpr size_t candidate_lanes_k = 8;          // ? `u16` lanes for the affine candidate-lane walker.
+    static constexpr size_t u16_reach_limit_k = 50000;      // ? `u16` headroom below the lane walker's discard bias.
     static constexpr size_t u32_reach_limit_k = 1500000000; // ? `u32` headroom for the wide affine lane walker.
 
     using scoring_t = levenshtein_distance<char, affine_gap_costs_t, sz_cap_serial_k>; // ? Per-pair DP fallback.
@@ -5920,9 +5896,9 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
         candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_gap_costs_t, sz_minimize_distance_k,
                               sz_similarity_global_k, sz_cap_neon_k, (int)candidate_lanes_k,
                               void>; // ? NEON affine shared-query `u16` lanes.
-    using lane_walker_wide_t =
-        candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_gap_costs_t, sz_minimize_distance_k,
-                              sz_similarity_global_k, sz_cap_neon_k, 4, void>; // ? NEON affine shared-query `u32` lanes.
+    using lane_walker_wide_t = candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                                                     sz_minimize_distance_k, sz_similarity_global_k, sz_cap_neon_k, 4,
+                                                     void>; // ? NEON affine shared-query `u32` lanes.
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
 
@@ -5955,7 +5931,7 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
                u32_reach_limit_k;
     }
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case distance fits the `u16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -6003,10 +5979,10 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
+                                                       cross_similarities_t::all_pairs_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -6028,18 +6004,18 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
+                                                       cross_similarities_t::symmetric_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -6061,7 +6037,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t candidate_lanes_k = 8;
-    static constexpr ssize_t score_range_limit_k = 30000;       // ? `i16` headroom for the narrow lane walker.
+    static constexpr ssize_t score_range_limit_k = 30000;           // ? `i16` headroom for the narrow lane walker.
     static constexpr ssize_t score_range_limit_wide_k = 2000000000; // ? `i32` headroom for the wide lane walker.
 
     using scoring_t = needleman_wunsch_score<char, substituter_t, gap_costs_t, sz_caps_sn_k>; // ? Per-pair DP fallback.
@@ -6103,7 +6079,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
         return reach <= score_range_limit_wide_k;
     }
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `i16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -6150,10 +6126,10 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
+                                                       cross_similarities_t::all_pairs_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -6175,18 +6151,18 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
+                                                       cross_similarities_t::symmetric_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -6210,7 +6186,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t candidate_lanes_k = 8;
-    static constexpr ssize_t score_range_limit_k = 30000;       // ? `i16` headroom for the narrow lane walker.
+    static constexpr ssize_t score_range_limit_k = 30000;           // ? `i16` headroom for the narrow lane walker.
     static constexpr ssize_t score_range_limit_wide_k = 2000000000; // ? `i32` headroom for the wide lane walker.
 
     using scoring_t = smith_waterman_score<char, substituter_t, gap_costs_t, sz_caps_sn_k>; // ? Per-pair DP fallback.
@@ -6252,7 +6228,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
         return reach <= score_range_limit_wide_k;
     }
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `i16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -6300,10 +6276,10 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
+                                                       cross_similarities_t::all_pairs_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -6325,18 +6301,18 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
+                                                       cross_similarities_t::symmetric_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -6360,7 +6336,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t candidate_lanes_k = 8;
-    static constexpr ssize_t score_range_limit_k = 30000;       // ? `i16` headroom for the narrow lane walker.
+    static constexpr ssize_t score_range_limit_k = 30000;           // ? `i16` headroom for the narrow lane walker.
     static constexpr ssize_t score_range_limit_wide_k = 2000000000; // ? `i32` headroom for the wide lane walker.
 
     using scoring_t = needleman_wunsch_score<char, substituter_t, gap_costs_t, sz_caps_sn_k>; // ? Per-pair DP fallback.
@@ -6402,7 +6378,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
         return reach <= score_range_limit_wide_k;
     }
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `i16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -6450,10 +6426,10 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
+                                                       cross_similarities_t::all_pairs_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -6475,18 +6451,18 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
+                                                       cross_similarities_t::symmetric_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -6511,7 +6487,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr size_t candidate_lanes_k = 8;
-    static constexpr ssize_t score_range_limit_k = 30000;       // ? `i16` headroom for the narrow lane walker.
+    static constexpr ssize_t score_range_limit_k = 30000;           // ? `i16` headroom for the narrow lane walker.
     static constexpr ssize_t score_range_limit_wide_k = 2000000000; // ? `i32` headroom for the wide lane walker.
 
     using scoring_t = smith_waterman_score<char, substituter_t, gap_costs_t, sz_caps_sn_k>; // ? Per-pair DP fallback.
@@ -6553,7 +6529,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
         return reach <= score_range_limit_wide_k;
     }
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `i16` walker. */
     auto fits_narrow_policy_() const noexcept {
@@ -6601,10 +6577,10 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
+                                                       cross_similarities_t::all_pairs_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
@@ -6626,18 +6602,18 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
+                                                       cross_similarities_t::symmetric_k, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -6755,7 +6731,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         return true;
     }
 
-#pragma region - Cross-Product Cell Addressing
+#pragma region Cross Product Cell Addressing
 
     template <typename value_type_>
     struct cross_cell_destination_ {
@@ -6785,9 +6761,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         }
     }
 
-#pragma endregion - Cross-Product Cell Addressing
+#pragma endregion Cross Product Cell Addressing
 
-#pragma region - Cross-Product Scratch Sizing
+#pragma region Cross Product Scratch Sizing
 
     /**
      *  @brief Worst-case scratch for a single cell over the whole input, in O(Q+C): the shared-query rune buffer plus
@@ -6808,13 +6784,13 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         lane_walker_t lane_walker {substituter_, gap_costs_};
         size_t const query_runes_bytes = round_up_to_multiple(sizeof(rune_t) * longest_query, specs.cache_line_width);
         size_t const transpose_bytes = candidate_lanes_k * longest_candidate * sizeof(rune_t);
-        size_t const walker_scratch = longest_candidate ? lane_walker.scratch_space_needed(longest_candidate, specs) : 0;
+        size_t const walker_scratch = longest_candidate ? lane_walker.scratch_space_needed(longest_candidate, specs)
+                                                        : 0;
         size_t const lane_path = query_runes_bytes + transpose_bytes + walker_scratch;
         // The rune-Myers fast path transcodes up to `myers_lanes_k` pairs' runes into one arena (a rune is at least one
         // byte, so byte length bounds rune count) and builds the 2-lane hash `Peq` for the longest shorter side.
-        size_t const myers_transcode_bytes =
-            round_up_to_multiple((size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t),
-                                 specs.cache_line_width);
+        size_t const myers_transcode_bytes = round_up_to_multiple(
+            (size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t), specs.cache_line_width);
         size_t const myers_peq_bytes = myers_t::scratch_bytes_for(sz_min_of_two(longest_query, longest_candidate));
         size_t const myers_path = myers_transcode_bytes + myers_peq_bytes;
         size_t dp_scratch = 0;
@@ -6826,9 +6802,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         return sz_max_of_two(sz_max_of_two(lane_path, myers_path), dp_scratch);
     }
 
-#pragma endregion - Cross-Product Scratch Sizing
+#pragma endregion Cross Product Scratch Sizing
 
-#pragma region - Cross-Product Scoring
+#pragma region Cross Product Scoring
 
     /** @brief Transcodes a UTF-8 byte span into a rune buffer; returns the rune count, or `invalid_utf8_k` on error. */
     static status_t transcode_(span<char const> source, rune_t *destination, size_t &rune_count) noexcept {
@@ -6853,7 +6829,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     template <typename queries_type_, typename candidates_type_, typename results_type_>
     [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
                                             results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
+                                            size_t cell_end, scratch_space_t scratch,
+                                            cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -6868,9 +6845,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             longest_query = sz_max_of_two(longest_query, to_view(queries[query_index]).size());
             longest_candidate = sz_max_of_two(longest_candidate, to_view(candidates[candidate_index]).size());
         }
-        size_t const transcode_bytes =
-            round_up_to_multiple((size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t),
-                                 specs.cache_line_width);
+        size_t const transcode_bytes = round_up_to_multiple(
+            (size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t), specs.cache_line_width);
         rune_t *const rune_arena = reinterpret_cast<rune_t *>(scratch.data());
         size_t const rune_arena_runes = transcode_bytes / sizeof(rune_t);
         scratch_space_t const peq_scratch = transcode_bytes <= scratch.size()
@@ -6912,14 +6888,15 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         // Transcode one cell's shorter/longer sides into the rune arena at byte offset `arena_used` (in runes),
         // returning false on invalid UTF-8 or arena overflow. The shorter rune side is the Myers pattern.
         auto const transcode_cell = [&](span<char const> query, span<char const> candidate, size_t &arena_used,
-                                        span<rune_t const> &shorter_runes, span<rune_t const> &longer_runes) noexcept
-            -> bool {
+                                        span<rune_t const> &shorter_runes,
+                                        span<rune_t const> &longer_runes) noexcept -> bool {
             size_t const query_offset = arena_used;
             size_t query_runes_count = 0;
             rune_length_t rune_length {};
             for (size_t progress = 0; progress < query.size(); progress += rune_length, ++query_runes_count) {
                 if (query_offset + query_runes_count >= rune_arena_runes) return false;
-                rune_length = sz_rune_parse_unchecked(query.data() + progress, rune_arena + query_offset + query_runes_count);
+                rune_length = sz_rune_parse_unchecked(query.data() + progress,
+                                                      rune_arena + query_offset + query_runes_count);
                 if (rune_length == sz_utf8_invalid_k) return false;
             }
             size_t const candidate_offset = query_offset + query_runes_count;
@@ -6939,7 +6916,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             return true;
         };
 
-        static constexpr size_t stack_words_capacity_k = 64; // ? `distances_2x_multiword_large_` covers shorter <= 4096 runes.
+        static constexpr size_t stack_words_capacity_k =
+            64; // ? `distances_2x_multiword_large_` covers shorter <= 4096 runes.
         for (size_t cell_index = cell_begin; cell_index != cell_end;) {
             size_t query_index = 0, candidate_index = 0;
             cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
@@ -7028,20 +7006,20 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
             cross_cell_writer_ group_writer;
             group_writer.destinations = group_destinations;
-            status_t status = status_t::success_k;
-            lane_pairs_view<rune_t> const group_pairs {
-                {group_shorters, group}, {group_longers, group}, {group_positions, group}};
-            switch (seed_bucket) {
-            case 1: status = myers.distances_2x64_(group_pairs, group_writer, peq_scratch); break;
-            case 2: status = myers.template distances_2x_multiword_<2>(group_pairs, group_writer, peq_scratch); break;
-            case 3: status = myers.template distances_2x_multiword_<3>(group_pairs, group_writer, peq_scratch); break;
-            case 4: status = myers.template distances_2x_multiword_<4>(group_pairs, group_writer, peq_scratch); break;
-            case 5: status = myers.template distances_2x_multiword_<5>(group_pairs, group_writer, peq_scratch); break;
-            case 6: status = myers.template distances_2x_multiword_<6>(group_pairs, group_writer, peq_scratch); break;
-            case 7: status = myers.template distances_2x_multiword_<7>(group_pairs, group_writer, peq_scratch); break;
-            case 8: status = myers.template distances_2x_multiword_<8>(group_pairs, group_writer, peq_scratch); break;
-            default: status = myers.distances_2x_multiword_large_(group_pairs, group_writer, peq_scratch); break;
-            }
+            lane_pairs_view<rune_t> const group_pairs {{group_shorters, group},
+                                                       {group_longers, group},
+                                                       {group_positions, group}};
+            // Bucket 1 (shorter <= 64 runes) takes the single-word kernel, 2..8 the compile-time multiword variant.
+            status_t status = dispatch_word_bucket_<1, 8>(
+                seed_bucket,
+                [&](auto bucket) {
+                    if constexpr (bucket.value == 1)
+                        return myers.distances_2x64_(group_pairs, group_writer, peq_scratch);
+                    else
+                        return myers.template distances_2x_multiword_<bucket.value>(group_pairs, group_writer,
+                                                                                    peq_scratch);
+                },
+                [&] { return myers.distances_2x_multiword_large_(group_pairs, group_writer, peq_scratch); });
             if (status == status_t::success_k) continue;
             // Defensive scratch-shortfall fallback: score every grouped pair through the per-pair UTF-8 rune DP over
             // its original cell (the `dp` scorer owns its own scratch via `dp_scratch_space`). Mirrors the Ice Lake
@@ -7075,16 +7053,16 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
             size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
             scratch_space_t slice = scratch_space_t(score_scratch_).subspan(worker * worker_scratch, worker_scratch);
-            status_t status =
-                score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length, slice, specs);
+            status_t status = score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length,
+                                           slice, specs);
             if (status != status_t::success_k) error.store(status);
         });
         return error.load();
     }
 
-#pragma endregion - Cross-Product Scoring
+#pragma endregion Cross Product Scoring
 
-#pragma region - Non-Unit Cross-Product via Rune Lane Driver
+#pragma region Non Unit Cross Product via Rune Lane Driver
 
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the narrow `u16` rune walker's range. */
     auto fits_narrow_policy_() const noexcept {
@@ -7113,9 +7091,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
      *      per-pair UTF-8 serial scorer, which handles invalid bytes directly.
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    status_t cross_via_lanes_(queries_type_ const &queries, candidates_type_ const &candidates,
-                              results_type_ &&results, cross_similarities_t cross_kind,
-                              cpu_specs_t const &specs) noexcept {
+    status_t cross_via_lanes_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+                              cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
         bool const same = static_cast<void const *>(&queries) == static_cast<void const *>(&candidates);
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
@@ -7149,21 +7126,22 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
             return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                              cross_kind, score_scratch_, std::forward<executor_type_>(executor), specs);
+                                              cross_kind, score_scratch_, std::forward<executor_type_>(executor),
+                                              specs);
         auto const &candidate_views = same ? query_runes_ : candidate_runes_;
 
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         rune_scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, query_runes_, candidate_views, results, cross_kind, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, query_runes_, candidate_views, results,
+                                                       cross_kind, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Non-Unit Cross-Product via Rune Lane Driver
+#pragma endregion Non Unit Cross Product via Rune Lane Driver
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
@@ -7204,8 +7182,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_())
             return cross_via_lanes_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                              std::forward<executor_type_>(executor), specs);
@@ -7213,7 +7191,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                                std::forward<executor_type_>(executor), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 /**
@@ -7248,7 +7226,7 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
                               void>; // ? NEON 8-lane `u16` affine rune shared query.
     using lane_walker_wide_t =
         candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine_gap_costs_t, sz_minimize_distance_k,
-                              sz_similarity_global_k, sz_cap_neon_k, 4, void>; // ? 4-lane `u32` affine rune.
+                              sz_similarity_global_k, sz_cap_neon_k, 4, void>;         // ? 4-lane `u32` affine rune.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
@@ -7319,7 +7297,7 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
         return true;
     }
 
-#pragma region - Cross-Product Policies
+#pragma region Cross Product Policies
 
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the narrow `u16` rune walker's range. */
     auto fits_narrow_policy_() const noexcept {
@@ -7345,9 +7323,8 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Serial cross-product: transcode to runes once, then run the shared candidate-lane driver. */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    status_t cross_via_lanes_(queries_type_ const &queries, candidates_type_ const &candidates,
-                              results_type_ &&results, cross_similarities_t cross_kind,
-                              cpu_specs_t const &specs) noexcept {
+    status_t cross_via_lanes_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+                              cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
         bool const same = static_cast<void const *>(&queries) == static_cast<void const *>(&candidates);
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
@@ -7378,21 +7355,22 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
             return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                              cross_kind, score_scratch_, std::forward<executor_type_>(executor), specs);
+                                              cross_kind, score_scratch_, std::forward<executor_type_>(executor),
+                                              specs);
         auto const &candidate_views = same ? query_runes_ : candidate_runes_;
 
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         rune_scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(
-            narrow, wide, fallback, query_runes_, candidate_views, results, cross_kind, score_scratch_,
-            std::forward<executor_type_>(executor), fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
-            specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, query_runes_, candidate_views, results,
+                                                       cross_kind, score_scratch_,
+                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
+                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
     }
 
-#pragma endregion - Cross-Product Policies
+#pragma endregion Cross Product Policies
 
-#pragma region - Public Cross-Product Overloads
+#pragma region Public Cross Product Overloads
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
@@ -7416,13 +7394,13 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) noexcept {
         return cross_via_lanes_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                          std::forward<executor_type_>(executor), specs);
     }
 
-#pragma endregion - Public Cross-Product Overloads
+#pragma endregion Public Cross Product Overloads
 };
 
 #if defined(__clang__)

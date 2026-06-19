@@ -638,6 +638,151 @@ struct tile_scorer<char const *, char const *, i64_t, error_costs_classes_in_cud
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 };
 
+#pragma region Tiled tier and register tier DPX fold functors
+
+/**
+ *  @brief @b Hopper DPX partial specialization of the linear-gap DP cell: fuses `opt(diag+sub, opt(top,left)+gap)`
+ *         (with the Smith-Waterman ReLU clamp for local) into one `__viaddmin/max_s32[_relu]`. Bit-exact with the
+ *         scalar primary. @sa score_cell (cuda.cuh primary).
+ */
+template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
+          typename score_type_>
+struct score_cell<objective_, locality_, capability_, score_type_,
+                  std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0 && sizeof(score_type_) <= 4>> {
+    __forceinline__ __device__ score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
+                                                      score_type_ substitution, score_type_ gap) const noexcept {
+        using score_t = score_type_;
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+        int const diagonal = static_cast<int>(diag), substitution_cost = static_cast<int>(substitution);
+        int const gap_cost = static_cast<int>(gap);
+        int const top_cell = static_cast<int>(top), left_cell = static_cast<int>(left);
+        if constexpr (objective_ == sz_minimize_distance_k)
+            return static_cast<score_t>(
+                __viaddmin_s32(diagonal, substitution_cost, min(top_cell, left_cell) + gap_cost));
+        else if constexpr (is_local_k)
+            return static_cast<score_t>(
+                __viaddmax_s32_relu(diagonal, substitution_cost, max(top_cell, left_cell) + gap_cost));
+        else
+            return static_cast<score_t>(
+                __viaddmax_s32(diagonal, substitution_cost, max(top_cell, left_cell) + gap_cost));
+#else
+        score_t cell = min_or_max<objective_>(
+            static_cast<score_t>(diag + substitution),
+            min_or_max<objective_>(static_cast<score_t>(top + gap), static_cast<score_t>(left + gap)));
+        if constexpr (is_local_k) cell = min_or_max<objective_, score_t>(cell, 0);
+        return cell;
+#endif
+    }
+};
+
+/**
+ *  @brief @b Hopper DPX partial specialization of the affine-gap (Gotoh) DP cell: each of V, H, and M is a single fused
+ *         `__viaddmin/max_s32[_relu]`. Bit-exact with the scalar primary. @sa affine_score_cell (cuda.cuh primary).
+ */
+template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
+          typename score_type_>
+struct affine_score_cell<objective_, locality_, capability_, score_type_,
+                         std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0 && sizeof(score_type_) <= 4>> {
+    __forceinline__ __device__ score_type_ operator()( //
+        score_type_ diag, score_type_ top_m, score_type_ top_v, score_type_ left_m, score_type_ left_h,
+        score_type_ substitution, score_type_ open, score_type_ extend, score_type_ &v_out,
+        score_type_ &h_out) const noexcept {
+        using score_t = score_type_;
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+        int const diagonal = static_cast<int>(diag), substitution_cost = static_cast<int>(substitution);
+        int const open_cost = static_cast<int>(open), extend_cost = static_cast<int>(extend);
+        if constexpr (objective_ == sz_minimize_distance_k) {
+            int const vertical = __viaddmin_s32(static_cast<int>(top_m), open_cost,
+                                                static_cast<int>(top_v) + extend_cost);
+            int const horizontal = __viaddmin_s32(static_cast<int>(left_m), open_cost,
+                                                  static_cast<int>(left_h) + extend_cost);
+            v_out = static_cast<score_t>(vertical), h_out = static_cast<score_t>(horizontal);
+            return static_cast<score_t>(__viaddmin_s32(diagonal, substitution_cost, min(vertical, horizontal)));
+        }
+        else {
+            int const vertical = __viaddmax_s32(static_cast<int>(top_m), open_cost,
+                                                static_cast<int>(top_v) + extend_cost);
+            int const horizontal = __viaddmax_s32(static_cast<int>(left_m), open_cost,
+                                                  static_cast<int>(left_h) + extend_cost);
+            v_out = static_cast<score_t>(vertical), h_out = static_cast<score_t>(horizontal);
+            int const gap_best = max(vertical, horizontal);
+            return is_local_k ? static_cast<score_t>(__viaddmax_s32_relu(diagonal, substitution_cost, gap_best))
+                              : static_cast<score_t>(__viaddmax_s32(diagonal, substitution_cost, gap_best));
+        }
+#else
+        score_t const v = min_or_max<objective_>(static_cast<score_t>(top_m + open),
+                                                 static_cast<score_t>(top_v + extend));
+        score_t const h = min_or_max<objective_>(static_cast<score_t>(left_m + open),
+                                                 static_cast<score_t>(left_h + extend));
+        v_out = v, h_out = h;
+        score_t if_substitution = static_cast<score_t>(diag + substitution);
+        if constexpr (is_local_k) if_substitution = min_or_max<objective_, score_t>(if_substitution, 0);
+        return min_or_max<objective_>(min_or_max<objective_>(v, h), if_substitution);
+#endif
+    }
+};
+
+/**
+ *  @brief @b Hopper DPX partial specialization of the register-weighted linear-gap horizontal fold: each step is a
+ *         fused `__viaddmax_s32(left, gap, cell)`. Bit-exact with the scalar primary. @sa weighted_gap_fold (cuda.cuh
+ *         primary).
+ */
+template <sz_similarity_locality_t locality_, sz_capability_t capability_>
+struct weighted_gap_fold<locality_, capability_, std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0>> {
+    __forceinline__ __device__ void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
+                                               i16_t gap_cost) const noexcept {
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+        // The two packed cells are a horizontal chain (`cell_high` reads the freshly folded `cell_low`), so they
+        // cannot share one packed `__viaddmax_s16x2`; each fused add-max is a scalar 32-bit DPX op (the i16->int
+        // sign-extension is free). The local-objective clamp is already branchless (`max` lowers to `IMNMX`).
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+        int const gap = static_cast<int>(gap_cost);
+        cell_low = static_cast<i16_t>(__viaddmax_s32(static_cast<int>(left_cell), gap, static_cast<int>(cell_low)));
+        cell_high = static_cast<i16_t>(__viaddmax_s32(static_cast<int>(cell_low), gap, static_cast<int>(cell_high)));
+#else
+        cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
+        cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
+#endif
+        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+    }
+};
+
+/**
+ *  @brief @b Hopper DPX partial specialization of the register-weighted affine deletion-track fold: each
+ *         `max(left_m + open, left_h + extend)` is a fused `__viaddmax_s32`. Bit-exact with the scalar primary. @sa
+ *         weighted_affine_gap_fold (cuda.cuh primary).
+ */
+template <sz_similarity_locality_t locality_, sz_capability_t capability_>
+struct weighted_affine_gap_fold<locality_, capability_, std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0>> {
+    __forceinline__ __device__ void operator()(                         //
+        i16_t match_or_insert_low, i16_t match_or_insert_high,          //
+        i16_t left_cell, i16_t left_deletion, i16_t open, i16_t extend, //
+        i16_t &deletion_low, i16_t &cell_low, i16_t &deletion_high, i16_t &cell_high) const noexcept {
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+        // The high deletion track reads the freshly folded `cell_low`, so the low/high pair is a chain and cannot
+        // share one packed `__viaddmax_s16x2`; each deletion is a scalar 32-bit fused add-max (i16->int is free).
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
+        int const open_cost = static_cast<int>(open), extend_cost = static_cast<int>(extend);
+        deletion_low = static_cast<i16_t>(
+            __viaddmax_s32(static_cast<int>(left_cell), open_cost, static_cast<int>(left_deletion) + extend_cost));
+        cell_low = std::max(match_or_insert_low, deletion_low);
+        deletion_high = static_cast<i16_t>(
+            __viaddmax_s32(static_cast<int>(cell_low), open_cost, static_cast<int>(deletion_low) + extend_cost));
+        cell_high = std::max(match_or_insert_high, deletion_high);
+#else
+        deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
+        cell_low = std::max(match_or_insert_low, deletion_low);
+        deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
+        cell_high = std::max(match_or_insert_high, deletion_high);
+#endif
+        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+    }
+};
+
+#pragma endregion Tiled tier and register tier DPX fold functors
+
 #endif
 
 } // namespace stringzillas

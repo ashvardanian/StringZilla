@@ -2,7 +2,8 @@
  *  @file scripts/bench_similarities.cuh
  *  @brief Shared code for CPU and GPU batched string similarity kernels.
  */
-#include <tuple> // `std::tuple`
+#include <tuple>   // `std::tuple`
+#include <utility> // `std::declval`
 
 #define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
@@ -69,40 +70,68 @@ using namespace ashvardanian::stringzilla::scripts;
 using similarities_t = unified_vector<sz_ssize_t>;
 
 /**
- *  @brief Reads the `status_t` out of an engine's return value through opaque memory, defeating NVCC's
- *         host-codegen folding of the read.
+ *  @brief The device-measured kernel time that an engine reports, in milliseconds, or @b 0 for CPU engines.
  *
- *  @note NVCC 12.x miscompiles the 12-byte `cuda_status_t` return-by-value of the @b affine alignment
- *        engine instantiations inside this large translation unit at @b -O2 : the `float elapsed_milliseconds`
+ *  GPU engines return a `cuda_status_t` carrying a `float elapsed_milliseconds` measured on the device with
+ *  CUDA events, excluding host-to-device materialization. CPU engines return a plain `status_t` with no such
+ *  timer, so the trait below resolves to @b 0 for them, keeping a single timed call path for every backend.
+ */
+template <typename status_type_, typename = void>
+struct engine_elapsed_milliseconds_trait {
+    static float read(status_type_ const &) noexcept { return 0.0f; }
+};
+template <typename status_type_>
+struct engine_elapsed_milliseconds_trait<status_type_,
+                                         decltype((void)std::declval<status_type_ const &>().elapsed_milliseconds)> {
+    static float read(status_type_ const &materialized) noexcept { return materialized.elapsed_milliseconds; }
+};
+
+/** @brief A status paired with the device-measured kernel time, both surfaced through one materialized read. */
+struct engine_timing_t {
+    status_t status = status_t::success_k;
+    float kernel_milliseconds = 0.0f;
+};
+
+/**
+ *  @brief Reads the `status_t` @b and the device-measured `elapsed_milliseconds` out of an engine's return
+ *         value through opaque memory, defeating NVCC's host-codegen folding of the read.
+ *
+ *  @note NVCC 12.x miscompiles the `cuda_status_t` return-by-value of the @b affine alignment engine
+ *        instantiations inside this large translation unit at @b -O2 : the `float elapsed_milliseconds`
  *        field survives, but the two leading enum fields (`status`, `cuda_error`) come back as garbage, so a
  *        direct `static_cast<status_t>(result)` reports a bogus `unrecognized` status. The StringZillas
  *        library itself is correct - a direct call to the same engine returns `success_k` - this only bites
  *        the affine instantiations folded into this benchmark. Bouncing the struct through `std::memcpy` in a
- *        `[[gnu::noinline]]` helper forces the compiler to materialize the full object before reading it.
+ *        `[[gnu::noinline]]` helper forces the compiler to materialize the full object before reading both
+ *        fields, so the kernel time is pulled from the same defended copy as the status.
  */
 template <typename status_type_>
-[[gnu::noinline]] status_t read_engine_status_(status_type_ const &engine_result) noexcept {
+[[gnu::noinline]] engine_timing_t read_engine_timing_(status_type_ const &engine_result) noexcept {
     status_type_ materialized;
     std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_type_));
-    return static_cast<status_t>(materialized);
+    engine_timing_t timing;
+    timing.status = static_cast<status_t>(materialized);
+    timing.kernel_milliseconds = engine_elapsed_milliseconds_trait<status_type_>::read(materialized);
+    return timing;
 }
 
 /**
- *  @brief Calls an engine and reads its status entirely inside one @b `[[gnu::noinline]]` frame.
+ *  @brief Calls an engine and reads its status @b and kernel time entirely inside one @b `[[gnu::noinline]]` frame.
  *
- *  @note `read_engine_status_` alone is not enough: when the optimizer folds the engine's return-by-value
+ *  @note `read_engine_timing_` alone is not enough: when the optimizer folds the engine's return-by-value
  *        into the caller it can corrupt the status @b before the read runs (seen with g++ trunk on the Ice
  *        Lake instantiations in this large TU, and with NVCC 12.x on the affine `cuda_status_t`). Performing
  *        the call and the read together in a non-inlined frame reproduces the same code path as a separate-TU
  *        call, which the library validates as correct in isolation.
  */
 template <typename engine_type_, typename queries_type_, typename candidates_type_, typename... rest_types_>
-[[gnu::noinline]] status_t invoke_engine_status_(engine_type_ &engine, queries_type_ const &queries,
-                                                 candidates_type_ const &candidates, strided_rows<sz_ssize_t> results,
-                                                 rest_types_ &...rest) noexcept {
+[[gnu::noinline]] engine_timing_t invoke_engine_timed_(engine_type_ &engine, queries_type_ const &queries,
+                                                       candidates_type_ const &candidates,
+                                                       strided_rows<sz_ssize_t> results,
+                                                       rest_types_ &...rest) noexcept {
     auto status = engine(queries, candidates, results, rest...);
     do_not_optimize(status);
-    return read_engine_status_(status);
+    return read_engine_timing_(status);
 }
 
 #pragma region Levenshtein Distance and Alignment Scores
@@ -165,9 +194,9 @@ inline std::vector<shape_t> make_similarity_shapes(environment_t const &env, std
     // `queries + candidates < tokens`), shrinking the candidate axis first since the query axis carries the label.
     auto fit_all_pairs = [&](std::size_t queries_request) -> shape_t {
         std::size_t const queries = clamp_block(queries_request);
-        std::size_t candidates = clamp_block((std::max<std::size_t>)(1, pair_budget / (std::max<std::size_t>)(1, queries)));
-        if (env.tokens.size() > queries + 1)
-            candidates = (std::min)(candidates, env.tokens.size() - queries - 1);
+        std::size_t candidates = clamp_block(
+            (std::max<std::size_t>)(1, pair_budget / (std::max<std::size_t>)(1, queries)));
+        if (env.tokens.size() > queries + 1) candidates = (std::min)(candidates, env.tokens.size() - queries - 1);
         return shape_t {queries, (std::max<std::size_t>)(1, candidates), true};
     };
     // A diagonal of `queries` independent `1 x 1` pairs; both blocks are `queries` long, so cap at just under half.
@@ -230,14 +259,40 @@ struct similarities_callable {
     engine_t engine = {};
     std::tuple<extra_args_...> extra_args = {};
 
+    /**
+     *  @brief Device-measured kernel time and the matching Cell-Updates, summed over @b every engine call.
+     *
+     *  GPU engines fill `kernel_milliseconds_total` from `cuda_status_t::elapsed_milliseconds`; CPU engines
+     *  leave it at @b 0 because their `status_t` carries no device timer. The two totals grow together on each
+     *  call, so their ratio - the kernel GCUPS - is independent of how many calls the harness made, and the
+     *  destructor reports it next to the end-to-end wall figure that `bench_result_t::log` already printed.
+     */
+    double kernel_milliseconds_total = 0.0;
+    double kernel_cells_total = 0.0;
+
     similarities_callable(environment_t const &env, similarities_t &res, shape_t shape, engine_t eng = {},
                           extra_args_... args)
-        : env(env), results(res), shape(shape), engine(std::move(eng)),
-          extra_args(std::forward<extra_args_>(args)...) {
+        : env(env), results(res), shape(shape), engine(std::move(eng)), extra_args(std::forward<extra_args_>(args)...) {
         if (env.tokens.size() <= shape.queries + shape.candidates)
             throw std::runtime_error("Cross-product tile is too large for the dataset.");
         if (results.size() < shape.scored_pairs())
             throw std::runtime_error("Results buffer is smaller than the number of scored pairs.");
+    }
+
+    /**
+     *  @brief Prints the device-measured @b kernel GCUPS once the callable goes out of scope.
+     *
+     *  The accelerated callable is a temporary that outlives the inline `.log()` call printing the wall figure
+     *  (both die only at the end of the full statement, the callable last), so this destructor appends the
+     *  kernel line right after it, attributing it by adjacency to the just-logged engine. CPU callables never
+     *  accumulate device time, so the guard skips them and the wall figure's format stays untouched for
+     *  downstream log parsing.
+     */
+    ~similarities_callable() {
+        if (kernel_milliseconds_total <= 0.0 || kernel_cells_total <= 0.0) return;
+        double const kernel_gcups = kernel_cells_total / (kernel_milliseconds_total * 1e6);
+        std::printf("> Kernel: %.2f GCUPS @ %.3f ms device-measured (excludes host materialization)\n", kernel_gcups,
+                    kernel_milliseconds_total);
     }
 
     /** @brief Deterministically picks a contiguous block start in `[0, count_total - block_size]`. */
@@ -259,9 +314,9 @@ struct similarities_callable {
                               queries_start + shape.queries > candidates_start;
         if (overlaps && env.tokens.size() > shape.queries + shape.candidates) {
             std::size_t const after_queries = queries_start + shape.queries;
-            candidates_start = after_queries + shape.candidates <= env.tokens.size()
-                                   ? after_queries
-                                   : queries_start >= shape.candidates ? queries_start - shape.candidates : 0;
+            candidates_start = after_queries + shape.candidates <= env.tokens.size() ? after_queries
+                               : queries_start >= shape.candidates                   ? queries_start - shape.candidates
+                                                                                     : 0;
         }
 
         return operator()({env.tokens.data() + queries_start, shape.queries},
@@ -300,16 +355,25 @@ struct similarities_callable {
     }
 
   private:
-    /** @brief Runs the engine call + status read behind the non-inlined `invoke_engine_status_` boundary. */
+    /** @brief Runs the engine call + status/kernel-time read behind the non-inlined `invoke_engine_timed_` boundary. */
     void run_engine_(std::span<token_view_t const> queries_block, std::span<token_view_t const> candidates_block,
                      strided_rows<sz_ssize_t> results_matrix) noexcept(false) {
-        status_t const status_code = std::apply(
+        engine_timing_t const timing = std::apply(
             [&](auto &&...rest) {
-                return invoke_engine_status_(engine, queries_block, candidates_block, results_matrix, rest...);
+                return invoke_engine_timed_(engine, queries_block, candidates_block, results_matrix, rest...);
             },
             extra_args);
-        if (status_code != status_t::success_k)
-            throw std::runtime_error(std::string("Failed to compute similarity matrix: ") + status_name(status_code));
+        if (timing.status != status_t::success_k)
+            throw std::runtime_error(std::string("Failed to compute similarity matrix: ") + status_name(timing.status));
+
+        // Accumulate the device-measured kernel time alongside the exact Cell-Updates of this call, so the
+        // kernel GCUPS the destructor prints covers the same calls as the wall figure - and, being a ratio of
+        // two co-growing totals, stays correct regardless of how many calls the harness ends up issuing.
+        kernel_milliseconds_total += static_cast<double>(timing.kernel_milliseconds);
+        for (std::size_t query_index = 0; query_index < queries_block.size(); ++query_index)
+            for (std::size_t candidate_index = 0; candidate_index < candidates_block.size(); ++candidate_index)
+                kernel_cells_total += static_cast<double>(queries_block[query_index].size()) *
+                                      static_cast<double>(candidates_block[candidate_index].size());
     }
 
     /** @brief Full `queries x candidates` cross-product in one engine call. */
@@ -359,7 +423,8 @@ void bench_levenshtein(environment_t const &env) {
 #if SZ_USE_CUDA
     std::size_t const device_parallelism = static_cast<std::size_t>(specs.streaming_multiprocessors);
 #else
-    std::size_t const device_parallelism = (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+    std::size_t const device_parallelism =
+        (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
 #endif
     std::vector<shape_t> shapes = make_similarity_shapes(env, device_parallelism);
     similarities_t results_linear_baseline, results_linear_accelerated;
@@ -398,28 +463,24 @@ void bench_levenshtein(environment_t const &env) {
             results_utf8_baseline.resize(matrix_size), results_utf8_accelerated.resize(matrix_size);
 
             auto call_linear_baseline = similarities_callable<levenshtein_serial_t, fu::basic_pool_t &>(
-                env, results_linear_baseline, shape,
-                levenshtein_serial_t {scheme.uniform, scheme.linear}, pool);
+                env, results_linear_baseline, shape, levenshtein_serial_t {scheme.uniform, scheme.linear}, pool);
             auto name_linear_baseline = "levenshtein_serial_"s + scheme.tag + ":" + shape_label;
             bench_result_t linear_baseline = bench_unary(env, name_linear_baseline, call_linear_baseline).log();
 
             auto call_utf8_baseline = similarities_callable<levenshtein_utf8_serial_t>(
-                env, results_utf8_baseline, shape,
-                levenshtein_utf8_serial_t {scheme.uniform, scheme.linear});
+                env, results_utf8_baseline, shape, levenshtein_utf8_serial_t {scheme.uniform, scheme.linear});
             auto name_utf8_baseline = "levenshtein_utf8_serial_"s + scheme.tag + ":" + shape_label;
             bench_result_t utf8_baseline = bench_unary(env, name_utf8_baseline, call_utf8_baseline).log();
 
             auto call_affine_baseline = similarities_callable<affine_levenshtein_serial_t, fu::basic_pool_t &>(
-                env, results_affine_baseline, shape,
-                affine_levenshtein_serial_t {scheme.uniform, scheme.affine}, pool);
+                env, results_affine_baseline, shape, affine_levenshtein_serial_t {scheme.uniform, scheme.affine}, pool);
             auto name_affine_baseline = "affine_levenshtein_serial_"s + scheme.tag + ":" + shape_label;
             bench_result_t affine_baseline =
                 bench_unary(env, name_affine_baseline, call_affine_baseline).log(linear_baseline);
             sz_unused_(affine_baseline);
 
 #if SZ_USE_ICELAKE
-            bench_unary(env, "levenshtein_icelake_"s + scheme.tag + ":" + shape_label,
-                        call_linear_baseline,
+            bench_unary(env, "levenshtein_icelake_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
                         similarities_callable<levenshtein_icelake_t, fu::basic_pool_t &>(
                             env, results_linear_accelerated, shape,
                             levenshtein_icelake_t {scheme.uniform, scheme.linear}, pool),
@@ -428,8 +489,7 @@ void bench_levenshtein(environment_t const &env) {
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(env, "affine_levenshtein_icelake_"s + scheme.tag + ":" + shape_label,
-                        call_affine_baseline,
+            bench_unary(env, "affine_levenshtein_icelake_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
                         similarities_callable<affine_levenshtein_icelake_t, fu::basic_pool_t &>(
                             env, results_affine_accelerated, shape,
                             affine_levenshtein_icelake_t {scheme.uniform, scheme.affine}, pool),
@@ -438,30 +498,27 @@ void bench_levenshtein(environment_t const &env) {
                 .log(linear_baseline, affine_baseline);
             scramble_accelerated_results(results_affine_accelerated);
 
-            bench_unary(env, "levenshtein_utf8_icelake_"s + scheme.tag + ":" + shape_label,
-                        call_utf8_baseline,
-                        similarities_callable<levenshtein_utf8_icelake_t>(
-                            env, results_utf8_accelerated, shape,
-                            levenshtein_utf8_icelake_t {scheme.uniform, scheme.linear}),
-                        callable_no_op_t {},        // preprocessing
-                        similarities_equality_t {}) // equality check
+            bench_unary(
+                env, "levenshtein_utf8_icelake_"s + scheme.tag + ":" + shape_label, call_utf8_baseline,
+                similarities_callable<levenshtein_utf8_icelake_t>(
+                    env, results_utf8_accelerated, shape, levenshtein_utf8_icelake_t {scheme.uniform, scheme.linear}),
+                callable_no_op_t {},        // preprocessing
+                similarities_equality_t {}) // equality check
                 .log(utf8_baseline);
             scramble_accelerated_results(results_utf8_accelerated);
 #endif
 
 #if SZ_USE_NEON
-            bench_unary(env, "levenshtein_neon_"s + scheme.tag + ":" + shape_label,
-                        call_linear_baseline,
-                        similarities_callable<levenshtein_neon_t, fu::basic_pool_t &>(
-                            env, results_linear_accelerated, shape,
-                            levenshtein_neon_t {scheme.uniform, scheme.linear}, pool),
-                        callable_no_op_t {},        // preprocessing
-                        similarities_equality_t {}) // equality check
+            bench_unary(
+                env, "levenshtein_neon_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
+                similarities_callable<levenshtein_neon_t, fu::basic_pool_t &>(
+                    env, results_linear_accelerated, shape, levenshtein_neon_t {scheme.uniform, scheme.linear}, pool),
+                callable_no_op_t {},        // preprocessing
+                similarities_equality_t {}) // equality check
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(env, "affine_levenshtein_neon_"s + scheme.tag + ":" + shape_label,
-                        call_affine_baseline,
+            bench_unary(env, "affine_levenshtein_neon_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
                         similarities_callable<affine_levenshtein_neon_t, fu::basic_pool_t &>(
                             env, results_affine_accelerated, shape,
                             affine_levenshtein_neon_t {scheme.uniform, scheme.affine}, pool),
@@ -470,30 +527,27 @@ void bench_levenshtein(environment_t const &env) {
                 .log(linear_baseline, affine_baseline);
             scramble_accelerated_results(results_affine_accelerated);
 
-            bench_unary(env, "levenshtein_utf8_neon_"s + scheme.tag + ":" + shape_label,
-                        call_utf8_baseline,
-                        similarities_callable<levenshtein_utf8_neon_t>(
-                            env, results_utf8_accelerated, shape,
-                            levenshtein_utf8_neon_t {scheme.uniform, scheme.linear}),
-                        callable_no_op_t {},        // preprocessing
-                        similarities_equality_t {}) // equality check
+            bench_unary(
+                env, "levenshtein_utf8_neon_"s + scheme.tag + ":" + shape_label, call_utf8_baseline,
+                similarities_callable<levenshtein_utf8_neon_t>(env, results_utf8_accelerated, shape,
+                                                               levenshtein_utf8_neon_t {scheme.uniform, scheme.linear}),
+                callable_no_op_t {},        // preprocessing
+                similarities_equality_t {}) // equality check
                 .log(utf8_baseline);
             scramble_accelerated_results(results_utf8_accelerated);
 #endif
 
 #if SZ_USE_CUDA
-            bench_unary(env, "levenshtein_cuda_"s + scheme.tag + ":" + shape_label,
-                        call_linear_baseline,
+            bench_unary(env, "levenshtein_cuda_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
                         similarities_callable<levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
-                            env, results_linear_accelerated, shape,
-                            levenshtein_cuda_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
+                            env, results_linear_accelerated, shape, levenshtein_cuda_t {scheme.uniform, scheme.linear},
+                            cuda_executor_t {}, specs),
                         callable_no_op_t {},        // preprocessing
                         similarities_equality_t {}) // equality check
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(env, "affine_levenshtein_cuda_"s + scheme.tag + ":" + shape_label,
-                        call_affine_baseline,
+            bench_unary(env, "affine_levenshtein_cuda_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
                         similarities_callable<affine_levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
                             env, results_affine_accelerated, shape,
                             affine_levenshtein_cuda_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
@@ -504,8 +558,7 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_KEPLER
-            bench_unary(env, "levenshtein_kepler_"s + scheme.tag + ":" + shape_label,
-                        call_linear_baseline,
+            bench_unary(env, "levenshtein_kepler_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
                         similarities_callable<levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
                             env, results_linear_accelerated, shape,
                             levenshtein_kepler_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
@@ -514,8 +567,7 @@ void bench_levenshtein(environment_t const &env) {
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(env, "affine_levenshtein_kepler_"s + scheme.tag + ":" + shape_label,
-                        call_affine_baseline,
+            bench_unary(env, "affine_levenshtein_kepler_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
                         similarities_callable<affine_levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
                             env, results_affine_accelerated, shape,
                             affine_levenshtein_kepler_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
@@ -526,8 +578,7 @@ void bench_levenshtein(environment_t const &env) {
 #endif
 
 #if SZ_USE_HOPPER
-            bench_unary(env, "levenshtein_hopper_"s + scheme.tag + ":" + shape_label,
-                        call_linear_baseline,
+            bench_unary(env, "levenshtein_hopper_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
                         similarities_callable<levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
                             env, results_linear_accelerated, shape,
                             levenshtein_hopper_t {scheme.uniform, scheme.linear}, cuda_executor_t {}, specs),
@@ -536,8 +587,7 @@ void bench_levenshtein(environment_t const &env) {
                 .log(linear_baseline);
             scramble_accelerated_results(results_linear_accelerated);
 
-            bench_unary(env, "affine_levenshtein_hopper_"s + scheme.tag + ":" + shape_label,
-                        call_affine_baseline,
+            bench_unary(env, "affine_levenshtein_hopper_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
                         similarities_callable<affine_levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
                             env, results_affine_accelerated, shape,
                             affine_levenshtein_hopper_t {scheme.uniform, scheme.affine}, cuda_executor_t {}, specs),
@@ -566,7 +616,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_CUDA
     std::size_t const device_parallelism = static_cast<std::size_t>(specs.streaming_multiprocessors);
 #else
-    std::size_t const device_parallelism = (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
+    std::size_t const device_parallelism =
+        (std::max<std::size_t>)(1, static_cast<std::size_t>(std::thread::hardware_concurrency()));
 #endif
     std::vector<shape_t> shapes = make_similarity_shapes(env, device_parallelism);
     similarities_t results_linear_global_baseline, results_linear_global_accelerated;
@@ -592,29 +643,25 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         results_affine_local_baseline.resize(matrix_size), results_affine_local_accelerated.resize(matrix_size);
 
         auto call_linear_global_baseline = similarities_callable<needleman_wunsch_serial_t, fu::basic_pool_t &>(
-            env, results_linear_global_baseline, shape,
-            {blosum62_matrix32, blosum62_linear_cost}, pool);
+            env, results_linear_global_baseline, shape, {blosum62_matrix32, blosum62_linear_cost}, pool);
         auto name_linear_global_baseline = "needleman_wunsch_serial:"s + shape_label;
         bench_result_t linear_global_baseline =
             bench_unary(env, name_linear_global_baseline, call_linear_global_baseline).log();
 
         auto call_linear_local_baseline = similarities_callable<smith_waterman_serial_t, fu::basic_pool_t &>(
-            env, results_linear_local_baseline, shape,
-            {blosum62_matrix32, blosum62_linear_cost}, pool);
+            env, results_linear_local_baseline, shape, {blosum62_matrix32, blosum62_linear_cost}, pool);
         auto name_linear_local_baseline = "smith_waterman_serial:"s + shape_label;
         bench_result_t linear_local_baseline =
             bench_unary(env, name_linear_local_baseline, call_linear_local_baseline).log();
 
         auto call_affine_global_baseline = similarities_callable<affine_needleman_wunsch_serial_t, fu::basic_pool_t &>(
-            env, results_affine_global_baseline, shape,
-            {blosum62_matrix32, blosum62_affine_cost}, pool);
+            env, results_affine_global_baseline, shape, {blosum62_matrix32, blosum62_affine_cost}, pool);
         auto name_affine_global_baseline = "affine_needleman_wunsch_serial:"s + shape_label;
         bench_result_t affine_global_baseline =
             bench_unary(env, name_affine_global_baseline, call_affine_global_baseline).log();
 
         auto call_affine_local_baseline = similarities_callable<affine_smith_waterman_serial_t, fu::basic_pool_t &>(
-            env, results_affine_local_baseline, shape,
-            {blosum62_matrix32, blosum62_affine_cost}, pool);
+            env, results_affine_local_baseline, shape, {blosum62_matrix32, blosum62_affine_cost}, pool);
         auto name_affine_local_baseline = "affine_smith_waterman_serial:"s + shape_label;
         bench_result_t affine_local_baseline =
             bench_unary(env, name_affine_local_baseline, call_affine_local_baseline).log();
@@ -622,8 +669,7 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_ICELAKE
         bench_unary(env, "needleman_wunsch_icelake:"s + shape_label, call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_icelake_t, fu::basic_pool_t &>(
-                        env, results_linear_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, pool),
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -631,28 +677,23 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_icelake:"s + shape_label, call_linear_local_baseline,
                     similarities_callable<smith_waterman_icelake_t, fu::basic_pool_t &>(
-                        env, results_linear_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, pool),
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
         scramble_accelerated_results(results_linear_local_accelerated);
 
-        bench_unary(env, "affine_needleman_wunsch_icelake:"s + shape_label,
-                    call_affine_global_baseline,
+        bench_unary(env, "affine_needleman_wunsch_icelake:"s + shape_label, call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_icelake_t, fu::basic_pool_t &>(
-                        env, results_affine_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, pool),
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
         scramble_accelerated_results(results_affine_global_accelerated);
 
-        bench_unary(env, "affine_smith_waterman_icelake:"s + shape_label,
-                    call_affine_local_baseline,
+        bench_unary(env, "affine_smith_waterman_icelake:"s + shape_label, call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_icelake_t, fu::basic_pool_t &>(
-                        env, results_affine_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, pool),
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);
@@ -662,8 +703,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_CUDA
         bench_unary(env, "needleman_wunsch_cuda:"s + shape_label, call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -671,18 +712,17 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_cuda:"s + shape_label, call_linear_local_baseline,
                     similarities_callable<smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
         scramble_accelerated_results(results_linear_local_accelerated);
 
-        bench_unary(env, "affine_needleman_wunsch_cuda:"s + shape_label,
-                    call_affine_global_baseline,
+        bench_unary(env, "affine_needleman_wunsch_cuda:"s + shape_label, call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
@@ -690,8 +730,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_cuda:"s + shape_label, call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);
@@ -701,8 +741,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #if SZ_USE_HOPPER
         bench_unary(env, "needleman_wunsch_hopper:"s + shape_label, call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
@@ -710,18 +750,17 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "smith_waterman_hopper:"s + shape_label, call_linear_local_baseline,
                     similarities_callable<smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_linear_cost}, cuda_executor_t {}, specs),
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
         scramble_accelerated_results(results_linear_local_accelerated);
 
-        bench_unary(env, "affine_needleman_wunsch_hopper:"s + shape_label,
-                    call_affine_global_baseline,
+        bench_unary(env, "affine_needleman_wunsch_hopper:"s + shape_label, call_affine_global_baseline,
                     similarities_callable<affine_needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
@@ -729,8 +768,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_hopper:"s + shape_label, call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, shape,
-                        {blosum62_matrix32, blosum62_affine_cost}, cuda_executor_t {}, specs),
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);

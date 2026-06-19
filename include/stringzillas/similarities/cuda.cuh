@@ -9,8 +9,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cuda/pipeline>        // `cuda::pipeline`
-#include <cooperative_groups.h> // `cooperative_groups::this_grid()`
+#include <cuda/atomic> // `cuda::atomic_ref`, `cuda::memory_order_acquire`
 
 #include <cub/device/device_partition.cuh>         // `cub::DevicePartition` — register/device task split
 #include <cub/device/device_radix_sort.cuh>        // `cub::DeviceRadixSort` — single-pass device tier sort
@@ -25,7 +24,7 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-#pragma region - Common Aliases
+#pragma region Common Aliases
 
 using ualloc_t = unified_alloc_t;
 
@@ -36,6 +35,9 @@ using ualloc_t = unified_alloc_t;
  */
 using levenshtein_cuda_t = levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 using affine_levenshtein_cuda_t = levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+
+/** @brief Codepoint-level (UTF-8) Levenshtein on the GPU; register thread-per-pair tier (linear unit-cost MVP). */
+using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
 using levenshtein_kepler_t = levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
 using affine_levenshtein_kepler_t = levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_caps_ck_k>;
@@ -61,9 +63,9 @@ using affine_needleman_wunsch_hopper_t =
 using affine_smith_waterman_hopper_t =
     smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
 
-#pragma endregion - Common Aliases
+#pragma endregion Common Aliases
 
-#pragma region - Common Helpers
+#pragma region Common Helpers
 
 /**
  *  @brief Dispatches min or max operation based on the compile-time objective.
@@ -109,9 +111,9 @@ __forceinline__ __device__ scalar_type_ load_last_use_(scalar_type_ const *ptr) 
     return *ptr;
 }
 
-#pragma endregion - Common Helpers
+#pragma endregion Common Helpers
 
-#pragma region - Algorithm Building Blocks
+#pragma region Algorithm Building Blocks
 
 /**
  *  @brief GPU adaptation of the `tile_scorer` on CUDA, avoiding warp-level shuffles and DPX.
@@ -197,8 +199,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
-            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
-            char second_char = load_immutable_(second_slice + i);
+            char_t first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char_t second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -293,8 +295,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
-            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
-            char second_char = load_immutable_(second_slice + i);
+            char_t first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char_t second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -412,8 +414,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
-            char second_char = load_immutable_(second_slice + i);
+            char_t first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char_t second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -530,8 +532,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
-            char second_char = load_immutable_(second_slice + i);
+            char_t first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char_t second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -557,75 +559,62 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     }
 };
 
-#pragma region Tiled large-input device kernel (register micro-tiles)
+#pragma region Tiled large input device kernel (register micro tiles)
+
+/**
+ *  @brief One DP cell's substitution cost, computed directly in @p score_type_. For the uniform (unit-cost
+ *         Levenshtein) substituter this is the branchless `match + (mismatch - match) * (a != b)` - a single compare
+ *         feeding a fused multiply-add, with no per-cell `i8`->cell byte-pack - so the cost stays off the DP
+ *         recurrence's serial critical path (measured: removes the `SEL`+`PRMT` chain that left the uniform tiled
+ *         scorer latency-bound vs the class-cost one). The general class-cost substituter keeps its shared-memory
+ *         table lookup, which the scheduler already overlaps across warps.
+ */
+template <typename score_type_, typename substituter_type_, typename char_type_>
+__forceinline__ __device__ score_type_ tiled_substitution_cost_(substituter_type_ const &substituter, char_type_ a,
+                                                                char_type_ b) noexcept {
+    if constexpr (is_same_type<substituter_type_, uniform_substitution_costs_t>::value) {
+        score_type_ const differ = static_cast<score_type_>(a != b);
+        return static_cast<score_type_>(substituter.match) +
+               static_cast<score_type_>(substituter.mismatch - substituter.match) * differ;
+    }
+    else { return static_cast<score_type_>(substituter(a, b)); }
+}
 
 /**
  *  @brief One linear-gap DP cell: `opt(diag + sub, top + gap, left + gap)` (+ a Smith-Waterman ReLU clamp to 0 for the
- *         local objective). On @b Hopper with <=32-bit cells it fuses the whole thing into a single DPX
- *         `__viaddmin/max_s32[_relu]` (the gaps share `gap`, so `opt(top,left)+gap == opt(top+gap,left+gap)`); on every
- *         other capability or 64-bit cell it stays scalar. Mirrors the warp-tier `tile_scorer` Hopper specializations.
+ *         local objective). Scalar primary; the @b Hopper partial specialization (in `hopper.cuh`) fuses the whole
+ *         thing into a single fused-add-min/max DPX instruction for <=32-bit cells. Mirrors the warp-tier
+ *         `tile_scorer` Hopper specializations.
  */
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
-          typename score_type_>
-__forceinline__ __device__ score_type_ tiled_dp_cell_(score_type_ diag, score_type_ top, score_type_ left,
-                                                      score_type_ substitution, score_type_ gap) noexcept {
-    using score_t = score_type_;
-    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-    if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(score_t) <= 4) {
-        int const d = static_cast<int>(diag), s = static_cast<int>(substitution), g = static_cast<int>(gap);
-        int const t = static_cast<int>(top), l = static_cast<int>(left);
-        if constexpr (objective_ == sz_minimize_distance_k)
-            return static_cast<score_t>(__viaddmin_s32(d, s, min(t, l) + g)); // min(diag+sub, opt(top,left)+gap)
-        else if constexpr (is_local_k)
-            return static_cast<score_t>(__viaddmax_s32_relu(d, s, max(t, l) + g)); // Smith-Waterman: clamp to 0
-        else return static_cast<score_t>(__viaddmax_s32(d, s, max(t, l) + g));
-    }
-    else
-#endif
-    {
+          typename score_type_, typename enable_ = void>
+struct score_cell {
+    __forceinline__ __device__ score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
+                                                      score_type_ substitution, score_type_ gap) const noexcept {
+        using score_t = score_type_;
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
         score_t cell = min_or_max<objective_>(
             static_cast<score_t>(diag + substitution),
             min_or_max<objective_>(static_cast<score_t>(top + gap), static_cast<score_t>(left + gap)));
         if constexpr (is_local_k) cell = min_or_max<objective_, score_t>(cell, 0);
         return cell;
     }
-}
+};
 
 /**
  *  @brief One affine-gap (Gotoh) DP cell. Returns @b M and writes the running vertical/horizontal gaps @p v_out /
- *         @p h_out. On @b Hopper with <=32-bit cells each of V, H, and M is a single fused DPX
- *         `__viaddmin/max_s32[_relu]`; scalar otherwise. @sa tiled_dp_cell_.
+ *         @p h_out. Scalar primary; the @b Hopper partial specialization (in `hopper.cuh`) makes each of V, H, and M a
+ *         single fused-add-min/max DPX instruction for <=32-bit cells. @sa score_cell.
  */
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
-          typename score_type_>
-__forceinline__ __device__ score_type_ tiled_dp_cell_affine_( //
-    score_type_ diag, score_type_ top_m, score_type_ top_v, score_type_ left_m, score_type_ left_h,
-    score_type_ substitution, score_type_ open, score_type_ extend, score_type_ &v_out, score_type_ &h_out) noexcept {
-    using score_t = score_type_;
-    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-    if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(score_t) <= 4) {
-        int const d = static_cast<int>(diag), s = static_cast<int>(substitution);
-        int const o = static_cast<int>(open), e = static_cast<int>(extend);
-        if constexpr (objective_ == sz_minimize_distance_k) {
-            int const v = __viaddmin_s32(static_cast<int>(top_m), o, static_cast<int>(top_v) + e);
-            int const h = __viaddmin_s32(static_cast<int>(left_m), o, static_cast<int>(left_h) + e);
-            v_out = static_cast<score_t>(v), h_out = static_cast<score_t>(h);
-            return static_cast<score_t>(__viaddmin_s32(d, s, min(v, h)));
-        }
-        else {
-            int const v = __viaddmax_s32(static_cast<int>(top_m), o, static_cast<int>(top_v) + e);
-            int const h = __viaddmax_s32(static_cast<int>(left_m), o, static_cast<int>(left_h) + e);
-            v_out = static_cast<score_t>(v), h_out = static_cast<score_t>(h);
-            int const gap_best = max(v, h);
-            return is_local_k ? static_cast<score_t>(__viaddmax_s32_relu(d, s, gap_best))
-                              : static_cast<score_t>(__viaddmax_s32(d, s, gap_best));
-        }
-    }
-    else
-#endif
-    {
+          typename score_type_, typename enable_ = void>
+struct affine_score_cell {
+    __forceinline__ __device__ score_type_ operator()( //
+        score_type_ diag, score_type_ top_m, score_type_ top_v, score_type_ left_m, score_type_ left_h,
+        score_type_ substitution, score_type_ open, score_type_ extend, score_type_ &v_out,
+        score_type_ &h_out) const noexcept {
+        using score_t = score_type_;
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
         score_t const v = min_or_max<objective_>(static_cast<score_t>(top_m + open),
                                                  static_cast<score_t>(top_v + extend));
         score_t const h = min_or_max<objective_>(static_cast<score_t>(left_m + open),
@@ -635,7 +624,92 @@ __forceinline__ __device__ score_type_ tiled_dp_cell_affine_( //
         if constexpr (is_local_k) if_substitution = min_or_max<objective_, score_t>(if_substitution, 0);
         return min_or_max<objective_>(min_or_max<objective_>(v, h), if_substitution);
     }
+};
+
+#pragma region Micro tile helpers
+
+/**
+ *  @brief Resolves a micro-tile's left boundary column + diagonal corner for the @b linear-gap march. Lane 0 reads the
+ *         on-chip staged left frontier (indexed by the micro-row within the tile) and carries the tile-top corner for
+ *         the first micro-row; every other lane receives the left neighbour's right column + top-right corner that
+ *         arrived via `__shfl_up`. Shared by the global and local instantiations of `score_across_cuda_device_`.
+ */
+template <typename score_type_>
+__device__ __forceinline__ void resolve_left_boundary_(                    //
+    unsigned lane_index, unsigned micro_row, unsigned micro_side,          //
+    score_type_ const *shared_left_row, score_type_ tile_corner,           //
+    score_type_ const *shuffled_right_edge, score_type_ shuffled_topright, //
+    score_type_ *left_column, score_type_ &diagonal_corner) {
+    if (lane_index == 0) {
+        for (unsigned element = 0; element < micro_side; ++element)
+            left_column[element] = shared_left_row[micro_row * micro_side + element];
+        diagonal_corner = micro_row == 0 ? tile_corner : shared_left_row[micro_row * micro_side - 1];
+    }
+    else {
+        for (unsigned element = 0; element < micro_side; ++element) left_column[element] = shuffled_right_edge[element];
+        diagonal_corner = shuffled_topright;
+    }
 }
+
+/**
+ *  @brief Affine sibling of `resolve_left_boundary_`: resolves BOTH the primary @b M and horizontal-gap @b H left
+ *         boundary columns plus the diagonal @b M corner. Lane 0 reads the two on-chip staged frontier slices; every
+ *         other lane receives the left neighbour's right M/H edges + top-right M corner from `__shfl_up`. Shared by the
+ *         global and local instantiations of `affine_score_across_cuda_device_`.
+ */
+template <typename score_type_>
+__device__ __forceinline__ void resolve_left_boundary_affine_(                          //
+    unsigned lane_index, unsigned micro_row, unsigned micro_side,                       //
+    score_type_ const *shared_left_m_row, score_type_ const *shared_left_h_row,         //
+    score_type_ tile_corner_m,                                                          //
+    score_type_ const *shuffled_right_edge_m, score_type_ const *shuffled_right_edge_h, //
+    score_type_ shuffled_topright_m,                                                    //
+    score_type_ *left_column_m, score_type_ *left_column_h, score_type_ &diagonal_corner_m) {
+    if (lane_index == 0) {
+        for (unsigned element = 0; element < micro_side; ++element) {
+            left_column_m[element] = shared_left_m_row[micro_row * micro_side + element];
+            left_column_h[element] = shared_left_h_row[micro_row * micro_side + element];
+        }
+        diagonal_corner_m = micro_row == 0 ? tile_corner_m : shared_left_m_row[micro_row * micro_side - 1];
+    }
+    else {
+        for (unsigned element = 0; element < micro_side; ++element)
+            left_column_m[element] = shuffled_right_edge_m[element],
+            left_column_h[element] = shuffled_right_edge_h[element];
+        diagonal_corner_m = shuffled_topright_m;
+    }
+}
+
+/**
+ *  @brief Captures one finished DP cell for both tiled device scorers. For the @b local (Smith-Waterman) objective it
+ *         folds the cell into the per-lane running maximum - unconditionally on the `fast_k` (full-tile) march, and
+ *         gated by the in-bounds re-check on the `checked_k` (partial/corner) march. For the @b global objective it
+ *         stores the true corner cell `M[shorter_length][longer_length]` through @p result_ptr when this is that cell.
+ *         The short-circuit (`tile_is_full ||` early-accept vs the per-cell bounds re-check) is preserved verbatim from
+ *         the original inline ladder, keeping the recurrence bit-exact.
+ */
+template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, tile_march_t march_,
+          typename score_type_, typename final_score_type_>
+__device__ __forceinline__ void capture_cell_(                                        //
+    score_type_ cell_score, bool tile_is_full, bool tile_has_corner,                  //
+    u32_t matrix_row, u32_t matrix_column, u32_t shorter_length, u32_t longer_length, //
+    score_type_ &running_best, final_score_type_ *result_ptr) {
+    static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+    if constexpr (is_local_k) {
+        if constexpr (march_ == tile_march_t::fast_k)
+            running_best = min_or_max<objective_, score_type_>(running_best, cell_score);
+        else {
+            if (tile_is_full || (matrix_row <= shorter_length && matrix_column <= longer_length))
+                running_best = min_or_max<objective_, score_type_>(running_best, cell_score);
+        }
+    }
+    else if constexpr (march_ == tile_march_t::checked_k) {
+        if (tile_has_corner && matrix_row == shorter_length && matrix_column == longer_length)
+            *result_ptr = static_cast<final_score_type_>(cell_score);
+    }
+}
+
+#pragma endregion Micro tile helpers
 
 /**
  *  @brief Tiled large-matrix linear-gap scorer: one @b warp owns a 128-wide tile-COLUMN and marches it top-to-bottom,
@@ -659,7 +733,7 @@ template <                                                         //
     sz_capability_t capability_ = sz_cap_cuda_k,                   //
     typename task_type_ = void                                     //
     >
-__global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_across_cuda_device_(    //
+__global__ __launch_bounds__(warps_per_block_ * 32) void score_across_cuda_device_(          //
     task_type_ *tasks,                                                                       //
     score_type_ *row_frontier_base, score_type_ *corner_frontier_base, u32_t *progress_base, //
     u32_t row_stride, u32_t corner_stride,                                                   //
@@ -701,7 +775,7 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_across_cuda
     score_type_ *const corner_frontier = corner_frontier_base + static_cast<size_t>(pair) * corner_stride;
     u32_t *const progress = progress_base + static_cast<size_t>(pair) * corner_stride;
 
-    unsigned const lane = threadIdx.x & 31u;
+    unsigned const lane_index = threadIdx.x & 31u;
     u32_t const tile_column = (blockIdx.x * blockDim.x + threadIdx.x) >> 5; // one warp per tile-column
     if (tile_column >= tile_grid_columns) return;
     u32_t const tile_first_column = tile_column * tile_side_k;
@@ -710,16 +784,17 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_across_cuda
     // `longer_length` (the last tile may be partial) read a sentinel that never matches - those padded cells are
     // computed but never feed a valid cell, and are excluded from the result.
     char_type_ target_chars[micro_side_k];
-    for (unsigned a = 0; a < micro_side_k; ++a) {
-        u32_t const target_index = tile_first_column + lane * micro_side_k + a;
-        target_chars[a] = target_index < longer_length ? longer_ptr[target_index] : static_cast<char_type_>(0xFF);
+    for (unsigned element = 0; element < micro_side_k; ++element) {
+        u32_t const target_index = tile_first_column + lane_index * micro_side_k + element;
+        target_chars[element] = target_index < longer_length ? longer_ptr[target_index] : static_cast<char_type_>(0xFF);
     }
     // Top edge carried in registers down the column (free vertical hand-off); row 0 is the matrix boundary - the same
     // value `tile_scorer::init_score` produces (0 for local, gap·column for the linear global gap ladder).
     score_t carry_top[micro_side_k];
-    for (unsigned a = 0; a < micro_side_k; ++a)
-        carry_top[a] = is_local_k ? score_t {0}
-                                  : static_cast<score_t>(gap * (tile_first_column + lane * micro_side_k + a + 1));
+    for (unsigned element = 0; element < micro_side_k; ++element)
+        carry_top[element] = is_local_k ? score_t {0}
+                                        : static_cast<score_t>(
+                                              gap * (tile_first_column + lane_index * micro_side_k + element + 1));
     score_t running_best = 0; // local (SW) keeps the global maximum across all cells
 
     // The corner cell M[shorter_length][longer_length] lives in exactly one tile; only that warp/tile pays the per-cell
@@ -734,18 +809,19 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_across_cuda
                                   tile_first_column + tile_side_k <= longer_length;
         bool const tile_has_corner = owns_corner_column && tile_row == corner_tile_row;
         // Wait for the left column to publish this tile-row (acquire orders its halo writes before our reads).
-        if (tile_column > 0 && lane == 0) {
+        if (tile_column > 0 && lane_index == 0) {
             cuda::atomic_ref<u32_t, cuda::thread_scope_device> left_progress(progress[tile_column - 1]);
             while (left_progress.load(cuda::memory_order_acquire) <= tile_row) {}
         }
         __syncwarp();
         // Stage this tile-row's left boundary (a coalesced read of the global `row_frontier` slice) and the query rows
-        // into shared. `shared_left[r]` holds M[tile_first_row + 1 + r][tile_first_column]; the inner loop's lane-0 then
-        // serves its left/corner reads from shared instead of re-touching the latent global frontier per micro-tile.
-        for (unsigned r = lane; r < tile_side_k; r += 32) {
-            shared_left[warp_in_block][r] = row_frontier[tile_first_row + 1 + r];
-            shared_query[warp_in_block][r] = tile_first_row + r < shorter_length ? shorter_ptr[tile_first_row + r]
-                                                                                 : static_cast<char_type_>(0xFE);
+        // into shared. `shared_left[stage_row]` holds M[tile_first_row + 1 + stage_row][tile_first_column]; the inner
+        // loop's lane-0 then serves its left/corner reads from shared instead of re-touching the global frontier.
+        for (unsigned stage_row = lane_index; stage_row < tile_side_k; stage_row += 32) {
+            shared_left[warp_in_block][stage_row] = row_frontier[tile_first_row + 1 + stage_row];
+            shared_query[warp_in_block][stage_row] = tile_first_row + stage_row < shorter_length
+                                                         ? shorter_ptr[tile_first_row + stage_row]
+                                                         : static_cast<char_type_>(0xFE);
         }
         __syncwarp();
         score_t const tile_corner = corner_frontier[tile_column];
@@ -755,120 +831,108 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_across_cuda
         score_t const tile_bottom_left = shared_left[warp_in_block][tile_side_k - 1];
 
         // Micro-tile anti-diagonal wavefront within the tile (lane = micro-column, step skew = micro-row), specialized on
-        // `tile_fast_`. A FULL non-corner tile (global) - or any full tile (local) - needs NO per-cell result/bounds work,
-        // so the `tile_fast_` instantiation's inner loop is provably free of the guarded global store / bounds branch that
-        // otherwise inhibits register optimization of the hot path (measured +17% @batch-8, +33% @batch-32). The corner
-        // and partial-edge tiles - a vanishing fraction - take the checked path.
-        auto const march_tile = [&]<bool tile_fast_>() {
-            score_t last_right[micro_side_k];
-            for (unsigned a = 0; a < micro_side_k; ++a) last_right[a] = 0;
-            score_t last_topright = 0;
-            unsigned const steps = micro_rows_k + lanes_k - 1;
-            for (unsigned step = 0; step < steps; ++step) {
-                unsigned const micro_row = step - lane;
-                bool const active = (step >= lane) && (micro_row < micro_rows_k);
-                score_t neighbor_right[micro_side_k];
-                for (unsigned a = 0; a < micro_side_k; ++a)
-                    neighbor_right[a] = __shfl_up_sync(0xffffffff, last_right[a], 1);
-                score_t neighbor_topright = __shfl_up_sync(0xffffffff, last_topright, 1);
+        // the `tile_march_t` variant. A FULL non-corner tile (global) - or any full tile (local) - needs NO per-cell
+        // result/bounds work, so the `fast_k` instantiation's inner loop is provably free of the guarded global store /
+        // bounds branch that otherwise inhibits register optimization of the hot path (measured +17% @batch-8, +33%
+        // @batch-32). The corner and partial-edge tiles - a vanishing fraction - take the checked path.
+        auto const march_tile = [&]<tile_march_t march_>() {
+            score_t prev_right_edge[micro_side_k];
+            for (unsigned element = 0; element < micro_side_k; ++element) prev_right_edge[element] = 0;
+            score_t prev_topright = 0;
+            unsigned const wavefront_steps = micro_rows_k + lanes_k - 1;
+            for (unsigned wavefront_step = 0; wavefront_step < wavefront_steps; ++wavefront_step) {
+                unsigned const micro_row = wavefront_step - lane_index;
+                bool const active = (wavefront_step >= lane_index) && (micro_row < micro_rows_k);
+                score_t shuffled_right_edge[micro_side_k];
+                for (unsigned element = 0; element < micro_side_k; ++element)
+                    shuffled_right_edge[element] = __shfl_up_sync(0xffffffff, prev_right_edge[element], 1);
+                score_t shuffled_topright = __shfl_up_sync(0xffffffff, prev_topright, 1);
                 if (active) {
                     u32_t const micro_first_row = tile_first_row + micro_row * micro_side_k;
-                    score_t left[micro_side_k], corner;
-                    if (lane == 0) {
-                        // Lane 0's left boundary + diagonal corner come from the on-chip staged `shared_left` (indexed by
-                        // the micro-row within the tile), not the global frontier; the tile-top corner is the carried diagonal.
-                        for (unsigned a = 0; a < micro_side_k; ++a)
-                            left[a] = shared_left[warp_in_block][micro_row * micro_side_k + a];
-                        corner = micro_row == 0 ? tile_corner
-                                                : shared_left[warp_in_block][micro_row * micro_side_k - 1];
-                    }
-                    else {
-                        for (unsigned a = 0; a < micro_side_k; ++a) left[a] = neighbor_right[a];
-                        corner = neighbor_topright;
-                    }
-                    score_t const send_topright =
-                        carry_top[micro_side_k - 1]; // M[micro_first_row][col+4], corner for lane+1
-                    score_t above[micro_side_k + 1];
-                    above[0] = corner;
-                    for (unsigned a = 0; a < micro_side_k; ++a) above[a + 1] = carry_top[a];
-                    score_t my_right[micro_side_k];
-                    for (unsigned i = 1; i <= micro_side_k; ++i) {
-                        score_t row[micro_side_k + 1];
-                        row[0] = left[i - 1];
-                        [[maybe_unused]] u32_t const matrix_row = micro_first_row +
-                                                                  i; // 1-based DP row; > len on a partial tile
-                        char_type_ const query_char = shared_query[warp_in_block][micro_row * micro_side_k + i - 1];
-                        for (unsigned j = 1; j <= micro_side_k; ++j) {
+                    score_t left_column[micro_side_k], diagonal_corner;
+                    resolve_left_boundary_<score_t>(lane_index, micro_row, micro_side_k, shared_left[warp_in_block],
+                                                    tile_corner, shuffled_right_edge, shuffled_topright, left_column,
+                                                    diagonal_corner);
+                    score_t const topright_for_next_lane = carry_top[micro_side_k - 1];
+                    score_t above_row[micro_side_k + 1];
+                    above_row[0] = diagonal_corner;
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        above_row[element + 1] = carry_top[element];
+                    score_t right_edge[micro_side_k];
+                    for (unsigned micro_row_cell = 1; micro_row_cell <= micro_side_k; ++micro_row_cell) {
+                        score_t current_row[micro_side_k + 1];
+                        current_row[0] = left_column[micro_row_cell - 1];
+                        /** 1-based DP row index of this micro-row-cell. */
+                        [[maybe_unused]] u32_t const matrix_row = micro_first_row + micro_row_cell;
+                        char_type_ const query_char =
+                            shared_query[warp_in_block][micro_row * micro_side_k + micro_row_cell - 1];
+                        for (unsigned micro_column_cell = 1; micro_column_cell <= micro_side_k; ++micro_column_cell) {
                             // Polymorphic cost: `uniform_substitution_costs_t` for Levenshtein, the 32-class table for NW/SW.
-                            score_t const substitution = static_cast<score_t>(
-                                substituter_shared(query_char, target_chars[j - 1]));
+                            score_t const substitution = tiled_substitution_cost_<score_t>(
+                                substituter_shared, query_char, target_chars[micro_column_cell - 1]);
                             // One fused DP cell (Hopper DPX when the capability + cell width allow; the helper also applies
                             // the Smith-Waterman clamp-to-0 for the local objective).
-                            score_t cell = tiled_dp_cell_<objective_k, locality_, capability_, score_t>(
-                                above[j - 1], above[j], row[j - 1], substitution, gap);
-                            if constexpr (is_local_k) {
-                                if constexpr (tile_fast_)
-                                    running_best = min_or_max<objective_k, score_t>(running_best, cell);
-                                else {
-                                    u32_t const matrix_column = tile_first_column + lane * micro_side_k + j;
-                                    if (tile_is_full ||
-                                        (matrix_row <= shorter_length && matrix_column <= longer_length))
-                                        running_best = min_or_max<objective_k, score_t>(running_best, cell);
-                                }
-                            }
-                            else if constexpr (!tile_fast_) {
-                                if (tile_has_corner && matrix_row == shorter_length &&
-                                    tile_first_column + lane * micro_side_k + j == longer_length)
-                                    *result_ptr = static_cast<final_score_type_>(
-                                        cell); // global result = the true corner cell
-                            }
-                            row[j] = cell;
+                            score_t cell_score = score_cell<objective_k, locality_, capability_, score_t> {}(
+                                above_row[micro_column_cell - 1], above_row[micro_column_cell],
+                                current_row[micro_column_cell - 1], substitution, gap);
+                            [[maybe_unused]] u32_t const matrix_column = tile_first_column + lane_index * micro_side_k +
+                                                                         micro_column_cell;
+                            capture_cell_<objective_k, locality_, march_, score_t, final_score_type_>(
+                                cell_score, tile_is_full, tile_has_corner, matrix_row, matrix_column, shorter_length,
+                                longer_length, running_best, result_ptr);
+                            current_row[micro_column_cell] = cell_score;
                         }
-                        my_right[i - 1] = row[micro_side_k];
-                        for (unsigned a = 0; a <= micro_side_k; ++a) above[a] = row[a];
+                        right_edge[micro_row_cell - 1] = current_row[micro_side_k];
+                        for (unsigned element = 0; element <= micro_side_k; ++element)
+                            above_row[element] = current_row[element];
                     }
-                    for (unsigned a = 0; a < micro_side_k; ++a)
-                        carry_top[a] = above[a + 1]; // bottom row -> next micro-row top
-                    for (unsigned a = 0; a < micro_side_k; ++a) last_right[a] = my_right[a];
-                    last_topright = send_topright;
-                    if (lane ==
-                        lanes_k - 1) // rightmost micro-column: publish the tile's right column for the next warp
-                        for (unsigned a = 0; a < micro_side_k; ++a) row_frontier[micro_first_row + a + 1] = my_right[a];
+                    // Bottom row -> next micro-row top.
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        carry_top[element] = above_row[element + 1];
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        prev_right_edge[element] = right_edge[element];
+                    prev_topright = topright_for_next_lane;
+                    // Rightmost micro-column: publish the tile's right column for the next warp.
+                    if (lane_index == lanes_k - 1)
+                        for (unsigned element = 0; element < micro_side_k; ++element)
+                            row_frontier[micro_first_row + element + 1] = right_edge[element];
                 }
                 __syncwarp();
             }
         };
         // Full tiles with no result cell to capture (global: not the corner tile; local: every full tile) take the fast,
         // store-free path; corner / partial-edge tiles take the checked path.
-        if (tile_is_full && (is_local_k || !tile_has_corner)) march_tile.template operator()<true>();
-        else march_tile.template operator()<false>();
-        if (lane == 0)
-            corner_frontier[tile_column] = tile_bottom_left; // bottom-left corner -> diagonal for the tile below
+        if (tile_is_full && (is_local_k || !tile_has_corner)) march_tile.template operator()<tile_march_t::fast_k>();
+        else march_tile.template operator()<tile_march_t::checked_k>();
+        // Bottom-left corner -> diagonal for the tile below.
+        if (lane_index == 0) corner_frontier[tile_column] = tile_bottom_left;
         __syncwarp();
-        if (lane == 0) { // release: publish this tile-row so the right neighbour column can proceed
+        // Release: publish this tile-row so the right neighbour column can proceed.
+        if (lane_index == 0) {
             cuda::atomic_ref<u32_t, cuda::thread_scope_device> my_progress(progress[tile_column]);
             my_progress.store(tile_row + 1, cuda::memory_order_release);
         }
     }
-    if constexpr (
-        is_local_k) { // Smith-Waterman: reduce the per-lane maxima across the warp and publish the global best
+    // Smith-Waterman: reduce the per-lane maxima across the warp and publish the global best.
+    if constexpr (is_local_k) {
         running_best = pick_best_in_warp_<objective_k>(running_best);
-        if (lane == 0)
+        if (lane_index == 0)
             atomicMax(reinterpret_cast<unsigned long long *>(result_ptr),
                       static_cast<unsigned long long>(running_best));
     }
 }
 
 /**
- *  @brief Seeds the global frontier for `tiled_score_across_cuda_device_`: the left boundary column `M[i][0]`, the
+ *  @brief Seeds the global frontier for `score_across_cuda_device_`: the left boundary column `M[i][0]`, the
  *         per-tile-column diagonal corners `M[0][tc·128]`, the `progress` counters, and the local-result slot. A
  *         separate launch supplies the grid-wide barrier the (cooperative-free) tiled kernel deliberately avoids.
  */
 template <typename score_type_, typename final_score_type_, sz_similarity_objective_t objective_,
           sz_similarity_locality_t locality_, typename task_type_ = void>
-__global__ void tiled_frontier_init_(task_type_ *tasks, score_type_ *row_frontier_base,
-                                     score_type_ *corner_frontier_base, u32_t *progress_base, u32_t row_stride,
-                                     u32_t corner_stride, linear_gap_costs_t const gap_costs) {
+__global__ void frontier_init_across_cuda_device_(task_type_ *tasks, score_type_ *row_frontier_base,
+                                                  score_type_ *corner_frontier_base, u32_t *progress_base,
+                                                  u32_t row_stride, u32_t corner_stride,
+                                                  linear_gap_costs_t const gap_costs) {
     using score_t = score_type_;
     static constexpr unsigned tile_side_k = 128;
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
@@ -895,7 +959,7 @@ __global__ void tiled_frontier_init_(task_type_ *tasks, score_type_ *row_frontie
 }
 
 /**
- *  @brief Affine-gap (Gotoh) sibling of `tiled_score_across_cuda_device_`: same warp-per-tile-column data-flow and
+ *  @brief Affine-gap (Gotoh) sibling of `score_across_cuda_device_`: same warp-per-tile-column data-flow and
  *         4x4 register micro-tiles, but each cell carries three matrices - the primary @b M plus the running vertical
  *         (@b V, opens from M above) and horizontal (@b H, opens from M to the left) gap matrices. The top edge carries
  *         M+V down the column in registers; the left edge + corner cross warps via @p row_frontier_m / @p row_frontier_d
@@ -917,11 +981,11 @@ template <                                                         //
     sz_capability_t capability_ = sz_cap_cuda_k,                   //
     typename task_type_ = void                                     //
     >
-__global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_affine_across_cuda_device_( //
-    task_type_ *tasks,                                                                           //
-    score_type_ *row_frontier_m_base, score_type_ *row_frontier_d_base,                          //
-    score_type_ *corner_frontier_m_base, u32_t *progress_base,                                   //
-    u32_t row_stride, u32_t corner_stride,                                                       //
+__global__ __launch_bounds__(warps_per_block_ * 32) void affine_score_across_cuda_device_( //
+    task_type_ *tasks,                                                                     //
+    score_type_ *row_frontier_m_base, score_type_ *row_frontier_d_base,                    //
+    score_type_ *corner_frontier_m_base, u32_t *progress_base,                             //
+    u32_t row_stride, u32_t corner_stride,                                                 //
     substituter_type_ const substituter, affine_gap_costs_t const gap_costs) {
 
     using score_t = score_type_;
@@ -961,22 +1025,22 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_affine_acro
     score_type_ *const corner_frontier_m = corner_frontier_m_base + static_cast<size_t>(pair) * corner_stride;
     u32_t *const progress = progress_base + static_cast<size_t>(pair) * corner_stride;
 
-    unsigned const lane = threadIdx.x & 31u;
+    unsigned const lane_index = threadIdx.x & 31u;
     u32_t const tile_column = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
     if (tile_column >= tile_grid_columns) return;
     u32_t const tile_first_column = tile_column * tile_side_k;
 
     char_type_ target_chars[micro_side_k];
-    for (unsigned a = 0; a < micro_side_k; ++a) {
-        u32_t const target_index = tile_first_column + lane * micro_side_k + a;
-        target_chars[a] = target_index < longer_length ? longer_ptr[target_index] : static_cast<char_type_>(0xFF);
+    for (unsigned element = 0; element < micro_side_k; ++element) {
+        u32_t const target_index = tile_first_column + lane_index * micro_side_k + element;
+        target_chars[element] = target_index < longer_length ? longer_ptr[target_index] : static_cast<char_type_>(0xFF);
     }
     // Top edge carried in registers down the column: M and the running vertical gap V (the row directly above).
     score_t carry_top_m[micro_side_k], carry_top_v[micro_side_k];
-    for (unsigned a = 0; a < micro_side_k; ++a) {
-        u32_t const column = tile_first_column + lane * micro_side_k + a + 1;
-        carry_top_m[a] = boundary_m(column);
-        carry_top_v[a] = boundary_gap(column);
+    for (unsigned element = 0; element < micro_side_k; ++element) {
+        u32_t const column = tile_first_column + lane_index * micro_side_k + element + 1;
+        carry_top_m[element] = boundary_m(column);
+        carry_top_v[element] = boundary_gap(column);
     }
     score_t running_best = 0;
 
@@ -989,138 +1053,133 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void tiled_score_affine_acro
         bool const tile_is_full = tile_first_row + tile_side_k <= shorter_length &&
                                   tile_first_column + tile_side_k <= longer_length;
         bool const tile_has_corner = owns_corner_column && tile_row == corner_tile_row;
-        if (tile_column > 0 && lane == 0) {
+        // Wait for the left column to publish this tile-row (acquire orders its halo writes before our reads).
+        if (tile_column > 0 && lane_index == 0) {
             cuda::atomic_ref<u32_t, cuda::thread_scope_device> left_progress(progress[tile_column - 1]);
             while (left_progress.load(cuda::memory_order_acquire) <= tile_row) {}
         }
         __syncwarp();
         score_t const tile_corner_m = corner_frontier_m[tile_column];
         // Stage both left boundaries (coalesced reads of the global M/H frontier slices) and the query rows into shared.
-        for (unsigned r = lane; r < tile_side_k; r += 32) {
-            shared_left_m[warp_in_block][r] = row_frontier_m[tile_first_row + 1 + r];
-            shared_left_h[warp_in_block][r] = row_frontier_d[tile_first_row + 1 + r];
-            shared_query[warp_in_block][r] = tile_first_row + r < shorter_length ? shorter_ptr[tile_first_row + r]
-                                                                                 : static_cast<char_type_>(0xFE);
+        for (unsigned stage_row = lane_index; stage_row < tile_side_k; stage_row += 32) {
+            shared_left_m[warp_in_block][stage_row] = row_frontier_m[tile_first_row + 1 + stage_row];
+            shared_left_h[warp_in_block][stage_row] = row_frontier_d[tile_first_row + 1 + stage_row];
+            shared_query[warp_in_block][stage_row] = tile_first_row + stage_row < shorter_length
+                                                         ? shorter_ptr[tile_first_row + stage_row]
+                                                         : static_cast<char_type_>(0xFE);
         }
         __syncwarp();
         // Bottom-left M boundary (the staged copy survives the march writing its own right edge into `row_frontier_m`);
         // becomes the diagonal corner for the tile below.
         score_t const tile_bottom_left_m = shared_left_m[warp_in_block][tile_side_k - 1];
 
-        // Full non-corner (global) / full (local) tiles take a `tile_fast_` march with the per-cell result/bounds work
+        // Full non-corner (global) / full (local) tiles take the `fast_k` march with the per-cell result/bounds work
         // compile-time elided - the same store-free hot-loop speedup as the linear kernel (see its comment).
-        auto const march_tile = [&]<bool tile_fast_>() {
-            score_t last_right_m[micro_side_k], last_right_h[micro_side_k];
-            for (unsigned a = 0; a < micro_side_k; ++a) last_right_m[a] = 0, last_right_h[a] = 0;
-            score_t last_topright_m = 0;
-            unsigned const steps = micro_rows_k + lanes_k - 1;
-            for (unsigned step = 0; step < steps; ++step) {
-                unsigned const micro_row = step - lane;
-                bool const active = (step >= lane) && (micro_row < micro_rows_k);
-                score_t neighbor_right_m[micro_side_k], neighbor_right_h[micro_side_k];
-                for (unsigned a = 0; a < micro_side_k; ++a) {
-                    neighbor_right_m[a] = __shfl_up_sync(0xffffffff, last_right_m[a], 1);
-                    neighbor_right_h[a] = __shfl_up_sync(0xffffffff, last_right_h[a], 1);
+        auto const march_tile = [&]<tile_march_t march_>() {
+            score_t prev_right_edge_m[micro_side_k], prev_right_edge_h[micro_side_k];
+            for (unsigned element = 0; element < micro_side_k; ++element)
+                prev_right_edge_m[element] = 0, prev_right_edge_h[element] = 0;
+            score_t prev_topright_m = 0;
+            unsigned const wavefront_steps = micro_rows_k + lanes_k - 1;
+            for (unsigned wavefront_step = 0; wavefront_step < wavefront_steps; ++wavefront_step) {
+                unsigned const micro_row = wavefront_step - lane_index;
+                bool const active = (wavefront_step >= lane_index) && (micro_row < micro_rows_k);
+                score_t shuffled_right_edge_m[micro_side_k], shuffled_right_edge_h[micro_side_k];
+                for (unsigned element = 0; element < micro_side_k; ++element) {
+                    shuffled_right_edge_m[element] = __shfl_up_sync(0xffffffff, prev_right_edge_m[element], 1);
+                    shuffled_right_edge_h[element] = __shfl_up_sync(0xffffffff, prev_right_edge_h[element], 1);
                 }
-                score_t neighbor_topright_m = __shfl_up_sync(0xffffffff, last_topright_m, 1);
+                score_t shuffled_topright_m = __shfl_up_sync(0xffffffff, prev_topright_m, 1);
                 if (active) {
                     u32_t const micro_first_row = tile_first_row + micro_row * micro_side_k;
-                    score_t left_m[micro_side_k], left_h[micro_side_k], corner_m;
-                    if (lane == 0) {
-                        // Lane 0's left M/H boundaries + diagonal M corner come from the on-chip staged slices.
-                        for (unsigned a = 0; a < micro_side_k; ++a) {
-                            left_m[a] = shared_left_m[warp_in_block][micro_row * micro_side_k + a];
-                            left_h[a] = shared_left_h[warp_in_block][micro_row * micro_side_k + a];
-                        }
-                        corner_m = micro_row == 0 ? tile_corner_m
-                                                  : shared_left_m[warp_in_block][micro_row * micro_side_k - 1];
-                    }
-                    else {
-                        for (unsigned a = 0; a < micro_side_k; ++a)
-                            left_m[a] = neighbor_right_m[a], left_h[a] = neighbor_right_h[a];
-                        corner_m = neighbor_topright_m;
-                    }
-                    score_t const send_topright_m =
-                        carry_top_m[micro_side_k - 1]; // M[micro_first_row][col+4] -> lane+1's corner
-                    score_t above_m[micro_side_k + 1], above_v[micro_side_k + 1];
-                    above_m[0] = corner_m; // the diagonal M; above_v[0] is never read
-                    for (unsigned a = 0; a < micro_side_k; ++a)
-                        above_m[a + 1] = carry_top_m[a], above_v[a + 1] = carry_top_v[a];
-                    score_t my_right_m[micro_side_k], my_right_h[micro_side_k];
-                    for (unsigned i = 1; i <= micro_side_k; ++i) {
-                        score_t row_m[micro_side_k + 1], row_h[micro_side_k + 1], row_v[micro_side_k + 1];
-                        row_m[0] = left_m[i - 1], row_h[0] = left_h[i - 1]; // row_v[0] never read
-                        [[maybe_unused]] u32_t const matrix_row = micro_first_row + i;
-                        char_type_ const query_char = shared_query[warp_in_block][micro_row * micro_side_k + i - 1];
-                        for (unsigned j = 1; j <= micro_side_k; ++j) {
-                            score_t const substitution = static_cast<score_t>(
-                                substituter_shared(query_char, target_chars[j - 1]));
+                    score_t left_column_m[micro_side_k], left_column_h[micro_side_k], diagonal_corner_m;
+                    resolve_left_boundary_affine_<score_t>(
+                        lane_index, micro_row, micro_side_k, shared_left_m[warp_in_block], shared_left_h[warp_in_block],
+                        tile_corner_m, shuffled_right_edge_m, shuffled_right_edge_h, shuffled_topright_m, left_column_m,
+                        left_column_h, diagonal_corner_m);
+                    score_t const topright_for_next_lane_m = carry_top_m[micro_side_k - 1];
+                    score_t above_row_m[micro_side_k + 1], above_row_v[micro_side_k + 1];
+                    above_row_m[0] = diagonal_corner_m; // the diagonal M; above_row_v[0] is never read
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        above_row_m[element + 1] = carry_top_m[element],
+                                              above_row_v[element + 1] = carry_top_v[element];
+                    score_t right_edge_m[micro_side_k], right_edge_h[micro_side_k];
+                    for (unsigned micro_row_cell = 1; micro_row_cell <= micro_side_k; ++micro_row_cell) {
+                        score_t current_row_m[micro_side_k + 1], current_row_h[micro_side_k + 1],
+                            current_row_v[micro_side_k + 1];
+                        current_row_m[0] = left_column_m[micro_row_cell - 1],
+                        current_row_h[0] = left_column_h[micro_row_cell - 1]; // current_row_v[0] never read
+                        [[maybe_unused]] u32_t const matrix_row = micro_first_row + micro_row_cell;
+                        char_type_ const query_char =
+                            shared_query[warp_in_block][micro_row * micro_side_k + micro_row_cell - 1];
+                        for (unsigned micro_column_cell = 1; micro_column_cell <= micro_side_k; ++micro_column_cell) {
+                            score_t const substitution = tiled_substitution_cost_<score_t>(
+                                substituter_shared, query_char, target_chars[micro_column_cell - 1]);
                             // One fused Gotoh cell (Hopper DPX when capability + cell width allow); writes the running V/H gaps.
                             score_t v_new, h_new;
-                            score_t cell = tiled_dp_cell_affine_<objective_k, locality_, capability_, score_t>(
-                                above_m[j - 1], above_m[j], above_v[j], row_m[j - 1], row_h[j - 1], substitution, open,
-                                extend, v_new, h_new);
-                            if constexpr (is_local_k) {
-                                if constexpr (tile_fast_)
-                                    running_best = min_or_max<objective_k, score_t>(running_best, cell);
-                                else {
-                                    u32_t const matrix_column = tile_first_column + lane * micro_side_k + j;
-                                    if (tile_is_full ||
-                                        (matrix_row <= shorter_length && matrix_column <= longer_length))
-                                        running_best = min_or_max<objective_k, score_t>(running_best, cell);
-                                }
-                            }
-                            else if constexpr (!tile_fast_) {
-                                if (tile_has_corner && matrix_row == shorter_length &&
-                                    tile_first_column + lane * micro_side_k + j == longer_length)
-                                    *result_ptr = static_cast<final_score_type_>(cell);
-                            }
-                            row_m[j] = cell, row_h[j] = h_new, row_v[j] = v_new;
+                            score_t cell_score = affine_score_cell<objective_k, locality_, capability_, score_t> {}(
+                                above_row_m[micro_column_cell - 1], above_row_m[micro_column_cell],
+                                above_row_v[micro_column_cell], current_row_m[micro_column_cell - 1],
+                                current_row_h[micro_column_cell - 1], substitution, open, extend, v_new, h_new);
+                            [[maybe_unused]] u32_t const matrix_column = tile_first_column + lane_index * micro_side_k +
+                                                                         micro_column_cell;
+                            capture_cell_<objective_k, locality_, march_, score_t, final_score_type_>(
+                                cell_score, tile_is_full, tile_has_corner, matrix_row, matrix_column, shorter_length,
+                                longer_length, running_best, result_ptr);
+                            current_row_m[micro_column_cell] = cell_score, current_row_h[micro_column_cell] = h_new,
+                            current_row_v[micro_column_cell] = v_new;
                         }
-                        my_right_m[i - 1] = row_m[micro_side_k], my_right_h[i - 1] = row_h[micro_side_k];
-                        for (unsigned a = 0; a <= micro_side_k; ++a) above_m[a] = row_m[a], above_v[a] = row_v[a];
+                        right_edge_m[micro_row_cell - 1] = current_row_m[micro_side_k],
+                                                      right_edge_h[micro_row_cell - 1] = current_row_h[micro_side_k];
+                        for (unsigned element = 0; element <= micro_side_k; ++element)
+                            above_row_m[element] = current_row_m[element],
+                            above_row_v[element] = current_row_v[element];
                     }
-                    for (unsigned a = 0; a < micro_side_k; ++a)
-                        carry_top_m[a] = above_m[a + 1], carry_top_v[a] = above_v[a + 1];
-                    for (unsigned a = 0; a < micro_side_k; ++a)
-                        last_right_m[a] = my_right_m[a], last_right_h[a] = my_right_h[a];
-                    last_topright_m = send_topright_m;
-                    if (lane == lanes_k - 1)
-                        for (unsigned a = 0; a < micro_side_k; ++a) {
-                            row_frontier_m[micro_first_row + a + 1] = my_right_m[a];
-                            row_frontier_d[micro_first_row + a + 1] = my_right_h[a];
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        carry_top_m[element] = above_row_m[element + 1],
+                        carry_top_v[element] = above_row_v[element + 1];
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        prev_right_edge_m[element] = right_edge_m[element],
+                        prev_right_edge_h[element] = right_edge_h[element];
+                    prev_topright_m = topright_for_next_lane_m;
+                    if (lane_index == lanes_k - 1)
+                        for (unsigned element = 0; element < micro_side_k; ++element) {
+                            row_frontier_m[micro_first_row + element + 1] = right_edge_m[element];
+                            row_frontier_d[micro_first_row + element + 1] = right_edge_h[element];
                         }
                 }
                 __syncwarp();
             }
         };
-        if (tile_is_full && (is_local_k || !tile_has_corner)) march_tile.template operator()<true>();
-        else march_tile.template operator()<false>();
-        if (lane == 0) corner_frontier_m[tile_column] = tile_bottom_left_m;
+        if (tile_is_full && (is_local_k || !tile_has_corner)) march_tile.template operator()<tile_march_t::fast_k>();
+        else march_tile.template operator()<tile_march_t::checked_k>();
+        if (lane_index == 0) corner_frontier_m[tile_column] = tile_bottom_left_m;
         __syncwarp();
-        if (lane == 0) {
+        // Release: publish this tile-row so the right neighbour column can proceed.
+        if (lane_index == 0) {
             cuda::atomic_ref<u32_t, cuda::thread_scope_device> my_progress(progress[tile_column]);
             my_progress.store(tile_row + 1, cuda::memory_order_release);
         }
     }
     if constexpr (is_local_k) {
         running_best = pick_best_in_warp_<objective_k>(running_best);
-        if (lane == 0)
+        if (lane_index == 0)
             atomicMax(reinterpret_cast<unsigned long long *>(result_ptr),
                       static_cast<unsigned long long>(running_best));
     }
 }
 
 /**
- *  @brief Seeds the affine frontier for `tiled_score_affine_across_cuda_device_`: the left-column M and H (deletion)
+ *  @brief Seeds the affine frontier for `affine_score_across_cuda_device_`: the left-column M and H (deletion)
  *         boundaries, the per-tile-column diagonal M corners, the `progress` counters, and the local-result slot.
  */
 template <typename score_type_, typename final_score_type_, sz_similarity_objective_t objective_,
           sz_similarity_locality_t locality_, typename task_type_ = void>
-__global__ void tiled_frontier_init_affine_(task_type_ *tasks, score_type_ *row_frontier_m_base,
-                                            score_type_ *row_frontier_d_base, score_type_ *corner_frontier_m_base,
-                                            u32_t *progress_base, u32_t row_stride, u32_t corner_stride,
-                                            affine_gap_costs_t const gap_costs) {
+__global__ void affine_frontier_init_across_cuda_device_(task_type_ *tasks, score_type_ *row_frontier_m_base,
+                                                         score_type_ *row_frontier_d_base,
+                                                         score_type_ *corner_frontier_m_base, u32_t *progress_base,
+                                                         u32_t row_stride, u32_t corner_stride,
+                                                         affine_gap_costs_t const gap_costs) {
     using score_t = score_type_;
     static constexpr unsigned tile_side_k = 128;
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
@@ -1156,6 +1215,22 @@ __global__ void tiled_frontier_init_affine_(task_type_ *tasks, score_type_ *row_
 #pragma endregion
 
 /**
+ *  @brief Advances the three rolling score diagonals across the central anti-diagonal band: drops the leading element of
+ *         @p current_scores into @p previous_scores, then copies @p next_scores into @p current_scores. The band keeps a
+ *         fixed diagonal length, so the buffers are copied rather than pointer-rotated like the triangles - an in-place
+ *         shift would spill past the diagonal a few steps later. Warp-strided; the caller owns the outer `__syncwarp`s.
+ */
+template <typename score_type_>
+__forceinline__ __device__ void rotate_central_band_(unsigned thread_in_warp_index, unsigned warp_size,
+                                                     unsigned diagonal_length, score_type_ *previous_scores,
+                                                     score_type_ *current_scores, score_type_ *next_scores) {
+    for (unsigned i = thread_in_warp_index; i + 1 < diagonal_length; i += warp_size)
+        previous_scores[i] = current_scores[i + 1];
+    __syncwarp();
+    for (unsigned i = thread_in_warp_index; i < diagonal_length; i += warp_size) current_scores[i] = next_scores[i];
+}
+
+/**
  *  @brief Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
  *          @b three skewed (reverse) diagonals at a time on a GPU, leveraging CUDA for parallelization.
  *          Each pair of strings gets its own @b "block" of CUDA threads forming one @b warp and shared memory.
@@ -1175,7 +1250,7 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void linear_score_per_cuda_warp_(                                 //
+__global__ void score_per_cuda_warp_(                                        //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
     unsigned const shared_memory_size) {
@@ -1311,14 +1386,8 @@ __global__ void linear_score_per_cuda_warp_(                                 //
             if (is_main_thread) diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
             __syncwarp();
-            // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
-            // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
-            // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (unsigned i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
-                previous_scores[i] = current_scores[i + 1];
-            __syncwarp();
-            for (unsigned i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
-                current_scores[i] = next_scores[i];
+            rotate_central_band_(thread_in_warp_index, warp_size, next_diagonal_length, previous_scores, current_scores,
+                                 next_scores);
             __syncwarp();
         }
 
@@ -1527,14 +1596,8 @@ __global__ void affine_score_per_cuda_warp_(                                 //
             trivial_swap(current_deletes, next_deletes);
 
             __syncwarp();
-            // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
-            // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
-            // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (unsigned i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
-                previous_scores[i] = current_scores[i + 1];
-            __syncwarp();
-            for (unsigned i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
-                current_scores[i] = next_scores[i];
+            rotate_central_band_(thread_in_warp_index, warp_size, next_diagonal_length, previous_scores, current_scores,
+                                 next_scores);
             __syncwarp();
         }
 
@@ -1573,7 +1636,7 @@ __global__ void affine_score_per_cuda_warp_(                                 //
 
 #pragma endregion
 
-#pragma region - Levenshtein Distance in CUDA
+#pragma region Levenshtein Distance in CUDA
 
 /**
  *  @brief Wraps a single task for the CUDA-based @b byte-level "similarity" kernels.
@@ -1618,6 +1681,18 @@ struct cuda_similarity_task {
     string_t longer;
     /** @brief Shared query of this cell's row (Peq side for Myers reuse); empty when reuse is not applicable. */
     string_t query;
+    /**
+     *  @brief @b UTF-8 codepoint-level scoring only: byte offset of each rune in @ref shorter, a prefix scan of rune
+     *         byte-lengths (@ref build_rune_index_per_cuda_thread_). `nullptr` for byte-level scoring. @ref shorter_runes
+     *         holds the decoded rune count, the DP-grid extent over the shorter axis.
+     */
+    u32_t const *shorter_rune_offsets = nullptr;
+    /** @brief @b UTF-8 only: byte offset of each rune in @ref longer (see @ref shorter_rune_offsets). */
+    u32_t const *longer_rune_offsets = nullptr;
+    /** @brief @b UTF-8 only: decoded rune count of @ref shorter (the DP-grid extent over the shorter axis). */
+    u32_t shorter_runes = 0;
+    /** @brief @b UTF-8 only: decoded rune count of @ref longer (the DP-grid extent over the longer axis). */
+    u32_t longer_runes = 0;
     /** @brief Shared-memory bytes for this cell's DP diagonals. */
     size_t memory_requirement;
     /** @brief Flat index into the row-major results matrix. */
@@ -1726,6 +1801,14 @@ struct cuda_cross_buffers {
     safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
 
     /**
+     *  @brief Grow-only @b UTF-8 rune-offset index scratch: a per-task tile-rounded slice holding the byte offset of each
+     *         rune (a prefix scan, @ref build_rune_index_per_cuda_thread_) for the shorter then the longer side. Each
+     *         slice is `ceil(byte_len / 128) * 128 + 1` words so padded lanes of the last partial tile read in bounds.
+     *         Only the codepoint-level engine grows it; the byte engine leaves it empty.
+     */
+    safe_vector<u32_t, counts_allocator_t> rune_offsets_buffer_ {alloc_};
+
+    /**
      *  @brief Grow-only device-resident dense results staging for the host-output (non-device-accessible) scatter
      *         fallback: the device scatter kernel writes the full row-major matrix here, then one
      *         `cudaMemcpy2DAsync` strides it into the caller's (host) `strided_rows`. Byte-typed since the element
@@ -1792,23 +1875,42 @@ static constexpr u32_t levenshtein_tier_device_k = 4;
 static constexpr int levenshtein_tier_count_k = 5;
 
 /**
- *  @brief Whether a task routes to the bit-parallel Myers tiers. Only unit-cost linear Levenshtein can; affine and
- *         non-unit-cost linear skip Myers entirely and fall through to the register/device split (exactly as the host
- *         code did with `myers_count == 0`). Every unit-cost linear task takes a Myers tier regardless of size: short
- *         (`shorter <= 64`) on the register-resident single-word kernel, the rest on the size-generic kernel.
+ *  @brief Shorter-length at/above which a unit-cost Levenshtein pair leaves the bit-parallel Myers tiers and routes
+ *         through the register / warp / tiled Dynamic-Programming tiers instead - the very same tiers (and kernels,
+ *         with the uniform substituter) that Needleman-Wunsch uses. Myers is the optimal cell engine only for short
+ *         shorter-sides: the register-resident single-word kernel (`shorter <= 64`) and the warp `Peq`-reuse path
+ *         dominate, but the size-generic one-thread-per-pair Myers (`words = ceil(shorter / 64)`, register-resident,
+ *         one pair's worth of parallelism) loses to the multi-warp DP wavefront as `shorter` grows. Capping Myers here
+ *         guarantees Levenshtein is never slower than Needleman-Wunsch (identical DP tiers above the cap, cheaper cell
+ *         below it). Tunable; measured crossover on the H100 sits between the warp `Peq`-reuse cap and ~1 KB.
+ */
+inline static constexpr size_t levenshtein_myers_max_shorter_k = 256;
+
+/**
+ *  @brief Whether a task routes to the bit-parallel Myers tiers. Only unit-cost linear Levenshtein can, and only when
+ *         its shorter side is at most @ref levenshtein_myers_max_shorter_k; affine, non-unit-cost linear, and longer
+ *         unit-cost pairs fall through to the register / device split (the Needleman-Wunsch DP tiers).
  */
 enum class levenshtein_tier_mode_t {
-    /** @brief Unit-cost linear: shorter <= 64 -> register Myers, shorter > 64 -> generic Myers; never register/device. */
+    /** @brief Unit-cost linear: `shorter <= 64` -> register Myers, `64 < shorter <= cap` -> generic Myers, else DP tiers. */
     myers_and_registers_k,
     /** @brief Affine or non-unit-cost linear: no Myers; every task -> register / device split. */
     registers_only_k,
 };
 
+/** @brief Whether @p task takes a Myers tier: unit-cost-linear mode AND shorter within the Myers crossover cap. */
+template <typename char_type_>
+__host__ __device__ __forceinline__ bool levenshtein_task_uses_myers(cuda_similarity_task<char_type_> const &task,
+                                                                     levenshtein_tier_mode_t mode) noexcept {
+    return mode == levenshtein_tier_mode_t::myers_and_registers_k &&
+           task.shorter.size() <= levenshtein_myers_max_shorter_k;
+}
+
 /** @brief Group-ordering priority placed in the key MSBs for one task. */
 template <typename char_type_>
 __host__ __device__ __forceinline__ u32_t levenshtein_task_tier_priority(cuda_similarity_task<char_type_> const &task,
                                                                          levenshtein_tier_mode_t mode) noexcept {
-    if (mode == levenshtein_tier_mode_t::myers_and_registers_k) return levenshtein_priority_myers_k;
+    if (levenshtein_task_uses_myers(task, mode)) return levenshtein_priority_myers_k;
     if (task.fits_in_registers())
         return task.bytes_per_cell == one_byte_per_cell_k ? levenshtein_priority_register_u8_k
                                                           : levenshtein_priority_register_u16_k;
@@ -1819,7 +1921,7 @@ __host__ __device__ __forceinline__ u32_t levenshtein_task_tier_priority(cuda_si
 template <typename char_type_>
 __host__ __device__ __forceinline__ u32_t levenshtein_task_dense_tier(cuda_similarity_task<char_type_> const &task,
                                                                       levenshtein_tier_mode_t mode) noexcept {
-    if (mode == levenshtein_tier_mode_t::myers_and_registers_k)
+    if (levenshtein_task_uses_myers(task, mode))
         return task.shorter.size() <= levenshtein_myers_word1_cap_k ? levenshtein_tier_myers_word1_k
                                                                     : levenshtein_tier_myers_generic_k;
     if (task.fits_in_registers())
@@ -1866,8 +1968,8 @@ __host__ __device__ __forceinline__ u64_t levenshtein_pack_tier_key(cuda_similar
 
 /** @brief Builds the packed sort key for every task and seeds the identity permutation values. */
 template <typename char_type_>
-__global__ void levenshtein_build_tier_keys_kernel(cuda_similarity_task<char_type_> const *tasks, size_t count,
-                                                   levenshtein_tier_mode_t mode, u64_t *keys, u32_t *task_indices) {
+__global__ void unit_build_tier_keys_(cuda_similarity_task<char_type_> const *tasks, size_t count,
+                                      levenshtein_tier_mode_t mode, u64_t *keys, u32_t *task_indices) {
     size_t const stride = static_cast<size_t>(blockDim.x) * gridDim.x;
     for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < count; index += stride) {
         keys[index] = levenshtein_pack_tier_key(tasks[index], static_cast<u32_t>(index), mode);
@@ -1877,9 +1979,8 @@ __global__ void levenshtein_build_tier_keys_kernel(cuda_similarity_task<char_typ
 
 /** @brief Materializes the reordered task array from the sorted permutation of indices. */
 template <typename char_type_>
-__global__ void levenshtein_gather_tasks_kernel(cuda_similarity_task<char_type_> const *tasks,
-                                                u32_t const *sorted_indices, size_t count,
-                                                cuda_similarity_task<char_type_> *reordered) {
+__global__ void unit_gather_tasks_(cuda_similarity_task<char_type_> const *tasks, u32_t const *sorted_indices,
+                                   size_t count, cuda_similarity_task<char_type_> *reordered) {
     size_t const stride = static_cast<size_t>(blockDim.x) * gridDim.x;
     for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < count; index += stride)
         reordered[index] = tasks[sorted_indices[index]];
@@ -1923,12 +2024,14 @@ struct levenshtein_dense_tier_functor {
  */
 template <typename buffers_type_, typename keys_scratch_type_, typename values_scratch_type_,
           typename rle_scratch_type_, typename mode_type_, typename dense_tier_functor_type_>
-cuda_status_t cuda_route_tasks_into_tiers_(
-    buffers_type_ &buffers, //
-    keys_scratch_type_ &keys_scratch, values_scratch_type_ &values_scratch, rle_scratch_type_ &rle_scratch, //
-    kernel_shape_t const &build_keys_shape, kernel_shape_t const &gather_shape, mode_type_ mode, //
-    dense_tier_functor_type_ dense_tier_functor, int begin_bit, int end_bit, int tier_count, //
-    cuda_executor_t const &executor, size_t *tier_counts) noexcept {
+cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, //
+                                           keys_scratch_type_ &keys_scratch, values_scratch_type_ &values_scratch,
+                                           rle_scratch_type_ &rle_scratch, //
+                                           kernel_shape_t const &build_keys_shape, kernel_shape_t const &gather_shape,
+                                           mode_type_ mode, //
+                                           dense_tier_functor_type_ dense_tier_functor, int begin_bit, int end_bit,
+                                           int tier_count, //
+                                           cuda_executor_t const &executor, size_t *tier_counts) noexcept {
 
     using task_t = typename buffers_type_::task_t;
     size_t const count = buffers.tasks_.size();
@@ -2062,6 +2165,22 @@ struct task_bytes_per_cell_functor {
     }
 };
 
+/** @brief Reads the decoded shorter @b rune count of a task (UTF-8 device-tier rune-grid sizing). @sa task_shorter_length_functor. */
+template <typename char_type_>
+struct task_shorter_runes_functor {
+    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+        return task.shorter_runes;
+    }
+};
+
+/** @brief Reads the decoded longer @b rune count of a task (UTF-8 device-tier rune-grid sizing). @sa task_longer_length_functor. */
+template <typename char_type_>
+struct task_longer_runes_functor {
+    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+        return task.longer_runes;
+    }
+};
+
 /**
  *  @brief Per-task shape maxima a device tier needs to size its batched frontier: the longest shorter/longer side
  *         and the widest cell type across the whole device-promoted subspan. Replaces the former host scan loops.
@@ -2122,6 +2241,50 @@ cuda_status_t reduce_device_tier_maxima_(cuda_similarity_task<char_type_> const 
     return {status_t::success_k, cudaSuccess};
 }
 
+/**
+ *  @brief UTF-8 sibling of @ref reduce_device_tier_maxima_: reduces the longest @b rune counts (`shorter_runes`,
+ *         `longer_runes`, filled by @ref build_rune_index_per_cuda_thread_) over a device-resident task subspan with two
+ *         `cub::DeviceReduce::Max` passes, so the codepoint-level tiers size their grids/frontier by runes, not bytes.
+ *         @p maxima.max_bytes_per_cell is left unset (cell width is chosen from the rune-count magnitude by the caller).
+ */
+template <typename char_type_, typename cub_temp_type_, typename maxima_scratch_type_>
+cuda_status_t reduce_device_tier_rune_maxima_(cuda_similarity_task<char_type_> const *tasks, size_t count,
+                                              cub_temp_type_ &cub_temp, maxima_scratch_type_ &maxima_scratch,
+                                              cudaStream_t stream, device_tier_maxima_t &maxima) noexcept {
+    maxima = {};
+    if (!count) return {status_t::success_k, cudaSuccess};
+    if (maxima_scratch.try_resize_uninitialized(2) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+    u32_t *const max_shorter_out = maxima_scratch.data();
+    u32_t *const max_longer_out = max_shorter_out + 1;
+
+    using task_t = cuda_similarity_task<char_type_>;
+    cub::TransformInputIterator<u32_t, task_shorter_runes_functor<char_type_>, task_t const *> shorter_iterator(
+        tasks, task_shorter_runes_functor<char_type_> {});
+    cub::TransformInputIterator<u32_t, task_longer_runes_functor<char_type_>, task_t const *> longer_iterator(
+        tasks, task_longer_runes_functor<char_type_> {});
+
+    auto const reduce_max = [&](auto input_iterator, u32_t *output) -> cuda_status_t {
+        size_t reduce_bytes = 0;
+        if (cub::DeviceReduce::Max(nullptr, reduce_bytes, input_iterator, output, static_cast<int>(count), stream) !=
+            cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        if (cub_temp.try_resize_uninitialized(reduce_bytes) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        if (cub::DeviceReduce::Max(cub_temp.data(), reduce_bytes, input_iterator, output, static_cast<int>(count),
+                                   stream) != cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        return {status_t::success_k, cudaSuccess};
+    };
+    cuda_status_t status = reduce_max(shorter_iterator, max_shorter_out);
+    if (status.status != status_t::success_k) return status;
+    status = reduce_max(longer_iterator, max_longer_out);
+    if (status.status != status_t::success_k) return status;
+
+    if (cudaStreamSynchronize(stream) != cudaSuccess) return make_cuda_status(cudaGetLastError());
+    maxima.max_shorter = *max_shorter_out;
+    maxima.max_longer = *max_longer_out;
+    return {status_t::success_k, cudaSuccess};
+}
+
 #pragma endregion Device Tier Shape Maxima
 
 /**
@@ -2157,9 +2320,9 @@ __forceinline__ __device__ warp_tasks_density_t warp_tasks_density_device_(size_
  */
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, bool is_affine_,
           typename task_type_, typename gap_costs_type_>
-__global__ void materialize_similarity_tasks_(                                         //
+__global__ void similarity_materialize_tasks_(                                         //
     task_type_ *tasks,                                                                 //
-    span<char const> const *queries, span<char const> const *candidates,           //
+    span<char const> const *queries, span<char const> const *candidates,               //
     size_t queries_count, size_t candidates_count, size_t row_stride,                  //
     cross_similarities_t cross_kind,                                                   //
     error_cost_magnitude_t substitute_magnitude, error_cost_magnitude_t gap_magnitude, //
@@ -2219,7 +2382,7 @@ __global__ void materialize_similarity_tasks_(                                  
  *         never reads the (large, GPU-resident) task array back - avoiding a full unified-memory page migration.
  */
 template <typename task_type_, typename value_type_>
-__global__ void scatter_similarity_results_(task_type_ const *tasks, size_t tasks_count, value_type_ *results) {
+__global__ void similarity_scatter_results_(task_type_ const *tasks, size_t tasks_count, value_type_ *results) {
     size_t const task_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (task_index >= tasks_count) return;
     task_type_ const &task = tasks[task_index];
@@ -2230,7 +2393,7 @@ __global__ void scatter_similarity_results_(task_type_ const *tasks, size_t task
 
 /**
  *  @brief Host-output (non-device-accessible) scatter fallback shared by every CUDA cross-product engine: instead of a
- *         per-cell host loop, the device @ref scatter_similarity_results_ kernel writes the full row-major matrix into a
+ *         per-cell host loop, the device @ref similarity_scatter_results_ kernel writes the full row-major matrix into a
  *         hoisted device-resident staging buffer (laid out at the caller's `row_stride`, so each task's precomputed
  *         `result_offset` / `mirror_offset` stays valid), then a single strided `cudaMemcpy2DAsync` copies the valid
  *         `rows x columns` region into the caller's host `strided_rows`. Fully stream-async; staging grows-and-reuses.
@@ -2241,9 +2404,10 @@ __global__ void scatter_similarity_results_(task_type_ const *tasks, size_t task
  *  @param results The caller's host-side strided output matrix.
  */
 template <typename task_type_, typename value_type_, typename buffers_task_type_, typename allocator_type_>
-cuda_status_t cuda_scatter_results_to_host_strided_(
-    cuda_cross_buffers<buffers_task_type_, allocator_type_> &buffers, task_type_ const *tasks, size_t tasks_count,
-    strided_rows<value_type_> const &results, cuda_executor_t const &executor, unsigned block) noexcept {
+cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_task_type_, allocator_type_> &buffers,
+                                                    task_type_ const *tasks, size_t tasks_count,
+                                                    strided_rows<value_type_> const &results,
+                                                    cuda_executor_t const &executor, unsigned block) noexcept {
 
     if (!tasks_count) return {status_t::success_k, cudaSuccess};
 
@@ -2257,7 +2421,7 @@ cuda_status_t cuda_scatter_results_to_host_strided_(
 
     kernel_shape_t scatter_shape;
     cuda_status_t const scatter_resolve = resolve_kernel_shape(
-        scatter_shape, (void const *)&scatter_similarity_results_<task_type_, value_type_>, 256, 0, false);
+        scatter_shape, (void const *)&similarity_scatter_results_<task_type_, value_type_>, 256, 0, false);
     if (scatter_resolve.status != status_t::success_k) return scatter_resolve;
 
     task_type_ const *tasks_ptr = tasks;
@@ -2289,7 +2453,7 @@ cuda_status_t cuda_scatter_results_to_host_strided_(
  *         On the device they map to the `__vcmpeq4`/`__vminu4`/`__vaddus4`/`__byte_perm` video instructions; the
  *         host fallbacks keep the kernel unit-testable on the CPU.
  */
-__forceinline__ __device__ __host__ u32_t sz_u32_vcmpeq4_(u32_t a, u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t u32_vcmpeq4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vcmpeq4(a, b);
 #else
@@ -2302,7 +2466,7 @@ __forceinline__ __device__ __host__ u32_t sz_u32_vcmpeq4_(u32_t a, u32_t b) noex
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t sz_u32_vminu4_(u32_t a, u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t u32_vminu4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vminu4(a, b);
 #else
@@ -2315,7 +2479,7 @@ __forceinline__ __device__ __host__ u32_t sz_u32_vminu4_(u32_t a, u32_t b) noexc
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t sz_u32_vaddus4_(u32_t a, u32_t b) noexcept {
+__forceinline__ __device__ __host__ u32_t u32_vaddus4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vaddus4(a, b);
 #else
@@ -2328,7 +2492,7 @@ __forceinline__ __device__ __host__ u32_t sz_u32_vaddus4_(u32_t a, u32_t b) noex
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t sz_u32_byte_perm_(u32_t x, u32_t y, u32_t selector) noexcept {
+__forceinline__ __device__ __host__ u32_t u32_byte_perm_(u32_t x, u32_t y, u32_t selector) noexcept {
 #ifdef __CUDA_ARCH__
     return __byte_perm(x, y, selector);
 #else
@@ -2420,25 +2584,25 @@ struct register_levenshtein {
             // Inner loop over the longer string, four columns per pack.
             for (unsigned pack_idx = 0; pack_idx < pack_count_k; ++pack_idx) {
                 u32_t const top_vec = row_cells_[pack_idx].u32;
-                u32_t const diagonal_vec = sz_u32_byte_perm_(previous_row_vec, top_vec, diagonal_selector_k);
-                u32_t const match_mask_vec = sz_u32_vcmpeq4_(shorter_char_vec, longer_chars_[pack_idx].u32);
+                u32_t const diagonal_vec = u32_byte_perm_(previous_row_vec, top_vec, diagonal_selector_k);
+                u32_t const match_mask_vec = u32_vcmpeq4_(shorter_char_vec, longer_chars_[pack_idx].u32);
                 u32_t const cost_of_substitution_vec = (match_cost_vec & match_mask_vec) |
                                                        (mismatch_cost_vec & ~match_mask_vec);
-                u32_t const cost_if_substitution_vec = sz_u32_vaddus4_(diagonal_vec, cost_of_substitution_vec);
-                u32_t const cost_if_top_gap_vec = sz_u32_vaddus4_(top_vec, gap_cost_vec);
-                u32_t cell_score_vec = sz_u32_vminu4_(cost_if_substitution_vec, cost_if_top_gap_vec);
+                u32_t const cost_if_substitution_vec = u32_vaddus4_(diagonal_vec, cost_of_substitution_vec);
+                u32_t const cost_if_top_gap_vec = u32_vaddus4_(top_vec, gap_cost_vec);
+                u32_t cell_score_vec = u32_vminu4_(cost_if_substitution_vec, cost_if_top_gap_vec);
 
                 // Propagate the left dependency across the four packed cells (sequential prefix scan).
                 u8_t const left_cell = (pack_idx == 0) ? first_col_current : (row_cells_[pack_idx - 1].u32 >> 24);
-                u32_t cost_if_left_gap_vec = sz_u32_byte_perm_(broadcast_cost_u8x4_(left_cell), cell_score_vec,
-                                                               left_carry_selector_k);
-                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
-                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_1_k);
-                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
-                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_2_k);
-                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
-                cost_if_left_gap_vec = sz_u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_3_k);
-                cell_score_vec = sz_u32_vminu4_(cell_score_vec, sz_u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                u32_t cost_if_left_gap_vec = u32_byte_perm_(broadcast_cost_u8x4_(left_cell), cell_score_vec,
+                                                            left_carry_selector_k);
+                cell_score_vec = u32_vminu4_(cell_score_vec, u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_1_k);
+                cell_score_vec = u32_vminu4_(cell_score_vec, u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_2_k);
+                cell_score_vec = u32_vminu4_(cell_score_vec, u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
+                cost_if_left_gap_vec = u32_byte_perm_(cell_score_vec, cell_score_vec, left_scan_selector_3_k);
+                cell_score_vec = u32_vminu4_(cell_score_vec, u32_vaddus4_(cost_if_left_gap_vec, gap_cost_vec));
 
                 previous_row_vec = top_vec;
                 row_cells_[pack_idx].u32 = cell_score_vec;
@@ -2462,7 +2626,7 @@ struct register_levenshtein {
  */
 template <typename task_type_, typename char_type_ = char, u32_t words_ = 1,
           sz_capability_t capability_ = sz_cap_cuda_k>
-__global__ __launch_bounds__(256, 4) void levenshtein_myers_per_cuda_thread_( //
+__global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_thread_( //
     task_type_ *tasks, size_t tasks_count, u64_t *peq_scratch, size_t peq_stride) {
 
     size_t const thread_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2524,7 +2688,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_per_cuda_thread_( //
 
 /**
  *  @brief Size-generic bit-parallel Myers/Hyyrö @b unit-cost Levenshtein, one pair per thread, for @b any shorter
- *         length (`shorter > 64`, no word-count cap). The companion of `levenshtein_myers_per_cuda_thread_<words_=1>`:
+ *         length (`shorter > 64`, no word-count cap). The companion of `unit_myers_singleword_per_cuda_thread_<words_=1>`:
  *         where the single-word kernel keeps VP/VN in registers, this one holds the per-word `Peq` table and the
  *         per-word VP/VN state in a per-thread @b global-scratch slice and loops over `words_count = ceil(shorter/64)`
  *         machine words, so it covers shorter lengths that would otherwise overflow a fixed register array.
@@ -2542,7 +2706,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_per_cuda_thread_( //
  *        the dispatch; each pair clears its own `Peq` entries at the end so the slice stays clean between pairs.
  */
 template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k>
-__global__ __launch_bounds__(256, 4) void levenshtein_myers_generic_per_cuda_thread_( //
+__global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_thread_( //
     task_type_ *tasks, size_t tasks_count, u64_t *peq_scratch, size_t peq_stride) {
 
     size_t const thread_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -2630,7 +2794,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_generic_per_cuda_thr
  *        This amortizes the per-query table build (the per-pair kernels rebuild it for every candidate).
  */
 template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k>
-__global__ __launch_bounds__(256, 4) void levenshtein_myers_candidates_per_cuda_warp_( //
+__global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_warp_( //
     task_type_ *tasks, size_t queries_count, size_t candidates_count) {
 
     unsigned const warp_in_block = threadIdx.x >> 5, lane = threadIdx.x & 31u;
@@ -2718,7 +2882,7 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_candidates_per_cuda_
  */
 template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k,
           unsigned words_count_ = 1>
-__global__ __launch_bounds__(256, 4) void levenshtein_myers_words_candidates_per_cuda_warp_( //
+__global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_warp_( //
     task_type_ *tasks, size_t queries_count, size_t candidates_count) {
 
     unsigned const warp_in_block = threadIdx.x >> 5, lane = threadIdx.x & 31u;
@@ -2778,7 +2942,8 @@ __global__ __launch_bounds__(256, 4) void levenshtein_myers_words_candidates_per
             for (size_t candidate_position = 0; candidate_position != candidate_length; ++candidate_position) {
                 u8_t const symbol = static_cast<u8_t>(candidate_ptr[candidate_position]);
                 u64_t addition_carry = 0;
-                u64_t horizontal_positive_carry = 1, horizontal_negative_carry = 0; // top-row boundary into word 0 is +1
+                u64_t horizontal_positive_carry = 1,
+                      horizontal_negative_carry = 0; // top-row boundary into word 0 is +1
                 for (u32_t word = 0; word != words; ++word) {
                     u64_t const pattern_matches = match_masks[word * 256 + symbol]; // SHARED
                     u64_t const vertical_positive = vertical_positives[word];
@@ -2827,8 +2992,8 @@ template <                                            //
     sz_capability_t capability_ = sz_cap_cuda_k,      //
     unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 4) void levenshtein_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                              //
+__global__ __launch_bounds__(256, 4) void unit_wagner_fischer_u8_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                         //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -2900,15 +3065,15 @@ struct register_levenshtein_u16 {
     }
 };
 
-/** @brief One-thread-per-pair Levenshtein with @b 2-byte register cells; see @ref levenshtein_per_cuda_thread_. */
+/** @brief One-thread-per-pair Levenshtein with @b 2-byte register cells; see @ref unit_wagner_fischer_u8_per_cuda_thread_. */
 template <                                            //
     typename task_type_,                              //
     typename char_type_ = char,                       //
     sz_capability_t capability_ = sz_cap_cuda_k,      //
     unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 2) void levenshtein_u16_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                  //
+__global__ __launch_bounds__(256, 2) void unit_wagner_fischer_u16_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                          //
     uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -3005,15 +3170,15 @@ struct register_levenshtein_u16_affine {
     }
 };
 
-/** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref levenshtein_u16_per_cuda_thread_. */
+/** @brief One-thread-per-pair @b affine Levenshtein with 2-byte register cells; see @ref unit_wagner_fischer_u16_per_cuda_thread_. */
 template <                                            //
     typename task_type_,                              //
     typename char_type_ = char,                       //
     sz_capability_t capability_ = sz_cap_cuda_k,      //
     unsigned max_text_length_ = register_text_limit_k //
     >
-__global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                         //
+__global__ __launch_bounds__(256, 1) void unit_gotoh_u16_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                 //
     uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
@@ -3029,7 +3194,556 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_per_cuda_thread
     }
 }
 
-#pragma region Shared Cross-Product Host Orchestration
+#pragma region UTF 8 Codepoint Level Register Tier
+
+/**
+ *  @brief Branchless single-codepoint UTF-8 decode, advancing by the returned byte length.
+ *
+ *  Mirrors the `sz_rune_parse_unchecked` value contract used by the CPU UTF-8 Levenshtein engine: it reads the lead
+ *  byte, derives the encoded length from the high bits, and accumulates the continuation bytes with no data-dependent
+ *  branches (the higher continuation reads are masked out by length, not skipped). Unlike the CPU version, each
+ *  continuation read index is clamped to the rune's own length (`bytes[length > k ? k : 0]`), so a well-formed rune
+ *  never reads past its own bytes - the device tiers decode straight from caller byte tapes that carry no trailing
+ *  slack, and an unconditional `bytes[1..3]` read would step one byte past the final allocation. The clamp is
+ *  value-preserving (the surplus reads were already masked out) and stays branchless (the index ternaries lower to
+ *  predicated selects). A malformed lead whose declared length exceeds the bytes actually present can still read up to
+ *  `length - 1` bytes of whatever follows, identical in spirit to the CPU unchecked contract.
+ *
+ *  The lead mask is `length == 1 ? 0xFF : (0x7F >> length)` (1->0xFF, 2->0x1F, 3->0x0F, 4->0x07): a one-byte rune keeps
+ *  the raw lead and multibyte leads strip exactly their marker bits, matching `sz_rune_parse_unchecked` bit-for-bit on
+ *  both well-formed and malformed input. The ternary lowers to a predicated select, so the decode stays branchless.
+ *  @param[in] bytes Pointer to the lead byte of the codepoint.
+ *  @param[out] out The decoded codepoint.
+ *  @return The number of UTF-8 bytes consumed (1..4).
+ */
+__device__ __forceinline__ unsigned decode_utf8_rune(unsigned char const *bytes, rune_t *out) noexcept {
+    unsigned const lead = bytes[0];
+    unsigned const length = 1u + (lead >= 0xC0u) + (lead >= 0xE0u) + (lead >= 0xF0u);
+    unsigned const lead_mask = length == 1u ? 0xFFu : (0x7Fu >> length);
+    unsigned const continuation_0 = bytes[length > 1u ? 1u : 0u] & 0x3Fu,
+                   continuation_1 = bytes[length > 2u ? 2u : 0u] & 0x3Fu,
+                   continuation_2 = bytes[length > 3u ? 3u : 0u] & 0x3Fu;
+    rune_t rune = (lead & lead_mask);
+    rune = (length >= 2u) ? ((rune << 6) | continuation_0) : rune;
+    rune = (length >= 3u) ? ((rune << 6) | continuation_1) : rune;
+    rune = (length >= 4u) ? ((rune << 6) | continuation_2) : rune;
+    *out = rune;
+    return length;
+}
+
+/**
+ *  @brief Random-access cursor over a UTF-8 byte tape that yields decoded codepoints, addressed by @b rune index
+ *         through a precomputed rune-offset table. It models the same `pointer_like` shape as the byte iterators the
+ *         warp `tile_scorer` already consumes (`++`, `*`, `[index]`, `+ advance`), but decodes a `rune_t` on access.
+ *         This lets the warp anti-diagonal kernel score codepoints by reusing the byte-level diagonal indexing
+ *         verbatim - only the symbol type changes. @sa build_rune_index_per_cuda_thread_, decode_utf8_rune.
+ */
+struct rune_cursor_t {
+    using value_type = rune_t;
+    using difference_type = ptrdiff_t;
+    using reference = rune_t;
+    using pointer = rune_t const *;
+    using iterator_category = std::random_access_iterator_tag;
+
+    unsigned char const *bytes {nullptr};
+    u32_t const *rune_offsets {nullptr};
+
+    __forceinline__ __device__ rune_t at(size_t rune_index) const noexcept {
+        rune_t decoded;
+        decode_utf8_rune(bytes + rune_offsets[rune_index], &decoded);
+        return decoded;
+    }
+    __forceinline__ __device__ rune_t operator*() const noexcept { return at(0); }
+    __forceinline__ __device__ rune_t operator[](size_t rune_index) const noexcept { return at(rune_index); }
+    __forceinline__ __device__ rune_cursor_t &operator++() noexcept { return ++rune_offsets, *this; }
+    __forceinline__ __device__ rune_cursor_t operator+(difference_type advance) const noexcept {
+        return rune_cursor_t {bytes, rune_offsets + advance};
+    }
+    __forceinline__ __device__ rune_cursor_t operator-(difference_type retreat) const noexcept {
+        return rune_cursor_t {bytes, rune_offsets - retreat};
+    }
+};
+
+/** @brief `load_immutable_` overload so the warp `tile_scorer` decodes a codepoint from a @ref rune_cursor_t. */
+__forceinline__ __device__ rune_t load_immutable_(rune_cursor_t cursor) noexcept { return cursor.at(0); }
+
+/**
+ *  @brief Register-only @b codepoint-level Levenshtein distance, one thread per pair, for UTF-8 byte spans whose
+ *         byte length is within @p max_text_length_ (so the decoded rune count is too - runes never outnumber bytes).
+ *
+ *  Each thread decodes its pair's two UTF-8 byte spans into local `rune_t` arrays via @ref decode_utf8_rune (counting
+ *  runes during the decode), then runs a Wagner-Fischer DP over the runes with a single `u16_t` cell row kept in
+ *  registers/local memory. The recurrence is the unit-cost edit distance shared with the CPU `levenshtein_distance_utf8`
+ *  (match 0 / mismatch 1 / gap 1, comparing `rune_t` codepoints), so the distance is bit-exact. The hot loop is
+ *  branchless: the substitution cost is selected by a comparison mask, not an `if`.
+ */
+template <unsigned max_text_length_>
+struct register_levenshtein_runes {
+    static constexpr unsigned max_text_length_k = max_text_length_;
+
+    rune_t longer_runes_[max_text_length_k];
+    u16_t row_cells_[max_text_length_k];
+
+    /** @brief Decodes a UTF-8 byte span into @p out runes, returning the rune count. */
+    __forceinline__ __device__ unsigned decode_span_(u8_t const *bytes, unsigned byte_length, rune_t *out) noexcept {
+        unsigned rune_count = 0, byte_offset = 0;
+        while (byte_offset < byte_length) {
+            rune_t rune;
+            byte_offset += decode_utf8_rune(reinterpret_cast<unsigned char const *>(bytes) + byte_offset, &rune);
+            out[rune_count] = rune;
+            ++rune_count;
+        }
+        return rune_count;
+    }
+
+    __forceinline__ __device__ u16_t operator()(                 //
+        u8_t const *longer_bytes, unsigned longer_byte_length,   //
+        u8_t const *shorter_bytes, unsigned shorter_byte_length, //
+        uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
+
+        u16_t const gap_cost = gap_costs.open_or_extend;
+        u16_t const match_cost = substituter.match;
+        u16_t const mismatch_cost = substituter.mismatch;
+
+        // Decode both sides into local rune arrays, counting runes on the fly.
+        rune_t shorter_runes[max_text_length_k];
+        unsigned const longer_length = decode_span_(longer_bytes, longer_byte_length, longer_runes_);
+        unsigned const shorter_length = decode_span_(shorter_bytes, shorter_byte_length, shorter_runes);
+
+        // Initialize the first DP row with the (column index + 1) * gap ladder over the longer (column) axis.
+        for (unsigned column = 0; column < longer_length; ++column)
+            row_cells_[column] = static_cast<u16_t>((column + 1) * gap_cost);
+
+        // Outer loop over the shorter (row) axis; the inner loop sweeps the longer (column) axis.
+        for (unsigned row_idx = 1; row_idx <= shorter_length; ++row_idx) {
+            rune_t const shorter_rune = shorter_runes[row_idx - 1];
+            u16_t left_cell = static_cast<u16_t>(row_idx * gap_cost);            // column 0 of this row
+            u16_t diagonal_carry = static_cast<u16_t>((row_idx - 1) * gap_cost); // column 0 of the previous row
+            for (unsigned column = 0; column < longer_length; ++column) {
+                u16_t const top_cell = row_cells_[column];
+                // Branchless substitution cost: mask selects match vs. mismatch on the codepoint comparison.
+                u16_t const substitution_cost = shorter_rune == longer_runes_[column] ? match_cost : mismatch_cost;
+                u16_t const cost_if_substitution = static_cast<u16_t>(diagonal_carry + substitution_cost);
+                u16_t const cost_if_top_gap = static_cast<u16_t>(top_cell + gap_cost);
+                u16_t const cost_if_left_gap = static_cast<u16_t>(left_cell + gap_cost);
+                u16_t cell = sz_min_of_two(cost_if_substitution, sz_min_of_two(cost_if_top_gap, cost_if_left_gap));
+                row_cells_[column] = cell;
+                left_cell = cell;
+                diagonal_carry = top_cell;
+            }
+        }
+        if (longer_length == 0) return static_cast<u16_t>(shorter_length * gap_cost);
+        return row_cells_[longer_length - 1];
+    }
+};
+
+/**
+ *  @brief One-thread-per-pair @b codepoint-level UTF-8 Levenshtein with 2-byte cells; sibling of
+ *         @ref unit_wagner_fischer_u8_per_cuda_thread_, decoding UTF-8 byte spans into runes on the fly.
+ */
+template <                                            //
+    typename task_type_,                              //
+    typename char_type_ = char,                       //
+    sz_capability_t capability_ = sz_cap_cuda_k,      //
+    unsigned max_text_length_ = register_text_limit_k //
+    >
+__global__ __launch_bounds__(256, 2) void unit_utf8_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                            //
+    uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
+
+    using task_t = task_type_;
+    register_levenshtein_runes<max_text_length_> levenshtein_computer;
+    size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
+    for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
+         task_idx += threads_per_device) {
+        task_t &task = tasks[task_idx];
+        task.result = levenshtein_computer(                                                                  //
+            reinterpret_cast<u8_t const *>(task.longer.data()), static_cast<unsigned>(task.longer.size()),   //
+            reinterpret_cast<u8_t const *>(task.shorter.data()), static_cast<unsigned>(task.shorter.size()), //
+            substituter, gap_costs);
+    }
+}
+
+#pragma endregion UTF 8 Codepoint Level Register Tier
+
+#pragma region UTF 8 Codepoint Level Rune Offset Index
+
+/** @brief Byte length of the UTF-8 rune whose lead byte is @p lead (1..4); mirrors @ref decode_utf8_rune's length. */
+__device__ __forceinline__ unsigned utf8_rune_length(unsigned char lead) noexcept {
+    return 1u + (lead >= 0xC0u) + (lead >= 0xE0u) + (lead >= 0xF0u);
+}
+
+/**
+ *  @brief Builds the per-string @b rune-offset index: one thread per string (grid-stride over the task array) scans its
+ *         shorter/longer byte tapes once and writes, for each rune @e i, the byte offset of that rune (a prefix scan of
+ *         rune byte-lengths via @ref utf8_rune_length), plus a trailing sentinel equal to the byte length and the rune
+ *         count into the task's @ref cuda_similarity_task::shorter_runes / longer_runes fields.
+ *
+ *  The UTF-8 device-tier scorers below random-index the @e i-th rune by its byte offset and branchlessly decode a single
+ *  codepoint there (@ref decode_utf8_rune), so the global tapes stay UTF-8 bytes while the DP grid is over runes. The
+ *  offset buffers are sized tile-rounded (`ceil(byte_len / 128) * 128 + 1`) by the host, so padded lanes of the last
+ *  partial tile read offsets in bounds; the over-read margin is documented at the engine's index allocation.
+ *
+ *  @param[in] tasks The device-resident task array; each task's shorter/longer spans hold the UTF-8 byte tapes.
+ *  @param[in] tasks_count Number of tasks to index.
+ *  @param[in] shorter_offsets_base,longer_offsets_base Per-task slices of the engine's rune-offset scratch, addressed by
+ *             `task_index * shorter_offsets_stride` / `* longer_offsets_stride`.
+ */
+template <typename task_type_>
+__global__ void build_rune_index_per_cuda_thread_(             //
+    task_type_ *tasks, size_t tasks_count,                     //
+    u32_t *shorter_offsets_base, u32_t shorter_offsets_stride, //
+    u32_t *longer_offsets_base, u32_t longer_offsets_stride) {
+
+    size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
+    for (size_t task_index = blockIdx.x * blockDim.x + threadIdx.x; task_index < tasks_count;
+         task_index += threads_per_device) {
+        task_type_ &task = tasks[task_index];
+
+        unsigned char const *const shorter_bytes = reinterpret_cast<unsigned char const *>(task.shorter.data());
+        u32_t const shorter_byte_length = static_cast<u32_t>(task.shorter.size());
+        u32_t *const shorter_offsets = shorter_offsets_base + task_index * shorter_offsets_stride;
+        u32_t shorter_rune_count = 0, shorter_byte_offset = 0;
+        while (shorter_byte_offset < shorter_byte_length) {
+            shorter_offsets[shorter_rune_count] = shorter_byte_offset;
+            shorter_byte_offset += utf8_rune_length(shorter_bytes[shorter_byte_offset]);
+            ++shorter_rune_count;
+        }
+        shorter_offsets[shorter_rune_count] = shorter_byte_offset;
+
+        unsigned char const *const longer_bytes = reinterpret_cast<unsigned char const *>(task.longer.data());
+        u32_t const longer_byte_length = static_cast<u32_t>(task.longer.size());
+        u32_t *const longer_offsets = longer_offsets_base + task_index * longer_offsets_stride;
+        u32_t longer_rune_count = 0, longer_byte_offset = 0;
+        while (longer_byte_offset < longer_byte_length) {
+            longer_offsets[longer_rune_count] = longer_byte_offset;
+            longer_byte_offset += utf8_rune_length(longer_bytes[longer_byte_offset]);
+            ++longer_rune_count;
+        }
+        longer_offsets[longer_rune_count] = longer_byte_offset;
+
+        task.shorter_rune_offsets = shorter_offsets;
+        task.longer_rune_offsets = longer_offsets;
+        task.shorter_runes = shorter_rune_count;
+        task.longer_runes = longer_rune_count;
+    }
+}
+
+#pragma endregion UTF 8 Codepoint Level Rune Offset Index
+
+#pragma region UTF 8 Codepoint Level Device Tier
+
+/**
+ *  @brief Codepoint-level sibling of @ref score_across_cuda_device_: the tiled large-matrix linear-gap scorer where the
+ *         DP grid is over @b runes (not bytes). The warp-per-tile-column data-flow, 4x4 register micro-tiles,
+ *         `__shfl_up` frontier hand-off, and acquire/release @p progress gating are @b identical to the byte kernel; the
+ *         only difference is the two symbol-lookup sites: a column / staged query symbol is the decoded codepoint
+ *         `decode_utf8_rune(bytes + rune_offsets[index])` (a `rune_t`, 32-bit) rather than a raw byte. The DP-grid
+ *         extents are the task's rune counts. Ported from the proven `/tmp/utf8_gpu_gen/utf8_tiled_probe.cu` (validated
+ *         bit-exact vs a serial UTF-8 oracle on mixed 1/2/3/4-byte inputs, memcheck-clean). @sa decode_utf8_rune.
+ *
+ *  Cloned (not templated through @ref score_across_cuda_device_) because the byte kernel reads symbols as `char_type_`
+ *  straight from the task span, whereas the rune body stages @b decoded `rune_t` codepoints into shared and compares
+ *  32-bit codepoints; the micro-tile recurrence below is otherwise kept structurally identical to the byte version.
+ */
+template <unsigned warps_per_block_, typename score_type_ = u32_t, typename final_score_type_ = size_t,
+          typename task_type_ = void>
+__global__ __launch_bounds__(warps_per_block_ * 32) void unit_utf8_score_across_cuda_device_( //
+    task_type_ *tasks,                                                                        //
+    score_type_ *row_frontier_base, score_type_ *corner_frontier_base, u32_t *progress_base,  //
+    u32_t row_stride, u32_t corner_stride,                                                    //
+    uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) {
+
+    using score_t = score_type_;
+    static constexpr unsigned tile_side_k = 128, micro_side_k = 4, lanes_k = 32,
+                              micro_rows_k = tile_side_k / micro_side_k;
+    score_t const gap = gap_costs.open_or_extend;
+    score_t const match_cost = substituter.match;
+    score_t const mismatch_cost = substituter.mismatch;
+
+    __shared__ rune_t shared_query[warps_per_block_][tile_side_k];
+    __shared__ score_t shared_left[warps_per_block_][tile_side_k];
+    unsigned const warp_in_block = threadIdx.x >> 5;
+
+    // Cross-pair batching: `blockIdx.y` selects one (shorter, longer) pair; lengths/pointers/rune-offsets/result are read
+    // here so the proven micro-tile body below stays structurally identical to the byte kernel.
+    u32_t const pair = blockIdx.y;
+    unsigned char const *const shorter_bytes = reinterpret_cast<unsigned char const *>(tasks[pair].shorter.data());
+    unsigned char const *const longer_bytes = reinterpret_cast<unsigned char const *>(tasks[pair].longer.data());
+    u32_t const *const shorter_offsets = tasks[pair].shorter_rune_offsets;
+    u32_t const *const longer_offsets = tasks[pair].longer_rune_offsets;
+    u32_t const shorter_length = tasks[pair].shorter_runes;
+    u32_t const longer_length = tasks[pair].longer_runes;
+    final_score_type_ *const result_ptr = reinterpret_cast<final_score_type_ *>(&tasks[pair].result);
+    u32_t const tile_grid_rows = (shorter_length + tile_side_k - 1) / tile_side_k;
+    u32_t const tile_grid_columns = (longer_length + tile_side_k - 1) / tile_side_k;
+    score_t *const row_frontier = row_frontier_base + static_cast<size_t>(pair) * row_stride;
+    score_t *const corner_frontier = corner_frontier_base + static_cast<size_t>(pair) * corner_stride;
+    u32_t *const progress = progress_base + static_cast<size_t>(pair) * corner_stride;
+
+    unsigned const lane_index = threadIdx.x & 31u;
+    u32_t const tile_column = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
+    if (tile_column >= tile_grid_columns) return;
+    u32_t const tile_first_column = tile_column * tile_side_k;
+
+    // This lane's target codepoints (its micro-column), constant across the whole column march. Columns past the rune
+    // count read a sentinel codepoint that never matches; their padded `longer_offsets` lanes are tile-rounded in bounds.
+    rune_t target_runes[micro_side_k];
+    for (unsigned element = 0; element < micro_side_k; ++element) {
+        u32_t const target_index = tile_first_column + lane_index * micro_side_k + element;
+        if (target_index < longer_length) {
+            rune_t decoded;
+            decode_utf8_rune(longer_bytes + longer_offsets[target_index], &decoded);
+            target_runes[element] = decoded;
+        }
+        else target_runes[element] = static_cast<rune_t>(0xFFFFFFFFu);
+    }
+    score_t carry_top[micro_side_k];
+    for (unsigned element = 0; element < micro_side_k; ++element)
+        carry_top[element] = static_cast<score_t>(gap * (tile_first_column + lane_index * micro_side_k + element + 1));
+
+    u32_t const corner_tile_row = (shorter_length - 1) / tile_side_k;
+    u32_t const corner_tile_column = (longer_length - 1) / tile_side_k;
+    bool const owns_corner_column = tile_column == corner_tile_column;
+
+    for (u32_t tile_row = 0; tile_row < tile_grid_rows; ++tile_row) {
+        u32_t const tile_first_row = tile_row * tile_side_k;
+        bool const tile_has_corner = owns_corner_column && tile_row == corner_tile_row;
+        if (tile_column > 0 && lane_index == 0) {
+            cuda::atomic_ref<u32_t, cuda::thread_scope_device> left_progress(progress[tile_column - 1]);
+            while (left_progress.load(cuda::memory_order_acquire) <= tile_row) {}
+        }
+        __syncwarp();
+        // Stage this tile-row's left boundary AND its query rows, decoding codepoints once per tile.
+        for (unsigned stage_row = lane_index; stage_row < tile_side_k; stage_row += 32) {
+            shared_left[warp_in_block][stage_row] = row_frontier[tile_first_row + 1 + stage_row];
+            u32_t const query_index = tile_first_row + stage_row;
+            if (query_index < shorter_length) {
+                rune_t decoded;
+                decode_utf8_rune(shorter_bytes + shorter_offsets[query_index], &decoded);
+                shared_query[warp_in_block][stage_row] = decoded;
+            }
+            else shared_query[warp_in_block][stage_row] = static_cast<rune_t>(0xFFFFFFFEu);
+        }
+        __syncwarp();
+        score_t const tile_corner = corner_frontier[tile_column];
+        score_t const tile_bottom_left = shared_left[warp_in_block][tile_side_k - 1];
+
+        score_t prev_right_edge[micro_side_k];
+        for (unsigned element = 0; element < micro_side_k; ++element) prev_right_edge[element] = 0;
+        score_t prev_topright = 0;
+        unsigned const wavefront_steps = micro_rows_k + lanes_k - 1;
+        for (unsigned wavefront_step = 0; wavefront_step < wavefront_steps; ++wavefront_step) {
+            unsigned const micro_row = wavefront_step - lane_index;
+            bool const active = (wavefront_step >= lane_index) && (micro_row < micro_rows_k);
+            score_t shuffled_right_edge[micro_side_k];
+            for (unsigned element = 0; element < micro_side_k; ++element)
+                shuffled_right_edge[element] = __shfl_up_sync(0xffffffff, prev_right_edge[element], 1);
+            score_t shuffled_topright = __shfl_up_sync(0xffffffff, prev_topright, 1);
+            if (active) {
+                u32_t const micro_first_row = tile_first_row + micro_row * micro_side_k;
+                score_t left_column[micro_side_k], diagonal_corner;
+                resolve_left_boundary_<score_t>(lane_index, micro_row, micro_side_k, shared_left[warp_in_block],
+                                                tile_corner, shuffled_right_edge, shuffled_topright, left_column,
+                                                diagonal_corner);
+                score_t const topright_for_next_lane = carry_top[micro_side_k - 1];
+                score_t above_row[micro_side_k + 1];
+                above_row[0] = diagonal_corner;
+                for (unsigned element = 0; element < micro_side_k; ++element)
+                    above_row[element + 1] = carry_top[element];
+                score_t right_edge[micro_side_k];
+                for (unsigned micro_row_cell = 1; micro_row_cell <= micro_side_k; ++micro_row_cell) {
+                    score_t current_row[micro_side_k + 1];
+                    current_row[0] = left_column[micro_row_cell - 1];
+                    u32_t const matrix_row = micro_first_row + micro_row_cell;
+                    rune_t const query_rune =
+                        shared_query[warp_in_block][micro_row * micro_side_k + micro_row_cell - 1];
+                    for (unsigned micro_column_cell = 1; micro_column_cell <= micro_side_k; ++micro_column_cell) {
+                        score_t const substitution = query_rune == target_runes[micro_column_cell - 1] ? match_cost
+                                                                                                       : mismatch_cost;
+                        score_t const cost_if_substitution = static_cast<score_t>(above_row[micro_column_cell - 1] +
+                                                                                  substitution);
+                        score_t const cost_if_top_gap = static_cast<score_t>(above_row[micro_column_cell] + gap);
+                        score_t const cost_if_left_gap = static_cast<score_t>(current_row[micro_column_cell - 1] + gap);
+                        score_t cell = sz_min_of_two(cost_if_substitution,
+                                                     sz_min_of_two(cost_if_top_gap, cost_if_left_gap));
+                        u32_t const matrix_column = tile_first_column + lane_index * micro_side_k + micro_column_cell;
+                        if (tile_has_corner && matrix_row == shorter_length && matrix_column == longer_length)
+                            *result_ptr = static_cast<final_score_type_>(cell);
+                        current_row[micro_column_cell] = cell;
+                    }
+                    right_edge[micro_row_cell - 1] = current_row[micro_side_k];
+                    for (unsigned element = 0; element <= micro_side_k; ++element)
+                        above_row[element] = current_row[element];
+                }
+                for (unsigned element = 0; element < micro_side_k; ++element)
+                    carry_top[element] = above_row[element + 1];
+                for (unsigned element = 0; element < micro_side_k; ++element)
+                    prev_right_edge[element] = right_edge[element];
+                prev_topright = topright_for_next_lane;
+                if (lane_index == lanes_k - 1)
+                    for (unsigned element = 0; element < micro_side_k; ++element)
+                        row_frontier[micro_first_row + element + 1] = right_edge[element];
+            }
+            __syncwarp();
+        }
+        if (lane_index == 0) corner_frontier[tile_column] = tile_bottom_left;
+        __syncwarp();
+        if (lane_index == 0) {
+            cuda::atomic_ref<u32_t, cuda::thread_scope_device> my_progress(progress[tile_column]);
+            my_progress.store(tile_row + 1, cuda::memory_order_release);
+        }
+    }
+}
+
+/**
+ *  @brief Codepoint-level sibling of @ref frontier_init_across_cuda_device_: seeds the global frontier for
+ *         @ref unit_utf8_score_across_cuda_device_ using the task's @b rune counts as the DP-grid extents. The left
+ *         boundary column is the gap ladder `M[i][0] = gap * i`, the per-tile-column diagonal corners are
+ *         `M[0][tc * 128] = gap * tc * 128`, and the progress counters are cleared. Linear unit-cost global only.
+ */
+template <typename score_type_, typename final_score_type_, typename task_type_ = void>
+__global__ void unit_utf8_frontier_init_across_cuda_device_( //
+    task_type_ *tasks, score_type_ *row_frontier_base,       //
+    score_type_ *corner_frontier_base, u32_t *progress_base, //
+    u32_t row_stride, u32_t corner_stride, linear_gap_costs_t const gap_costs) {
+    using score_t = score_type_;
+    static constexpr unsigned tile_side_k = 128;
+    score_t const gap = gap_costs.open_or_extend;
+    u32_t const pair = blockIdx.y;
+    u32_t const shorter_length = tasks[pair].shorter_runes;
+    u32_t const longer_length = tasks[pair].longer_runes;
+    u32_t const padded_rows = ((shorter_length + tile_side_k - 1) / tile_side_k) * tile_side_k;
+    u32_t const tile_grid_columns = (longer_length + tile_side_k - 1) / tile_side_k;
+    score_t *const row_frontier = row_frontier_base + static_cast<size_t>(pair) * row_stride;
+    score_t *const corner_frontier = corner_frontier_base + static_cast<size_t>(pair) * corner_stride;
+    u32_t *const progress = progress_base + static_cast<size_t>(pair) * corner_stride;
+    u32_t const global_index = blockIdx.x * blockDim.x + threadIdx.x, stride = gridDim.x * blockDim.x;
+    for (u32_t row = global_index; row <= padded_rows; row += stride)
+        row_frontier[row] = static_cast<score_t>(gap * row);
+    for (u32_t tile_column = global_index; tile_column < tile_grid_columns; tile_column += stride) {
+        corner_frontier[tile_column] = static_cast<score_t>(gap * tile_column * tile_side_k);
+        progress[tile_column] = 0;
+    }
+    if (global_index == 0) *reinterpret_cast<final_score_type_ *>(&tasks[pair].result) = final_score_type_ {0};
+}
+
+#pragma endregion UTF 8 Codepoint Level Device Tier
+
+#pragma region UTF 8 Codepoint Level Warp Tier
+
+/**
+ *  @brief Codepoint-level Levenshtein over @b three skewed diagonals, one pair per @b warp, for the mid-length range
+ *         between the register thread-per-pair tier and the device-spanning tiled tier. It is the byte warp kernel
+ *         @ref score_per_cuda_warp_ with two changes: the symbols come from @ref rune_cursor_t (decode-on-read over the
+ *         task's rune-offset index) instead of raw byte pointers, and the DP-grid extents are the task's @b rune counts
+ *         (`shorter_runes` / `longer_runes`) instead of byte lengths. The diagonal indexing, the shared three-diagonal
+ *         ring, and the boundary seeding are reused verbatim through the shared `tile_scorer`, so the recurrence is
+ *         bit-identical to the byte warp kernel on the decoded codepoints. Unit-cost, linear-gap, global only.
+ *
+ *  @param[in] tasks The device-resident task array; each task carries its UTF-8 byte spans, rune-offset slices, and
+ *             rune counts (filled by @ref build_rune_index_per_cuda_thread_).
+ *  @param[in] shared_memory_size Per-block dynamic-shared budget; carved into one three-diagonal ring per warp.
+ */
+template <typename task_type_, typename score_type_ = u32_t, sz_capability_t capability_ = sz_cap_cuda_k,
+          typename substituter_type_ = uniform_substitution_costs_t>
+__global__ void unit_utf8_score_per_cuda_warp_(                              //
+    task_type_ *tasks, size_t tasks_count,                                   //
+    substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
+    unsigned const shared_memory_size) {
+
+    using task_t = task_type_;
+    using score_t = score_type_;
+    using substituter_t = substituter_type_;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    using cuda_warp_scorer_t = tile_scorer<rune_cursor_t, rune_cursor_t, score_t, substituter_t, linear_gap_costs_t,
+                                           objective_k, locality_k, capability_k>;
+
+    unsigned const warp_size = warpSize;
+    unsigned const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
+    unsigned const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
+    unsigned const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
+    unsigned const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
+    unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
+
+    extern __shared__ char shared_memory_for_block[];
+    char *const shared_memory_for_warp = shared_memory_for_block +
+                                         (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
+    bool const is_main_thread = thread_in_warp_index == 0;
+    uniform_substitution_costs_t const substituter_shared = load_substituter_into_shared_(substituter);
+
+    for (size_t task_idx = global_warp_index; task_idx < tasks_count; task_idx += warps_per_device) {
+        task_t &task = tasks[task_idx];
+        rune_cursor_t const shorter {reinterpret_cast<unsigned char const *>(task.shorter.data()),
+                                     task.shorter_rune_offsets};
+        rune_cursor_t const longer {reinterpret_cast<unsigned char const *>(task.longer.data()),
+                                    task.longer_rune_offsets};
+        u32_t const shorter_length = task.shorter_runes;
+        u32_t const longer_length = task.longer_runes;
+        auto &result_ref = task.result;
+
+        unsigned const shorter_dim = static_cast<unsigned>(shorter_length + 1);
+        unsigned const longer_dim = static_cast<unsigned>(longer_length + 1);
+        unsigned const diagonals_count = shorter_dim + longer_dim - 1;
+        unsigned const max_diagonal_length = shorter_length + 1;
+        unsigned const bytes_per_diagonal = round_up_to_multiple<unsigned>(max_diagonal_length * sizeof(score_t), 4);
+
+        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_for_warp);
+        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + bytes_per_diagonal);
+        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + 2 * bytes_per_diagonal);
+
+        cuda_warp_scorer_t diagonal_aligner {substituter_shared, gap_costs};
+        if (is_main_thread) {
+            diagonal_aligner.init_score(previous_scores[0], 0);
+            diagonal_aligner.init_score(current_scores[0], 1);
+            diagonal_aligner.init_score(current_scores[1], 1);
+        }
+        __syncwarp();
+
+        unsigned next_diagonal_index = 2;
+        for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
+            unsigned const next_diagonal_length = next_diagonal_index + 1;
+            diagonal_aligner(shorter, longer, thread_in_warp_index, warp_size, next_diagonal_length - 2,
+                             previous_scores, current_scores, current_scores + 1, next_scores + 1);
+            if (is_main_thread) {
+                diagonal_aligner.init_score(next_scores[0], next_diagonal_index);
+                diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            }
+            __syncwarp();
+            rotate_three(previous_scores, current_scores, next_scores);
+        }
+
+        for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
+            unsigned const next_diagonal_length = shorter_dim;
+            diagonal_aligner(shorter, longer + next_diagonal_index - shorter_dim, thread_in_warp_index, warp_size,
+                             next_diagonal_length - 1, previous_scores, current_scores, current_scores + 1,
+                             next_scores);
+            if (is_main_thread) diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            __syncwarp();
+            rotate_central_band_(thread_in_warp_index, warp_size, next_diagonal_length, previous_scores, current_scores,
+                                 next_scores);
+            __syncwarp();
+        }
+
+        for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
+            unsigned const next_diagonal_length = diagonals_count - next_diagonal_index;
+            diagonal_aligner(shorter + next_diagonal_index - longer_dim, longer + next_diagonal_index - shorter_dim,
+                             thread_in_warp_index, warp_size, next_diagonal_length, previous_scores, current_scores,
+                             current_scores + 1, next_scores);
+            rotate_three(previous_scores, current_scores, next_scores);
+            previous_scores++;
+            __syncwarp();
+        }
+
+        if (is_main_thread) result_ref = diagonal_aligner.score();
+    }
+}
+
+#pragma endregion UTF 8 Codepoint Level Warp Tier
+
+#pragma region Shared Cross Product Host Orchestration
 
 /**
  *  @brief Tiled device-tier wavefront launch shared by every CUDA cross-product engine. Reduces the device-level
@@ -3037,8 +3751,7 @@ __global__ __launch_bounds__(256, 2) void levenshtein_u16_affine_per_cuda_thread
  *         slices, and chunks the batch along `blockIdx.y`, seeding then scoring each chunk. One body covers the
  *         linear (single row frontier + corners) and affine Gotoh (M + H row frontiers + M corners) data-flows via
  *         `if constexpr (is_affine_)`; the two engine families differ only in the resolved score / init
- *         `cudaFunction_t`s and the substituter type, both passed by reference. Bit-identical to the four former
- *         in-line `launch_batched` clones.
+ *         `cudaFunction_t`s and the substituter type, both passed by reference.
  *
  *  @param[in] init_fn,score_fn The resolved frontier-seed and tiled-score `CUfunction`s for @p score_type_.
  *  @param[in] substituter The cell-cost substituter (uniform for Levenshtein, the device 32-class map for NW/SW).
@@ -3075,6 +3788,13 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allo
             cuda_launch_t {}.grid(bx, by).block(threads).shared(0).stream(executor.stream()).launch(function, args);
         return e == CUDA_SUCCESS ? true : (tiled_status = make_cuda_status(e), false);
     };
+    auto const score_launch = [&](cudaFunction_t function, unsigned bx, unsigned by, unsigned threads,
+                                  void **args) noexcept -> bool {
+        cuda_launch_t builder {};
+        builder.grid(bx, by).block(threads).shared(0).stream(executor.stream());
+        CUresult e = builder.launch(function, args);
+        return e == CUDA_SUCCESS ? true : (tiled_status = make_cuda_status(e), false);
+    };
 
     if constexpr (is_affine_) {
         // Affine Gotoh: the frontier carries M and H (deletion) left-edges (two `row` arrays) plus the diagonal M corners.
@@ -3102,7 +3822,7 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allo
                                    (void *)&corner_stride,
                                    (void *)&substituter,
                                    (void *)&gap_costs};
-            launch(score_fn, grid_columns_blocks, this_chunk, tiled_warps_per_block_k * 32, tiled_args);
+            score_launch(score_fn, grid_columns_blocks, this_chunk, tiled_warps_per_block_k * 32, tiled_args);
         }
     }
     else {
@@ -3124,7 +3844,7 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allo
             void *tiled_args[8] = {(void *)&chunk_tasks,   (void *)&row_frontier_base, (void *)&corner_frontier_base,
                                    (void *)&progress_base, (void *)&row_stride,        (void *)&corner_stride,
                                    (void *)&substituter,   (void *)&gap_costs};
-            launch(score_fn, grid_columns_blocks, this_chunk, tiled_warps_per_block_k * 32, tiled_args);
+            score_launch(score_fn, grid_columns_blocks, this_chunk, tiled_warps_per_block_k * 32, tiled_args);
         }
     }
     return tiled_status;
@@ -3191,7 +3911,7 @@ cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_, allocator_
     return result;
 }
 
-#pragma endregion Shared Cross - Product Host Orchestration
+#pragma endregion Shared Cross Product Host Orchestration
 
 /**
  *  @brief Dispatches baseline Levenshtein edit distance algorithm to the GPU.
@@ -3249,37 +3969,36 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
 
     using final_score_t = size_t;
 
-    struct cuda_kernels_t {
-        kernel_shape_t register_u8;
-        kernel_shape_t register_u16;
-        kernel_shape_t warp_u8;
-        kernel_shape_t warp_u16;
-        // Device tier: the tiled register-micro-tile scorer + its frontier-seed kernel, one shape per cell width.
-        // (Resolves to the linear `tiled_score_across_cuda_device_` or the affine sibling, matching `affine_k`.)
-        // The old cooperative `[affine_]score_across_cuda_device_` kernels were retired - they were dead weight.
-        kernel_shape_t tiled_u16, tiled_u32, tiled_u64;
-        kernel_shape_t tiled_init_u16, tiled_init_u32, tiled_init_u64;
-        // Bit-parallel Myers fast path (linear unit-cost Levenshtein only): a register-resident single-word
-        // thread-per-pair kernel for shorter <= 64, and one size-generic thread-per-pair kernel for shorter > 64
-        // of any length (no word-count cap). Null for the affine engine, which never routes to Myers.
-        kernel_shape_t myers_word1, myers_generic;
-        /** @brief Per-query multi-word `Peq`-reuse across a row of candidates: 1/2/4 words (shorter <= 64/128/256). */
-        kernel_shape_t myers_candidates_warp1, myers_candidates_warp2, myers_candidates_warp4;
-        /** @brief Device-side per-cell task build (all-pairs or symmetric). */
-        kernel_shape_t materialize_tasks;
-        /** @brief Device-side scatter of task results into the row-major matrix. */
-        kernel_shape_t scatter_results;
-        /** @brief Device tier-router: packs the radix-sort keys + identity permutation over `tasks_`. */
-        kernel_shape_t build_tier_keys;
-        /** @brief Device tier-router: gathers the sorted permutation into the reordered task array. */
-        kernel_shape_t gather_tasks;
+    /** @brief Unit-cost edit-distance (Levenshtein) GPU kernels, grouped by parallelism tier + concern.
+     *         Shared across cuda/kepler/hopper generations; each engine resolves its own instance. */
+    struct kernels_t {
+        /** @brief Register thread-per-pair scorers (256 threads, occupancy precomputed). */
+        struct register_tier_t {
+            kernel_shape_t u8, u16;
+        } register_tier;
+        /** @brief Warp anti-diagonal scorers (one pair per warp). */
+        struct warp_tier_t {
+            kernel_shape_t u8, u16;
+        } warp_tier;
+        /** @brief Device-spanning tiled wavefront scorer + its frontier-seed kernel, per cell width. */
+        struct device_tier_t {
+            kernel_shape_t score_u16, score_u32, score_u64, init_u16, init_u32, init_u64;
+        } device_tier;
+        /** @brief Bit-parallel Myers fast path (linear unit-cost only). */
+        struct myers_t {
+            kernel_shape_t singleword_thread, multiword_thread, singleword_warp, multiword_warp_2, multiword_warp_4;
+        } myers;
+        /** @brief Device-side task build / result scatter / on-GPU tier router. */
+        struct infra_t {
+            kernel_shape_t materialize_tasks, scatter_results, build_tier_keys, gather_tasks;
+        } infra;
     };
 
     /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
-    static expected<cuda_kernels_t const &, cuda_status_t> kernels() noexcept {
-        static cuda_kernels_t cuda_kernels;
+    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
+        static kernels_t table;
         static bool resolved = false;
-        if (resolved) return {cuda_kernels, {}};
+        if (resolved) return {table, {}};
         constexpr unsigned text_limit_k = register_text_limit_k;
         constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
         constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3292,41 +4011,42 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         // Register tier (thread-per-pair, fixed 256-thread / no-shared shape).
         if constexpr (affine_k)
             status = resolve_kernel_shape(
-                cuda_kernels.register_u16,
-                (void const *)&levenshtein_u16_affine_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256,
-                0, true);
+                table.register_tier.u16,
+                (void const *)&unit_gotoh_u16_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256, 0,
+                true);
         else {
             status = resolve_kernel_shape(
-                cuda_kernels.register_u8,
-                (void const *)&levenshtein_per_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>, 256, 0,
-                true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+                table.register_tier.u8,
+                (void const
+                     *)&unit_wagner_fischer_u8_per_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>,
+                256, 0, true);
+            if (status.status != status_t::success_k) return {table, status};
             status = resolve_kernel_shape(
-                cuda_kernels.register_u16,
-                (void const *)&levenshtein_u16_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>, 256, 0,
-                true);
+                table.register_tier.u16,
+                (void const *)&unit_wagner_fischer_u16_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
+                256, 0, true);
         }
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {table, status};
 
         // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
         status = resolve_kernel_shape(
-            cuda_kernels.warp_u8,
+            table.warp_tier.u8,
             affine_k
                 ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
                                                              objective_k, locality_k, capability_k>
-                : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
-                                                             objective_k, locality_k, capability_k>,
+                : (void const *)&score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
+                                                      objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {table, status};
         status = resolve_kernel_shape(
-            cuda_kernels.warp_u16,
+            table.warp_tier.u16,
             affine_k
                 ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
                                                              objective_k, locality_k, capability_k>
-                : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
-                                                             objective_k, locality_k, capability_k>,
+                : (void const *)&score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
+                                                      objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {table, status};
 
         // Device tier: the tiled micro-tile scorer + its frontier-seed kernel, one shape per cell width. We only need
         // the resolved `CUfunction` (the launch sizes its grid from the tile-column count, not occupancy), so
@@ -3335,37 +4055,39 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         auto const resolve_tiled = [&]<typename score_t>(kernel_shape_t &score_shape,
                                                          kernel_shape_t &init_shape) -> cuda_status_t {
             void const *score_sym =
-                affine_k ? (void const *)&tiled_score_affine_across_cuda_device_<
-                               tiled_warps_k, char_t, score_t, final_score_t, uniform_substitution_costs_t, objective_k,
-                               locality_k, capability_k, task_t>
-                         : (void const *)&tiled_score_across_cuda_device_<tiled_warps_k, char_t, score_t, final_score_t,
-                                                                          uniform_substitution_costs_t, objective_k,
-                                                                          locality_k, capability_k, task_t>;
+                affine_k
+                    ? (void const *)&affine_score_across_cuda_device_<tiled_warps_k, char_t, score_t, final_score_t,
+                                                                      uniform_substitution_costs_t, objective_k,
+                                                                      locality_k, capability_k, task_t>
+                    : (void const *)&score_across_cuda_device_<tiled_warps_k, char_t, score_t, final_score_t,
+                                                               uniform_substitution_costs_t, objective_k, locality_k,
+                                                               capability_k, task_t>;
             void const *init_sym =
-                affine_k ? (void const
-                                *)&tiled_frontier_init_affine_<score_t, final_score_t, objective_k, locality_k, task_t>
-                         : (void const *)&tiled_frontier_init_<score_t, final_score_t, objective_k, locality_k, task_t>;
+                affine_k ? (void const *)&affine_frontier_init_across_cuda_device_<score_t, final_score_t, objective_k,
+                                                                                   locality_k, task_t>
+                         : (void const *)&frontier_init_across_cuda_device_<score_t, final_score_t, objective_k,
+                                                                            locality_k, task_t>;
             cuda_status_t s = resolve_kernel_shape(score_shape, score_sym, tiled_warps_k * 32, 0, false);
             if (s.status != status_t::success_k) return s;
             return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
         };
-        status = resolve_tiled.template operator()<u16_t>(cuda_kernels.tiled_u16, cuda_kernels.tiled_init_u16);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
-        status = resolve_tiled.template operator()<u32_t>(cuda_kernels.tiled_u32, cuda_kernels.tiled_init_u32);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
-        status = resolve_tiled.template operator()<u64_t>(cuda_kernels.tiled_u64, cuda_kernels.tiled_init_u64);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_tiled.template operator()<u16_t>(table.device_tier.score_u16, table.device_tier.init_u16);
+        if (status.status != status_t::success_k) return {table, status};
+        status = resolve_tiled.template operator()<u32_t>(table.device_tier.score_u32, table.device_tier.init_u32);
+        if (status.status != status_t::success_k) return {table, status};
+        status = resolve_tiled.template operator()<u64_t>(table.device_tier.score_u64, table.device_tier.init_u64);
+        if (status.status != status_t::success_k) return {table, status};
 
         // Bit-parallel Myers fast path (linear unit-cost Levenshtein only); occupancy precomputed for grid sizing.
         if constexpr (!affine_k) {
             status = resolve_kernel_shape(
-                cuda_kernels.myers_word1,
-                (void const *)&levenshtein_myers_per_cuda_thread_<task_t, char_t, 1u, capability_k>, 256, 0, true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+                table.myers.singleword_thread,
+                (void const *)&unit_myers_singleword_per_cuda_thread_<task_t, char_t, 1u, capability_k>, 256, 0, true);
+            if (status.status != status_t::success_k) return {table, status};
             status = resolve_kernel_shape(
-                cuda_kernels.myers_generic,
-                (void const *)&levenshtein_myers_generic_per_cuda_thread_<task_t, char_t, capability_k>, 256, 0, true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+                table.myers.multiword_thread,
+                (void const *)&unit_myers_multiword_per_cuda_thread_<task_t, char_t, capability_k>, 256, 0, true);
+            if (status.status != status_t::success_k) return {table, status};
             // Per-query multi-word `Peq`-reuse kernels: 256 threads = 8 warps, each warp owns `words_count * 256`
             // `u64_t` of shared `Peq` (1/2/4 words covering shorter <= 64/128/256).
             static constexpr unsigned myers_candidates_shared1_k = (256u / 32u) * 1u * 256u * sizeof(u64_t);
@@ -3375,38 +4097,38 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             // faster than the generic multi-word body specialized to one word (whose carry bookkeeping is dead
             // weight at a single word). The 2/4-word variants below use the generalized shared-`Peq` kernel.
             status = resolve_kernel_shape(
-                cuda_kernels.myers_candidates_warp1,
-                (void const *)&levenshtein_myers_candidates_per_cuda_warp_<task_t, char_t, capability_k>, 256,
+                table.myers.singleword_warp,
+                (void const *)&unit_myers_singleword_per_cuda_warp_<task_t, char_t, capability_k>, 256,
                 myers_candidates_shared1_k, true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            if (status.status != status_t::success_k) return {table, status};
             status = resolve_kernel_shape(
-                cuda_kernels.myers_candidates_warp2,
-                (void const *)&levenshtein_myers_words_candidates_per_cuda_warp_<task_t, char_t, capability_k, 2u>, 256,
+                table.myers.multiword_warp_2,
+                (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 2u>, 256,
                 myers_candidates_shared2_k, true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            if (status.status != status_t::success_k) return {table, status};
             status = resolve_kernel_shape(
-                cuda_kernels.myers_candidates_warp4,
-                (void const *)&levenshtein_myers_words_candidates_per_cuda_warp_<task_t, char_t, capability_k, 4u>, 256,
+                table.myers.multiword_warp_4,
+                (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 4u>, 256,
                 myers_candidates_shared4_k, true);
-            if (status.status != status_t::success_k) return {cuda_kernels, status};
+            if (status.status != status_t::success_k) return {table, status};
         }
         // Device-side task materialization (all-pairs or symmetric); grid is sized from the cell count, so no
         // occupancy precompute is needed. Levenshtein is always minimize / global.
         status = resolve_kernel_shape(
-            cuda_kernels.materialize_tasks,
-            (void const *)&materialize_similarity_tasks_<sz_minimize_distance_k, sz_similarity_global_k, affine_k,
+            table.infra.materialize_tasks,
+            (void const *)&similarity_materialize_tasks_<sz_minimize_distance_k, sz_similarity_global_k, affine_k,
                                                          task_t, gap_costs_t>,
             256, 0, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {table, status};
         // Device tier-router kernels (grid-stride, fixed 256-thread blocks; the router caps the grid itself).
-        status = resolve_kernel_shape(cuda_kernels.build_tier_keys,
-                                      (void const *)&levenshtein_build_tier_keys_kernel<char_t>, 256, 0, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
-        status = resolve_kernel_shape(cuda_kernels.gather_tasks, (void const *)&levenshtein_gather_tasks_kernel<char_t>,
-                                      256, 0, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        status = resolve_kernel_shape(table.infra.build_tier_keys, (void const *)&unit_build_tier_keys_<char_t>, 256, 0,
+                                      false);
+        if (status.status != status_t::success_k) return {table, status};
+        status = resolve_kernel_shape(table.infra.gather_tasks, (void const *)&unit_gather_tasks_<char_t>, 256, 0,
+                                      false);
+        if (status.status != status_t::success_k) return {table, status};
         resolved = true;
-        return {cuda_kernels, {}};
+        return {table, {}};
     }
 
     /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
@@ -3491,7 +4213,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         if (kernels_status.status != status_t::success_k) return kernels_status;
 
         span<char const> *queries_ptr = buffers_.query_descs_.data(),
-                           *candidates_ptr = buffers_.candidate_descs_.data();
+                         *candidates_ptr = buffers_.candidate_descs_.data();
         task_t *tasks_ptr = tasks.data();
         error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
         sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
@@ -3511,7 +4233,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                                          .block(block)
                                          .shared(0)
                                          .stream(executor.stream())
-                                         .launch(kernel_table.materialize_tasks.function, materialize_args);
+                                         .launch(kernel_table.infra.materialize_tasks.function, materialize_args);
         if (materialize_error != CUDA_SUCCESS) return make_cuda_status(materialize_error);
         // The downstream tiering reads `tasks_` on the host (partition/sort), so drain the kernel first.
         if (cudaStreamSynchronize(executor.stream()) != cudaSuccess) return make_cuda_status(cudaGetLastError());
@@ -3528,7 +4250,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
             kernel_shape_t scatter_shape;
             cuda_status_t scatter_resolve = resolve_kernel_shape(
-                scatter_shape, (void const *)&scatter_similarity_results_<task_t, results_value_t>, 256, 0, false);
+                scatter_shape, (void const *)&similarity_scatter_results_<task_t, results_value_t>, 256, 0, false);
             if (scatter_resolve.status != status_t::success_k) return scatter_resolve;
             results_value_t *results_ptr = results.data;
             task_t const *tasks_ptr = tasks.data();
@@ -3605,9 +4327,9 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                                     queries_count != 0 && queries_count * candidates_count == tasks.size();
         if (reuse_eligible) {
             unsigned const reuse_words = (static_cast<unsigned>(cross_max_query_length_) + 63u) >> 6; // 1,2,3,4
-            kernel_shape_t const &shape = reuse_words <= 1 ? kernel_table.myers_candidates_warp1
-                                          : reuse_words <= 2 ? kernel_table.myers_candidates_warp2
-                                                             : kernel_table.myers_candidates_warp4; // 3 or 4 words
+            kernel_shape_t const &shape = reuse_words <= 1   ? kernel_table.myers.singleword_warp
+                                          : reuse_words <= 2 ? kernel_table.myers.multiword_warp_2
+                                                             : kernel_table.myers.multiword_warp_4; // 3 or 4 words
             unsigned const reuse_words_rounded = reuse_words <= 1 ? 1u : reuse_words <= 2 ? 2u : 4u;
             unsigned const reuse_shared_k = (256u / 32u) * reuse_words_rounded * 256u * (unsigned)sizeof(u64_t);
             unsigned const blocks = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
@@ -3631,28 +4353,31 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
 
     {
         // Device tier-router: one `cub::DeviceRadixSort` lays every task out in its final contiguous tier order and
-        // one `cub::DeviceRunLengthEncode` fills `tier_counts_`. Unit-cost linear Levenshtein routes short pairs
-        // (shorter <= 2048) to the bit-parallel Myers word tiers; affine and non-unit-cost linear skip Myers and split
-        // only into register / device tiers. The tier-kernel launches below consume the router's offsets + counts directly.
+        // one `cub::DeviceRunLengthEncode` fills `tier_counts_`. Unit-cost linear Levenshtein routes pairs whose shorter
+        // side is within `levenshtein_myers_max_shorter_k` to the bit-parallel Myers word tiers; longer unit-cost pairs
+        // (and affine / non-unit-cost linear) skip Myers and split into register / device tiers (the Needleman-Wunsch DP
+        // path). The tier-kernel launches below consume the router's offsets + counts directly.
         bool is_unit_cost = false;
         if constexpr (!is_affine_k)
             is_unit_cost = substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
         levenshtein_tier_mode_t const tier_mode = is_unit_cost ? levenshtein_tier_mode_t::myers_and_registers_k
                                                                : levenshtein_tier_mode_t::registers_only_k;
-        cuda_status_t const router_status = route_tiers_(executor, specs, tier_mode, kernel_table.build_tier_keys,
-                                                         kernel_table.gather_tasks);
+        cuda_status_t const router_status = route_tiers_(executor, specs, tier_mode, kernel_table.infra.build_tier_keys,
+                                                         kernel_table.infra.gather_tasks);
         if (router_status.status != status_t::success_k) return router_status;
 
         // Myers tier ends, derived from the dense per-tier counts (contiguous prefix sums): the register-resident
         // single-word tier `[0, word1_count)` holds shorter <= 64, the size-generic tier `[word1_count, myers_count)`
-        // holds the rest of any length.
+        // holds `64 < shorter <= levenshtein_myers_max_shorter_k`.
         size_t const word1_count = tier_counts_[levenshtein_tier_myers_word1_k];
         size_t const generic_count = tier_counts_[levenshtein_tier_myers_generic_k];
         size_t const myers_count = word1_count + generic_count;
 
-        // Bit-parallel Myers fast path: claim unit-cost Levenshtein pairs (match 0 / mismatch 1 / gap 1) of ANY size
-        // and run the register-resident single-word kernel (shorter <= 64) plus the size-generic kernel (the rest) -
-        // far faster than the anti-diagonal register/device tiers. The router places them at the front; the
+        // Bit-parallel Myers fast path: claim unit-cost Levenshtein pairs (match 0 / mismatch 1 / gap 1) whose shorter
+        // side is within `levenshtein_myers_max_shorter_k` and run the register-resident single-word kernel (shorter <=
+        // 64) plus the size-generic kernel (the rest) - faster than the DP tiers in that range. The router places them
+        // at the front; the register/device tiers below operate on the remaining `[myers_count, size)` tasks (which now
+        // include longer unit-cost pairs, scored by the same DP wavefront as Needleman-Wunsch). (Linear engine only -
         // register/device tiers below operate on the remaining `[myers_count, size)` tasks. (Linear engine only -
         // Myers can't encode affine or weighted costs.)
         if constexpr (!is_affine_k) {
@@ -3661,7 +4386,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                 // ceil(max_generic_shorter / 64) `Peq` rows of 256 plus 2*words_count VP/VN slots. The single-word
                 // kernel needs a flat 256-entry `Peq` per thread. Both launches reuse the buffer sequentially (each
                 // pair cleans up its own entries), so size it to the larger per-thread slice times the grid threads.
-                unsigned const word1_threads = kernel_table.myers_word1.blocks_per_multiprocessor *
+                unsigned const word1_threads = kernel_table.myers.singleword_thread.blocks_per_multiprocessor *
                                                specs.streaming_multiprocessors * 256u;
                 size_t const word1_peq = word1_count ? static_cast<size_t>(word1_threads) * 256 : 0;
                 size_t generic_stride = 0, generic_peq = 0;
@@ -3673,7 +4398,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                     if (maxima_status.status != status_t::success_k) return maxima_status;
                     u32_t const words_count = (generic_maxima.max_shorter + 63u) >> 6;
                     generic_stride = static_cast<size_t>(words_count) * 256 + 2u * words_count; // Peq + VP + VN
-                    unsigned const generic_threads = kernel_table.myers_generic.blocks_per_multiprocessor *
+                    unsigned const generic_threads = kernel_table.myers.multiword_thread.blocks_per_multiprocessor *
                                                      specs.streaming_multiprocessors * 256u;
                     generic_peq = static_cast<size_t>(generic_threads) * generic_stride;
                 }
@@ -3701,8 +4426,8 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                                      .launch(shape.function, args);
                     if (e != CUDA_SUCCESS) myers_status = make_cuda_status(e);
                 };
-                launch_myers(kernel_table.myers_word1, 0, word1_count, 256);
-                launch_myers(kernel_table.myers_generic, word1_count, generic_count, generic_stride);
+                launch_myers(kernel_table.myers.singleword_thread, 0, word1_count, 256);
+                launch_myers(kernel_table.myers.multiword_thread, word1_count, generic_count, generic_stride);
                 if (myers_status.status != status_t::success_k) return myers_status;
             }
         }
@@ -3734,14 +4459,14 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
             if constexpr (!is_affine_k) {
                 // Within the register tier, 1-byte cells go to the (4×-SIMD) u8 kernel and the rest to the u16 one;
                 // the router already laid the one-byte tasks first, so the counts give the exact sub-ranges.
-                launch_register_kernel(kernel_table.register_u8, myers_count, count_u8_register_tasks);
-                launch_register_kernel(kernel_table.register_u16, myers_count + count_u8_register_tasks,
+                launch_register_kernel(kernel_table.register_tier.u8, myers_count, count_u8_register_tasks);
+                launch_register_kernel(kernel_table.register_tier.u16, myers_count + count_u8_register_tasks,
                                        count_register_level_tasks - count_u8_register_tasks);
             }
             else {
                 // Affine gaps need 2-byte cells (gap opening overflows the 1-byte variant), so the whole register
                 // tier runs the u16 affine kernel.
-                launch_register_kernel(kernel_table.register_u16, myers_count, count_register_level_tasks);
+                launch_register_kernel(kernel_table.register_tier.u16, myers_count, count_register_level_tasks);
             }
             if (register_status.status != status_t::success_k) return register_status;
         }
@@ -3776,12 +4501,13 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
             // Resolve the per-cell-width tiled score + frontier-seed `CUfunction`s from the table and launch the
             // shared batched driver; the linear and affine frontier carvings live in the driver, gated on `affine_k`.
             auto const launch_batched = [&]<typename score_t>() noexcept -> cuda_status_t {
-                cudaFunction_t const init_fn = sizeof(score_t) == 8   ? kernel_table.tiled_init_u64.function
-                                               : sizeof(score_t) == 4 ? kernel_table.tiled_init_u32.function
-                                                                      : kernel_table.tiled_init_u16.function;
-                cudaFunction_t const score_fn = sizeof(score_t) == 8   ? kernel_table.tiled_u64.function
-                                                : sizeof(score_t) == 4 ? kernel_table.tiled_u32.function
-                                                                       : kernel_table.tiled_u16.function;
+                cudaFunction_t const init_fn = sizeof(score_t) == 8   ? kernel_table.device_tier.init_u64.function
+                                               : sizeof(score_t) == 4 ? kernel_table.device_tier.init_u32.function
+                                                                      : kernel_table.device_tier.init_u16.function;
+                cudaFunction_t const device_fn = sizeof(score_t) == 8   ? kernel_table.device_tier.score_u64.function
+                                                 : sizeof(score_t) == 4 ? kernel_table.device_tier.score_u32.function
+                                                                        : kernel_table.device_tier.score_u16.function;
+                cudaFunction_t const score_fn = device_fn;
                 return cuda_launch_tiled_device_tier_<score_t, is_affine_k>(
                     buffers_, device_level_tasks, row_stride, corner_stride, grid_columns_blocks, init_fn, score_fn,
                     substituter_, gap_costs_, executor);
@@ -3798,7 +4524,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         // the small descriptor array (never a device task) and the launches go onto the stream back-to-back.
         if (warp_group_count) {
             cuda_status_t const warp_status = cuda_launch_warp_groups_(
-                buffers_, device_level_tasks, warp_group_count, kernel_table.warp_u8, kernel_table.warp_u16,
+                buffers_, device_level_tasks, warp_group_count, kernel_table.warp_tier.u8, kernel_table.warp_tier.u16,
                 sizeof(u16_t), substituter_, gap_costs_, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
@@ -3815,7 +4541,405 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
 
 #pragma endregion
 
-#pragma region - Needleman Wunsch and Smith Waterman Scores in CUDA
+#pragma region UTF 8 Levenshtein Distances in CUDA
+
+/**
+ *  @brief Dispatches @b codepoint-level (UTF-8) Levenshtein edit distance to the GPU across the register and
+ *         device-tiled tiers, giving UTF-8 the same length reach as the byte engine.
+ *
+ *  The tapes stay UTF-8 @b bytes - no host transcode, no 4x device buffers. A one-time on-device pass
+ *  (@ref build_rune_index_per_cuda_thread_) prefix-scans each task's rune byte-lengths into a rune-offset index, so the
+ *  scorers random-index the @e i-th rune by its byte offset and branchlessly decode one codepoint there
+ *  (@ref decode_utf8_rune). The cross-product machinery (descriptors, device-side task materialization, rune maxima,
+ *  device/host scatter) is shared with the byte engine; only the rune index + the codepoint-level scorers differ.
+ *
+ *  Tiers, routed by the batch's max @b rune count (reduced on device after the index): pairs within
+ *  @ref register_text_limit_k runes run the register thread-per-pair scorer (@ref unit_utf8_per_cuda_thread_);
+ *  mid-length batches run the warp anti-diagonal scorer (@ref unit_utf8_score_per_cuda_warp_, one pair per warp, three
+ *  diagonals in shared, codepoints supplied by @ref rune_cursor_t so the byte warp recurrence is reused verbatim); the
+ *  longest batches run the device-spanning tiled wavefront (@ref unit_utf8_score_across_cuda_device_), the codepoint-grid
+ *  sibling of the byte device tier, batched across pairs on `blockIdx.y`. The warp tier engages only while its per-warp
+ *  three-diagonal ring fits the device dynamic-shared ceiling; otherwise that range falls through to the tiled tier.
+ *  Linear unit-cost global only (the variant the C shim selects for the GPU arm); affine UTF-8 stays on the CPU.
+ */
+template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
+                                  std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+
+    using char_t = char;
+    using gap_costs_t = gap_costs_type_;
+    using allocator_t = allocator_type_;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    using task_t = cuda_similarity_task<char_t>;
+    using buffers_t = cuda_cross_buffers<task_t, allocator_t>;
+
+    uniform_substitution_costs_t substituter_ {};
+    gap_costs_t gap_costs_ {};
+    allocator_t alloc_ {};
+
+    /** @brief The cross-product device buffer bundle shared with the byte Levenshtein engine (passed by reference). */
+    buffers_t buffers_ {alloc_};
+    cuda_timer_t timer_ {};
+
+    /** @brief Longest query/candidate @b byte length of the current call; sizes each task's tile-rounded rune-offset slice. */
+    size_t cross_max_query_length_ = 0;
+    size_t cross_max_candidate_length_ = 0;
+
+    levenshtein_distances_utf8(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
+                               allocator_t const &alloc = {}) noexcept
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
+
+    levenshtein_distances_utf8(levenshtein_distances_utf8 const &) = delete;
+    levenshtein_distances_utf8 &operator=(levenshtein_distances_utf8 const &) = delete;
+    levenshtein_distances_utf8(levenshtein_distances_utf8 &&) noexcept = default;
+    levenshtein_distances_utf8 &operator=(levenshtein_distances_utf8 &&) noexcept = default;
+
+    using final_score_t = size_t;
+
+    /** @brief Codepoint-level (UTF-8) Levenshtein GPU kernels, grouped by parallelism tier; resolved once per engine. */
+    struct kernels_t {
+        /** @brief Register thread-per-pair rune scorer (256 threads, occupancy precomputed). */
+        kernel_shape_t register_utf8;
+        /** @brief One-time on-device rune-offset index builder (one thread per string). */
+        kernel_shape_t build_rune_index;
+        /**
+         *  @brief Codepoint-level device-spanning tiled wavefront scorer + its frontier-seed kernel, per cell width
+         *         (`u16`/`u32`/`u64`). The DP grid is over runes; the kernels read the per-task rune-offset index.
+         */
+        struct utf8_tier_t {
+            kernel_shape_t warp;
+            kernel_shape_t score_u16, score_u32, score_u64;
+            kernel_shape_t init_u16, init_u32, init_u64;
+        } utf8_tier;
+    };
+
+    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
+    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
+        static kernels_t table;
+        static bool resolved = false;
+        if (resolved) return {table, {}};
+        constexpr unsigned text_limit_k = register_text_limit_k;
+        static constexpr unsigned tiled_warps_k = 8;
+        cuda_status_t status = resolve_kernel_shape(
+            table.register_utf8, (void const *)&unit_utf8_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
+            256, 0, true);
+        if (status.status != status_t::success_k) return {table, status};
+        // Rune-offset index builder (grid-stride, fixed 256-thread blocks; occupancy precomputed for grid sizing).
+        status = resolve_kernel_shape(table.build_rune_index, (void const *)&build_rune_index_per_cuda_thread_<task_t>,
+                                      256, 0, true);
+        if (status.status != status_t::success_k) return {table, status};
+        // Warp tier (anti-diagonal, one pair per warp). Block dims + grid are sized per launch from the batch's largest
+        // rune count, so we only need the resolved `CUfunction` here - but we raise its dynamic-shared ceiling to the
+        // device opt-in maximum so the per-launch three-diagonal ring can exceed the 48 KB default for mid-length pairs.
+        int warp_capable_device = 0, warp_shared_ceiling = 0;
+        cudaGetDevice(&warp_capable_device);
+        cudaDeviceGetAttribute(&warp_shared_ceiling, cudaDevAttrMaxSharedMemoryPerBlockOptin, warp_capable_device);
+        status = resolve_kernel_shape(table.utf8_tier.warp,
+                                      (void const *)&unit_utf8_score_per_cuda_warp_<task_t, u32_t, capability_k>, 0,
+                                      static_cast<unsigned>(warp_shared_ceiling), false);
+        if (status.status != status_t::success_k) return {table, status};
+        // Device tier: the tiled rune scorer + its frontier-seed kernel, one shape per cell width. Only the resolved
+        // `CUfunction` is needed (the launch sizes its grid from the tile-column count), so no occupancy precompute.
+        auto const resolve_tiled = [&]<typename score_t>(kernel_shape_t &score_shape,
+                                                         kernel_shape_t &init_shape) -> cuda_status_t {
+            void const *score_sym =
+                (void const *)&unit_utf8_score_across_cuda_device_<tiled_warps_k, score_t, final_score_t, task_t>;
+            void const *init_sym =
+                (void const *)&unit_utf8_frontier_init_across_cuda_device_<score_t, final_score_t, task_t>;
+            cuda_status_t s = resolve_kernel_shape(score_shape, score_sym, tiled_warps_k * 32, 0, false);
+            if (s.status != status_t::success_k) return s;
+            return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
+        };
+        status = resolve_tiled.template operator()<u16_t>(table.utf8_tier.score_u16, table.utf8_tier.init_u16);
+        if (status.status != status_t::success_k) return {table, status};
+        status = resolve_tiled.template operator()<u32_t>(table.utf8_tier.score_u32, table.utf8_tier.init_u32);
+        if (status.status != status_t::success_k) return {table, status};
+        status = resolve_tiled.template operator()<u64_t>(table.utf8_tier.score_u64, table.utf8_tier.init_u64);
+        if (status.status != status_t::success_k) return {table, status};
+        resolved = true;
+        return {table, {}};
+    }
+
+    /**
+     *  @brief Shared cross-product driver: materializes one task per live (query, candidate) cell on the device, scores
+     *         every pair with the register rune kernel, and scatters each distance into the row-major matrix. For
+     *         @b symmetric_k only the lower triangle (incl. the diagonal) is built and each result is mirrored.
+     */
+    template <typename queries_type_, typename candidates_type_, typename results_type_>
+    cuda_status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
+                         cross_similarities_t cross_kind, cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
+
+        bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
+        size_t const queries_count = queries.size();
+        size_t const candidates_count = candidates.size();
+        size_t const row_stride = results.row_stride;
+        size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2
+                                               : queries_count * candidates_count;
+
+        auto &tasks = buffers_.tasks_;
+        if (tasks.try_resize_uninitialized(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+
+        // Ensure inputs are device-accessible (Unified/Device memory); the base pointer of the first element of each
+        // contiguous tape covers the whole tape.
+        if (queries_count != 0 && candidates_count != 0) {
+            if (!is_device_accessible_memory((void const *)queries[0].data()) ||
+                !is_device_accessible_memory((void const *)candidates[0].data()))
+                return {status_t::device_memory_mismatch_k, cudaSuccess};
+        }
+
+        // Device-side materialization (all-pairs or symmetric): build the O(queries+candidates) descriptors on the
+        // host, let one thread per live cell fill the O(queries*candidates) task array on the GPU.
+        if (buffers_.query_descs_.try_resize(queries_count) == status_t::bad_alloc_k ||
+            buffers_.candidate_descs_.try_resize(candidates_count) == status_t::bad_alloc_k)
+            return {status_t::bad_alloc_k};
+        cross_max_query_length_ = 0;
+        cross_max_candidate_length_ = 0;
+        for (size_t query_index = 0; query_index < queries_count; ++query_index) {
+            buffers_.query_descs_[query_index] = {queries[query_index].data(), queries[query_index].length()};
+            if (queries[query_index].length() > cross_max_query_length_)
+                cross_max_query_length_ = queries[query_index].length();
+        }
+        for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
+            buffers_.candidate_descs_[candidate_index] = {candidates[candidate_index].data(),
+                                                          candidates[candidate_index].length()};
+            if (candidates[candidate_index].length() > cross_max_candidate_length_)
+                cross_max_candidate_length_ = candidates[candidate_index].length();
+        }
+        // The materialization assigns each cell's shorter/longer as the smaller/larger of its (query, candidate) pair,
+        // so either side can land in either slot. Size BOTH offset-slice strides to the global widest byte length so a
+        // task's shorter and longer rune-offset slices are always large enough (over-allocation; the index over-read
+        // margin is the tile rounding below).
+        {
+            size_t const widest = sz_max_of_two(cross_max_query_length_, cross_max_candidate_length_);
+            cross_max_query_length_ = widest;
+            cross_max_candidate_length_ = widest;
+        }
+
+        constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+        constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+        constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        kernel_shape_t materialize_shape;
+        cuda_status_t materialize_resolve = resolve_kernel_shape(
+            materialize_shape,
+            (void const *)&similarity_materialize_tasks_<objective_k, locality_k, affine_k, task_t, gap_costs_t>, 256,
+            0, false);
+        if (materialize_resolve.status != status_t::success_k) return materialize_resolve;
+
+        span<char const> *queries_ptr = buffers_.query_descs_.data(),
+                         *candidates_ptr = buffers_.candidate_descs_.data();
+        task_t *tasks_ptr = tasks.data();
+        error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
+        sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
+        bytes_per_cell_t min_bytes_per_cell = two_bytes_per_cell_k; // rune cells are 2 bytes (`u16_t`).
+        cross_similarities_t cross_kind_copy = cross_kind;
+        gap_costs_t gap_costs_copy = gap_costs_;
+        gpu_specs_t specs_copy = specs;
+        void *materialize_args[13] = {(void *)&tasks_ptr,       (void *)&queries_ptr,          (void *)&candidates_ptr,
+                                      (void *)&queries_count,   (void *)&candidates_count,     (void *)&row_stride,
+                                      (void *)&cross_kind_copy, (void *)&substitute_magnitude, (void *)&gap_magnitude,
+                                      (void *)&gap_type_value,  (void *)&min_bytes_per_cell,   (void *)&gap_costs_copy,
+                                      (void *)&specs_copy};
+        unsigned const materialize_block = 256;
+        unsigned const materialize_grid = static_cast<unsigned>((live_cells + materialize_block - 1) /
+                                                                materialize_block);
+        CUresult materialize_error = cuda_launch_t {}
+                                         .grid(materialize_grid)
+                                         .block(materialize_block)
+                                         .shared(0)
+                                         .stream(executor.stream())
+                                         .launch(materialize_shape.function, materialize_args);
+        if (materialize_error != CUDA_SUCCESS) return make_cuda_status(materialize_error);
+
+        auto [kernel_table, kernels_status] = kernels();
+        if (kernels_status.status != status_t::success_k) return kernels_status;
+
+        CUresult timer_error = timer_.ensure_created();
+        if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
+        CUresult start_event_error = timer_.record_start(executor.stream());
+        if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
+
+        cuda_status_t status {status_t::success_k, cudaSuccess, CUDA_SUCCESS, 0.0f};
+        if (tasks.size()) {
+            // Build the per-task rune-offset index on the device (chained after materialization on the same stream).
+            // Each task gets a tile-rounded slice for its shorter then longer side: `ceil(byte_len / 128) * 128 + 1`
+            // words, so the device-tier's padded last-tile lanes read offsets in bounds (the known over-read margin).
+            static constexpr u32_t tiled_tile_side_k = 128;
+            u32_t const shorter_offsets_stride =
+                round_up_to_multiple<u32_t>(static_cast<u32_t>(cross_max_query_length_), tiled_tile_side_k) + 1;
+            u32_t const longer_offsets_stride =
+                round_up_to_multiple<u32_t>(static_cast<u32_t>(cross_max_candidate_length_), tiled_tile_side_k) + 1;
+            size_t const rune_offsets_words = tasks.size() *
+                                              (static_cast<size_t>(shorter_offsets_stride) + longer_offsets_stride);
+            buffers_.rune_offsets_buffer_.clear();
+            if (buffers_.rune_offsets_buffer_.try_resize(rune_offsets_words) == status_t::bad_alloc_k)
+                return {status_t::bad_alloc_k};
+            u32_t *const shorter_offsets_base = buffers_.rune_offsets_buffer_.data();
+            u32_t *const longer_offsets_base = shorter_offsets_base + tasks.size() * shorter_offsets_stride;
+
+            size_t index_tasks_count = tasks.size();
+            task_t *index_tasks_ptr = tasks.data();
+            void *index_args[6] = {(void *)&index_tasks_ptr,      (void *)&index_tasks_count,
+                                   (void *)&shorter_offsets_base, (void *)&shorter_offsets_stride,
+                                   (void *)&longer_offsets_base,  (void *)&longer_offsets_stride};
+            unsigned const index_blocks = kernel_table.build_rune_index.blocks_per_multiprocessor *
+                                          specs.streaming_multiprocessors;
+            CUresult index_error = cuda_launch_t {}
+                                       .grid(index_blocks)
+                                       .block(256)
+                                       .shared(0)
+                                       .stream(executor.stream())
+                                       .launch(kernel_table.build_rune_index.function, index_args);
+            if (index_error != CUDA_SUCCESS) return make_cuda_status(index_error);
+
+            // Reduce the longest rune counts over the whole batch (this synchronizes the stream, draining the index
+            // kernel). Rune counts - not byte lengths - drive the tier choice, the cell width, and the frontier sizing.
+            device_tier_maxima_t rune_maxima;
+            cuda_status_t const maxima_status = reduce_device_tier_rune_maxima_<char_t>(
+                tasks.data(), tasks.size(), buffers_.cub_buffer_, buffers_.device_maxima_scratch_, executor.stream(),
+                rune_maxima);
+            if (maxima_status.status != status_t::success_k) return maxima_status;
+
+            // Whole-batch tier route by max rune count: pairs within the register cap run the thread-per-pair rune
+            // scorer; mid-length batches run the warp anti-diagonal rune tier (one pair per warp, three diagonals in
+            // shared); the longest batches run the device-spanning tiled rune wavefront. The warp tier engages only when
+            // its per-warp three-diagonal ring (sized by the longest shorter side) fits the device dynamic-shared ceiling.
+            bool const fits_register = rune_maxima.max_shorter <= register_text_limit_k &&
+                                       rune_maxima.max_longer <= register_text_limit_k;
+            using warp_score_t = u32_t;
+            unsigned const warp_bytes_per_diagonal = round_up_to_multiple<unsigned>(
+                (rune_maxima.max_shorter + 1) * sizeof(warp_score_t), 4);
+            unsigned const warp_shared_per_warp = 3u * warp_bytes_per_diagonal;
+            int warp_score_device = 0, warp_shared_ceiling = 0;
+            cudaGetDevice(&warp_score_device);
+            cudaDeviceGetAttribute(&warp_shared_ceiling, cudaDevAttrMaxSharedMemoryPerBlockOptin, warp_score_device);
+            bool const fits_warp_tier = !fits_register && rune_maxima.max_shorter < tiled_promotion_min_shorter_k &&
+                                        rune_maxima.max_longer < tiled_promotion_min_shorter_k &&
+                                        warp_shared_per_warp <= static_cast<unsigned>(warp_shared_ceiling);
+            if (fits_register) {
+                size_t tasks_count = tasks.size();
+                task_t *score_tasks_ptr = tasks.data();
+                void *score_args[4] = {(void *)&score_tasks_ptr, (void *)&tasks_count, (void *)&substituter_,
+                                       (void *)&gap_costs_};
+                unsigned const blocks_per_grid = kernel_table.register_utf8.blocks_per_multiprocessor *
+                                                 specs.streaming_multiprocessors;
+                CUresult score_error = cuda_launch_t {}
+                                           .grid(blocks_per_grid)
+                                           .block(256)
+                                           .shared(0)
+                                           .stream(executor.stream())
+                                           .launch(kernel_table.register_utf8.function, score_args);
+                if (score_error != CUDA_SUCCESS) return make_cuda_status(score_error);
+            }
+            else if (fits_warp_tier) {
+                // Warp anti-diagonal rune tier: one pair per warp, three diagonals (u32 cells) staged in dynamic shared.
+                // Pack as many warps per block as the shared ceiling allows (capped at 8), then grid-stride the batch.
+                unsigned const warps_per_block = sz_min_of_two(
+                    8u, sz_max_of_two(1u, static_cast<unsigned>(warp_shared_ceiling) / warp_shared_per_warp));
+                unsigned const block_threads = warps_per_block * 32u;
+                unsigned const block_shared = warps_per_block * warp_shared_per_warp;
+                size_t const warp_tasks_count = tasks.size();
+                unsigned const warp_grid = sz_max_of_two(
+                    1u, sz_min_of_two(static_cast<unsigned>(divide_round_up<size_t>(warp_tasks_count, warps_per_block)),
+                                      specs.streaming_multiprocessors * 16u));
+                task_t *warp_tasks_ptr = tasks.data();
+                void *warp_args[5] = {(void *)&warp_tasks_ptr, (void *)&warp_tasks_count, (void *)&substituter_,
+                                      (void *)&gap_costs_, (void *)&block_shared};
+                CUresult warp_error = cuda_launch_t {}
+                                          .grid(warp_grid)
+                                          .block(block_threads)
+                                          .shared(block_shared)
+                                          .stream(executor.stream())
+                                          .launch(kernel_table.utf8_tier.warp.function, warp_args);
+                if (warp_error != CUDA_SUCCESS) return make_cuda_status(warp_error);
+            }
+            else {
+                // Device-spanning tiled rune wavefront, batched across pairs on `blockIdx.y`. The frontier scratch is
+                // sized to the batch's largest pair (by rune count) and run at the widest cell type the rune-count
+                // distance magnitude needs. The cell width floors at u32 to match the byte device tier (GPU scalar u16
+                // min/add promote to 32-bit anyway). The UTF-8 score/init `CUfunction`s mirror the byte linear path's
+                // 8-arg / 7-arg signatures exactly, so they ride the shared `cuda_launch_tiled_device_tier_` driver.
+                static constexpr unsigned tiled_warps_per_block_k = 8;
+                // Cell width by the rune-count distance magnitude. The unit-cost distance never exceeds the longer rune
+                // count, which is a `u32_t`, so u32 cells always suffice; floor at u32 to match the byte device tier
+                // (GPU scalar u16 min/add promote to 32-bit anyway, so a u16 tile is measured ~1.3-1.4x slower).
+                u32_t const max_columns = divide_round_up<u32_t>(rune_maxima.max_longer, tiled_tile_side_k);
+                u32_t const max_padded_rows = round_up_to_multiple<u32_t>(rune_maxima.max_shorter, tiled_tile_side_k);
+                u32_t const tiled_row_stride = max_padded_rows + 1, tiled_corner_stride = max_columns;
+                unsigned const grid_columns_blocks = divide_round_up<unsigned>(max_columns, tiled_warps_per_block_k);
+
+                auto const launch_batched = [&]<typename score_t>() noexcept -> cuda_status_t {
+                    cudaFunction_t const init_fn = sizeof(score_t) == 8   ? kernel_table.utf8_tier.init_u64.function
+                                                   : sizeof(score_t) == 4 ? kernel_table.utf8_tier.init_u32.function
+                                                                          : kernel_table.utf8_tier.init_u16.function;
+                    cudaFunction_t const score_fn = sizeof(score_t) == 8   ? kernel_table.utf8_tier.score_u64.function
+                                                    : sizeof(score_t) == 4 ? kernel_table.utf8_tier.score_u32.function
+                                                                           : kernel_table.utf8_tier.score_u16.function;
+                    return cuda_launch_tiled_device_tier_<score_t, false>(
+                        buffers_, {tasks.data(), tasks.size()}, tiled_row_stride, tiled_corner_stride,
+                        grid_columns_blocks, init_fn, score_fn, substituter_, gap_costs_, executor);
+                };
+                cuda_status_t const tiled_status = launch_batched.template operator()<u32_t>();
+                if (tiled_status.status != status_t::success_k) return tiled_status;
+            }
+        }
+
+        CUresult stop_event_error = timer_.record_stop(executor.stream());
+        if (stop_event_error != CUDA_SUCCESS) return make_cuda_status(stop_event_error);
+        CUresult execution_error = timer_.synchronize(executor.stream());
+        if (execution_error != CUDA_SUCCESS) return make_cuda_status(execution_error);
+        status.elapsed_milliseconds = timer_.elapsed_milliseconds();
+
+        // Scatter on the device when the output is device-accessible (the common unified-memory case); otherwise scatter
+        // into a hoisted staging matrix and stream-copy it into the caller's host matrix.
+        if (tasks.size() && is_device_accessible_memory((void const *)results.data)) {
+            using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
+            kernel_shape_t scatter_shape;
+            cuda_status_t scatter_resolve = resolve_kernel_shape(
+                scatter_shape, (void const *)&similarity_scatter_results_<task_t, results_value_t>, 256, 0, false);
+            if (scatter_resolve.status != status_t::success_k) return scatter_resolve;
+            results_value_t *results_ptr = results.data;
+            task_t const *scatter_tasks_ptr = tasks.data();
+            size_t tasks_size = tasks.size();
+            void *scatter_args[3] = {(void *)&scatter_tasks_ptr, (void *)&tasks_size, (void *)&results_ptr};
+            unsigned const scatter_block = 256;
+            unsigned const scatter_grid = static_cast<unsigned>((tasks_size + scatter_block - 1) / scatter_block);
+            CUresult scatter_error = cuda_launch_t {}
+                                         .grid(scatter_grid)
+                                         .block(scatter_block)
+                                         .shared(0)
+                                         .stream(executor.stream())
+                                         .launch(scatter_shape.function, scatter_args);
+            if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
+            if (cudaStreamSynchronize(executor.stream()) != cudaSuccess) return make_cuda_status(cudaGetLastError());
+        }
+        else if (tasks.size()) {
+            using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
+            cuda_status_t const fallback_status = cuda_scatter_results_to_host_strided_<task_t, results_value_t>(
+                buffers_, tasks.data(), tasks.size(), results, executor, 256u);
+            if (fallback_status.status != status_t::success_k) return fallback_status;
+        }
+        return status;
+    }
+
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    cuda_status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cuda_executor_t const &executor = {},
+                             gpu_specs_t specs = {}) noexcept {
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, executor, specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    cuda_status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                             cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, executor, specs);
+    }
+};
+
+#pragma endregion UTF 8 Levenshtein Distances in CUDA
+
+#pragma region Needleman Wunsch and Smith Waterman Scores in CUDA
 
 /**
  *  @brief Device-side view of a compact @b `error_costs_32x32_t` substitution table.
@@ -3888,13 +5012,51 @@ load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const 
 }
 
 /**
+ *  @brief Sequential 2-step horizontal (left) gap fold for the packed 2-wide register-weighted linear-gap walker, plus
+ *         the local clamp-to-0. Scalar primary; the @b Hopper partial specialization (in `hopper.cuh`) fuses each step
+ *         into a fused-add-max DPX instruction for <=32-bit cells. Maximize objective only (the register walker is
+ *         NW/SW). @sa score_cell.
+ */
+template <sz_similarity_locality_t locality_, sz_capability_t capability_, typename enable_ = void>
+struct weighted_gap_fold {
+    __forceinline__ __device__ void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
+                                               i16_t gap_cost) const noexcept {
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+        cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
+        cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
+        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+    }
+};
+
+/**
+ *  @brief Sequential 2-step horizontal deletion-track (affine H) fold for the packed 2-wide register-weighted affine
+ *         walker, plus the local clamp-to-0. Scalar primary; the @b Hopper partial specialization (in `hopper.cuh`)
+ *         fuses each `max(left_m + open, left_h + extend)` into a fused-add-max DPX instruction for <=32-bit cells.
+ *         @sa affine_score_cell.
+ */
+template <sz_similarity_locality_t locality_, sz_capability_t capability_, typename enable_ = void>
+struct weighted_affine_gap_fold {
+    __forceinline__ __device__ void operator()(                         //
+        i16_t match_or_insert_low, i16_t match_or_insert_high,          //
+        i16_t left_cell, i16_t left_deletion, i16_t open, i16_t extend, //
+        i16_t &deletion_low, i16_t &cell_low, i16_t &deletion_high, i16_t &cell_high) const noexcept {
+        static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
+        deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
+        cell_low = std::max(match_or_insert_low, deletion_low);
+        deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
+        cell_high = std::max(match_or_insert_high, deletion_high);
+        if constexpr (is_local_k) cell_low = std::max<i16_t>(cell_low, 0), cell_high = std::max<i16_t>(cell_high, 0);
+    }
+};
+
+/**
  *  @brief Register-only NW/SW scoring for strings up to @p max_text_length_ bytes with @b signed 2-byte cells, one
  *         thread per pair. Like @ref register_levenshtein_u16 but @b maximizes (`__vmaxs2`/`__vaddss2`),
  *         gathers the per-cell substitution cost via the class substituter, and - for local scoring - clamps cells
  *         to zero and tracks a column-guarded running maximum (padded columns >ll are excluded).
  */
 template <unsigned max_text_length_, sz_similarity_locality_t locality_, sz_capability_t capability_ = sz_cap_cuda_k>
-struct register_weighted {
+struct weighted_needleman_register_scorer {
     static constexpr unsigned max_text_length_k = max_text_length_;
     static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
@@ -3937,29 +5099,9 @@ struct register_weighted {
                 u32_t const cell_score_vec = __vmaxs2(__vaddss2(diagonal_vec, cost_of_substitution_vec),
                                                       __vaddss2(top_vec, gap_cost_vec));
                 i16_t cell_low = (i16_t)(cell_score_vec & 0xFFFF), cell_high = (i16_t)(cell_score_vec >> 16);
-                // Sequential left (horizontal) fold + local clamp. Mirrors the maximize branch of `tiled_dp_cell_`:
-                // `__viaddmax_s32(a,b,c) == max(a + b, c)` for the gap fold; the Smith-Waterman clamp-to-0 stays at the
-                // end (the high-cell fold reads the un-clamped low cell, matching the scalar path bit-for-bit).
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-                if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(i16_t) <= 4) {
-                    int const gap = (int)gap_cost;
-                    cell_low = (i16_t)__viaddmax_s32((int)left_cell, gap, (int)cell_low);
-                    cell_high = (i16_t)__viaddmax_s32((int)cell_low, gap, (int)cell_high);
-                    if constexpr (is_local_k) {
-                        cell_low = std::max<i16_t>(cell_low, 0);
-                        cell_high = std::max<i16_t>(cell_high, 0);
-                    }
-                }
-                else
-#endif
-                {
-                    cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
-                    cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
-                    if constexpr (is_local_k) {
-                        cell_low = std::max<i16_t>(cell_low, 0);
-                        cell_high = std::max<i16_t>(cell_high, 0);
-                    }
-                }
+                // Sequential left (horizontal) fold + local clamp; the Smith-Waterman clamp-to-0 stays at the end (the
+                // high-cell fold reads the un-clamped low cell, matching the scalar path bit-for-bit).
+                weighted_gap_fold<locality_, capability_> {}(cell_low, cell_high, left_cell, gap_cost);
                 if constexpr (is_local_k) {
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
                     if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
@@ -3976,7 +5118,7 @@ struct register_weighted {
     }
 };
 
-/** @brief One-thread-per-pair NW/SW scoring with signed 2-byte register cells; see @ref register_weighted. */
+/** @brief One-thread-per-pair NW/SW scoring with signed 2-byte register cells; see @ref weighted_needleman_register_scorer. */
 template <                                                       //
     typename task_type_,                                         //
     typename char_type_ = char,                                  //
@@ -3984,12 +5126,12 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_cuda_k,                 //
     unsigned max_text_length_ = register_text_limit_k            //
     >
-__global__ __launch_bounds__(256, 2) void weighted_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                           //
+__global__ __launch_bounds__(256, 2) void weighted_needleman_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                     //
     error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_weighted<max_text_length_, locality_, capability_> nw_sw_computer;
+    weighted_needleman_register_scorer<max_text_length_, locality_, capability_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
@@ -4003,12 +5145,12 @@ __global__ __launch_bounds__(256, 2) void weighted_per_cuda_thread_( //
 
 /**
  *  @brief Register-only @b affine-gap NW/SW scoring for strings up to @p max_text_length_ bytes with @b signed
- *         2-byte cells, one thread per pair. Like @ref register_weighted but runs the Gotoh recurrence: a
+ *         2-byte cells, one thread per pair. Like @ref weighted_needleman_register_scorer but runs the Gotoh recurrence: a
  *         second register row holds the insertion matrix @b I (`ins_vec_`) and the deletion matrix @b D is carried
  *         as a scalar across the row, so gap opening and extension are priced separately.
  */
 template <unsigned max_text_length_, sz_similarity_locality_t locality_, sz_capability_t capability_ = sz_cap_cuda_k>
-struct register_weighted_affine {
+struct weighted_gotoh_register_scorer {
     static constexpr unsigned max_text_length_k = max_text_length_;
     static constexpr unsigned pack_count_k = max_text_length_k / 2; // ? two signed `i16_t` cells per `u32_t`
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
@@ -4067,35 +5209,14 @@ struct register_weighted_affine {
                                                            insertion_vec);
                 i16_t const match_or_insert_low = (i16_t)(match_or_insert_vec & 0xFFFF);
                 i16_t const match_or_insert_high = (i16_t)(match_or_insert_vec >> 16);
-                // Deletion D carries left across the row (sequential): cell 0 then cell 1. The open/extend fold is the
-                // affine H-track of `tiled_dp_cell_affine_`: `__viaddmax_s32(left_m, open, left_h + extend)`, then the
-                // 2-way `max(match_or_insert, deletion)`. The Smith-Waterman clamp-to-0 stays at the end (the next
-                // deletion fold reads the un-clamped `cell_low`, matching the scalar path bit-for-bit).
+                // Deletion D carries left across the row (sequential): cell 0 then cell 1. The Smith-Waterman
+                // clamp-to-0 stays at the end (the next deletion fold reads the un-clamped `cell_low`, matching the
+                // scalar path bit-for-bit).
                 i16_t deletion_low, cell_low, deletion_high, cell_high;
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
-                if constexpr ((capability_ & sz_cap_hopper_k) != 0 && sizeof(i16_t) <= 4) {
-                    int const open_i = (int)open, extend_i = (int)extend;
-                    deletion_low = (i16_t)__viaddmax_s32((int)left_cell, open_i, (int)left_deletion + extend_i);
-                    cell_low = std::max(match_or_insert_low, deletion_low);
-                    deletion_high = (i16_t)__viaddmax_s32((int)cell_low, open_i, (int)deletion_low + extend_i);
-                    cell_high = std::max(match_or_insert_high, deletion_high);
-                    if constexpr (is_local_k) {
-                        cell_low = std::max<i16_t>(cell_low, 0);
-                        cell_high = std::max<i16_t>(cell_high, 0);
-                    }
-                }
-                else
-#endif
-                {
-                    deletion_low = std::max<i16_t>(left_cell + open, left_deletion + extend);
-                    cell_low = std::max(match_or_insert_low, deletion_low);
-                    deletion_high = std::max<i16_t>(cell_low + open, deletion_low + extend);
-                    cell_high = std::max(match_or_insert_high, deletion_high);
-                    if constexpr (is_local_k) {
-                        cell_low = std::max<i16_t>(cell_low, 0);
-                        cell_high = std::max<i16_t>(cell_high, 0);
-                    }
-                }
+                weighted_affine_gap_fold<locality_, capability_> {}( //
+                    match_or_insert_low, match_or_insert_high,       //
+                    left_cell, left_deletion, open, extend,          //
+                    deletion_low, cell_low, deletion_high, cell_high);
                 if constexpr (is_local_k) {
                     unsigned const column_low = 2 * pack_idx + 1, column_high = 2 * pack_idx + 2;
                     if (column_low <= longer_length) best_score = std::max(best_score, cell_low);
@@ -4114,7 +5235,7 @@ struct register_weighted_affine {
     }
 };
 
-/** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref weighted_per_cuda_thread_. */
+/** @brief One-thread-per-pair @b affine NW/SW scoring with signed 2-byte register cells; see @ref weighted_needleman_per_cuda_thread_. */
 template <                                                       //
     typename task_type_,                                         //
     typename char_type_ = char,                                  //
@@ -4122,12 +5243,12 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_cuda_k,                 //
     unsigned max_text_length_ = register_text_limit_k            //
     >
-__global__ __launch_bounds__(256, 2) void weighted_affine_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count,                                  //
+__global__ __launch_bounds__(256, 1) void weighted_gotoh_per_cuda_thread_( //
+    task_type_ *tasks, size_t tasks_count,                                 //
     error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) {
 
     using task_t = task_type_;
-    register_weighted_affine<max_text_length_, locality_, capability_> nw_sw_computer;
+    weighted_gotoh_register_scorer<max_text_length_, locality_, capability_> nw_sw_computer;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
     for (size_t task_idx = blockIdx.x * blockDim.x + threadIdx.x; task_idx < tasks_count;
          task_idx += threads_per_device) {
@@ -4167,8 +5288,8 @@ weighted_task_dense_tier(cuda_similarity_task<char_type_> const &task) noexcept 
 
 /** @brief Packs one weighted task into the Levenshtein-layout MSB-ordered radix-sort key (priority = dense tier id). */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u64_t
-weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task, u32_t original_index) noexcept {
+__host__ __device__ __forceinline__ u64_t weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task,
+                                                                 u32_t original_index) noexcept {
     u64_t const priority = weighted_task_dense_tier(task);
     // Dyadic length bucket (see @ref levenshtein_length_dyadic_bucket) so both engine families bucket identically.
     u64_t const shorter_max = (1ull << levenshtein_shorter_length_bits_k) - 1ull;
@@ -4188,8 +5309,8 @@ weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task, u32_t origi
  *         five-argument launch path in @ref cuda_route_tasks_into_tiers_.
  */
 template <typename char_type_>
-__global__ void weighted_build_tier_keys_kernel(cuda_similarity_task<char_type_> const *tasks, size_t count,
-                                                u32_t /*mode_unused*/, u64_t *keys, u32_t *task_indices) {
+__global__ void weighted_build_tier_keys_(cuda_similarity_task<char_type_> const *tasks, size_t count,
+                                          u32_t /*mode_unused*/, u64_t *keys, u32_t *task_indices) {
     size_t const stride = static_cast<size_t>(blockDim.x) * gridDim.x;
     for (size_t index = blockIdx.x * blockDim.x + threadIdx.x; index < count; index += stride) {
         keys[index] = weighted_pack_tier_key(tasks[index], static_cast<u32_t>(index));
@@ -4210,29 +5331,24 @@ struct weighted_dense_tier_functor {
 #pragma endregion Weighted Device Tier Router
 
 /**
- *  @brief Resolved CUDA kernel table shared by the weighted NW/SW engines (filled by @ref cuda_weighted_kernels_).
+ *  @brief Resolved CUDA kernel table shared by the weighted NW/SW engines (filled by @ref weighted_kernels_).
  *         Decoupled from any engine struct so the trampoline free function can take it by const reference - the
  *         no-inheritance substrate that replaced the retired `cuda_weighted_scores` base class.
  */
-struct cuda_weighted_kernels_t {
-    kernel_shape_t register_score;
-    /** @brief Thread-per-pair @b batch scorer (same kernel, @ref batch_text_limit_k storage) for register<L<=~512. */
-    kernel_shape_t batch_score;
-    kernel_shape_t warp_i16;
-    kernel_shape_t warp_i32;
-    // Device tier: the tiled register-micro-tile scorer (objective=maximize, locality=global/local) + its
-    // frontier-seed kernel, one shape per signed cell width. Resolves to the linear `tiled_score_across_cuda_device_`
-    // or the affine sibling, matching `affine_k`. The old cooperative device kernels were retired as dead weight.
-    kernel_shape_t tiled_i32, tiled_i64;
-    kernel_shape_t tiled_init_i32, tiled_init_i64;
-    /** @brief Device-side per-cell task build (all-pairs or symmetric). */
-    kernel_shape_t materialize_tasks;
-    /** @brief Device-side scatter of task results into the row-major matrix. */
-    kernel_shape_t scatter_results;
-    /** @brief Device tier-router: packs the radix-sort keys + identity permutation over `tasks_`. */
-    kernel_shape_t build_tier_keys;
-    /** @brief Device tier-router: gathers the sorted permutation into the reordered task array. */
-    kernel_shape_t gather_tasks;
+/** @brief Substitution-matrix-scored alignment (Needleman-Wunsch / Smith-Waterman) GPU kernels. */
+struct weighted_kernels_t {
+    struct register_tier_t {
+        kernel_shape_t score, batch_score;
+    } register_tier;
+    struct warp_tier_t {
+        kernel_shape_t i16, i32;
+    } warp_tier;
+    struct device_tier_t {
+        kernel_shape_t score_i32, score_i64, init_i32, init_i64;
+    } device_tier;
+    struct infra_t {
+        kernel_shape_t materialize_tasks, scatter_results, build_tier_keys, gather_tasks;
+    } infra;
 };
 
 /**
@@ -4241,15 +5357,15 @@ struct cuda_weighted_kernels_t {
  *         the `needleman_wunsch_scores` and `smith_waterman_scores` GPU engines call it with their own `locality_`.
  */
 template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capability_t capability_>
-expected<cuda_weighted_kernels_t const &, cuda_status_t> cuda_weighted_kernels_() noexcept {
+expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept {
     using task_t = cuda_similarity_task<char>;
     using final_score_t = ssize_t;
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static cuda_weighted_kernels_t cuda_kernels;
+    static weighted_kernels_t table;
     static bool resolved = false;
-    if (resolved) return {cuda_kernels, {}};
+    if (resolved) return {table, {}};
     using char_t = char;
     using substituter_t = error_costs_classes_in_cuda_shared_memory_t;
     constexpr unsigned text_limit_k = register_text_limit_k;
@@ -4262,39 +5378,43 @@ expected<cuda_weighted_kernels_t const &, cuda_status_t> cuda_weighted_kernels_(
 
     // Register tier (single signed i16 thread-per-pair kernel, fixed 256-thread / no-shared shape).
     status = resolve_kernel_shape(
-        cuda_kernels.register_score,
-        affine_k ? (void const *)&weighted_affine_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>
-                 : (void const *)&weighted_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
+        table.register_tier.score,
+        affine_k
+            ? (void const *)&weighted_gotoh_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>
+            : (void const
+                   *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
         256, 0, true);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    if (status.status != status_t::success_k) return {table, status};
 
     // Batch tier: the SAME thread-per-pair kernel instantiated with the larger `batch_text_limit_k` register/local
     // storage, covering register<L<=~512 where the measured thread-per-pair scorer still beats the tiled wavefront.
     constexpr unsigned batch_limit_k = batch_text_limit_k;
     status = resolve_kernel_shape(
-        cuda_kernels.batch_score,
-        affine_k ? (void const *)&weighted_affine_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>
-                 : (void const *)&weighted_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>,
+        table.register_tier.batch_score,
+        affine_k
+            ? (void const *)&weighted_gotoh_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>
+            : (void const
+                   *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>,
         256, 0, true);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    if (status.status != status_t::success_k) return {table, status};
 
     // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
     status = resolve_kernel_shape(
-        cuda_kernels.warp_i16,
+        table.warp_tier.i16,
         affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t, objective_k,
                                                               locality_k, capability_k>
-                 : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t, objective_k,
-                                                              locality_k, capability_k>,
+                 : (void const *)&score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t, objective_k,
+                                                       locality_k, capability_k>,
         0, (unsigned)warp_ceiling, false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    if (status.status != status_t::success_k) return {table, status};
     status = resolve_kernel_shape(
-        cuda_kernels.warp_i32,
+        table.warp_tier.i32,
         affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t, objective_k,
                                                               locality_k, capability_k>
-                 : (void const *)&linear_score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t, objective_k,
-                                                              locality_k, capability_k>,
+                 : (void const *)&score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t, objective_k,
+                                                       locality_k, capability_k>,
         0, (unsigned)warp_ceiling, false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    if (status.status != status_t::success_k) return {table, status};
 
     // Device tier: the tiled micro-tile scorer + its frontier-seed kernel, one shape per signed cell width. Only
     // the resolved `CUfunction` is needed (the launch sizes its grid from the tile-column count, not occupancy),
@@ -4303,46 +5423,45 @@ expected<cuda_weighted_kernels_t const &, cuda_status_t> cuda_weighted_kernels_(
     auto const resolve_tiled = [&]<typename score_type_>(kernel_shape_t &score_shape,
                                                          kernel_shape_t &init_shape) -> cuda_status_t {
         void const *score_sym =
-            affine_k
-                ? (void const *)&tiled_score_affine_across_cuda_device_<tiled_warps_k, char_t, score_type_,
-                                                                        final_score_t, substituter_t, objective_k,
-                                                                        locality_k, capability_k, task_t>
-                : (void const *)&tiled_score_across_cuda_device_<tiled_warps_k, char_t, score_type_, final_score_t,
-                                                                 substituter_t, objective_k, locality_k, capability_k,
-                                                                 task_t>;
+            affine_k ? (void const *)&affine_score_across_cuda_device_<tiled_warps_k, char_t, score_type_,
+                                                                       final_score_t, substituter_t, objective_k,
+                                                                       locality_k, capability_k, task_t>
+                     : (void const
+                            *)&score_across_cuda_device_<tiled_warps_k, char_t, score_type_, final_score_t,
+                                                         substituter_t, objective_k, locality_k, capability_k, task_t>;
         void const *init_sym =
-            affine_k ? (void const
-                            *)&tiled_frontier_init_affine_<score_type_, final_score_t, objective_k, locality_k, task_t>
-                     : (void const *)&tiled_frontier_init_<score_type_, final_score_t, objective_k, locality_k, task_t>;
+            affine_k ? (void const *)&affine_frontier_init_across_cuda_device_<score_type_, final_score_t, objective_k,
+                                                                               locality_k, task_t>
+                     : (void const *)&frontier_init_across_cuda_device_<score_type_, final_score_t, objective_k,
+                                                                        locality_k, task_t>;
         cuda_status_t s = resolve_kernel_shape(score_shape, score_sym, tiled_warps_k * 32, 0, false);
         if (s.status != status_t::success_k) return s;
         return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
     };
-    status = resolve_tiled.template operator()<i32_t>(cuda_kernels.tiled_i32, cuda_kernels.tiled_init_i32);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
-    status = resolve_tiled.template operator()<i64_t>(cuda_kernels.tiled_i64, cuda_kernels.tiled_init_i64);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    status = resolve_tiled.template operator()<i32_t>(table.device_tier.score_i32, table.device_tier.init_i32);
+    if (status.status != status_t::success_k) return {table, status};
+    status = resolve_tiled.template operator()<i64_t>(table.device_tier.score_i64, table.device_tier.init_i64);
+    if (status.status != status_t::success_k) return {table, status};
 
     // Device-side task materialization (all-pairs or symmetric) + scatter; grid sized from the cell count.
     status = resolve_kernel_shape(
-        cuda_kernels.materialize_tasks,
-        (void const *)&materialize_similarity_tasks_<objective_k, locality_k, affine_k, task_t, gap_costs_type_>, 256, 0,
-        false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
-    status = resolve_kernel_shape(cuda_kernels.scatter_results,
-                                  (void const *)&scatter_similarity_results_<task_t, final_score_t>, 256, 0, false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+        table.infra.materialize_tasks,
+        (void const *)&similarity_materialize_tasks_<objective_k, locality_k, affine_k, task_t, gap_costs_type_>, 256,
+        0, false);
+    if (status.status != status_t::success_k) return {table, status};
+    status = resolve_kernel_shape(table.infra.scatter_results,
+                                  (void const *)&similarity_scatter_results_<task_t, final_score_t>, 256, 0, false);
+    if (status.status != status_t::success_k) return {table, status};
 
     // Dyadic length-bucket router kernels (shared machinery with Levenshtein): the weighted build-keys kernel packs
     // the three-tier register/batch/device key; the gather kernel is the generic permutation-gather reused as-is.
-    status = resolve_kernel_shape(cuda_kernels.build_tier_keys,
-                                  (void const *)&weighted_build_tier_keys_kernel<char_t>, 256, 0, false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
-    status = resolve_kernel_shape(cuda_kernels.gather_tasks,
-                                  (void const *)&levenshtein_gather_tasks_kernel<char_t>, 256, 0, false);
-    if (status.status != status_t::success_k) return {cuda_kernels, status};
+    status = resolve_kernel_shape(table.infra.build_tier_keys, (void const *)&weighted_build_tier_keys_<char_t>, 256, 0,
+                                  false);
+    if (status.status != status_t::success_k) return {table, status};
+    status = resolve_kernel_shape(table.infra.gather_tasks, (void const *)&unit_gather_tasks_<char_t>, 256, 0, false);
+    if (status.status != status_t::success_k) return {table, status};
     resolved = true;
-    return {cuda_kernels, {}};
+    return {table, {}};
 }
 
 /**
@@ -4351,16 +5470,16 @@ expected<cuda_weighted_kernels_t const &, cuda_status_t> cuda_weighted_kernels_(
  *         `cuda_weighted_scores` base): NW and SW call it identically, differing only in the resolved kernel table.
  */
 template <typename gap_costs_type_, typename allocator_type_>
-cuda_status_t cuda_weighted_run_trampoline_(                                                                     //
+cuda_status_t cuda_weighted_run_trampoline_(                                                                          //
     cuda_cross_buffers<cuda_similarity_task<char>, allocator_type_> &buffers, error_costs_32x32_t const &substituter, //
-    gap_costs_type_ const &gap_costs, cuda_weighted_kernels_t const &kernel_table, cuda_timer_t &timer,          //
-    safe_vector<u64_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u64_t>> &tier_keys, //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_values, //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle, //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                //
-        &byte_to_class_buffer,                                                                                     //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
-        &class_substitution_costs_buffer,                                                                          //
+    gap_costs_type_ const &gap_costs, weighted_kernels_t const &kernel_table, cuda_timer_t &timer,                    //
+    safe_vector<u64_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u64_t>> &tier_keys,     //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_values,   //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,      //
+    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                   //
+        &byte_to_class_buffer,                                                                                        //
+    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>>   //
+        &class_substitution_costs_buffer,                                                                             //
     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     using char_t = char;
@@ -4409,15 +5528,15 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
             int const end_bit = levenshtein_tier_priority_shift_k + levenshtein_tier_priority_bits_k;
             weighted_dense_tier_functor<char_t> dense_tier_functor {nullptr, 0u};
             cuda_status_t const router_status = cuda_route_tasks_into_tiers_(
-                buffers, tier_keys, tier_values, tier_rle, kernel_table.build_tier_keys, kernel_table.gather_tasks,
-                u32_t {0}, dense_tier_functor, begin_bit, end_bit, weighted_tier_count_k, executor,
-                weighted_tier_counts);
+                buffers, tier_keys, tier_values, tier_rle, kernel_table.infra.build_tier_keys,
+                kernel_table.infra.gather_tasks, u32_t {0}, dense_tier_functor, begin_bit, end_bit,
+                weighted_tier_count_k, executor, weighted_tier_counts);
             if (router_status.status != status_t::success_k) return router_status;
             count_register_level_tasks = weighted_tier_counts[weighted_tier_register_k];
             count_batch_level_tasks = weighted_tier_counts[weighted_tier_batch_k];
         }
         if (count_register_level_tasks) {
-            kernel_shape_t const &shape = kernel_table.register_score;
+            kernel_shape_t const &shape = kernel_table.register_tier.score;
             task_t *tasks_ptr = tasks.data();
             void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_register_level_tasks),
                                                  (void *)(&device_substituter), (void *)(&gap_costs)};
@@ -4433,7 +5552,7 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         if (count_batch_level_tasks) {
             // Thread-per-pair batch tier: same kernel, larger per-thread storage; consumes the `[register, register+batch)`
             // prefix of the remainder. Below the measured ~512 GPU crossover this beats the tiled wavefront below.
-            kernel_shape_t const &shape = kernel_table.batch_score;
+            kernel_shape_t const &shape = kernel_table.register_tier.batch_score;
             task_t *tasks_ptr = tasks.data() + count_register_level_tasks;
             void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_batch_level_tasks),
                                                  (void *)(&device_substituter), (void *)(&gap_costs)};
@@ -4476,10 +5595,11 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
             // Resolve the per-signed-cell-width tiled score + frontier-seed `CUfunction`s and launch the shared
             // batched driver; the linear and affine frontier carvings live in the driver, gated on `affine_k`.
             auto const launch_batched = [&]<typename score_type_>() noexcept -> cuda_status_t {
-                cudaFunction_t const init_fn = sizeof(score_type_) == 8 ? kernel_table.tiled_init_i64.function
-                                                                        : kernel_table.tiled_init_i32.function;
-                cudaFunction_t const score_fn = sizeof(score_type_) == 8 ? kernel_table.tiled_i64.function
-                                                                         : kernel_table.tiled_i32.function;
+                cudaFunction_t const init_fn = sizeof(score_type_) == 8 ? kernel_table.device_tier.init_i64.function
+                                                                        : kernel_table.device_tier.init_i32.function;
+                cudaFunction_t const device_fn = sizeof(score_type_) == 8 ? kernel_table.device_tier.score_i64.function
+                                                                          : kernel_table.device_tier.score_i32.function;
+                cudaFunction_t const score_fn = device_fn;
                 return cuda_launch_tiled_device_tier_<score_type_, is_affine_k>(
                     buffers, device_level_tasks, row_stride, corner_stride, grid_columns_blocks, init_fn, score_fn,
                     device_substituter, gap_costs, executor);
@@ -4495,7 +5615,7 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         // the sort order): the host reads only the small descriptor array, never a device task.
         if (warp_group_count) {
             cuda_status_t const warp_status = cuda_launch_warp_groups_(
-                buffers, device_level_tasks, warp_group_count, kernel_table.warp_i16, kernel_table.warp_i32,
+                buffers, device_level_tasks, warp_group_count, kernel_table.warp_tier.i16, kernel_table.warp_tier.i32,
                 sizeof(i32_t), device_substituter, gap_costs, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
@@ -4519,17 +5639,17 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
  */
 template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename allocator_type_, typename queries_type_, typename candidates_type_, typename results_type_>
-cuda_status_t cuda_weighted_cross_(                                                                              //
+cuda_status_t cuda_weighted_cross_(                                                                                   //
     cuda_cross_buffers<cuda_similarity_task<char>, allocator_type_> &buffers, error_costs_32x32_t const &substituter, //
-    gap_costs_type_ const &gap_costs, cuda_timer_t &timer,                                                       //
-    safe_vector<u64_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u64_t>> &tier_keys, //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_values, //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle, //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                //
-        &byte_to_class_buffer,                                                                                     //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
-        &class_substitution_costs_buffer,                                                                          //
-    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,                   //
+    gap_costs_type_ const &gap_costs, cuda_timer_t &timer,                                                            //
+    safe_vector<u64_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u64_t>> &tier_keys,     //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_values,   //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,      //
+    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                   //
+        &byte_to_class_buffer,                                                                                        //
+    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>>   //
+        &class_substitution_costs_buffer,                                                                             //
+    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,                        //
     cross_similarities_t cross_kind, cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     using char_t = char;
@@ -4539,8 +5659,7 @@ cuda_status_t cuda_weighted_cross_(                                             
     size_t const queries_count = queries.size();
     size_t const candidates_count = candidates.size();
     size_t const row_stride = results.row_stride;
-    size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2
-                                           : queries_count * candidates_count;
+    size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
 
     // No `clear()`: every live cell is fully overwritten by the materialization below, and a same-size
     // `try_resize` of a trivially-constructible task does zero (re-)construction - so the host never touches
@@ -4568,7 +5687,7 @@ cuda_status_t cuda_weighted_cross_(                                             
         buffers.candidate_descs_[candidate_index] = {candidates[candidate_index].data(),
                                                      candidates[candidate_index].length()};
 
-    auto [kernel_table, kernels_status] = cuda_weighted_kernels_<gap_costs_type_, locality_, capability_>();
+    auto [kernel_table, kernels_status] = weighted_kernels_<gap_costs_type_, locality_, capability_>();
     if (kernels_status.status != status_t::success_k) return kernels_status;
 
     span<char const> *queries_ptr = buffers.query_descs_.data(), *candidates_ptr = buffers.candidate_descs_.data();
@@ -4591,7 +5710,7 @@ cuda_status_t cuda_weighted_cross_(                                             
                                      .block(block)
                                      .shared(0)
                                      .stream(executor.stream())
-                                     .launch(kernel_table.materialize_tasks.function, materialize_args);
+                                     .launch(kernel_table.infra.materialize_tasks.function, materialize_args);
     if (materialize_error != CUDA_SUCCESS) return make_cuda_status(materialize_error);
     // No host sync after materialization: the dyadic router tiers `tasks_` entirely on-device (radix sort +
     // gather + run-length-encode), all enqueued on the same stream after this kernel. The router performs the single
@@ -4619,7 +5738,7 @@ cuda_status_t cuda_weighted_cross_(                                             
                                      .block(block)
                                      .shared(0)
                                      .stream(executor.stream())
-                                     .launch(kernel_table.scatter_results.function, scatter_args);
+                                     .launch(kernel_table.infra.scatter_results.function, scatter_args);
         if (scatter_error != CUDA_SUCCESS) return make_cuda_status(scatter_error);
         // Single completion barrier: the scatter writes the caller's output buffer and results must be host-readable
         // on return, so removing it would let the host read `results.data` before the stream-ordered scatter completes.
@@ -4697,8 +5816,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
                              cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
         return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
             buffers_, substituter_, gap_costs_, timer_, tier_keys_, tier_values_, tier_rle_, byte_to_class_buffer_,
-            class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k, executor,
-            specs);
+            class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k,
+            executor, specs);
     }
 };
 
@@ -4766,8 +5885,8 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
                              cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
         return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
             buffers_, substituter_, gap_costs_, timer_, tier_keys_, tier_values_, tier_rle_, byte_to_class_buffer_,
-            class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k, executor,
-            specs);
+            class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k,
+            executor, specs);
     }
 };
 

@@ -45,8 +45,8 @@ sz_status_t emplace_levenshtein_utf8_engine(szs_levenshtein_distances_utf8_t *en
  *  `sz_size_t`, and @p results_row_stride counts elements (not bytes) between consecutive query rows.
  */
 template <typename backends_type_, typename queries_type_, typename candidates_type_>
-sz_status_t szs_levenshtein_cross_(                          //
-    backends_type_ *engine, szs_device_scope_t device_punned, //
+sz_status_t szs_levenshtein_cross_(                                                       //
+    backends_type_ *engine, szs_device_scope_t device_punned,                             //
     queries_type_ const &queries_container, candidates_type_ const *candidates_container, //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -68,23 +68,23 @@ sz_status_t szs_levenshtein_cross_(                          //
 #if SZ_USE_CUDA
             if (std::holds_alternative<gpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                szs::cuda_status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                szs::cuda_status_t status = candidates_container != nullptr
+                                                ? engine_variant(queries_container, *candidates_container,
+                                                                 results_matrix, get_executor(device_scope),
+                                                                 get_specs(device_scope))
+                                                : engine_variant(queries_container, results_matrix, //
+                                                                 get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             // Try ephemeral GPU on default scope (device 0)
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &ctx = default_gpu_context();
-                szs::cuda_status_t status =
-                    ctx.status != sz::status_t::success_k ? ctx.status
-                    : candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix, ctx.executor,
-                                         ctx.specs)
-                        : engine_variant(queries_container, results_matrix, ctx.executor, ctx.specs);
+                szs::cuda_status_t status = ctx.status != sz::status_t::success_k ? ctx.status
+                                            : candidates_container != nullptr
+                                                ? engine_variant(queries_container, *candidates_container,
+                                                                 results_matrix, ctx.executor, ctx.specs)
+                                                : engine_variant(queries_container, results_matrix, ctx.executor,
+                                                                 ctx.specs);
                 result = propagate_error(status, error_message);
             }
             else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
@@ -96,22 +96,20 @@ sz_status_t szs_levenshtein_cross_(                          //
         else {
             if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &device_scope = std::get<default_scope_t>(device->variants);
-                sz::status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                sz::status_t status = candidates_container != nullptr
+                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                                           get_executor(device_scope), get_specs(device_scope))
+                                          : engine_variant(queries_container, results_matrix, //
+                                                           get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
-                sz::status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                sz::status_t status = candidates_container != nullptr
+                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                                           get_executor(device_scope), get_specs(device_scope))
+                                          : engine_variant(queries_container, results_matrix, //
+                                                           get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
@@ -211,13 +209,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                               
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                        //
-    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                          //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -226,13 +224,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                       
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u32tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u32tape_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                        //
-    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                          //
+    szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -241,7 +239,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                       
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u64tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u64tape_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
@@ -284,6 +282,13 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
                                                                              substitution_costs, linear_costs);
 #endif // SZ_USE_NEON
 
+#if SZ_USE_CUDA
+    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
+    if (can_use_cuda && can_use_linear_costs)
+        return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_cuda_t>(engine_punned, error_message,
+                                                                             substitution_costs, linear_costs);
+#endif // SZ_USE_CUDA
+
     bool const can_use_serial = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
     if (can_use_serial && can_use_linear_costs)
         return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_serial_t>(engine_punned, error_message,
@@ -305,7 +310,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8(                          
     auto *engine = reinterpret_cast<levenshtein_utf8_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
@@ -320,7 +325,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                  
     auto *engine = reinterpret_cast<levenshtein_utf8_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u32tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u32tape_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
@@ -335,7 +340,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                  
     auto *engine = reinterpret_cast<levenshtein_utf8_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u64tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u64tape_as_cpp_container_t {candidates};
-    return szs_levenshtein_cross_(                                                                     //
+    return szs_levenshtein_cross_(                                                                         //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }

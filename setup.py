@@ -123,7 +123,7 @@ class CudaBuildExtension(NumpyBuildExt):
                 obj_path,
                 "--compiler-options",
                 "-fPIC",
-                "-std=c++17",
+                "-std=c++20",
                 "-O2",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
@@ -456,13 +456,17 @@ elif sz_target == "stringzillas-cpus":
     command_class = {"build_ext": NumpyBuildExt}
 elif sz_target == "stringzillas-cuda":
     __lib_name__ = "stringzillas-cuda"
+    # Honor the standard CUDA_HOME / CUDA_PATH so the include + runtime-library paths can be pinned to a
+    # toolkit whose `libcudart` the installed driver supports (mismatched runtimes raise
+    # `cudaErrorInsufficientDriver` at load). Falls back to the `/usr/local/cuda` symlink.
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
     ext_modules = [
         Extension(
             "stringzillas",
             ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
-            include_dirs=["include", "c/stringzillas", "fork_union/include", "/usr/local/cuda/include"],
+            include_dirs=["include", "c/stringzillas", "fork_union/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
-            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lcuda", "-lstdc++"],
+            extra_link_args=link_args + [f"-L{cuda_home}/lib64", "-lcudart", "-lcuda", "-lstdc++"],
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),

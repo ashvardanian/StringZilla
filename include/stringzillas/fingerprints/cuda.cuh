@@ -21,7 +21,7 @@
 namespace ashvardanian {
 namespace stringzillas {
 
-#pragma region - CUDA Device Helpers
+#pragma region CUDA Device Helpers
 
 /**
  *  @brief Wraps a single task for the CUDA-based @b byte-level "fingerprint" kernels.
@@ -64,9 +64,9 @@ __device__ __forceinline__ void update_min_count_(count_type_ &min_count, value_
     rolling_minimum = (std::min)(rolling_minimum, value);
 }
 
-#pragma endregion - CUDA Device Helpers
+#pragma endregion CUDA Device Helpers
 
-#pragma region - CUDA Kernels
+#pragma region CUDA Kernels
 
 /**
  *  Each warp takes in an individual document from @p `tasks` and computes many rolling hashes for it.
@@ -407,7 +407,7 @@ __global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_fingerpri
     sz_unused_(hashers);
 }
 
-#pragma endregion - CUDA Kernels
+#pragma endregion CUDA Kernels
 
 /**
  *  @brief CUDA specialization of `basic_rolling_hashers` for count-min-sketching.
@@ -474,25 +474,27 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
     basic_rolling_hashers(basic_rolling_hashers &&) noexcept = default;
     basic_rolling_hashers &operator=(basic_rolling_hashers &&) noexcept = default;
 
-    struct cuda_kernels_t {
+    /** @brief One GPU kernel-dispatch table shared across all GPU generations for this engine. */
+    struct kernels_t {
+        /** @brief Warp-per-document basic rolling-hash kernel shape. */
         kernel_shape_t warp;
     };
-    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
-    static expected<cuda_kernels_t const &, cuda_status_t> kernels() noexcept {
-        static cuda_kernels_t cuda_kernels;
+    /** @brief Resolves the engine's GPU kernel table once and returns it with the resolution status. */
+    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
+        static kernels_t gpu_kernels;
         static bool resolved = false;
-        if (resolved) return {cuda_kernels, {}};
+        if (resolved) return {gpu_kernels, {}};
         unsigned const threads_per_block = static_cast<unsigned>(warp_size_nvidia_k) *
                                            static_cast<unsigned>(four_warps_per_multiprocessor_k);
         cuda_status_t status = resolve_kernel_shape(
-            cuda_kernels.warp,
+            gpu_kernels.warp,
             (void const *)&basic_rolling_hashers_kernel_<dimensions_per_launch_k, hasher_t, min_hash_t, min_count_t,
                                                          sz_cap_cuda_k, byte_t, warp_size_nvidia_k,
                                                          four_warps_per_multiprocessor_k>,
             threads_per_block, 0, true);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {gpu_kernels, status};
         resolved = true;
-        return {cuda_kernels, {}};
+        return {gpu_kernels, {}};
     }
 
     size_t dimensions() const noexcept { return hashers_.size(); }
@@ -721,32 +723,35 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     floating_rolling_hashers(floating_rolling_hashers &&) noexcept = default;
     floating_rolling_hashers &operator=(floating_rolling_hashers &&) noexcept = default;
 
-    struct cuda_kernels_t {
+    /** @brief One GPU kernel-dispatch table shared across all GPU generations for this engine. */
+    struct kernels_t {
+        /** @brief Single-warp-per-device kernel shape for the one-document `try_fingerprint` path. */
         kernel_shape_t warp_single;
+        /** @brief Warp-per-document kernel shape for the batched many-document path. */
         kernel_shape_t warp_batch;
     };
 
-    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
-    static expected<cuda_kernels_t const &, cuda_status_t> kernels() noexcept {
-        static cuda_kernels_t cuda_kernels;
+    /** @brief Resolves the engine's GPU kernel table once and returns it with the resolution status. */
+    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
+        static kernels_t gpu_kernels;
         static bool resolved = false;
-        if (resolved) return {cuda_kernels, {}};
+        if (resolved) return {gpu_kernels, {}};
         cuda_status_t status = resolve_kernel_shape(
-            cuda_kernels.warp_single,
+            gpu_kernels.warp_single,
             (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
                                                                    warp_size_nvidia_k, one_warp_per_multiprocessor_k>,
             0, 0, false);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {gpu_kernels, status};
         unsigned const batch_threads = static_cast<unsigned>(warp_size_nvidia_k) *
                                        static_cast<unsigned>(four_warps_per_multiprocessor_k);
         status = resolve_kernel_shape(
-            cuda_kernels.warp_batch,
+            gpu_kernels.warp_batch,
             (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
                                                                    warp_size_nvidia_k, four_warps_per_multiprocessor_k>,
             batch_threads, 0, true);
-        if (status.status != status_t::success_k) return {cuda_kernels, status};
+        if (status.status != status_t::success_k) return {gpu_kernels, status};
         resolved = true;
-        return {cuda_kernels, {}};
+        return {gpu_kernels, {}};
     }
 
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
