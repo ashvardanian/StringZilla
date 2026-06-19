@@ -1215,7 +1215,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
  *      one Myers integer per ZMM lane. There is no cross-lane carry machinery anywhere - every lane is its own
  *      register-resident Myers integer, scaled in @b words instead of in lanes:
  *      - `distances_8x64_`             - 8 single-word Myers (shorter <= 64), one 64-bit integer per lane;
- *      - `distances_8x64_shared_query_` - the same, but builds the 256-entry `Peq` once from a shared query;
+ *      - `distances_8x64_shared_query_` - the same, but builds the 256-entry `match_masks` once from a shared query;
  *      - `distances_8x_multiword_<words_count_>` - 8 multi-word Myers with a compile-time word count, covering shorter
  *        in `(64, 64 * words_count_]`; the word state lives in stack arrays so the loop unrolls and the
  *        `vertical_positive` / `vertical_negative` words register-promote;
@@ -1231,7 +1231,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     using char_t = char;
     using index_t = u32_t;
     static constexpr index_t lanes_k = 8;
-    static constexpr size_t match_masks_bytes_k = sizeof(u64_t) * lanes_k * 256; // ? 16 KB `Peq` table.
+    static constexpr size_t match_masks_bytes_k = sizeof(u64_t) * lanes_k * 256; // ? 16 KB `match_masks` table.
 
     // VPTERNLOGQ truth tables for the Myers booleans; the imm8 is indexed by `(A << 2) | (B << 1) | C`.
     static constexpr int ternlog_xor_or_k = 0xBE; // ? `(A ^ B) | C` - the diagonal tail `(sum ^ VP) | Eq`.
@@ -1242,7 +1242,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     /**
      *  @brief Eight independent single-word Myers distances, one per ZMM lane (each shorter side <= 64).
      *      The hot path for short words: no carry, shift, or boundary masking crosses lanes - every lane is
-     *      its own 64-bit Myers integer. @p scratch_space holds the `Peq[8][256]` table (`match_masks_bytes_k`)
+     *      its own 64-bit Myers integer. @p scratch_space holds the `match_masks[8][256]` table (`match_masks_bytes_k`)
      *      followed by a transposed-text buffer of at least `max_longer * 8` bytes.
      */
     template <typename results_writer_>
@@ -1264,7 +1264,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             size_t const longer_length = pairs.longers[lane_index].size();
             char_t const *const shorter = pairs.shorters[lane_index].data();
             char_t const *const longer = pairs.longers[lane_index].data();
-            // Zero this lane's `Peq` entries for every character its text may read (see the scalar Myers).
+            // Zero this lane's `match_masks` entries for every character its text may read (see the scalar Myers).
             for (index_t position = 0; position != shorter_length; ++position)
                 match_masks[lane_index * 256 + (u8_t)shorter[position]] = 0;
             for (size_t position = 0; position != longer_length; ++position)
@@ -1323,15 +1323,15 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
     /**
      *  @brief Cross-product single-word Myers: one shared @p query against up to 8 @p candidates per call, building
-     *      the 256-entry `Peq` table once from the query and reusing it across all 8 ZMM lanes. For short strings the
-     *      per-lane `Peq` rebuild of `distances_8x64_` dominates the lockstep scan; here every lane gathers from the
+     *      the 256-entry `match_masks` table once from the query and reusing it across all 8 ZMM lanes. For short strings the
+     *      per-lane `match_masks` rebuild of `distances_8x64_` dominates the lockstep scan; here every lane gathers from the
      *      same single table, so the build cost is paid once per query rather than once per candidate.
      *
      *      The query is the Myers pattern for every lane and each candidate is that lane's text. Unit-cost edit
      *      distance is symmetric, so this is correct even when a candidate is shorter than the query.
      *
      *      @pre `query.size() <= 64` (single 64-bit Myers integer per lane). No runtime check is performed.
-     *      @p scratch_space holds the single `Peq[256]` table (256 `u64`) followed by a transposed-text buffer of
+     *      @p scratch_space holds the single `match_masks[256]` table (256 `u64`) followed by a transposed-text buffer of
      *      at least `max_candidate_length * 8` bytes.
      */
     template <typename results_writer_>
@@ -1426,7 +1426,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      across lanes): the 65-bit `(Eq & VP) + VP + addition_carry` ripple, tracked low->high via unsigned
      *      overflow detection, and the `horizontal_positive` / `horizontal_negative` bit63->bit0 shift carries.
      *
-     *      @p scratch_space holds the per-lane multi-word `Peq` table (`match_masks_bytes_k * words_count_`,
+     *      @p scratch_space holds the per-lane multi-word `match_masks` table (`match_masks_bytes_k * words_count_`,
      *      base `match_masks + lane * 256 * words_count_`, entry `[symbol * words_count_ + word]`).
      */
     template <size_t words_count_, typename results_writer_>
@@ -1438,11 +1438,11 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
         size_t max_longer = 0;
         for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
             max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
-        size_t const peq_words = (size_t)256 * words_count * lanes_k;
-        if (scratch_space.size() < peq_words * sizeof(u64_t)) return status_t::bad_alloc_k;
+        size_t const match_masks_words = (size_t)256 * words_count * lanes_k;
+        if (scratch_space.size() < match_masks_words * sizeof(u64_t)) return status_t::bad_alloc_k;
 
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data());
-        for (size_t element = 0; element != peq_words; ++element) match_masks[element] = 0;
+        for (size_t element = 0; element != match_masks_words; ++element) match_masks[element] = 0;
 
         alignas(64) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
         for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
@@ -1553,7 +1553,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
      *      same word range. The per-word state lives in a fixed-capacity stack array indexed at runtime; the math is
      *      identical to the templated variant.
      *
-     *      @p scratch_space holds the per-lane multi-word `Peq` table (`match_masks_bytes_k * words_count`,
+     *      @p scratch_space holds the per-lane multi-word `match_masks` table (`match_masks_bytes_k * words_count`,
      *      base `match_masks + lane * 256 * words_count`, entry `[symbol * words_count + word]`).
      */
     template <typename results_writer_>
@@ -1569,11 +1569,11 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
         }
         size_t const words_count = (max_shorter + 63) / 64;
         if (words_count == 0 || words_count > stack_words_capacity_k) return status_t::bad_alloc_k;
-        size_t const peq_words = (size_t)256 * words_count * lanes_k;
-        if (scratch_space.size() < peq_words * sizeof(u64_t)) return status_t::bad_alloc_k;
+        size_t const match_masks_words = (size_t)256 * words_count * lanes_k;
+        if (scratch_space.size() < match_masks_words * sizeof(u64_t)) return status_t::bad_alloc_k;
 
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data());
-        for (size_t element = 0; element != peq_words; ++element) match_masks[element] = 0;
+        for (size_t element = 0; element != match_masks_words; ++element) match_masks[element] = 0;
 
         alignas(64) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
         for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
@@ -1681,7 +1681,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 /**
  *  @brief AVX-512 Myers/Hyyr\xC3\xB6 unit-cost @b rune (UTF-32) Levenshtein for Ice Lake, scoring eight independent
  *      pairs at once with one Myers integer per ZMM lane - the rune twin of the byte `levenshtein_distance_myers`.
- *      The scan is bit-for-bit identical to the byte 8x64 / 8xN family; the only delta is the `Peq` source. A byte
+ *      The scan is bit-for-bit identical to the byte 8x64 / 8xN family; the only delta is the `match_masks` source. A byte
  *      pattern indexes a dense 256-row table, but a rune pattern (up to 0x10FFFF distinct keys) cannot, so each lane
  *      builds a small @b open-addressing hash over its own pattern's distinct runes (capacity `next_pow2(2*distinct)`,
  *      load factor <= 0.5), and per text position each of the eight lanes probes its lane's hash for the current
@@ -1737,7 +1737,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
     }
 
     /**
-     *  @brief Scratch bytes the 8-lane rune `Peq` needs for a group whose longest shorter side is @p max_shorter
+     *  @brief Scratch bytes the 8-lane rune `match_masks` needs for a group whose longest shorter side is @p max_shorter
      *      runes: eight per-lane hash tables (slot keys + `words_count` bitmask words per slot) plus one shared
      *      permanently-zero `absent_row`. This is the single source of truth for both the scratch sizing in the
      *      cross-product driver and the carving inside the kernels, so the two can never disagree.
@@ -1751,10 +1751,10 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
         return slot_keys_bytes + slot_masks_bytes + absent_row_bytes;
     }
 
-#pragma region Per Lane Hash Peq
+#pragma region Per Lane Hash match_masks
 
     /**
-     *  @brief Carves the 8-lane hash `Peq` out of @p scratch_space and builds it from each lane's shorter side. Every
+     *  @brief Carves the 8-lane hash `match_masks` out of @p scratch_space and builds it from each lane's shorter side. Every
      *      lane shares the group-wide @p capacity and @p words_count (so the inner scan loops one common word range,
      *      exactly like the byte 8xN kernel); a lane's pattern is hashed into its own slot region. Returns `false`
      *      when @p scratch_space is too small. On success @p slot_keys / @p slot_masks / @p absent_row point into
@@ -1816,13 +1816,13 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
         return absent_row;
     }
 
-#pragma endregion Per Lane Hash Peq
+#pragma endregion Per Lane Hash match_masks
 
     /**
      *  @brief Eight independent single-word rune Myers distances, one per ZMM lane (each shorter side <= 64 runes).
      *      The scan is verbatim the byte `distances_8x64_`; only the `Eq` source differs - per text position each
      *      lane hash-probes its rune to a single 64-bit bitmask, and the eight masks are assembled into one ZMM.
-     *      @p scratch_space holds the 8-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
+     *      @p scratch_space holds the 8-lane hash `match_masks` (`scratch_bytes_for(max_shorter)`).
      */
     template <typename results_writer_>
     status_t distances_8x64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
@@ -1904,7 +1904,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
      *      sides in `(64, 64 * words_count_]` runes. The scan is verbatim the byte `distances_8x_multiword_<words_count_>`
      *      (two intra-lane ripples: the 65-bit `(Eq & VP) + VP + addition_carry` and the bit63->bit0 shift carries;
      *      neither crosses a lane); only the `Eq` source differs - each lane probes its hash once per text rune and
-     *      reads the resulting row's `words_count_` bitmask words. @p scratch_space holds the 8-lane hash `Peq`
+     *      reads the resulting row's `words_count_` bitmask words. @p scratch_space holds the 8-lane hash `match_masks`
      *      (`scratch_bytes_for(max_shorter)`).
      */
     template <size_t words_count_, typename results_writer_>
@@ -2025,7 +2025,7 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
      *      runes). Each lane carries its own `ceil(shorter / 64)`-word Myers integer; the group shares a single
      *      @p words_count so every lane loops the same word range. The math is identical to the templated variant;
      *      the per-word state lives in a fixed-capacity stack array indexed at runtime. @p scratch_space holds the
-     *      8-lane hash `Peq` (`scratch_bytes_for(max_shorter)`).
+     *      8-lane hash `match_masks` (`scratch_bytes_for(max_shorter)`).
      */
     template <typename results_writer_>
     status_t distances_8x_multiword_large_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
@@ -2804,7 +2804,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     }
 
     /**
-     *  @brief Worst-case scratch for a single cell over the whole input, in O(Q+C): the Myers `Peq` + transposed-text
+     *  @brief Worst-case scratch for a single cell over the whole input, in O(Q+C): the Myers `match_masks` + transposed-text
      *      buffer for the longest string, or the anti-diagonal DP fallback for the longest query × longest candidate
      *      (a real cell in both the full and symmetric grids, so this is a safe upper bound for every slice).
      */
@@ -2823,7 +2823,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         size_t dp_scratch = 0, eightxN_scratch = 0;
         size_t const shortest_longest = sz_min_of_two(longest_query, longest_candidate);
         if (queries.size() && candidates.size() && shortest_longest > 64) {
-            // The 8xN kernels (templated and runtime) keep a per-lane multi-word `Peq` of `match_masks_bytes_k *
+            // The 8xN kernels (templated and runtime) keep a per-lane multi-word `match_masks` of `match_masks_bytes_k *
             // words_bound`, where the word bound is `ceil(shorter / 64)` for the largest shorter side any group can
             // present. This applies to every shorter side above 64, not just the > 512 long tail.
             size_t const words_bound = (shortest_longest + 63) / 64;
@@ -2963,7 +2963,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 index_t group = 1;
                 ++cell_index;
                 // Keep every group query-major: one shared query against a run of its candidates, so the build-once
-                // `distances_8x64_shared_query_` kernel can pay the `Peq` build once per query.
+                // `distances_8x64_shared_query_` kernel can pay the `match_masks` build once per query.
                 for (; cell_index != cell_end && group != (index_t)myers_t::lanes_k; ++cell_index, ++group) {
                     size_t next_query_index = 0, next_candidate_index = 0;
                     cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
@@ -2981,7 +2981,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 }
 
                 writer.destinations = destinations;
-                // When the shared query fits a single 64-bit Myers word, build its `Peq` once via the shared-query
+                // When the shared query fits a single 64-bit Myers word, build its `match_masks` once via the shared-query
                 // kernel; otherwise (the query is the longer side and exceeds 64 while a candidate is short) the
                 // per-pair build covers it.
                 auto const query_view = to_view(queries[seed_query_index]);
@@ -4054,10 +4054,10 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     static constexpr size_t u16_reach_limit_k = 60000; // ? `u16` headroom for the non-unit rune lane walker.
     // The in-engine 8-lane rune Myers keeps its `vertical` state in `distances_8x_multiword_large_`'s stack arrays
     // (`stack_words_capacity_k = 64` words), so the runtime `fits_myers` gate routes any cell whose shorter rune side
-    // exceeds `myers_max_shorter_runes_k` to the per-pair DP fallback instead. The Myers `Peq` is an open-addressing
+    // exceeds `myers_max_shorter_runes_k` to the per-pair DP fallback instead. The Myers `match_masks` is an open-addressing
     // hash sized `O(shorter`^2`)` (capacity grows with the pattern), so sizing it for the global-longest side - rather
     // than for this gate - would reserve quadratically large scratch (tens of GB at 100k runes) for a path that never
-    // runs. Cap every Myers-`Peq` reservation at the gate that actually admits cells into the Myers kernels.
+    // runs. Cap every Myers-`match_masks` reservation at the gate that actually admits cells into the Myers kernels.
     static constexpr size_t myers_max_shorter_runes_k = 64 * 64;
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
@@ -4160,14 +4160,14 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                                                         : 0;
         // The rune-Myers fast path transcodes up to `myers_lanes_k` pairs' runes into one buffer (a rune is at least
         // one byte, so byte length bounds rune count); the longer side is unbounded, so the transcode arena keeps the
-        // global longest dimensions. The 8-lane hash `Peq`, however, is only ever built for cells whose shorter side
+        // global longest dimensions. The 8-lane hash `match_masks`, however, is only ever built for cells whose shorter side
         // passes the `fits_myers` gate (`myers_max_shorter_runes_k`); a longer shorter side always takes the per-pair
-        // DP fallback. Since that `Peq` is an open-addressing hash sized `O(shorter`^2`)` (its capacity grows with the
+        // DP fallback. Since that `match_masks` is an open-addressing hash sized `O(shorter`^2`)` (its capacity grows with the
         // pattern), bound the shorter dimension by the gate - sizing it for the global longest would reserve tens of
         // gigabytes for a kernel that never runs at that length.
         size_t const myers_transcode_bytes = round_up_to_multiple(
             (size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t), specs.cache_line_width);
-        size_t const myers_peq_bytes = myers_t::scratch_bytes_for(
+        size_t const myers_match_masks_bytes = myers_t::scratch_bytes_for(
             sz_min_of_two(sz_min_of_two(longest_query, longest_candidate), myers_max_shorter_runes_k));
         size_t dp_scratch = 0;
         if (queries.size() && candidates.size()) {
@@ -4176,7 +4176,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                                                  to_view(candidates[longest_candidate_index]), specs);
         }
         size_t const lane_walker_path = query_rune_bytes + transpose_bytes + walker_scratch;
-        size_t const myers_path = myers_transcode_bytes + myers_peq_bytes;
+        size_t const myers_path = myers_transcode_bytes + myers_match_masks_bytes;
         return sz_max_of_two(sz_max_of_two(lane_walker_path, myers_path), dp_scratch);
     }
 
@@ -4241,7 +4241,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         size_t const candidates_count = candidates.size();
 
         // Carve the slice's worst transcode area off the front of scratch (a rune is >= 1 byte, so byte length bounds
-        // rune count) and leave the tail for the per-call 8-lane Myers `Peq`. The global-worst sizing from
+        // rune count) and leave the tail for the per-call 8-lane Myers `match_masks`. The global-worst sizing from
         // `worst_cell_scratch_` guarantees this split stays in bounds for any slice.
         size_t longest_query = 0, longest_candidate = 0;
         for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
@@ -4254,9 +4254,10 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             (size_t)myers_lanes_k * (longest_query + longest_candidate) * sizeof(rune_t), specs.cache_line_width);
         rune_t *const rune_arena = reinterpret_cast<rune_t *>(scratch.data());
         size_t const rune_arena_runes = transcode_bytes / sizeof(rune_t);
-        scratch_space_t const peq_scratch = transcode_bytes <= scratch.size()
-                                                ? scratch.subspan(transcode_bytes, scratch.size() - transcode_bytes)
-                                                : scratch_space_t {};
+        scratch_space_t const match_masks_scratch = transcode_bytes <= scratch.size()
+                                                        ? scratch.subspan(transcode_bytes,
+                                                                          scratch.size() - transcode_bytes)
+                                                        : scratch_space_t {};
         scratch_space_t const dp_scratch_space = scratch;
 
         scoring_t dp {substituter_, gap_costs_};
@@ -4334,7 +4335,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             // returns; the byte length is a safe conservative gate for the > 4096-rune long tail (rune >= 1 byte).
             bool const fits_myers = query.size() != 0 && candidate.size() != 0 &&
                                     sz_min_of_two(query.size(), candidate.size()) <= stack_words_capacity_k * 64;
-            if (!fits_myers || !peq_scratch.size()) {
+            if (!fits_myers || !match_masks_scratch.size()) {
                 size_t result_distance = 0;
                 if (status_t status = dp(query, candidate, result_distance, dp_scratch_space, dummy, specs);
                     status != status_t::success_k)
@@ -4419,16 +4420,16 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                 seed_bucket,
                 [&](auto bucket) {
                     if constexpr (bucket.value == 1)
-                        return myers.distances_8x64_(group_pairs, group_writer, peq_scratch);
+                        return myers.distances_8x64_(group_pairs, group_writer, match_masks_scratch);
                     else
                         return myers.template distances_8x_multiword_<bucket.value>(group_pairs, group_writer,
-                                                                                    peq_scratch);
+                                                                                    match_masks_scratch);
                 },
-                [&] { return myers.distances_8x_multiword_large_(group_pairs, group_writer, peq_scratch); });
+                [&] { return myers.distances_8x_multiword_large_(group_pairs, group_writer, match_masks_scratch); });
             if (status == status_t::success_k) continue;
             // Defensive scratch-shortfall fallback: score every grouped pair through the per-pair UTF-8 rune DP over
             // its original cell (the `dp` scorer owns its own scratch via `dp_scratch_space`). Mirrors the byte
-            // Myers driver's group fallback; `worst_cell_scratch_` sizes the `Peq` so this should not trigger.
+            // Myers driver's group fallback; `worst_cell_scratch_` sizes the `match_masks` so this should not trigger.
             for (index_t lane = 0; lane != group; ++lane) {
                 size_t lane_score = 0;
                 auto const lane_query = to_view(queries[group_query_indices[lane]]);
@@ -7184,8 +7185,9 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i16` recurrence hardcodes `_mm512_max_epi16`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-"
-                                                                                                        "Waterman).");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
+                                                                                                                 "man)"
+                                                                                                                 ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -7487,8 +7489,9 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i32` recurrence hardcodes `_mm512_max_epi32`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-"
-                                                                                                        "Waterman).");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
+                                                                                                                 "man)"
+                                                                                                                 ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};

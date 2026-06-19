@@ -2159,7 +2159,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *  @brief Number of 64-bit words the dispatch in `operator()` actually allocates for a @p shorter_length-rune
      *      pattern. The unrolled tiers round up to the next power of two (1/2/4/8 words for shorter <= 64/128/256/512)
      *      so their templates line up with the Ice Lake lockstep family; the generic tier above 512 uses the exact
-     *      `ceil(shorter / 64)`. `layout()` must size the `Peq` table to this so the scratch never falls short.
+     *      `ceil(shorter / 64)`. `layout()` must size the `match_masks` table to this so the scratch never falls short.
      */
     static constexpr size_t dispatch_words_count_for(size_t shorter_length) noexcept {
         return shorter_length <= 64    ? 1
@@ -2171,7 +2171,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
     /** @brief Byte offsets of this walker's scratch sub-buffers. */
     struct layout_t {
-        /** @brief The per-word `Peq` tables (256 entries each). */
+        /** @brief The per-word `match_masks` tables (256 entries each). */
         size_t match_masks = 0;
         /** @brief The generic path's per-word `vertical_positives` state (zero for the on-stack tiers). */
         size_t vertical_positives = 0;
@@ -2186,7 +2186,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
     layout_t layout(span<char_t const> first, span<char_t const> second, cpu_specs_t const &specs) const noexcept {
         size_t const shorter_length = sz_min_of_two(first.size(), second.size());
         // The small tiers pick 1/2/4/8 words (shorter <= 64/128/256/512); above that the generic path spans
-        // `ceil(shorter / 64)` words. Either way the `Peq` table needs one 256-entry row per word.
+        // `ceil(shorter / 64)` words. Either way the `match_masks` table needs one 256-entry row per word.
         size_t const words_count = dispatch_words_count_for(shorter_length);
         scratch_amount_t amount {specs.cache_line_width};
         layout_t at;
@@ -2229,7 +2229,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         using match_masks_t = u64_t[words_count_][256];
         match_masks_t &match_masks = *reinterpret_cast<match_masks_t *>(scratch_space.data());
-        // Every block of every touched character is read, so zero them all before building the `Peq` table: the
+        // Every block of every touched character is read, so zero them all before building the `match_masks` table: the
         // scratch is uninitialized (and may hold a previous walker's bytes).
         for (index_t position = 0; position != shorter_length; ++position)
             for (index_t word = 0; word != words_count_; ++word) match_masks[word][(u8_t)shorter[position]] = 0;
@@ -2282,7 +2282,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *      horizontal deltas across a run-time `words_count = ceil(shorter / 64)` of 64-bit blocks. Exact edit
      *      distance in O(longer * words_count) word-operations, 64 DP cells per machine word, no DP matrix.
      *
-     *  Uses the same recurrence as `unrolled_` but with a run-time block count. The `Peq` `match_masks` table lives
+     *  Uses the same recurrence as `unrolled_` but with a run-time block count. The `match_masks` `match_masks` table lives
      *  in the supplied scratch (`256 * words_count` u64 entries - the dominant memory cost, ~2KiB per block). The
      *  per-block `vertical_positives` / `vertical_negatives` state stays on the stack up to `stack_words_capacity_k`
      *  blocks and otherwise spills into scratch, so the hot loop never touches the heap.
@@ -2303,7 +2303,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
 
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data());
         // The vertical state lives on the stack for the common case and in scratch for very long patterns, so the
-        // inner loop is allocation-free either way. The `Peq` table starts at the (cache-line-aligned) front; the
+        // inner loop is allocation-free either way. The `match_masks` table starts at the (cache-line-aligned) front; the
         // vertical state is parked at the very end of scratch, sidestepping `layout()`'s internal alignment padding
         // between sub-buffers so the offsets here cannot disagree with the sizing in `scratch_space_needed`.
         u64_t stack_vertical_positives[stack_words_capacity_k], stack_vertical_negatives[stack_words_capacity_k];
@@ -2315,7 +2315,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
             vertical_positives = reinterpret_cast<u64_t *>(scratch_end - 2 * vertical_bytes);
         }
 
-        // Build the `Peq` table: clear every touched character's blocks, then set the shorter side's match bits. The
+        // Build the `match_masks` table: clear every touched character's blocks, then set the shorter side's match bits. The
         // scratch is uninitialized (and may hold a previous walker's bytes), so each row is `match_masks[char][word]`
         // laid out as `match_masks[char * words_count + word]`.
         for (size_t position = 0; position != shorter_length; ++position)
@@ -2384,9 +2384,9 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
  *  @brief Bit-parallel Myers/Hyyrö unit-cost Levenshtein for two @b UTF-32 (rune) strings on the serial backend.
  *
  *  The Myers scan (`vertical_positives` / `vertical_negatives`, the horizontal `+1`/`-1` carries, the multi-word
- *  low->high ripple and the distance probe) operates @b only on the per-symbol `Peq` bitmask words and is therefore
+ *  low->high ripple and the distance probe) operates @b only on the per-symbol `match_masks` bitmask words and is therefore
  *  independent of the key type. The byte specialization (`levenshtein_distance_myers<char, sz_cap_serial_k>`, the
- *  byte oracle) indexes a dense 256-entry `Peq` table by the symbol byte; a 4-byte `rune_t` key cannot index a dense
+ *  byte oracle) indexes a dense 256-entry `match_masks` table by the symbol byte; a 4-byte `rune_t` key cannot index a dense
  *  table, so this specialization swaps the dense table for an @b open-addressing hash (rune -> `words_count` bitmask
  *  words). The recurrence below is the same one the byte oracle runs, only the per-symbol `match_row` lookup changes:
  *  a text rune absent from the pattern hashes to an all-zero row, which is exactly correct (it matches nothing).
@@ -2439,7 +2439,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
     struct layout_t {
         /** @brief The open-addressing slot keys (`hash_capacity` runes). */
         size_t slot_keys = 0;
-        /** @brief The per-slot `Peq` bitmask words (`hash_capacity * words_count` u64 entries). */
+        /** @brief The per-slot `match_masks` bitmask words (`hash_capacity * words_count` u64 entries). */
         size_t slot_masks = 0;
         /** @brief A permanently-zero bitmask row (`words_count` u64) returned for runes absent from the pattern. */
         size_t absent_row = 0;
@@ -2511,7 +2511,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
             vertical_positives = reinterpret_cast<u64_t *>(scratch_end - 2 * vertical_bytes);
         }
 
-        // Build the open-addressing `Peq` hash: clear keys to the empty sentinel and the absent row to zero, then
+        // Build the open-addressing `match_masks` hash: clear keys to the empty sentinel and the absent row to zero, then
         // insert each pattern rune and set its match bit in the slot's `words_count` bitmask words.
         for (index_t slot = 0; slot != capacity; ++slot) slot_keys[slot] = empty_slot_k;
         for (size_t word = 0; word != words_count; ++word) absent_row[word] = 0;
@@ -2537,7 +2537,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
         for (size_t longer_position = 0; longer_position != longer_length; ++longer_position) {
             rune_t const symbol = longer[longer_position];
             // Look up the rune's bitmask row: probe to its slot, or the permanently-zero `absent_row` if the rune is
-            // not in the pattern (a text rune absent from the pattern matches nothing -> all-zero `Peq`, correct).
+            // not in the pattern (a text rune absent from the pattern matches nothing -> all-zero `match_masks`, correct).
             u64_t const *match_row = absent_row;
             for (index_t slot = hash_rune(symbol, capacity);; slot = (slot + 1) & (capacity - 1)) {
                 rune_t const key = slot_keys[slot];
@@ -2648,7 +2648,7 @@ struct levenshtein_distance {
 
         // Bit-parallel Myers path (matches the guard in `operator()`). The scalar serial walker covers any
         // shorter-side length - its generic tier above 512 runes still beats the anti-diagonal DP - while the
-        // SIMD lockstep families stay bounded to their widest 512-rune tier. Its `layout()` sizes both the `Peq`
+        // SIMD lockstep families stay bounded to their widest 512-rune tier. Its `layout()` sizes both the `match_masks`
         // table and, for very long patterns, the spilled vertical state.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
@@ -2789,11 +2789,11 @@ struct levenshtein_distance_utf8 {
     using linearized_fallback_t = levenshtein_distance<char, linear_gap_costs_t, capability_k>;
     using ascii_fallback_t = levenshtein_distance<char, gap_costs_t, capability_k>;
 
-    /** @brief Bit-parallel rune Myers fast path for unit-cost linear UTF-8 Levenshtein (rune-keyed `Peq`, R8). */
+    /** @brief Bit-parallel rune Myers fast path for unit-cost linear UTF-8 Levenshtein (rune-keyed `match_masks`, R8). */
     using rune_myers_t = levenshtein_distance_myers<rune_t, sz_cap_serial_k>;
     /**
      *  @brief Whether the rune Myers fast path is reachable for this backend. Only the serial rune Myers exists
-     *      (its `Peq` is an open-addressing hash, ISA-independent); SIMD UTF-8 backends keep the rune diagonal walker
+     *      (its `match_masks` is an open-addressing hash, ISA-independent); SIMD UTF-8 backends keep the rune diagonal walker
      *      until they grow their own rune-keyed Myers, so they stay on the diagonal path below.
      */
     static constexpr bool rune_myers_available_k = capability_serialized_k == sz_cap_serial_k;
@@ -2833,7 +2833,7 @@ struct levenshtein_distance_utf8 {
         size_t utf8_path = transcode_bytes + rune_requirements.total;
 
         // The unit-cost-linear UTF-8 path scores the transcoded runes with the rune Myers walker instead of the rune
-        // diagonal. Its `Peq` hash + vertical state can outsize the diagonal's two rune rows, so widen the reserve.
+        // diagonal. Its `match_masks` hash + vertical state can outsize the diagonal's two rune rows, so widen the reserve.
         // The Myers `layout()` reads only the rune-count via `.size()`; the worst case is one rune per UTF-8 byte.
         if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)
             if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1) {
@@ -2913,7 +2913,7 @@ struct levenshtein_distance_utf8 {
         span<rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
         span<rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
 
-        // Bit-parallel rune Myers fast path: ~20-30x the rune anti-diagonal DP at L >= 256 (the rune-keyed `Peq`
+        // Bit-parallel rune Myers fast path: ~20-30x the rune anti-diagonal DP at L >= 256 (the rune-keyed `match_masks`
         // hash lookup does not erode Myers' advantage). Unit-cost linear only (match 0, mismatch 1, gap 1); the rune
         // diagonal walker below remains the oracle for non-unit / affine costs. Bit-exact with that diagonal.
         if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)

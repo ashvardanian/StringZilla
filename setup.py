@@ -5,6 +5,85 @@ from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
+import concurrent.futures
+
+
+def _max_compile_workers() -> int:
+    """Concurrency cap for compiling translation units. Each `cicc`/`cc1plus` pass on the heavily-templated
+    similarity headers needs ~1-2 GB, so we cap below the core count to avoid thrashing or OOM on big boxes."""
+    return max(1, min(os.cpu_count() or 1, 8))
+
+
+def _depfile_prerequisites(dep_path: str):
+    """Parse a `-MMD/-MF` makefile fragment into its list of prerequisite paths, or `None` if absent."""
+    try:
+        with open(dep_path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    text = text.replace("\\\n", " ")  # un-escape the line continuations make uses
+    if ":" in text:
+        text = text.split(":", 1)[1]  # drop the `target.o:` prefix, keep the prerequisites
+    return [token for token in text.split() if token]
+
+
+def _object_is_fresh(obj_path: str, dep_path: str) -> bool:
+    """True when `obj_path` exists and is newer than every header/source in its depfile (so it can be skipped).
+    Conservative: a missing depfile (e.g. a first build) returns False so the object is (re)compiled."""
+    if not os.path.exists(obj_path):
+        return False
+    prerequisites = _depfile_prerequisites(dep_path)
+    if not prerequisites:
+        return False
+    object_mtime = os.path.getmtime(obj_path)
+    for prerequisite in prerequisites:
+        try:
+            if os.path.getmtime(prerequisite) > object_mtime:
+                return False
+        except OSError:
+            return False  # a prerequisite vanished -> rebuild
+    return True
+
+
+def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
+    """Run `(callable, label)` compile jobs concurrently, surfacing the first failure (and its label)."""
+    if not jobs:
+        return
+    workers = max(1, min(max_workers, len(jobs)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(job): label for job, label in jobs}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as error:
+                raise RuntimeError(f"Compilation failed: {futures[future]}") from error
+
+
+def _parallel_compiler_compile(self, sources, output_dir=None, macros=None, include_dirs=None, debug=0,
+                               extra_preargs=None, extra_postargs=None, depends=None):
+    """A parallel drop-in for `distutils.ccompiler.CCompiler.compile`, which compiles the sources of one
+    extension serially. Reuses the compiler's own `_setup_compile` / `_get_cc_args` / `_compile`, so the exact
+    flags distutils would pass are preserved; only the per-object loop is spread across a thread pool."""
+    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
+        output_dir, macros, include_dirs, sources, depends, extra_postargs)
+    cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
+
+    def _compile_one(obj):
+        try:
+            src, ext = build[obj]
+        except KeyError:
+            return
+        self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+
+    workers = max(1, min(_max_compile_workers(), len(objects)))
+    if workers > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for _ in pool.map(_compile_one, objects):
+                pass
+    else:
+        for obj in objects:
+            _compile_one(obj)
+    return objects
 
 
 class NumpyBuildExt(build_ext):
@@ -20,11 +99,18 @@ class NumpyBuildExt(build_ext):
 
     def build_extension(self, ext):
         import numpy as np
+        import types
 
         # Ensure NumPy headers are available
         numpy_include = np.get_include()
         if numpy_include not in ext.include_dirs:
             ext.include_dirs.append(numpy_include)
+
+        # distutils compiles an extension's sources serially; swap in a parallel `compile` so the many C/C++
+        # translation units (and the CUDA extension's C glue) build across cores like the nvcc step and `make -j`.
+        if self.compiler is not None and not getattr(self.compiler, "_sz_parallelized", False):
+            self.compiler.compile = types.MethodType(_parallel_compiler_compile, self.compiler)
+            self.compiler._sz_parallelized = True
 
         # Decide per-language compile flags using our platform helpers
         if sys.platform == "linux" or sys.platform.startswith("freebsd"):
@@ -106,15 +192,21 @@ class CudaBuildExtension(NumpyBuildExt):
         cuda_sources = [s for s in ext.sources if s.endswith(".cu")]
         c_sources = [s for s in ext.sources if not s.endswith(".cu")]
 
-        # Compile CUDA files with nvcc first
+        # Compile the CUDA sources with nvcc, concurrently, skipping any whose object is already up to date.
+        # nvcc itself does not parallelize across input files (and `--threads` only splits per-`-gencode` passes,
+        # of which we have one), so the only lever is running several nvcc processes at once - mirroring `make -j`.
+        os.makedirs(self.build_temp, exist_ok=True)
+        # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
+        # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
+        host_cxx = os.environ.get("CUDAHOSTCXX")
         objects = []
+        nvcc_jobs = []
         for cuda_source in cuda_sources:
-            # Generate object file path
             obj_name = os.path.splitext(os.path.basename(cuda_source))[0] + ".o"
             obj_path = os.path.join(self.build_temp, obj_name)
-            os.makedirs(self.build_temp, exist_ok=True)
+            dep_path = obj_path + ".d"
+            objects.append(obj_path)
 
-            # NVCC command
             nvcc_cmd = [
                 "nvcc",
                 "-c",
@@ -130,28 +222,28 @@ class CudaBuildExtension(NumpyBuildExt):
                 "-arch=sm_90a",  # Default to Hopper
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
+                "-MMD",  # emit a depfile so incremental rebuilds can skip translation units with no changed header
+                "-MF",
+                dep_path,
             ]
-
-            # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
-            # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
-            host_cxx = os.environ.get("CUDAHOSTCXX")
             if host_cxx:
                 nvcc_cmd.extend(["-ccbin", host_cxx])
-
-            # Add include directories
             for inc_dir in ext.include_dirs:
                 nvcc_cmd.extend(["-I", inc_dir])
-
-            # Add defines
             for define in ext.define_macros:
                 if len(define) == 2:
                     nvcc_cmd.append(f"-D{define[0]}={define[1]}")
                 else:
                     nvcc_cmd.append(f"-D{define[0]}")
 
-            print(f"Compiling {cuda_source} with nvcc...")
-            subprocess.check_call(nvcc_cmd)
-            objects.append(obj_path)
+            if not self.force and _object_is_fresh(obj_path, dep_path):
+                print(f"Skipping {cuda_source} (object up to date)")
+                continue
+            nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
+
+        if nvcc_jobs:
+            print(f"Compiling {len(nvcc_jobs)} CUDA source(s) with nvcc ({_max_compile_workers()} parallel workers)...")
+        _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers())
 
         # Update extension: remove .cu sources, add compiled objects
         ext.sources = c_sources

@@ -1679,7 +1679,7 @@ struct cuda_similarity_task {
     string_t shorter;
     /** @brief Longer of the two strings. */
     string_t longer;
-    /** @brief Shared query of this cell's row (Peq side for Myers reuse); empty when reuse is not applicable. */
+    /** @brief Shared query of this cell's row (match_masks side for Myers reuse); empty when reuse is not applicable. */
     string_t query;
     /**
      *  @brief @b UTF-8 codepoint-level scoring only: byte offset of each rune in @ref shorter, a prefix scan of rune
@@ -1878,11 +1878,11 @@ static constexpr int levenshtein_tier_count_k = 5;
  *  @brief Shorter-length at/above which a unit-cost Levenshtein pair leaves the bit-parallel Myers tiers and routes
  *         through the register / warp / tiled Dynamic-Programming tiers instead - the very same tiers (and kernels,
  *         with the uniform substituter) that Needleman-Wunsch uses. Myers is the optimal cell engine only for short
- *         shorter-sides: the register-resident single-word kernel (`shorter <= 64`) and the warp `Peq`-reuse path
+ *         shorter-sides: the register-resident single-word kernel (`shorter <= 64`) and the warp `match_masks`-reuse path
  *         dominate, but the size-generic one-thread-per-pair Myers (`words = ceil(shorter / 64)`, register-resident,
  *         one pair's worth of parallelism) loses to the multi-warp DP wavefront as `shorter` grows. Capping Myers here
  *         guarantees Levenshtein is never slower than Needleman-Wunsch (identical DP tiers above the cap, cheaper cell
- *         below it). Tunable; measured crossover on the H100 sits between the warp `Peq`-reuse cap and ~1 KB.
+ *         below it). Tunable; measured crossover on the H100 sits between the warp `match_masks`-reuse cap and ~1 KB.
  */
 inline static constexpr size_t levenshtein_myers_max_shorter_k = 256;
 
@@ -2618,7 +2618,7 @@ struct register_levenshtein {
  *  @brief Bit-parallel Myers/Hyyrö @b unit-cost Levenshtein, one pair per thread, for shorter <= `words_ * 64` runes.
  *         A GPU port of the serial `levenshtein_distance_myers::unrolled_`: exact edit distance in
  *         O(longer * words_) 64-bit word operations, 64 DP cells per machine word, no DP matrix. The
- *         256-entry-per-word `Peq` (`match_masks`) table lives in a per-thread @b global-scratch slice (L1-cached);
+ *         256-entry-per-word `match_masks` (`match_masks`) table lives in a per-thread @b global-scratch slice (L1-cached);
  *         the dispatch zeroes the scratch once, and each pair clears its own shorter-character entries at the end so
  *         the slice stays clean between grid-stride pairs.
  *  @note Unit-cost Levenshtein ONLY (match 0, mismatch 1, gap 1, single-byte) - the dispatch gates on that predicate.
@@ -2627,11 +2627,12 @@ struct register_levenshtein {
 template <typename task_type_, typename char_type_ = char, u32_t words_ = 1,
           sz_capability_t capability_ = sz_cap_cuda_k>
 __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count, u64_t *peq_scratch, size_t peq_stride) {
+    task_type_ *tasks, size_t tasks_count, u64_t *match_masks_scratch, size_t match_masks_stride) {
 
     size_t const thread_index = blockIdx.x * blockDim.x + threadIdx.x;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
-    u64_t *const match_masks = peq_scratch + thread_index * peq_stride; // this thread's flattened [words_][256] Peq
+    u64_t *const match_masks = match_masks_scratch +
+                               thread_index * match_masks_stride; // this thread's flattened [words_][256] match_masks
     for (size_t task_index = thread_index; task_index < tasks_count; task_index += threads_per_device) {
         task_type_ &task = tasks[task_index];
         char_type_ const *const shorter_ptr =
@@ -2644,7 +2645,7 @@ __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_thread_
             continue;
         } // empty pattern -> distance is the text length
 
-        // Build the `Peq` table: set one bit per shorter position (the slice is clean coming in).
+        // Build the `match_masks` table: set one bit per shorter position (the slice is clean coming in).
         for (u32_t position = 0; position != shorter_length; ++position)
             match_masks[(position >> 6) * 256 + static_cast<u8_t>(shorter_ptr[position])] |= (u64_t)1
                                                                                              << (position & 63);
@@ -2689,7 +2690,7 @@ __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_thread_
 /**
  *  @brief Size-generic bit-parallel Myers/Hyyrö @b unit-cost Levenshtein, one pair per thread, for @b any shorter
  *         length (`shorter > 64`, no word-count cap). The companion of `unit_myers_singleword_per_cuda_thread_<words_=1>`:
- *         where the single-word kernel keeps VP/VN in registers, this one holds the per-word `Peq` table and the
+ *         where the single-word kernel keeps VP/VN in registers, this one holds the per-word `match_masks` table and the
  *         per-word VP/VN state in a per-thread @b global-scratch slice and loops over `words_count = ceil(shorter/64)`
  *         machine words, so it covers shorter lengths that would otherwise overflow a fixed register array.
  *
@@ -2701,17 +2702,17 @@ __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_thread_
  *  possibly partial, word). Validated 0-error vs full-DP for shorter lengths in {1..9000}.
  *
  *  @note Unit-cost Levenshtein ONLY (match 0, mismatch 1, gap 1, single-byte). Myers cannot encode weighted/affine
- *        costs, so there is deliberately no NW/SW variant. The scratch slice (`peq_stride` `u64_t` per thread, laid
- *        out as `[words_count][256]` `Peq` followed by `[words_count]` VP and `[words_count]` VN) is zeroed once by
- *        the dispatch; each pair clears its own `Peq` entries at the end so the slice stays clean between pairs.
+ *        costs, so there is deliberately no NW/SW variant. The scratch slice (`match_masks_stride` `u64_t` per thread, laid
+ *        out as `[words_count][256]` `match_masks` followed by `[words_count]` VP and `[words_count]` VN) is zeroed once by
+ *        the dispatch; each pair clears its own `match_masks` entries at the end so the slice stays clean between pairs.
  */
 template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k>
 __global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_thread_( //
-    task_type_ *tasks, size_t tasks_count, u64_t *peq_scratch, size_t peq_stride) {
+    task_type_ *tasks, size_t tasks_count, u64_t *match_masks_scratch, size_t match_masks_stride) {
 
     size_t const thread_index = blockIdx.x * blockDim.x + threadIdx.x;
     size_t const threads_per_device = static_cast<size_t>(gridDim.x) * blockDim.x;
-    u64_t *const scratch = peq_scratch + thread_index * peq_stride;
+    u64_t *const scratch = match_masks_scratch + thread_index * match_masks_stride;
     for (size_t task_index = thread_index; task_index < tasks_count; task_index += threads_per_device) {
         task_type_ &task = tasks[task_index];
         char_type_ const *const shorter_ptr = task.shorter.data();
@@ -2728,11 +2729,11 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_thread_(
         }
 
         u32_t const words_count = (shorter_length + 63u) >> 6;
-        u64_t *const match_masks = scratch;                                 // [words_count][256] flattened `Peq`
-        u64_t *const vertical_positives = scratch + words_count * 256;      // [words_count] Myers' VP
+        u64_t *const match_masks = scratch;                            // [words_count][256] flattened `match_masks`
+        u64_t *const vertical_positives = scratch + words_count * 256; // [words_count] Myers' VP
         u64_t *const vertical_negatives = vertical_positives + words_count; // [words_count] Myers' VN
 
-        // Build the `Peq` table: set one bit per shorter position (the slice is clean coming in).
+        // Build the `match_masks` table: set one bit per shorter position (the slice is clean coming in).
         for (u32_t position = 0; position != shorter_length; ++position)
             match_masks[(position >> 6) * 256 + static_cast<u8_t>(shorter_ptr[position])] |= (u64_t)1
                                                                                              << (position & 63);
@@ -2775,14 +2776,14 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_thread_(
         }
         task.result = distance;
 
-        // Clear this pair's `Peq` entries so the slice is clean for the next grid-stride pair.
+        // Clear this pair's `match_masks` entries so the slice is clean for the next grid-stride pair.
         for (u32_t position = 0; position != shorter_length; ++position)
             match_masks[(position >> 6) * 256 + static_cast<u8_t>(shorter_ptr[position])] = 0;
     }
 }
 
 /**
- *  @brief Bit-parallel Myers (unit-cost Levenshtein) sharing one query's @b Peq across a whole row of candidates.
+ *  @brief Bit-parallel Myers (unit-cost Levenshtein) sharing one query's @b match_masks across a whole row of candidates.
  *         One @b WARP owns one query: its 32 lanes cooperatively build the query's 256-entry match-bitmask table
  *         once into shared memory, then stride over the query's candidates (one candidate per lane in flight),
  *         each lane running an independent single-word Myers scan that reuses the shared table.
@@ -2824,7 +2825,7 @@ __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_warp_( 
         char_type_ const *const query_ptr = row_head.query.data();
         u32_t const query_length = static_cast<u32_t>(row_head.query.size());
 
-        // Build this query's `Peq` once into shared (all 32 lanes cooperate); the row reuses it.
+        // Build this query's `match_masks` once into shared (all 32 lanes cooperate); the row reuses it.
         for (unsigned symbol = lane; symbol < 256u; symbol += 32u) match_masks[symbol] = 0;
         __syncwarp();
         for (u32_t position = lane; position < query_length; position += 32u)
@@ -2866,7 +2867,7 @@ __global__ __launch_bounds__(256, 4) void unit_myers_singleword_per_cuda_warp_( 
 }
 
 /**
- *  @brief Multi-word bit-parallel Myers (unit-cost Levenshtein) sharing one query's @b Peq across a row of candidates.
+ *  @brief Multi-word bit-parallel Myers (unit-cost Levenshtein) sharing one query's @b match_masks across a row of candidates.
  *         One @b WARP owns one query: its 32 lanes cooperatively build the query's `words_count_ * 256`-entry
  *         match-bitmask table once into shared memory, then stride over the query's candidates (one candidate per
  *         lane in flight), each lane running an independent multi-word Myers scan that reuses the shared table.
@@ -2912,7 +2913,7 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_warp_( /
         char_type_ const *const query_ptr = row_head.query.data();
         u32_t const query_length = static_cast<u32_t>(row_head.query.size());
 
-        // Build this query's multi-word `Peq` once into shared (all 32 lanes cooperate); the row reuses it.
+        // Build this query's multi-word `match_masks` once into shared (all 32 lanes cooperate); the row reuses it.
         for (unsigned slot = lane; slot < words_count_ * 256u; slot += 32u) match_masks[slot] = 0;
         __syncwarp();
         for (u32_t position = lane; position < query_length; position += 32u)
@@ -3949,7 +3950,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     /** @brief Host-side dense per-tier counts (empty tiers absent from the RLE expand to zero). */
     size_t tier_counts_[levenshtein_tier_count_k] {};
 
-    safe_vector<u64_t, scores_allocator_t> myers_peq_buffer_ {alloc_}; // per-thread Myers `Peq` scratch (zeroed once)
+    safe_vector<u64_t, scores_allocator_t> myers_match_masks_buffer_ {
+        alloc_}; // per-thread Myers `match_masks` scratch (zeroed once)
     /** @brief Row width of the current cross-product (for the Myers-reuse kernel). */
     size_t cross_candidates_count_ = 0;
     /** @brief Longest query this call (reuse needs every query single-word, <= 64). */
@@ -3986,7 +3988,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         } device_tier;
         /** @brief Bit-parallel Myers fast path (linear unit-cost only). */
         struct myers_t {
-            kernel_shape_t singleword_thread, multiword_thread, singleword_warp, multiword_warp_2, multiword_warp_4;
+            kernel_shape_t singleword_thread, multiword_thread, singleword_warp;
+            kernel_shape_t multiword_warp_2, multiword_warp_4, multiword_warp_8, multiword_warp_16, multiword_warp_32;
         } myers;
         /** @brief Device-side task build / result scatter / on-GPU tier router. */
         struct infra_t {
@@ -4088,14 +4091,19 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 table.myers.multiword_thread,
                 (void const *)&unit_myers_multiword_per_cuda_thread_<task_t, char_t, capability_k>, 256, 0, true);
             if (status.status != status_t::success_k) return {table, status};
-            // Per-query multi-word `Peq`-reuse kernels: 256 threads = 8 warps, each warp owns `words_count * 256`
-            // `u64_t` of shared `Peq` (1/2/4 words covering shorter <= 64/128/256).
+            // Per-query multi-word match-mask reuse kernels: each warp owns `words_count * 256` `u64_t` of shared
+            // match-masks (1/2/4/8/16 words covering shorter <= 64/128/256/512/1024). Shared per block is
+            // `warps_per_block * words * 256 * 8` bytes; the 1..8-word shapes run 8 warps/block (<= 128 KB), but the
+            // 16-word shape would need 256 KB at 8 warps (over the ~227 KB opt-in ceiling), so it runs 4 warps/block.
             static constexpr unsigned myers_candidates_shared1_k = (256u / 32u) * 1u * 256u * sizeof(u64_t);
             static constexpr unsigned myers_candidates_shared2_k = (256u / 32u) * 2u * 256u * sizeof(u64_t);
             static constexpr unsigned myers_candidates_shared4_k = (256u / 32u) * 4u * 256u * sizeof(u64_t);
+            static constexpr unsigned myers_candidates_shared8_k = (256u / 32u) * 8u * 256u * sizeof(u64_t);
+            static constexpr unsigned myers_candidates_shared16_k = (128u / 32u) * 16u * 256u * sizeof(u64_t);
+            static constexpr unsigned myers_candidates_shared32_k = (64u / 32u) * 32u * 256u * sizeof(u64_t);
             // Single-word (<= 64) keeps the dedicated hand-tuned kernel: its scalar VP/VN recurrence is ~2.3x
             // faster than the generic multi-word body specialized to one word (whose carry bookkeeping is dead
-            // weight at a single word). The 2/4-word variants below use the generalized shared-`Peq` kernel.
+            // weight at a single word). The 2/4-word variants below use the generalized shared-`match_masks` kernel.
             status = resolve_kernel_shape(
                 table.myers.singleword_warp,
                 (void const *)&unit_myers_singleword_per_cuda_warp_<task_t, char_t, capability_k>, 256,
@@ -4110,6 +4118,21 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 table.myers.multiword_warp_4,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 4u>, 256,
                 myers_candidates_shared4_k, true);
+            if (status.status != status_t::success_k) return {table, status};
+            status = resolve_kernel_shape(
+                table.myers.multiword_warp_8,
+                (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 8u>, 256,
+                myers_candidates_shared8_k, true);
+            if (status.status != status_t::success_k) return {table, status};
+            status = resolve_kernel_shape(
+                table.myers.multiword_warp_16,
+                (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 16u>, 128,
+                myers_candidates_shared16_k, true);
+            if (status.status != status_t::success_k) return {table, status};
+            status = resolve_kernel_shape(
+                table.myers.multiword_warp_32,
+                (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 32u>, 64,
+                myers_candidates_shared32_k, true);
             if (status.status != status_t::success_k) return {table, status};
         }
         // Device-side task materialization (all-pairs or symmetric); grid is sized from the cell count, so no
@@ -4312,9 +4335,9 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
     CUresult start_event_error = timer_.record_start(executor.stream());
     if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
-    // Per-query Myers `Peq`-reuse fast path (the retrieval regime): a non-symmetric unit-cost cross-product whose
+    // Per-query Myers `match_masks`-reuse fast path (the retrieval regime): a non-symmetric unit-cost cross-product whose
     // queries are all single-word (`<= 64`), with at least a warp's worth of candidates per row to amortize the
-    // shared-table build. One warp owns a query's whole row and reuses its `Peq` across every candidate - bit-exact
+    // shared-table build. One warp owns a query's whole row and reuses its `match_masks` across every candidate - bit-exact
     // with the per-pair Myers kernels (identical recurrence), so it covers the whole tier pipeline when it fires.
     if constexpr (!is_affine_k) {
         bool const is_unit_cost = substituter_.match == 0 && substituter_.mismatch == 1 &&
@@ -4323,22 +4346,42 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         size_t const candidates_count = cross_candidates_count_;
         size_t const queries_count = candidates_count ? tasks.size() / candidates_count : 0;
         bool const reuse_eligible = is_unit_cost && cross_kind_ == cross_similarities_t::all_pairs_k &&
-                                    cross_max_query_length_ <= 256u && candidates_count >= reuse_min_candidates_k &&
+                                    cross_max_query_length_ <= 2048u && candidates_count >= reuse_min_candidates_k &&
                                     queries_count != 0 && queries_count * candidates_count == tasks.size();
         if (reuse_eligible) {
-            unsigned const reuse_words = (static_cast<unsigned>(cross_max_query_length_) + 63u) >> 6; // 1,2,3,4
-            kernel_shape_t const &shape = reuse_words <= 1   ? kernel_table.myers.singleword_warp
-                                          : reuse_words <= 2 ? kernel_table.myers.multiword_warp_2
-                                                             : kernel_table.myers.multiword_warp_4; // 3 or 4 words
-            unsigned const reuse_words_rounded = reuse_words <= 1 ? 1u : reuse_words <= 2 ? 2u : 4u;
-            unsigned const reuse_shared_k = (256u / 32u) * reuse_words_rounded * 256u * (unsigned)sizeof(u64_t);
+            // Round the query's word count up to the nearest instantiated reuse shape {1,2,4,8,16,32 words = shorter
+            // <= 64,128,256,512,1024,2048}. Shapes up to 8 words run 8 warps/block; wider shapes shrink the block so
+            // their `warps * words * 256 * 8` shared match-masks stay under the ~227 KB opt-in ceiling (16 words -> 4
+            // warps = 128 KB, 32 words -> 2 warps = 128 KB).
+            unsigned const reuse_words = (static_cast<unsigned>(cross_max_query_length_) + 63u) >> 6; // 1..32
+            kernel_shape_t const *shape_ptr;
+            unsigned reuse_words_rounded, warps_per_block;
+            if (reuse_words <= 1) {
+                shape_ptr = &kernel_table.myers.singleword_warp, reuse_words_rounded = 1, warps_per_block = 8;
+            }
+            else if (reuse_words <= 2) {
+                shape_ptr = &kernel_table.myers.multiword_warp_2, reuse_words_rounded = 2, warps_per_block = 8;
+            }
+            else if (reuse_words <= 4) {
+                shape_ptr = &kernel_table.myers.multiword_warp_4, reuse_words_rounded = 4, warps_per_block = 8;
+            }
+            else if (reuse_words <= 8) {
+                shape_ptr = &kernel_table.myers.multiword_warp_8, reuse_words_rounded = 8, warps_per_block = 8;
+            }
+            else if (reuse_words <= 16) {
+                shape_ptr = &kernel_table.myers.multiword_warp_16, reuse_words_rounded = 16, warps_per_block = 4;
+            }
+            else { shape_ptr = &kernel_table.myers.multiword_warp_32, reuse_words_rounded = 32, warps_per_block = 2; }
+            kernel_shape_t const &shape = *shape_ptr;
+            unsigned const block_threads = warps_per_block * 32u;
+            unsigned const reuse_shared_k = warps_per_block * reuse_words_rounded * 256u * (unsigned)sizeof(u64_t);
             unsigned const blocks = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
             task_t *tasks_ptr = tasks.data();
             size_t queries_count_arg = queries_count, candidates_count_arg = candidates_count;
             void *reuse_args[3] = {(void *)&tasks_ptr, (void *)&queries_count_arg, (void *)&candidates_count_arg};
             CUresult launch_error = cuda_launch_t {}
                                         .grid(blocks)
-                                        .block(256)
+                                        .block(block_threads)
                                         .shared(reuse_shared_k)
                                         .stream(executor.stream())
                                         .launch(shape.function, reuse_args);
@@ -4383,13 +4426,13 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         if constexpr (!is_affine_k) {
             if (myers_count) {
                 // The size-generic kernel sizes its per-thread scratch to the widest pair it may run: words_count =
-                // ceil(max_generic_shorter / 64) `Peq` rows of 256 plus 2*words_count VP/VN slots. The single-word
-                // kernel needs a flat 256-entry `Peq` per thread. Both launches reuse the buffer sequentially (each
+                // ceil(max_generic_shorter / 64) `match_masks` rows of 256 plus 2*words_count VP/VN slots. The single-word
+                // kernel needs a flat 256-entry `match_masks` per thread. Both launches reuse the buffer sequentially (each
                 // pair cleans up its own entries), so size it to the larger per-thread slice times the grid threads.
                 unsigned const word1_threads = kernel_table.myers.singleword_thread.blocks_per_multiprocessor *
                                                specs.streaming_multiprocessors * 256u;
-                size_t const word1_peq = word1_count ? static_cast<size_t>(word1_threads) * 256 : 0;
-                size_t generic_stride = 0, generic_peq = 0;
+                size_t const word1_match_masks = word1_count ? static_cast<size_t>(word1_threads) * 256 : 0;
+                size_t generic_stride = 0, generic_match_masks = 0;
                 if (generic_count) {
                     device_tier_maxima_t generic_maxima {};
                     cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
@@ -4397,26 +4440,27 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                         buffers_.device_maxima_scratch_, executor.stream(), generic_maxima);
                     if (maxima_status.status != status_t::success_k) return maxima_status;
                     u32_t const words_count = (generic_maxima.max_shorter + 63u) >> 6;
-                    generic_stride = static_cast<size_t>(words_count) * 256 + 2u * words_count; // Peq + VP + VN
+                    generic_stride = static_cast<size_t>(words_count) * 256 + 2u * words_count; // match_masks + VP + VN
                     unsigned const generic_threads = kernel_table.myers.multiword_thread.blocks_per_multiprocessor *
                                                      specs.streaming_multiprocessors * 256u;
-                    generic_peq = static_cast<size_t>(generic_threads) * generic_stride;
+                    generic_match_masks = static_cast<size_t>(generic_threads) * generic_stride;
                 }
-                size_t const peq_words_total = word1_peq > generic_peq ? word1_peq : generic_peq;
-                myers_peq_buffer_.clear();
-                if (myers_peq_buffer_.try_resize(peq_words_total) == status_t::bad_alloc_k)
+                size_t const match_masks_words_total = word1_match_masks > generic_match_masks ? word1_match_masks
+                                                                                               : generic_match_masks;
+                myers_match_masks_buffer_.clear();
+                if (myers_match_masks_buffer_.try_resize(match_masks_words_total) == status_t::bad_alloc_k)
                     return {status_t::bad_alloc_k};
-                if (cudaMemsetAsync(myers_peq_buffer_.data(), 0, peq_words_total * sizeof(u64_t), executor.stream()) !=
-                    cudaSuccess)
+                if (cudaMemsetAsync(myers_match_masks_buffer_.data(), 0, match_masks_words_total * sizeof(u64_t),
+                                    executor.stream()) != cudaSuccess)
                     return make_cuda_status(cudaGetLastError());
-                u64_t *peq = myers_peq_buffer_.data();
+                u64_t *match_masks = myers_match_masks_buffer_.data();
 
                 cuda_status_t myers_status {status_t::success_k, cudaSuccess};
                 auto const launch_myers = [&](kernel_shape_t const &shape, size_t first, size_t count,
                                               size_t stride) noexcept {
                     if (!count || myers_status.status != status_t::success_k) return;
                     task_t *tasks_ptr = tasks.data() + first;
-                    void *args[4] = {(void *)&tasks_ptr, (void *)&count, (void *)&peq, (void *)&stride};
+                    void *args[4] = {(void *)&tasks_ptr, (void *)&count, (void *)&match_masks, (void *)&stride};
                     unsigned const blocks = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
                     CUresult e = cuda_launch_t {}
                                      .grid(blocks)
