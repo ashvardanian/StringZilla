@@ -88,10 +88,15 @@
 #include "stringzilla/sort.h"      // `sz_sequence_argsort`, `sz_pgrams_sort`
 #include "stringzilla/intersect.h" // `sz_sequence_intersect`
 
-#include "stringzilla/utf8_iterate.h" // `sz_utf8_find_newline`, `sz_utf8_find_whitespace`, `sz_utf8_find_nth`, `sz_utf8_valid`
-#include "stringzilla/utf8_uncased_fold.h"        // `sz_utf8_uncased_fold`
-#include "stringzilla/utf8_uncased.h" // `sz_utf8_uncased_find`, `sz_utf8_uncased_order`
-#include "stringzilla/utf8_norm.h"             // `sz_utf8_norm`, `sz_utf8_norm_violation`
+#include "stringzilla/utf8_codepoints.h"   // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_unpack_chunk`
+#include "stringzilla/utf8_delimiters.h"   // `sz_utf8_find_newlines`, `sz_utf8_find_whitespaces`
+#include "stringzilla/utf8_words.h"        // `sz_utf8_word_find_boundaries`, `sz_rune_word_break_property`
+#include "stringzilla/utf8_graphemes.h"    // `sz_utf8_grapheme_find_boundaries`
+#include "stringzilla/utf8_sentences.h"    // `sz_utf8_sentence_find_boundaries`
+#include "stringzilla/utf8_lines.h"        // `sz_utf8_line_find_boundaries`
+#include "stringzilla/utf8_uncased_fold.h" // `sz_utf8_uncased_fold`
+#include "stringzilla/utf8_uncased.h"      // `sz_utf8_uncased_find`, `sz_utf8_uncased_order`
+#include "stringzilla/utf8_norm.h"         // `sz_utf8_norm`, `sz_utf8_norm_violation`
 
 #include "stringzilla/small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
 

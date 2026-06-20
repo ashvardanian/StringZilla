@@ -12,7 +12,7 @@
  *  RVV is the cleanest backend of the family: the 64-entry lead lookup `sz_utf8_norm_lead_lut_` needs no
  *  table split (no `vpshufb` 16-lane window, no `vqtbl4q` register quad). A single indexed gather
  *  (`vluxei8`) over `byte & 0x3F` reads the family bits straight from memory at any `VLEN`, the same
- *  idiom the word-break classifier in `utf8_iterate/rvv.h` uses for its ASCII property table. A per-strip
+ *  idiom the word-break classifier in `utf8_words/rvv.h` uses for its ASCII property table. A per-strip
  *  ASCII gate (`vmsgtu` for the high bit, reduced with `vfirst`) keeps the dominant inert case off the
  *  LUT entirely, and any strip that survives the gate is handed to the shared scalar verify.
  */

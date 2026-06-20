@@ -59,13 +59,23 @@ def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
                 raise RuntimeError(f"Compilation failed: {futures[future]}") from error
 
 
-def _parallel_compiler_compile(self, sources, output_dir=None, macros=None, include_dirs=None, debug=0,
-                               extra_preargs=None, extra_postargs=None, depends=None):
+def _parallel_compiler_compile(
+    self,
+    sources,
+    output_dir=None,
+    macros=None,
+    include_dirs=None,
+    debug=0,
+    extra_preargs=None,
+    extra_postargs=None,
+    depends=None,
+):
     """A parallel drop-in for `distutils.ccompiler.CCompiler.compile`, which compiles the sources of one
     extension serially. Reuses the compiler's own `_setup_compile` / `_get_cc_args` / `_compile`, so the exact
     flags distutils would pass are preserved; only the per-object loop is spread across a thread pool."""
     macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
-        output_dir, macros, include_dirs, sources, depends, extra_postargs)
+        output_dir, macros, include_dirs, sources, depends, extra_postargs
+    )
     cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
 
     def _compile_one(obj):
@@ -475,7 +485,12 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/sort.c",
     "c/stringzilla/intersect.c",
     "c/stringzilla/utf8_norm.c",
-    "c/stringzilla/utf8_iterate.c",
+    "c/stringzilla/utf8_codepoints.c",
+    "c/stringzilla/utf8_delimiters.c",
+    "c/stringzilla/utf8_words.c",
+    "c/stringzilla/utf8_graphemes.c",
+    "c/stringzilla/utf8_sentences.c",
+    "c/stringzilla/utf8_lines.c",
     "c/stringzilla/utf8_uncased_fold.c",
     "c/stringzilla/utf8_uncased.c",
 ]

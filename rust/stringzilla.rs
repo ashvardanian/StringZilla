@@ -508,6 +508,40 @@ extern "C" {
         bytes_consumed: *mut usize,
     ) -> usize;
 
+    pub(crate) fn sz_utf8_grapheme_find_boundaries(
+        text: *const c_void,
+        length: usize,
+        starts: *mut usize,
+        lengths: *mut usize,
+        cap: usize,
+        consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_grapheme_rfind_boundaries(
+        text: *const c_void,
+        length: usize,
+        starts: *mut usize,
+        lengths: *mut usize,
+        cap: usize,
+        consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_sentence_find_boundaries(
+        text: *const c_void,
+        length: usize,
+        starts: *mut usize,
+        lengths: *mut usize,
+        cap: usize,
+        consumed: *mut usize,
+    ) -> usize;
+    pub(crate) fn sz_utf8_line_find_boundaries(
+        text: *const c_void,
+        length: usize,
+        starts: *mut usize,
+        lengths: *mut usize,
+        mandatory: *mut u8,
+        cap: usize,
+        consumed: *mut usize,
+    ) -> usize;
+
     pub(crate) fn sz_equal(a: *const c_void, b: *const c_void, length: usize) -> i32;
     pub(crate) fn sz_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
 
@@ -3208,7 +3242,7 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WhitespaceSplits<'a, STEPS> {
 }
 
 /// Default batch size for buffering the `sz_utf8_*` boundary kernels' output, mirroring the core
-/// `sz_iterators_default_steps_k` enum in `include/stringzilla/utf8_iterate.h`. Buffering this many
+/// `sz_iterators_default_steps_k` enum in `include/stringzilla/utf8_words.h`. Buffering this many
 /// boundaries per call amortizes the per-item dispatch/FFI overhead without an unbounded buffer; the
 /// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
 pub const ITERATORS_DEFAULT_STEPS: usize = 16;
@@ -3376,6 +3410,354 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
         let end = begin + self.lengths[self.index];
         self.index += 1;
         Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-29 grapheme clusters in UTF-8 text, in order.
+///
+/// Unlike whitespace splitting, the grapheme clusters tile the input: every byte belongs to exactly one
+/// grapheme cluster, so consecutive clusters are contiguous and no empty slices are produced. Follows the
+/// Unicode TR29 rules.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8GraphemeSplits;
+///
+/// let graphemes: Vec<&[u8]> = RangeUtf8GraphemeSplits::new(b"Hi!").collect();
+/// assert_eq!(graphemes, vec![&b"H"[..], &b"i"[..], &b"!"[..]]);
+/// ```
+pub struct RangeUtf8GraphemeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+    text: &'a [u8],
+    suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
+    starts: [usize; STEPS], // Buffered grapheme offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered grapheme lengths
+    count: usize,  // Number of buffered graphemes (0 once exhausted)
+    index: usize,  // Index of the next grapheme to yield from the buffer
+}
+
+impl<'a> RangeUtf8GraphemeSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8GraphemeSplits::<1>::with_steps(text)`.
+    pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8GraphemeSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` grapheme clusters per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_grapheme_find_boundaries(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                self.text.len() - self.suffix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        self.index = 0;
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeSplits<'a, STEPS> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            if self.count == 0 {
+                return None; // Empty input or fully drained.
+            }
+            // Batch drained: advance past the last grapheme (a TR29 boundary) and refill from the remaining suffix.
+            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
+            self.fill();
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let begin = self.suffix + self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-29 grapheme clusters in UTF-8 text, from the end of the text backward (last
+/// cluster first).
+///
+/// Yields the same grapheme clusters as [`RangeUtf8GraphemeSplits`], in reverse order.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8GraphemeRSplits;
+///
+/// let graphemes: Vec<&[u8]> = RangeUtf8GraphemeRSplits::new(b"Hi!").collect();
+/// assert_eq!(graphemes, vec![&b"!"[..], &b"i"[..], &b"H"[..]]);
+/// ```
+pub struct RangeUtf8GraphemeRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+    text: &'a [u8],
+    prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
+    starts: [usize; STEPS], // Buffered grapheme offsets from the text start, last cluster first
+    lengths: [usize; STEPS], // Buffered grapheme lengths
+    count: usize,  // Number of buffered graphemes (0 once exhausted)
+    index: usize,  // Index of the next grapheme to yield from the buffer
+}
+
+impl<'a> RangeUtf8GraphemeRSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8GraphemeRSplits::<1>::with_steps(text)`.
+    pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8GraphemeRSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` grapheme clusters per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            prefix: text.len(),
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the remaining prefix; `count` becomes 0 once the prefix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_grapheme_rfind_boundaries(
+                self.text.as_ptr() as *const c_void,
+                self.prefix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        self.prefix = consumed; // Earliest boundary still segmented; 0 once the prefix is exhausted.
+        self.index = 0;
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeRSplits<'a, STEPS> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            self.fill(); // Refill from the remaining prefix; `count` stays 0 once nothing is left.
+            if self.count == 0 {
+                return None;
+            }
+        }
+        // Offsets are relative to the text start; the buffer runs last cluster → first.
+        let begin = self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-29 sentences in UTF-8 text, in order.
+///
+/// Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one
+/// sentence, so consecutive sentences are contiguous and no empty slices are produced. Follows the
+/// Unicode TR29 rules.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8SentenceSplits;
+///
+/// let sentences: Vec<&[u8]> = RangeUtf8SentenceSplits::new(b"Hi. Bye.").collect();
+/// assert_eq!(sentences, vec![&b"Hi. "[..], &b"Bye."[..]]);
+/// ```
+pub struct RangeUtf8SentenceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+    text: &'a [u8],
+    suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
+    starts: [usize; STEPS], // Buffered sentence offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered sentence lengths
+    count: usize,  // Number of buffered sentences (0 once exhausted)
+    index: usize,  // Index of the next sentence to yield from the buffer
+}
+
+impl<'a> RangeUtf8SentenceSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8SentenceSplits::<1>::with_steps(text)`.
+    pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8SentenceSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` sentences per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_sentence_find_boundaries(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                self.text.len() - self.suffix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        self.index = 0;
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeUtf8SentenceSplits<'a, STEPS> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            if self.count == 0 {
+                return None; // Empty input or fully drained.
+            }
+            // Batch drained: advance past the last sentence (a TR29 boundary) and refill from the remaining suffix.
+            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
+            self.fill();
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let begin = self.suffix + self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        self.index += 1;
+        Some(&self.text[begin..end])
+    }
+}
+
+/// An iterator over UAX-14 lines in UTF-8 text, in order.
+///
+/// Unlike whitespace splitting, the lines tile the input: every byte belongs to exactly one line, so
+/// consecutive lines are contiguous and no empty slices are produced. Follows the Unicode TR14 rules.
+///
+/// Each yielded item is a `(&[u8], bool)` tuple: the first element is the line segment, and the second
+/// element is the *mandatory-break* flag — `true` when the segment ends at a hard line break (e.g. a
+/// newline, paragraph separator, or end of input that forces a break), and `false` when it ends at a
+/// soft break opportunity where a renderer *may* wrap but is not required to.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::RangeUtf8LineSplits;
+///
+/// let lines: Vec<(&[u8], bool)> = RangeUtf8LineSplits::new(b"Hi\nBye").collect();
+/// assert_eq!(lines, vec![(&b"Hi\n"[..], true), (&b"Bye"[..], true)]);
+/// ```
+pub struct RangeUtf8LineSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+    text: &'a [u8],
+    suffix: usize, // Start of the not-yet-segmented suffix (a TR14 boundary; `text.len()` once exhausted)
+    starts: [usize; STEPS], // Buffered line offsets, relative to `suffix`
+    lengths: [usize; STEPS], // Buffered line lengths
+    mandatory: [u8; STEPS], // Buffered mandatory-break flags (non-zero on a hard break)
+    count: usize,  // Number of buffered lines (0 once exhausted)
+    index: usize,  // Index of the next line to yield from the buffer
+}
+
+impl<'a> RangeUtf8LineSplits<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
+    /// `RangeUtf8LineSplits::<1>::with_steps(text)`.
+    pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> RangeUtf8LineSplits<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` lines per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            mandatory: [0; STEPS],
+            count: 0,
+            index: 0,
+        };
+        splits.fill();
+        splits
+    }
+
+    /// Refills the buffer from the current suffix; `count` becomes 0 once the suffix is empty.
+    fn fill(&mut self) {
+        let mut consumed = 0usize;
+        self.count = unsafe {
+            sz_utf8_line_find_boundaries(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                self.text.len() - self.suffix,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                self.mandatory.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        self.index = 0;
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for RangeUtf8LineSplits<'a, STEPS> {
+    type Item = (&'a [u8], bool);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.count {
+            if self.count == 0 {
+                return None; // Empty input or fully drained.
+            }
+            // Batch drained: advance past the last line (a TR14 boundary) and refill from the remaining suffix.
+            self.suffix += self.starts[self.count - 1] + self.lengths[self.count - 1];
+            self.fill();
+            if self.count == 0 {
+                return None;
+            }
+        }
+        let begin = self.suffix + self.starts[self.index];
+        let end = begin + self.lengths[self.index];
+        let is_mandatory_break = self.mandatory[self.index] != 0;
+        self.index += 1;
+        Some((&self.text[begin..end], is_mandatory_break))
     }
 }
 
@@ -3603,6 +3985,19 @@ pub trait StringZillableUnary {
 
     /// Returns an iterator over UAX-29 words from the end of the text backward (last word first).
     fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_>;
+
+    /// Returns an iterator over UAX-29 grapheme clusters (Unicode TR29), in order. Clusters tile the input contiguously.
+    fn sz_utf8_grapheme_splits(&self) -> RangeUtf8GraphemeSplits<'_>;
+
+    /// Returns an iterator over UAX-29 grapheme clusters from the end of the text backward (last cluster first).
+    fn sz_utf8_grapheme_rsplits(&self) -> RangeUtf8GraphemeRSplits<'_>;
+
+    /// Returns an iterator over UAX-29 sentences (Unicode TR29), in order. Sentences tile the input contiguously.
+    fn sz_utf8_sentence_splits(&self) -> RangeUtf8SentenceSplits<'_>;
+
+    /// Returns an iterator over UAX-14 lines (Unicode TR14), in order. Lines tile the input contiguously; each
+    /// item is a `(&[u8], bool)` of the segment and whether it ends at a mandatory (hard) line break.
+    fn sz_utf8_line_splits(&self) -> RangeUtf8LineSplits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -3869,6 +4264,22 @@ where
 
     fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_> {
         RangeUtf8WordRSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_grapheme_splits(&self) -> RangeUtf8GraphemeSplits<'_> {
+        RangeUtf8GraphemeSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_grapheme_rsplits(&self) -> RangeUtf8GraphemeRSplits<'_> {
+        RangeUtf8GraphemeRSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_sentence_splits(&self) -> RangeUtf8SentenceSplits<'_> {
+        RangeUtf8SentenceSplits::new(self.as_ref())
+    }
+
+    fn sz_utf8_line_splits(&self) -> RangeUtf8LineSplits<'_> {
+        RangeUtf8LineSplits::new(self.as_ref())
     }
 }
 
@@ -4841,6 +5252,70 @@ mod tests {
     }
 
     #[test]
+    fn iter_grapheme_utf8_splits_steps_invariance() {
+        // Grapheme clusters tile the input, so the yielded segments must match regardless of the batch size
+        // `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every cluster boundary.
+        let text = b"Hi, world! A second sentence.";
+        let forward: Vec<&[u8]> = RangeUtf8GraphemeSplits::new(text).collect();
+        assert_eq!(
+            RangeUtf8GraphemeSplits::<1>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+        assert_eq!(
+            RangeUtf8GraphemeSplits::<3>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+        assert_eq!(
+            RangeUtf8GraphemeSplits::<65>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+
+        // The reverse iterator yields the same clusters last-first, also batch-size invariant.
+        let mut reversed = forward.clone();
+        reversed.reverse();
+        assert_eq!(RangeUtf8GraphemeRSplits::new(text).collect::<Vec<_>>(), reversed);
+        assert_eq!(
+            RangeUtf8GraphemeRSplits::<1>::with_steps(text).collect::<Vec<_>>(),
+            reversed
+        );
+        assert_eq!(
+            RangeUtf8GraphemeRSplits::<65>::with_steps(text).collect::<Vec<_>>(),
+            reversed
+        );
+    }
+
+    #[test]
+    fn iter_sentence_utf8_splits_steps_invariance() {
+        // Sentences tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
+        // a tiny batch (STEPS == 1) exercises the refill seam on every sentence boundary.
+        let text = b"Hi, world! A second sentence.";
+        let forward: Vec<&[u8]> = RangeUtf8SentenceSplits::new(text).collect();
+        assert_eq!(
+            RangeUtf8SentenceSplits::<1>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+        assert_eq!(
+            RangeUtf8SentenceSplits::<3>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+        assert_eq!(
+            RangeUtf8SentenceSplits::<65>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+    }
+
+    #[test]
+    fn iter_line_utf8_splits_steps_invariance() {
+        // Lines tile the input, so the yielded segments (and mandatory-break flags) must match regardless of
+        // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line boundary.
+        let text = b"Hi, world! A second sentence.";
+        let forward: Vec<(&[u8], bool)> = RangeUtf8LineSplits::new(text).collect();
+        assert_eq!(RangeUtf8LineSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8LineSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8LineSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+    }
+
+    #[test]
     fn utf8_uncased_fold_golden_vectors() {
         // One probe per kernel family: ASCII, Latin-1 (C3), Latin Extended (C4/C6),
         // Greek (incl. final sigma), Cyrillic, Vietnamese (E1 BA), letterlike symbols,
@@ -4972,13 +5447,13 @@ mod tests {
         // straddle multiple expanding codepoints. Swept across prefix paddings so the match
         // lands at varied alignments relative to the SIMD window boundaries.
         let cases: &[(&str, &str)] = &[
-            ("\u{00DF}\u{00DF}", "sss"),            // ßß → "ssss", needle "sss"
+            ("\u{00DF}\u{00DF}", "sss"),              // ßß → "ssss", needle "sss"
             ("\u{00DF}\u{00DF}", "\u{017F}\u{00DF}"), // ßß vs ſß → "sss" inside "ssss"
-            ("\u{1E9E}\u{00DF}", "ssss"),          // ẞß → "ssss"
-            ("\u{1E9E}\u{00DF}", "sss"),           // ẞß → "ssss", needle "sss"
-            ("\u{FB03}", "fi"),                    // ﬃ → "ffi", needle "fi"
-            ("\u{FB03}", "ffi"),                   // ﬃ → "ffi"
-            ("\u{FB00}\u{FB01}", "ffi"),           // ﬀﬁ → "ff" + "fi" = "fffi"
+            ("\u{1E9E}\u{00DF}", "ssss"),             // ẞß → "ssss"
+            ("\u{1E9E}\u{00DF}", "sss"),              // ẞß → "ssss", needle "sss"
+            ("\u{FB03}", "fi"),                       // ﬃ → "ffi", needle "fi"
+            ("\u{FB03}", "ffi"),                      // ﬃ → "ffi"
+            ("\u{FB00}\u{FB01}", "ffi"),              // ﬀﬁ → "ff" + "fi" = "fffi"
         ];
         let paddings: &[usize] = &[0, 30, 62, 63, 64, 65];
 

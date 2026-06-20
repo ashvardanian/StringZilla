@@ -340,7 +340,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_nor
  *  or canonical combining class != 0, or has a relevant decomposition for the D-forms), or @b SZ_NULL_CHAR if the whole span
  *  is inert. This is the scalar reference; the NEON backend will replace just this with a `vqtbl4q`
  *  lead-classify plus a 64-byte gate. Semantics match the old module's `sz_utf8_find_denormalized`,
- *  but computed from the unified props trie - no dependency on `utf8_iterate`.
+ *  but computed from the unified props trie - no dependency on the `utf8_*` segmentation modules.
  */
 SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
@@ -348,7 +348,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t le
     while (ptr < end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)ptr, (sz_cptr_t)end, &rune);
-        if (rune_length == sz_utf8_invalid_k) { ++ptr; continue; } // malformed byte: inert, passed through
+        if (rune_length == sz_utf8_invalid_k) {
+            ++ptr;
+            continue;
+        } // malformed byte: inert, passed through
 
         sz_bool_t hangul = (rune >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
                             rune < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
@@ -412,7 +415,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz
         else if (lead >= 0xE0) { // 3-/4-byte: validating parse + props trie
             sz_rune_t rune;
             sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)position, (sz_cptr_t)end, &rune);
-            if (rune_length == sz_utf8_invalid_k) { previous_canonical_combining_class = 0, ++position; continue; }
+            if (rune_length == sz_utf8_invalid_k) {
+                previous_canonical_combining_class = 0, ++position;
+                continue;
+            }
             value = sz_utf8_norm_value_(rune);
             position += rune_length;
         }

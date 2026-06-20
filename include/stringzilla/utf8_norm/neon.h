@@ -9,7 +9,7 @@
  *  entry points (`sz_utf8_norm_neon` / `sz_utf8_norm_violation_neon`) reuse the force-inlined engines
  *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
  *
- *  The scanner is a clean port of the proven `utf8_iterate/sz_utf8_find_denormalized_neon` hot loop -
+ *  The scanner is a clean port of the proven `utf8_delimiters/sz_utf8_find_denormalized_neon` hot loop -
  *  a `vqtbl4q_u8` lead-classify behind a 64-byte ASCII/inert gate, with a cold per-codepoint exact
  *  verify - reading the unified `utf8_norm/tables.h` record set instead of the legacy denorm tables.
  */

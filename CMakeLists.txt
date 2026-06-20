@@ -619,7 +619,12 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/sort.c
     c/stringzilla/intersect.c
     c/stringzilla/utf8_norm.c
-    c/stringzilla/utf8_iterate.c
+    c/stringzilla/utf8_codepoints.c
+    c/stringzilla/utf8_delimiters.c
+    c/stringzilla/utf8_words.c
+    c/stringzilla/utf8_graphemes.c
+    c/stringzilla/utf8_sentences.c
+    c/stringzilla/utf8_lines.c
     c/stringzilla/utf8_uncased_fold.c
     c/stringzilla/utf8_uncased.c
 )

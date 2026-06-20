@@ -29,7 +29,7 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-/*  See `utf8_iterate/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane
+/*  See `utf8_codepoints/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane
  *  16-bit mask (word 0 = low lane, word 4 = high lane), recombined to match AVX2's `_mm256_movemask_epi8`. */
 SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended) {
     __m256i collected = __lasx_xvmskltz_b(sign_extended);

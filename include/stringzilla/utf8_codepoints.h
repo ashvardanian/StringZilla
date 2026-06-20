@@ -1,0 +1,234 @@
+/**
+ *  @brief Hardware-accelerated UTF-8 codepoint mechanics: count, find-nth, and chunk unpacking.
+ *  @file utf8_codepoints.h
+ *  @author Ash Vardanian
+ */
+#ifndef STRINGZILLA_UTF8_CODEPOINTS_H_
+#define STRINGZILLA_UTF8_CODEPOINTS_H_
+
+#include "stringzilla/types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#pragma region Core API
+
+/**
+ *  @brief Count the number of UTF-8 characters in a string.
+ *
+ *  The logic is to count the number of "continuation bytes" matching the 10xxxxxx pattern,
+ *  and then subtract that from the total byte length to get the number of "start bytes" -
+ *  coinciding with the number of UTF-8 characters.
+ *
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @return Number of UTF-8 characters in the string.
+ *
+ *  @example Count characters:
+ *  @code
+ *      size_t char_count = sz_utf8_count(text, length);
+ *      printf("String has %zu characters\n", char_count);
+ *  @endcode
+ */
+SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
+
+/**
+ *  @brief Skip forward to the Nth UTF-8 character.
+ *
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @param n Number of UTF-8 characters to skip (0-indexed, so n=0 returns text).
+ *  @return Pointer to the Nth character, or NULL if the string has fewer than n characters.
+ *
+ *  @example Skip to character 1000 (e.g., pagination):
+ *  @code
+ *      char const *pos = sz_utf8_find_nth(text, length, 1000);
+ *      if (!pos) {
+ *          // String has fewer than 1000 characters
+ *      }
+ *  @endcode
+ *
+ *  @example Truncate to 280 characters (Twitter-style):
+ *  @code
+ *      char const *end = sz_utf8_find_nth(text, length, 280);
+ *      size_t truncated_bytes = end ? (end - text) : length;
+ *  @endcode
+ */
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n);
+
+/**
+ *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
+ *
+ *  This function is designed for streaming-like decoding with smart iterators built on top of it.
+ *  The iterator would unpack a continuous slice of UTF-8 text into UTF-32 codepoints in chunks,
+ *  yielding them upstream - only one at a time. This avoids allocating large buffers for the entire
+ *  UTF-32 string, which can be 4x the size of the UTF-8 input.
+ *
+ *  This functionality is similar to the `simdutf` library's UTF-8 to UTF-32 conversion routines,
+ *  but unlike most of them - performs no validity checks, and leverages an assumption that absolute
+ *  majority of written text doesn't mix codepoints of every length in each register-sized chunk.
+ *
+ *  - English text and source code is predominantly 1-byte ASCII characters.
+ *  - Broader European languages with diacritics mostly use 2-byte characters with 1-byte punctuation.
+ *  - Chinese & Jamapanese mostly use 3-byte characters with rare punctuation, which can be 1- or 3-byte.
+ *  - Korean uses 3-byte characters with 1-byte spaces; word are 2-6 syllables or 6-16 bytes.
+ *
+ *  It's a different story for emoji-heavy texts, which can mix 4-byte characters more frequently.
+ *
+ *  @param text UTF-8 string to unpack.
+ *  @param length Number of bytes in the string (up to 64).
+ *  @param runes Output buffer for UTF-32 codepoints (recommended to be at least @b 64 entries wide).
+ *  @param runes_capacity Capacity of the @p runes buffer (number of sz_rune_t entries).
+ *  @param runes_unpacked Number of runes unpacked.
+ *  @return Pointer to the byte after the last unpacked byte in @p text.
+ */
+SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
+    sz_cptr_t text, sz_size_t length,           //
+    sz_rune_t *runes, sz_size_t runes_capacity, //
+    sz_size_t *runes_unpacked);
+
+#pragma endregion
+
+#pragma region Platform-Specific Backends
+
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_unpack_chunk */
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
+    sz_cptr_t text, sz_size_t length,            //
+    sz_rune_t *runes, sz_size_t runes_capacity,  //
+    sz_size_t *runes_unpacked);
+
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
+#endif
+
+#if SZ_USE_ICELAKE
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_unpack_chunk */
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
+    sz_cptr_t text, sz_size_t length,             //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
+#if SZ_USE_NEON
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_unpack_chunk */
+SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_neon( //
+    sz_cptr_t text, sz_size_t length,          //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_count */
+SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_find_nth */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
+#endif
+
+#pragma endregion
+
+/*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
+#include "stringzilla/utf8_codepoints/serial.h"
+#include "stringzilla/utf8_codepoints/icelake.h"
+#include "stringzilla/utf8_codepoints/haswell.h"
+#include "stringzilla/utf8_codepoints/neon.h"
+#include "stringzilla/utf8_codepoints/sve2.h"
+#include "stringzilla/utf8_codepoints/v128.h"
+#include "stringzilla/utf8_codepoints/v128relaxed.h"
+#include "stringzilla/utf8_codepoints/rvv.h"
+#include "stringzilla/utf8_codepoints/lasx.h"
+#include "stringzilla/utf8_codepoints/powervsx.h"
+
+#pragma region Dynamic Dispatch
+
+#if !SZ_DYNAMIC_DISPATCH
+
+SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
+#if SZ_USE_V128RELAXED
+    return sz_utf8_count_v128relaxed(text, length);
+#elif SZ_USE_V128
+    return sz_utf8_count_v128(text, length);
+#elif SZ_USE_RVV
+    return sz_utf8_count_rvv(text, length);
+#elif SZ_USE_LASX
+    return sz_utf8_count_lasx(text, length);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_count_powervsx(text, length);
+#elif SZ_USE_ICELAKE
+    return sz_utf8_count_icelake(text, length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_count_haswell(text, length);
+#elif SZ_USE_SVE2
+    return sz_utf8_count_sve2(text, length);
+#elif SZ_USE_NEON
+    return sz_utf8_count_neon(text, length);
+#else
+    return sz_utf8_count_serial(text, length);
+#endif
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+#if SZ_USE_V128RELAXED
+    return sz_utf8_find_nth_v128relaxed(text, length, n);
+#elif SZ_USE_V128
+    return sz_utf8_find_nth_v128(text, length, n);
+#elif SZ_USE_RVV
+    return sz_utf8_find_nth_rvv(text, length, n);
+#elif SZ_USE_LASX
+    return sz_utf8_find_nth_lasx(text, length, n);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_find_nth_powervsx(text, length, n);
+#elif SZ_USE_ICELAKE
+    return sz_utf8_find_nth_icelake(text, length, n);
+#elif SZ_USE_HASWELL
+    return sz_utf8_find_nth_haswell(text, length, n);
+#elif SZ_USE_SVE2
+    return sz_utf8_find_nth_sve2(text, length, n);
+#elif SZ_USE_NEON
+    return sz_utf8_find_nth_neon(text, length, n);
+#else
+    return sz_utf8_find_nth_serial(text, length, n);
+#endif
+}
+
+SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
+                                          sz_size_t *runes_unpacked) {
+#if SZ_USE_V128
+    return sz_utf8_unpack_chunk_v128(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_RVV
+    return sz_utf8_unpack_chunk_rvv(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_LASX
+    return sz_utf8_unpack_chunk_lasx(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_unpack_chunk_powervsx(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_ICELAKE
+    return sz_utf8_unpack_chunk_icelake(text, length, runes, runes_capacity, runes_unpacked);
+#elif SZ_USE_NEON
+    return sz_utf8_unpack_chunk_neon(text, length, runes, runes_capacity, runes_unpacked);
+#else
+    return sz_utf8_unpack_chunk_serial(text, length, runes, runes_capacity, runes_unpacked);
+#endif
+}
+
+#endif // !SZ_DYNAMIC_DISPATCH
+
+#pragma endregion
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // STRINGZILLA_UTF8_CODEPOINTS_H_

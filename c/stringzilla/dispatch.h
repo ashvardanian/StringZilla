@@ -5,7 +5,8 @@
  *  @date January 16, 2024
  *
  *  The compiled StringZilla library is split into one translation unit per domain
- *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_iterate.c`,
+ *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_codepoints.c`,
+ *  `utf8_delimiters.c`, `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_lines.c`,
  *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
  *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_DYNAMIC` public
@@ -71,6 +72,10 @@ typedef struct sz_implementations_t {
 
     sz_utf8_find_boundaries_t utf8_word_find_boundaries;
     sz_utf8_find_boundaries_t utf8_word_rfind_boundaries;
+    sz_utf8_find_boundaries_t utf8_grapheme_find_boundaries;
+    sz_utf8_find_boundaries_t utf8_grapheme_rfind_boundaries;
+    sz_utf8_find_boundaries_t utf8_sentence_find_boundaries;
+    sz_utf8_find_boundaries_flagged_t utf8_line_find_boundaries;
     sz_utf8_uncased_order_t utf8_uncased_order;
 
     sz_sequence_argsort_t sequence_argsort;
@@ -94,7 +99,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_iterate_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_codepoints_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_words_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_lines_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
