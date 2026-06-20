@@ -191,6 +191,15 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_safety", test_utf8_safety);
     failures += run_test("test_utf8_words_unit", test_utf8_words_unit);
     failures += run_test("test_utf8_ligature_unit", test_utf8_ligature_unit);
+    failures += run_test("test_utf8_grapheme_unit", test_utf8_grapheme_unit);
+    failures += run_test("test_utf8_grapheme_safety", test_utf8_grapheme_safety);
+    failures += run_test("test_utf8_grapheme_all", test_utf8_grapheme_all);
+    failures += run_test("test_utf8_sentence_unit", test_utf8_sentence_unit);
+    failures += run_test("test_utf8_sentence_safety", test_utf8_sentence_safety);
+    failures += run_test("test_utf8_sentence_all", test_utf8_sentence_all);
+    failures += run_test("test_utf8_line_unit", test_utf8_line_unit);
+    failures += run_test("test_utf8_line_safety", test_utf8_line_safety);
+    failures += run_test("test_utf8_line_all", test_utf8_line_all);
     failures += run_test("test_norm_unit", test_norm_unit);
     failures += run_test("test_norm_all", test_norm_all);
 

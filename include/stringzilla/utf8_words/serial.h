@@ -60,6 +60,30 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     return (sz_bool_t)(property >= sz_utf8_word_break_aletter_k);
 }
 
+/**
+ *  @brief Check if @p rune is Extended_Pictographic (UAX-29 WB3c). Not part of the 4-bit Word_Break model, so it is
+ *         resolved by binary search over the sorted Extended_Pictographic range table.
+ */
+SZ_PUBLIC sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
+    int low = 0, high = (int)sz_utf8_word_break_pict_u32_count_k - 1;
+    while (low <= high) {
+        int const mid = low + (high - low) / 2;
+        if ((sz_u32_t)rune < sz_utf8_word_break_pict_u32_lo_[mid]) { high = mid - 1; }
+        else if ((sz_u32_t)rune > sz_utf8_word_break_pict_u32_hi_[mid]) { low = mid + 1; }
+        else { return sz_true_k; }
+    }
+    return sz_false_k;
+}
+
+/** @brief Check if @p rune is WSegSpace (UAX-29 WB3d); resolved by range membership (six ranges). */
+SZ_PUBLIC sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
+    for (int range = 0; range < (int)sz_utf8_word_break_wseg_u32_count_k; ++range)
+        if ((sz_u32_t)rune >= sz_utf8_word_break_wseg_u32_lo_[range] &&
+            (sz_u32_t)rune <= sz_utf8_word_break_wseg_u32_hi_[range])
+            return sz_true_k;
+    return sz_false_k;
+}
+
 /*  Each Word_Break property fits in 4 bits, so a 16-bit constant is a membership set: bit `p` marks property
  *  `p` as a member. Testing membership is then a shift-and-mask, replacing chains of equality comparisons in
  *  the hot WB4 skip loops. */
@@ -166,13 +190,21 @@ SZ_INTERNAL sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_siz
     sz_rune_t rune = sz_utf8_decode_(text, position, &decode_position);
     sz_u8_t property = sz_rune_word_break_property(rune);
 
-    // Skip back over ignorables
-    while (sz_utf8_word_break_is_ignorable_(property) && previous > 0) {
-        previous--;
-        while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
-        decode_position = previous;
-        rune = sz_utf8_decode_(text, position, &decode_position);
-        property = sz_rune_word_break_property(rune);
+    // Skip back over ignorables (WB4). EXCEPTION: an ignorable immediately after a Newline/CR/LF — or at sot — is
+    // "de-ignored" and acts as its own base, so stop and return ITS property rather than the newline behind it
+    // (otherwise WB3/WB3a would wrongly fire on the codepoint after the de-ignored ignorable).
+    while (sz_utf8_word_break_is_ignorable_(property)) {
+        if (previous == 0) break;
+        sz_size_t predecessor = previous - 1;
+        while (predecessor > 0 && ((sz_u8_t)text[predecessor] & 0xC0) == 0x80) predecessor--;
+        sz_size_t predecessor_decode = predecessor;
+        sz_rune_t predecessor_rune = sz_utf8_decode_(text, previous, &predecessor_decode);
+        sz_u8_t predecessor_property = sz_rune_word_break_property(predecessor_rune);
+        if (predecessor_property == sz_utf8_word_break_newline_k || predecessor_property == sz_utf8_word_break_cr_k ||
+            predecessor_property == sz_utf8_word_break_lf_k)
+            break;
+        previous = predecessor;
+        property = predecessor_property;
     }
 
     return property;
@@ -207,160 +239,210 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_count_regional_indicators_before_(sz_cp
 }
 
 /**
- *  @brief Check if position is a word boundary per Unicode TR29.
+ *  @brief One UAX-29 "element": a base codepoint together with the run of Extend/Format/ZWJ it absorbs (WB4).
  *
- *  Implements the TR29 word boundary algorithm. Position 0 and position == length
- *  are always boundaries (WB1/WB2).
+ *  The Word_Break rules WB5-WB16 operate on these elements, not raw codepoints: WB4 folds every Extend, Format,
+ *  and ZWJ into the preceding base, EXCEPT when that base is sot, CR, LF, or a Newline (then the ignorable is
+ *  "de-ignored" and starts its own element). `ends_in_zwj` records whether the element's LAST codepoint is a ZWJ,
+ *  which is all WB3c (`ZWJ x Extended_Pictographic`) needs. `valid` is false for the sot/eot sentinels.
+ */
+typedef struct sz_word_element_t {
+    sz_u8_t property;      /**< Word_Break property of the base codepoint. */
+    sz_rune_t codepoint;   /**< Base codepoint (disambiguates Single/Double_Quote, Extended_Pictographic). */
+    sz_size_t start;       /**< Byte offset of the base codepoint. */
+    sz_bool_t ends_in_zwj; /**< The element's final codepoint is U+200D ZERO WIDTH JOINER. */
+    sz_bool_t valid;       /**< False for the sot/eot sentinel. */
+} sz_word_element_t;
+
+/** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
+SZ_INTERNAL sz_bool_t sz_word_is_newline_(sz_u8_t property) {
+    return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
+                       property == sz_utf8_word_break_newline_k);
+}
+
+/*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into MID_QUOTES, so the
+ *  WB6/WB7/WB7a-c/WB11/WB12 distinctions are recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote,
+ *  i.e. every MID_QUOTES codepoint that is NOT the Double_Quote. */
+SZ_INTERNAL sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
+    return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
+}
+SZ_INTERNAL sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
+    return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0022u);
+}
+SZ_INTERNAL sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
+    return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
+}
+
+/** @brief Byte offset of the codepoint start immediately before @p position (which must be > 0). */
+SZ_INTERNAL sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
+    sz_size_t previous = position - 1;
+    while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
+    return previous;
+}
+
+/** @brief The element whose final codepoint ends just before @p position (sot sentinel when @p position == 0). */
+SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
+    sz_word_element_t element;
+    element.valid = sz_false_k;
+    if (position == 0) return element;
+
+    sz_size_t last_start = sz_word_previous_start_(text, position);
+    sz_size_t decode_at = last_start;
+    sz_rune_t last_codepoint = sz_utf8_decode_(text, position, &decode_at);
+    sz_u8_t last_property = sz_rune_word_break_property(last_codepoint);
+    element.ends_in_zwj = (sz_bool_t)(last_property == sz_utf8_word_break_zwj_k);
+
+    sz_size_t base_start = last_start;
+    sz_rune_t base_codepoint = last_codepoint;
+    sz_u8_t base_property = last_property;
+    while (sz_utf8_word_break_is_ignorable_(base_property) && base_start > 0) {
+        sz_size_t predecessor_start = sz_word_previous_start_(text, base_start);
+        sz_size_t predecessor_at = predecessor_start;
+        sz_rune_t predecessor_codepoint = sz_utf8_decode_(text, base_start, &predecessor_at);
+        /*  WB4 exception: an ignorable directly after a Newline/CR/LF is de-ignored and is its own base. */
+        if (sz_word_is_newline_(sz_rune_word_break_property(predecessor_codepoint))) break;
+        base_start = predecessor_start;
+        base_codepoint = predecessor_codepoint;
+        base_property = sz_rune_word_break_property(predecessor_codepoint);
+    }
+    element.property = base_property;
+    element.codepoint = base_codepoint;
+    element.start = base_start;
+    element.valid = sz_true_k;
+    return element;
+}
+
+/** @brief The element following the one whose base is at @p position (eot sentinel at end of text). */
+SZ_INTERNAL sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    sz_word_element_t element;
+    element.valid = sz_false_k;
+    sz_size_t cursor = position;
+    sz_rune_t base_codepoint = sz_utf8_decode_(text, length, &cursor);
+    if (!sz_word_is_newline_(sz_rune_word_break_property(base_codepoint))) {
+        while (cursor < length) {
+            sz_size_t probe = cursor;
+            sz_rune_t codepoint = sz_utf8_decode_(text, length, &probe);
+            if (!sz_utf8_word_break_is_ignorable_(sz_rune_word_break_property(codepoint))) break;
+            cursor = probe;
+        }
+    }
+    if (cursor >= length) return element;
+    sz_size_t decode_at = cursor;
+    sz_rune_t next_codepoint = sz_utf8_decode_(text, length, &decode_at);
+    element.property = sz_rune_word_break_property(next_codepoint);
+    element.codepoint = next_codepoint;
+    element.start = cursor;
+    element.ends_in_zwj = sz_false_k;
+    element.valid = sz_true_k;
+    return element;
+}
+
+/** @brief Count of contiguous Regional_Indicator elements immediately before @p position (for WB15/WB16 parity). */
+SZ_INTERNAL sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
+    sz_size_t count = 0;
+    sz_size_t cursor = position;
+    for (;;) {
+        sz_word_element_t element = sz_word_previous_element_(text, cursor);
+        if (!element.valid || element.property != sz_utf8_word_break_regional_ind_k) break;
+        ++count;
+        cursor = element.start;
+    }
+    return count;
+}
+
+/**
+ *  @brief Whether @p position is a UAX-29 word boundary. Direct, branch-per-rule transcription of WB1-WB16 over
+ *         the WB4 element model; used unchanged by the forward and reverse drivers (and every backend that
+ *         delegates here), so segmentation is identical in either direction.
  */
 SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
-    // WB1: Break at start of text
-    if (position == 0) return sz_true_k;
-    // WB2: Break at end of text
-    if (position >= length) return sz_true_k;
+    if (position == 0) return sz_true_k;                             /* WB1 */
+    if (position >= length) return sz_true_k;                        /* WB2 */
+    if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k; /* never split inside a codepoint */
 
-    // Never break at UTF-8 continuation bytes (0x80-0xBF)
-    if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
+    sz_size_t after_at = position;
+    sz_rune_t next_codepoint = sz_utf8_decode_(text, length, &after_at);
+    sz_u8_t next_property = sz_rune_word_break_property(next_codepoint);
 
-    // Get properties of characters before and after the boundary
-    sz_u8_t previous_property = sz_utf8_word_break_previous_property_(text, position);
+    sz_size_t immediate_start = sz_word_previous_start_(text, position);
+    sz_size_t immediate_at = immediate_start;
+    sz_rune_t immediate_codepoint = sz_utf8_decode_(text, position, &immediate_at);
+    sz_u8_t immediate_property = sz_rune_word_break_property(immediate_codepoint);
 
-    sz_size_t after_position = position;
-    sz_rune_t after_rune = sz_utf8_decode_(text, length, &after_position);
-    sz_u8_t after_prop = sz_rune_word_break_property(after_rune);
+    if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
+        return sz_false_k;                                                  /* WB3  CR x LF */
+    if (sz_word_is_newline_(immediate_property)) return sz_true_k;          /* WB3a break after Newline/CR/LF */
+    if (sz_word_is_newline_(next_property)) return sz_true_k;               /* WB3b break before Newline/CR/LF */
+    if (sz_utf8_word_break_is_ignorable_(next_property)) return sz_false_k; /* WB4 absorb Extend/Format/ZWJ */
 
-    // WB3: Do not break between CR and LF
-    if (previous_property == sz_utf8_word_break_cr_k && after_prop == sz_utf8_word_break_lf_k) return sz_false_k;
+    sz_word_element_t previous = sz_word_previous_element_(text, position);
+    sz_u8_t previous_property = previous.property;
+    sz_rune_t previous_codepoint = previous.codepoint;
 
-    // WB3a: Break after Newline, CR, LF
-    if (previous_property == sz_utf8_word_break_newline_k || previous_property == sz_utf8_word_break_cr_k ||
-        previous_property == sz_utf8_word_break_lf_k)
-        return sz_true_k;
+    if (previous.ends_in_zwj && sz_rune_is_extended_pictographic(next_codepoint))
+        return sz_false_k; /* WB3c ZWJ x Extended_Pictographic */
+    /*  WB3c/WB3d precede WB4, so they test RAW adjacency: WB3d needs the immediate predecessor codepoint (an
+     *  intervening Extend, absorbed by WB4, must still force the break) rather than the folded element base. */
+    if (sz_rune_is_wsegspace(immediate_codepoint) && sz_rune_is_wsegspace(next_codepoint))
+        return sz_false_k; /* WB3d WSegSpace x WSegSpace */
 
-    // WB3b: Break before Newline, CR, LF
-    if (after_prop == sz_utf8_word_break_newline_k || after_prop == sz_utf8_word_break_cr_k ||
-        after_prop == sz_utf8_word_break_lf_k)
-        return sz_true_k;
+    sz_bool_t previous_ah = sz_utf8_word_break_is_aletter_or_hebrew_(previous_property);
+    sz_bool_t next_ah = sz_utf8_word_break_is_aletter_or_hebrew_(next_property);
 
-    // WB3c: Do not break within emoji ZWJ sequences
-    // (Simplified: don't break ZWJ × anything)
-    if (previous_property == sz_utf8_word_break_zwj_k) return sz_false_k;
-
-    // WB4: Ignore Format and Extend characters - get effective properties
-    // Skip ignorables after position to get effective "after" property
-    if (sz_utf8_word_break_is_ignorable_(after_prop)) {
-        sz_size_t skip_position = position;
-        after_prop = sz_utf8_word_break_effective_property_(text, length, skip_position, (sz_size_t *)0);
+    if (previous_ah && next_ah) return sz_false_k; /* WB5 */
+    if (previous_ah &&
+        (next_property == sz_utf8_word_break_midletter_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
+        sz_word_element_t after = sz_word_next_element_(text, length, position);
+        if (after.valid && sz_utf8_word_break_is_aletter_or_hebrew_(after.property)) return sz_false_k; /* WB6 */
     }
-
-    // WB5: Do not break between AHLetter
-    if (sz_utf8_word_break_is_aletter_or_hebrew_(previous_property) &&
-        sz_utf8_word_break_is_aletter_or_hebrew_(after_prop))
-        return sz_false_k;
-
-    // WB6: Do not break AHLetter × (MidLetter|MidNumLetQ) × AHLetter
-    if (sz_utf8_word_break_is_aletter_or_hebrew_(previous_property) &&
-        (after_prop == sz_utf8_word_break_midletter_k || sz_utf8_word_break_is_mid_quotes_(after_prop))) {
-        // Look ahead to see if followed by AHLetter
-        sz_size_t lookahead = after_position;
-        lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
-        if (lookahead < length) {
-            sz_size_t lookahead_position = lookahead;
-            sz_rune_t la_rune = sz_utf8_decode_(text, length, &lookahead_position);
-            sz_u8_t lookahead_property = sz_rune_word_break_property(la_rune);
-            if (sz_utf8_word_break_is_aletter_or_hebrew_(lookahead_property)) return sz_false_k;
-        }
+    if ((previous_property == sz_utf8_word_break_midletter_k ||
+         sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
+        next_ah) {
+        sz_word_element_t before = sz_word_previous_element_(text, previous.start);
+        if (before.valid && sz_utf8_word_break_is_aletter_or_hebrew_(before.property)) return sz_false_k; /* WB7 */
     }
-
-    // WB7: Do not break AHLetter (MidLetter|MidNumLetQ) × AHLetter
-    if ((previous_property == sz_utf8_word_break_midletter_k || sz_utf8_word_break_is_mid_quotes_(previous_property)) &&
-        sz_utf8_word_break_is_aletter_or_hebrew_(after_prop)) {
-        // Look back to see if preceded by AHLetter
-        // This requires looking at the character before the previous codepoint's position
-        sz_size_t previous_cp_start = position - 1;
-        while (previous_cp_start > 0 && ((sz_u8_t)text[previous_cp_start] & 0xC0) == 0x80) previous_cp_start--;
-        if (previous_cp_start > 0) {
-            sz_size_t pre_previous_codepoint_start = previous_cp_start - 1;
-            while (pre_previous_codepoint_start > 0 && ((sz_u8_t)text[pre_previous_codepoint_start] & 0xC0) == 0x80)
-                pre_previous_codepoint_start--;
-            sz_size_t pre_previous_position = pre_previous_codepoint_start;
-            sz_rune_t pp_rune = sz_utf8_decode_(text, previous_cp_start, &pre_previous_position);
-            sz_u8_t pre_previous_property = sz_rune_word_break_property(pp_rune);
-            if (sz_utf8_word_break_is_aletter_or_hebrew_(pre_previous_property)) return sz_false_k;
-        }
+    if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
+        sz_word_is_single_quote_(next_property, next_codepoint))
+        return sz_false_k; /* WB7a Hebrew x Single_Quote */
+    if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
+        sz_word_is_double_quote_(next_property, next_codepoint)) {
+        sz_word_element_t after = sz_word_next_element_(text, length, position);
+        if (after.valid && after.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; /* WB7b */
     }
-
-    // WB7a: Do not break Hebrew_Letter × Single_Quote
-    if (previous_property == sz_utf8_word_break_hebrew_letter_k && after_prop == sz_utf8_word_break_mid_quotes_k)
-        return sz_false_k;
-
-    // WB8: Do not break Numeric × Numeric
-    if (previous_property == sz_utf8_word_break_numeric_k && after_prop == sz_utf8_word_break_numeric_k)
-        return sz_false_k;
-
-    // WB9: Do not break AHLetter × Numeric
-    if (sz_utf8_word_break_is_aletter_or_hebrew_(previous_property) && after_prop == sz_utf8_word_break_numeric_k)
-        return sz_false_k;
-
-    // WB10: Do not break Numeric × AHLetter
-    if (previous_property == sz_utf8_word_break_numeric_k && sz_utf8_word_break_is_aletter_or_hebrew_(after_prop))
-        return sz_false_k;
-
-    // WB11: Do not break Numeric × (MidNum|MidNumLetQ) × Numeric
+    if (sz_word_is_double_quote_(previous_property, previous_codepoint) &&
+        next_property == sz_utf8_word_break_hebrew_letter_k) {
+        sz_word_element_t before = sz_word_previous_element_(text, previous.start);
+        if (before.valid && before.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; /* WB7c */
+    }
+    if (previous_property == sz_utf8_word_break_numeric_k && next_property == sz_utf8_word_break_numeric_k)
+        return sz_false_k;                                                               /* WB8 */
+    if (previous_ah && next_property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB9 */
+    if (previous_property == sz_utf8_word_break_numeric_k && next_ah) return sz_false_k; /* WB10 */
+    if ((previous_property == sz_utf8_word_break_midnum_k ||
+         sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
+        next_property == sz_utf8_word_break_numeric_k) {
+        sz_word_element_t before = sz_word_previous_element_(text, previous.start);
+        if (before.valid && before.property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB11 */
+    }
     if (previous_property == sz_utf8_word_break_numeric_k &&
-        (after_prop == sz_utf8_word_break_midnum_k || sz_utf8_word_break_is_mid_quotes_(after_prop))) {
-        sz_size_t lookahead = after_position;
-        lookahead = sz_utf8_skip_ignorables_forward_(text, length, lookahead);
-        if (lookahead < length) {
-            sz_size_t lookahead_position = lookahead;
-            sz_rune_t la_rune = sz_utf8_decode_(text, length, &lookahead_position);
-            sz_u8_t lookahead_property = sz_rune_word_break_property(la_rune);
-            if (lookahead_property == sz_utf8_word_break_numeric_k) return sz_false_k;
-        }
+        (next_property == sz_utf8_word_break_midnum_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
+        sz_word_element_t after = sz_word_next_element_(text, length, position);
+        if (after.valid && after.property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB12 */
     }
-
-    // WB12: Do not break Numeric (MidNum|MidNumLetQ) × Numeric (reverse of WB11)
-    if ((previous_property == sz_utf8_word_break_midnum_k || sz_utf8_word_break_is_mid_quotes_(previous_property)) &&
-        after_prop == sz_utf8_word_break_numeric_k) {
-        // Check if preceded by Numeric
-        sz_size_t previous_cp_start = position - 1;
-        while (previous_cp_start > 0 && ((sz_u8_t)text[previous_cp_start] & 0xC0) == 0x80) previous_cp_start--;
-        if (previous_cp_start > 0) {
-            sz_size_t pre_previous_codepoint_start = previous_cp_start - 1;
-            while (pre_previous_codepoint_start > 0 && ((sz_u8_t)text[pre_previous_codepoint_start] & 0xC0) == 0x80)
-                pre_previous_codepoint_start--;
-            sz_size_t pre_previous_position = pre_previous_codepoint_start;
-            sz_rune_t pp_rune = sz_utf8_decode_(text, previous_cp_start, &pre_previous_position);
-            sz_u8_t pre_previous_property = sz_rune_word_break_property(pp_rune);
-            if (pre_previous_property == sz_utf8_word_break_numeric_k) return sz_false_k;
-        }
-    }
-
-    // WB13: Do not break Katakana × Katakana
-    if (previous_property == sz_utf8_word_break_katakana_k && after_prop == sz_utf8_word_break_katakana_k)
-        return sz_false_k;
-
-    // WB13a: Do not break (AHLetter|Numeric|Katakana|ExtendNumLet) × ExtendNumLet
-    if ((sz_utf8_word_break_is_aletter_or_hebrew_(previous_property) ||
-         previous_property == sz_utf8_word_break_numeric_k || previous_property == sz_utf8_word_break_katakana_k ||
+    if (previous_property == sz_utf8_word_break_katakana_k && next_property == sz_utf8_word_break_katakana_k)
+        return sz_false_k; /* WB13 */
+    if ((previous_ah || previous_property == sz_utf8_word_break_numeric_k ||
+         previous_property == sz_utf8_word_break_katakana_k ||
          previous_property == sz_utf8_word_break_extendnumlet_k) &&
-        after_prop == sz_utf8_word_break_extendnumlet_k)
-        return sz_false_k;
-
-    // WB13b: Do not break ExtendNumLet × (AHLetter|Numeric|Katakana)
+        next_property == sz_utf8_word_break_extendnumlet_k)
+        return sz_false_k; /* WB13a */
     if (previous_property == sz_utf8_word_break_extendnumlet_k &&
-        (sz_utf8_word_break_is_aletter_or_hebrew_(after_prop) || after_prop == sz_utf8_word_break_numeric_k ||
-         after_prop == sz_utf8_word_break_katakana_k))
-        return sz_false_k;
-
-    // WB15/16: Do not break between Regional Indicators (keep pairs together)
-    if (previous_property == sz_utf8_word_break_regional_ind_k && after_prop == sz_utf8_word_break_regional_ind_k) {
-        // Count RI before - if odd, don't break (we're in the middle of a pair)
-        sz_size_t regional_indicator_count = sz_utf8_word_break_count_regional_indicators_before_(text, position);
-        if (regional_indicator_count % 2 == 1) return sz_false_k;
+        (next_ah || next_property == sz_utf8_word_break_numeric_k || next_property == sz_utf8_word_break_katakana_k))
+        return sz_false_k; /* WB13b */
+    if (previous_property == sz_utf8_word_break_regional_ind_k && next_property == sz_utf8_word_break_regional_ind_k) {
+        if (sz_word_regional_run_before_(text, previous.start) % 2 == 0) return sz_false_k; /* WB15/WB16 */
     }
-
-    // WB999: Otherwise, break everywhere
-    return sz_true_k;
+    return sz_true_k; /* WB999 */
 }
 
 /*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel

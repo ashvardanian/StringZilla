@@ -75,7 +75,7 @@ typedef struct sz_implementations_t {
     sz_utf8_find_boundaries_t utf8_grapheme_find_boundaries;
     sz_utf8_find_boundaries_t utf8_grapheme_rfind_boundaries;
     sz_utf8_find_boundaries_t utf8_sentence_find_boundaries;
-    sz_utf8_find_boundaries_flagged_t utf8_line_find_boundaries;
+    sz_utf8_find_boundaries_t utf8_find_linewraps;
     sz_utf8_uncased_order_t utf8_uncased_order;
 
     sz_sequence_argsort_t sequence_argsort;

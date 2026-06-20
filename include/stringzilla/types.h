@@ -1012,14 +1012,10 @@ typedef sz_ordering_t (*sz_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t
 /** @brief Signature of `sz_utf8_uncased_agnostic`. */
 typedef sz_cptr_t (*sz_utf8_uncased_violation_t)(sz_cptr_t, sz_size_t);
 
-/** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), newlines, whitespace.
- *         Emits parallel (offset, length) arrays for each delimiter/segment plus a resume `bytes_consumed`. */
+/** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), graphemes, sentences,
+ *         lines, newlines, whitespace. Emits parallel (offset, length) arrays for each segment/delimiter plus a
+ *         resume `bytes_consumed`. */
 typedef sz_size_t (*sz_utf8_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
-
-/** @brief Signature of a UTF-8 "find boundaries" kernel that also emits a parallel per-segment flag array -
- *         used by UAX-14 line breaking, where the extra `sz_u8_t *` marks LB4/LB5 mandatory breaks. */
-typedef sz_size_t (*sz_utf8_find_boundaries_flagged_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_u8_t *,
-                                                       sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
@@ -1449,6 +1445,13 @@ SZ_INTERNAL int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
 SZ_INTERNAL int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u32_ctz(bits);
+}
+
+/** @brief Branchless `value | (bit if condition)`: OR @p bit into @p value when @p condition holds, with no
+ *         branch (mask-select rather than a CMOV, so there is no flag dependency). For threading a per-window
+ *         carry signal into a lane mask. */
+SZ_INTERNAL sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
+    return value | (bit & ((sz_u64_t)0 - (sz_u64_t)(condition != 0)));
 }
 
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }

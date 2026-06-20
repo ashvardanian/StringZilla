@@ -532,12 +532,11 @@ extern "C" {
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_line_find_boundaries(
+    pub(crate) fn sz_utf8_find_linewraps(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
         lengths: *mut usize,
-        mandatory: *mut u8,
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
@@ -3667,44 +3666,42 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8SentenceSplits<'a, STEPS> {
     }
 }
 
-/// An iterator over UAX-14 lines in UTF-8 text, in order.
+/// An iterator over UAX-14 line break opportunities in UTF-8 text, in order.
 ///
 /// Unlike whitespace splitting, the lines tile the input: every byte belongs to exactly one line, so
 /// consecutive lines are contiguous and no empty slices are produced. Follows the Unicode TR14 rules.
 ///
-/// Each yielded item is a `(&[u8], bool)` tuple: the first element is the line segment, and the second
-/// element is the *mandatory-break* flag — `true` when the segment ends at a hard line break (e.g. a
-/// newline, paragraph separator, or end of input that forces a break), and `false` when it ends at a
-/// soft break opportunity where a renderer *may* wrap but is not required to.
+/// Each yielded segment ends at a TR14 break opportunity, including soft breaks where a renderer *may*
+/// wrap but is not required to. To split only on hard line breaks (the "splitlines" behaviour), use the
+/// newline API ([`StringZillable::sz_utf8_newline_splits`]) instead.
 ///
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::RangeUtf8LineSplits;
+/// use stringzilla::stringzilla::RangeUtf8LinewrapSplits;
 ///
-/// let lines: Vec<(&[u8], bool)> = RangeUtf8LineSplits::new(b"Hi\nBye").collect();
-/// assert_eq!(lines, vec![(&b"Hi\n"[..], true), (&b"Bye"[..], true)]);
+/// let lines: Vec<&[u8]> = RangeUtf8LinewrapSplits::new(b"Hi\nBye").collect();
+/// assert_eq!(lines, vec![&b"Hi\n"[..], &b"Bye"[..]]);
 /// ```
-pub struct RangeUtf8LineSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct RangeUtf8LinewrapSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR14 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered line offsets, relative to `suffix`
     lengths: [usize; STEPS], // Buffered line lengths
-    mandatory: [u8; STEPS], // Buffered mandatory-break flags (non-zero on a hard break)
     count: usize,  // Number of buffered lines (0 once exhausted)
     index: usize,  // Index of the next line to yield from the buffer
 }
 
-impl<'a> RangeUtf8LineSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> RangeUtf8LinewrapSplits<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8LineSplits::<1>::with_steps(text)`.
+    /// `RangeUtf8LinewrapSplits::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8LineSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> RangeUtf8LinewrapSplits<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` lines per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3712,7 +3709,6 @@ impl<'a, const STEPS: usize> RangeUtf8LineSplits<'a, STEPS> {
             suffix: 0,
             starts: [0; STEPS],
             lengths: [0; STEPS],
-            mandatory: [0; STEPS],
             count: 0,
             index: 0,
         };
@@ -3724,12 +3720,11 @@ impl<'a, const STEPS: usize> RangeUtf8LineSplits<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_line_find_boundaries(
+            sz_utf8_find_linewraps(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
                 self.lengths.as_mut_ptr(),
-                self.mandatory.as_mut_ptr(),
                 STEPS,
                 &mut consumed,
             )
@@ -3738,8 +3733,8 @@ impl<'a, const STEPS: usize> RangeUtf8LineSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8LineSplits<'a, STEPS> {
-    type Item = (&'a [u8], bool);
+impl<'a, const STEPS: usize> Iterator for RangeUtf8LinewrapSplits<'a, STEPS> {
+    type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index == self.count {
@@ -3755,9 +3750,8 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8LineSplits<'a, STEPS> {
         }
         let begin = self.suffix + self.starts[self.index];
         let end = begin + self.lengths[self.index];
-        let is_mandatory_break = self.mandatory[self.index] != 0;
         self.index += 1;
-        Some((&self.text[begin..end], is_mandatory_break))
+        Some(&self.text[begin..end])
     }
 }
 
@@ -3995,9 +3989,10 @@ pub trait StringZillableUnary {
     /// Returns an iterator over UAX-29 sentences (Unicode TR29), in order. Sentences tile the input contiguously.
     fn sz_utf8_sentence_splits(&self) -> RangeUtf8SentenceSplits<'_>;
 
-    /// Returns an iterator over UAX-14 lines (Unicode TR14), in order. Lines tile the input contiguously; each
-    /// item is a `(&[u8], bool)` of the segment and whether it ends at a mandatory (hard) line break.
-    fn sz_utf8_line_splits(&self) -> RangeUtf8LineSplits<'_>;
+    /// Returns an iterator over UAX-14 line-break opportunities (Unicode TR14), in order. Linewrap segments tile the
+    /// input contiguously, including soft break opportunities. For hard line splits only, use
+    /// [`Self::sz_utf8_newline_splits`].
+    fn sz_utf8_linewrap_splits(&self) -> RangeUtf8LinewrapSplits<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -4278,8 +4273,8 @@ where
         RangeUtf8SentenceSplits::new(self.as_ref())
     }
 
-    fn sz_utf8_line_splits(&self) -> RangeUtf8LineSplits<'_> {
-        RangeUtf8LineSplits::new(self.as_ref())
+    fn sz_utf8_linewrap_splits(&self) -> RangeUtf8LinewrapSplits<'_> {
+        RangeUtf8LinewrapSplits::new(self.as_ref())
     }
 }
 
@@ -5305,14 +5300,14 @@ mod tests {
     }
 
     #[test]
-    fn iter_line_utf8_splits_steps_invariance() {
-        // Lines tile the input, so the yielded segments (and mandatory-break flags) must match regardless of
-        // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line boundary.
+    fn iter_linewrap_utf8_splits_steps_invariance() {
+        // Linewrap segments tile the input, so the yielded segments must match regardless of
+        // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line-break opportunity.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<(&[u8], bool)> = RangeUtf8LineSplits::new(text).collect();
-        assert_eq!(RangeUtf8LineSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8LineSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8LineSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        let forward: Vec<&[u8]> = RangeUtf8LinewrapSplits::new(text).collect();
+        assert_eq!(RangeUtf8LinewrapSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8LinewrapSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(RangeUtf8LinewrapSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]

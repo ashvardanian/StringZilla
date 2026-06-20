@@ -9,7 +9,8 @@
  *  - Uncased substring search for Unicode text - @b utf8_uncased_find.
  *
  *  Its sibling @b `bench_utf8_iterate.cpp` covers the @b `sz_utf8_*` iteration/segmentation family
- *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word boundaries, transcoding).
+ *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word/grapheme/sentence boundaries,
+ *  UAX-14 line breaking, transcoding).
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -81,11 +82,13 @@ void bench_utf8_uncased_fold(environment_t const &env) {
     bench_result_t base = bench_unary(env, "sz_utf8_uncased_fold_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_uncased_fold_icelake", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_icelake> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_icelake", validator,
+                utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_uncased_fold_haswell", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_haswell> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_haswell", validator,
+                utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
@@ -97,14 +100,16 @@ void bench_utf8_uncased_fold(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_uncased_fold_rvv", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_rvv> {env}).log(base);
+    bench_unary(env, "sz_utf8_uncased_fold_rvv", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_rvv> {env})
+        .log(base);
 #endif
 #if SZ_USE_LASX
     bench_unary(env, "sz_utf8_uncased_fold_lasx", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_uncased_fold_powervsx", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_powervsx> {env})
+    bench_unary(env, "sz_utf8_uncased_fold_powervsx", validator,
+                utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_powervsx> {env})
         .log(base);
 #endif
 }
@@ -169,23 +174,19 @@ void bench_utf8_uncased_find(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_uncased_find_neon", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_neon> {env})
+    bench_unary(env, "sz_utf8_uncased_find_neon", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_neon> {env})
         .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_uncased_find_v128", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_v128> {env})
+    bench_unary(env, "sz_utf8_uncased_find_v128", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_v128> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_uncased_find_rvv", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_rvv> {env})
+    bench_unary(env, "sz_utf8_uncased_find_rvv", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_rvv> {env})
         .log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_uncased_find_lasx", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_lasx> {env})
+    bench_unary(env, "sz_utf8_uncased_find_lasx", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX

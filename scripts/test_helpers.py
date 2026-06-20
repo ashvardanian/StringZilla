@@ -581,3 +581,461 @@ def baseline_word_boundaries(text: str, wb_props: Dict[int, str] = None) -> List
     boundaries.append(total_bytes)
 
     return sorted(set(boundaries))
+
+
+def _download_break_property_file(filename: str, version: str) -> str:
+    """Download an auxiliary break-property file (e.g. GraphemeBreakProperty.txt) and return the cache path.
+
+    ``LineBreak.txt`` lives directly under ``ucd/`` while the others live under ``ucd/auxiliary/``.
+    """
+    cache_path = os.path.join(tempfile.gettempdir(), f"{filename[:-4]}-{version}.txt")
+
+    subdir = "ucd" if filename == "LineBreak.txt" else "ucd/auxiliary"
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/{subdir}/{filename}"
+        print(f"Downloading Unicode {version} {filename} from {url}...")
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(cache_path, "wb") as f:
+                    f.write(response.read())
+            print(f"Cached to {cache_path}")
+        except Exception as e:
+            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {e}")
+
+    return cache_path
+
+
+def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
+    """Parse a ``codepoint(..range) ; Property`` style UCD break-property file into a dict."""
+    props: Dict[int, str] = {}
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            if not line:
+                continue
+            parts = line.split(";")
+            if len(parts) < 2:
+                continue
+            try:
+                cp_range = parts[0].strip()
+                prop_name = parts[1].strip()
+                if ".." in cp_range:
+                    start, end = cp_range.split("..")
+                    start_cp = int(start, 16)
+                    end_cp = int(end, 16)
+                else:
+                    start_cp = end_cp = int(cp_range, 16)
+                for cp in range(start_cp, end_cp + 1):
+                    props[cp] = prop_name
+            except (ValueError, IndexError):
+                continue
+    return props
+
+
+def _download_break_test_file(filename: str, version: str) -> str:
+    """Download an auxiliary break-test file (e.g. GraphemeBreakTest.txt) and return the cache path."""
+    cache_path = os.path.join(tempfile.gettempdir(), f"{filename[:-4]}-{version}.txt")
+
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/ucd/auxiliary/{filename}"
+        print(f"Downloading Unicode {version} {filename} from {url}...")
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(cache_path, "wb") as f:
+                    f.write(response.read())
+            print(f"Cached to {cache_path}")
+        except Exception as e:
+            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {e}")
+
+    return cache_path
+
+
+def _parse_break_test_file(cache_path: str) -> List[tuple]:
+    """Parse a UAX break-test file (``÷`` = break, ``×`` = no break) into (text, boundary_positions)."""
+    test_cases = []
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            if not line:
+                continue
+            parts = line.replace("÷", " ÷ ").replace("×", " × ").split()
+            codepoints = []
+            boundaries = []
+            byte_pos = 0
+            for part in parts:
+                part = part.strip()
+                if part == "÷":
+                    boundaries.append(byte_pos)
+                elif part == "×":
+                    pass
+                elif part:
+                    try:
+                        cp = int(part, 16)
+                        codepoints.append(cp)
+                        byte_pos += len(chr(cp).encode("utf-8"))
+                    except ValueError:
+                        continue
+            if codepoints:
+                text = "".join(chr(cp) for cp in codepoints)
+                test_cases.append((text, boundaries))
+    return test_cases
+
+
+#  region Grapheme
+
+
+def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+    """Download and parse GraphemeBreakProperty.txt.
+
+    Returns a dict mapping codepoints to their Grapheme_Cluster_Break property name.
+    Property names: CR, LF, Control, Extend, ZWJ, Regional_Indicator, Prepend,
+    SpacingMark, L, V, T, LV, LVT, and (implicitly) Other.
+    """
+    cache_path = _download_break_property_file("GraphemeBreakProperty.txt", version)
+    return _parse_break_property_file(cache_path)
+
+
+def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+    """Download and parse the official GraphemeBreakTest.txt.
+
+    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    positions are byte offsets and include 0 and len(text).
+    """
+    cache_path = _download_break_test_file("GraphemeBreakTest.txt", version)
+    return _parse_break_test_file(cache_path)
+
+
+def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None) -> List[int]:
+    """Pure Python implementation of the UAX-29 extended grapheme cluster algorithm.
+
+    Reference baseline for the C implementation. Returns byte positions of cluster boundaries.
+    Covers GB1-GB999 including the Hangul, emoji-ZWJ (GB11) and Regional_Indicator (GB12/13) rules.
+    """
+    if props is None:
+        props = get_grapheme_break_properties()
+
+    def prop_of(cp: int) -> str:
+        return props.get(cp, "Other")
+
+    codepoints = []
+    byte_offset = 0
+    for char in text:
+        cp = ord(char)
+        cp_bytes = char.encode("utf-8")
+        codepoints.append((cp, byte_offset, len(cp_bytes)))
+        byte_offset += len(cp_bytes)
+
+    if not codepoints:
+        return [0]
+
+    total_bytes = byte_offset
+    boundaries = [0]  # GB1: sot ÷
+
+    def is_extended_pictographic(cp: int) -> bool:
+        # Extended_Pictographic is supplied via Emoji-Data; approximate from common ranges.
+        return (
+            0x1F000 <= cp <= 0x1FAFF
+            or 0x2600 <= cp <= 0x27BF
+            or cp in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x2328, 0x2388)
+            or 0x2194 <= cp <= 0x21AA
+            or 0x231A <= cp <= 0x231B
+            or 0x24C2 == cp
+            or 0x25AA <= cp <= 0x25FE
+            or 0x2934 <= cp <= 0x2935
+            or 0x2B00 <= cp <= 0x2BFF
+            or 0x1F1E6 <= cp <= 0x1F1FF
+        )
+
+    for i in range(1, len(codepoints)):
+        pos_bytes = codepoints[i][1]
+        prev_cp = codepoints[i - 1][0]
+        curr_cp = codepoints[i][0]
+        prev_prop = prop_of(prev_cp)
+        curr_prop = prop_of(curr_cp)
+
+        # GB3: CR x LF
+        if prev_prop == "CR" and curr_prop == "LF":
+            continue
+        # GB4: (Control | CR | LF) ÷
+        if prev_prop in ("Control", "CR", "LF"):
+            boundaries.append(pos_bytes)
+            continue
+        # GB5: ÷ (Control | CR | LF)
+        if curr_prop in ("Control", "CR", "LF"):
+            boundaries.append(pos_bytes)
+            continue
+        # GB6: L x (L | V | LV | LVT)
+        if prev_prop == "L" and curr_prop in ("L", "V", "LV", "LVT"):
+            continue
+        # GB7: (LV | V) x (V | T)
+        if prev_prop in ("LV", "V") and curr_prop in ("V", "T"):
+            continue
+        # GB8: (LVT | T) x T
+        if prev_prop in ("LVT", "T") and curr_prop == "T":
+            continue
+        # GB9: x (Extend | ZWJ)
+        if curr_prop in ("Extend", "ZWJ"):
+            continue
+        # GB9a: x SpacingMark
+        if curr_prop == "SpacingMark":
+            continue
+        # GB9b: Prepend x
+        if prev_prop == "Prepend":
+            continue
+        # GB11: ExtPict Extend* ZWJ x ExtPict
+        if prev_prop == "ZWJ" and is_extended_pictographic(curr_cp):
+            j = i - 1
+            # skip the ZWJ, then any Extend, looking for an Extended_Pictographic base
+            k = j - 1
+            while k >= 0 and prop_of(codepoints[k][0]) == "Extend":
+                k -= 1
+            if k >= 0 and is_extended_pictographic(codepoints[k][0]):
+                continue
+        # GB12/GB13: RI x RI when preceding RI count is even
+        if prev_prop == "Regional_Indicator" and curr_prop == "Regional_Indicator":
+            ri_count = 0
+            for k in range(i - 1, -1, -1):
+                if prop_of(codepoints[k][0]) == "Regional_Indicator":
+                    ri_count += 1
+                else:
+                    break
+            if ri_count % 2 == 1:
+                continue
+        # GB999: otherwise break
+        boundaries.append(pos_bytes)
+
+    boundaries.append(total_bytes)  # GB2: eot ÷
+    return sorted(set(boundaries))
+
+
+#  endregion Grapheme
+
+#  region Sentence
+
+
+def get_sentence_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+    """Download and parse SentenceBreakProperty.txt.
+
+    Returns a dict mapping codepoints to their Sentence_Break property name.
+    Property names: CR, LF, Extend, Sep, Format, Sp, Lower, Upper, OLetter,
+    Numeric, ATerm, SContinue, STerm, Close, and (implicitly) Other.
+    """
+    cache_path = _download_break_property_file("SentenceBreakProperty.txt", version)
+    return _parse_break_property_file(cache_path)
+
+
+def get_sentence_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+    """Download and parse the official SentenceBreakTest.txt.
+
+    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    positions are byte offsets and include 0 and len(text).
+    """
+    cache_path = _download_break_test_file("SentenceBreakTest.txt", version)
+    return _parse_break_test_file(cache_path)
+
+
+def baseline_sentence_boundaries(text: str, props: Dict[int, str] = None) -> List[int]:
+    """Pure Python implementation of the UAX-29 sentence boundary algorithm.
+
+    Reference baseline for the C implementation. Returns byte positions of sentence boundaries.
+    Implements SB1-SB998 including the SB8/SB8a/SB9/SB10/SB11 ATerm/STerm machinery.
+    """
+    if props is None:
+        props = get_sentence_break_properties()
+
+    def prop_of(cp: int) -> str:
+        return props.get(cp, "Other")
+
+    codepoints = []
+    byte_offset = 0
+    for char in text:
+        cp = ord(char)
+        cp_bytes = char.encode("utf-8")
+        codepoints.append((cp, byte_offset, len(cp_bytes)))
+        byte_offset += len(cp_bytes)
+
+    if not codepoints:
+        return [0]
+
+    total_bytes = byte_offset
+    props_list = [prop_of(cp) for cp, _, _ in codepoints]
+
+    def is_ignorable(prop: str) -> bool:
+        # SB5: ignore Extend and Format for the purpose of the "before" context.
+        return prop in ("Extend", "Format")
+
+    def effective_before(idx: int) -> str:
+        """Property of the last non-ignorable codepoint at or before idx (inclusive)."""
+        k = idx
+        while k >= 0 and is_ignorable(props_list[k]):
+            k -= 1
+        return props_list[k] if k >= 0 else "Other"
+
+    def parasep(prop: str) -> bool:
+        return prop in ("Sep", "CR", "LF")
+
+    boundaries = [0]  # SB1: sot ÷
+
+    n = len(codepoints)
+    for i in range(1, n):
+        pos_bytes = codepoints[i][1]
+        prev_prop = props_list[i - 1]
+        curr_prop = props_list[i]
+
+        # SB3: CR x LF
+        if prev_prop == "CR" and curr_prop == "LF":
+            continue
+        # SB4: Sep | CR | LF ÷
+        if parasep(prev_prop):
+            boundaries.append(pos_bytes)
+            continue
+        # SB5: x (Extend | Format) -> ignore (no break)
+        if curr_prop in ("Extend", "Format"):
+            continue
+
+        eff_prev = effective_before(i - 1)
+
+        # SB6: ATerm x Numeric
+        if eff_prev == "ATerm" and curr_prop == "Numeric":
+            continue
+        # SB7: (Upper | Lower) ATerm x Upper
+        if eff_prev == "ATerm" and curr_prop == "Upper":
+            # find the codepoint before the ATerm (skipping ignorables)
+            k = i - 2
+            while k >= 0 and is_ignorable(props_list[k]):
+                k -= 1
+            if k >= 0 and props_list[k] in ("Upper", "Lower"):
+                continue
+        # Scan back over Close* and Sp* after an ATerm/STerm to find the sentence-terminator context.
+        # SB8: ATerm Close* Sp* x (not (OLetter|Upper|Lower|Sep|CR|LF|STerm|ATerm))* Lower
+        # SB8a: (STerm|ATerm) Close* Sp* x (SContinue | STerm | ATerm)
+        k = i - 1
+        while k >= 0 and is_ignorable(props_list[k]):
+            k -= 1
+        # walk back through Sp
+        while k >= 0 and (props_list[k] == "Sp" or is_ignorable(props_list[k])):
+            k -= 1
+        # walk back through Close
+        while k >= 0 and (props_list[k] == "Close" or is_ignorable(props_list[k])):
+            k -= 1
+        term_prop = props_list[k] if k >= 0 else "Other"
+
+        if term_prop in ("ATerm", "STerm"):
+            # SB8a
+            if curr_prop in ("SContinue", "STerm", "ATerm"):
+                continue
+            if term_prop == "ATerm":
+                # SB8: look ahead skipping the "not separator/terminator/letter" run to a Lower
+                j = i
+                lower_ahead = False
+                while j < n:
+                    p = props_list[j]
+                    if p == "Lower":
+                        lower_ahead = True
+                        break
+                    if p in ("OLetter", "Upper", "Sep", "CR", "LF", "STerm", "ATerm"):
+                        break
+                    j += 1
+                if lower_ahead:
+                    continue
+            # SB9: (STerm|ATerm) Close* x (Close | Sp | Sep | CR | LF)
+            if curr_prop in ("Close", "Sp", "Sep", "CR", "LF"):
+                continue
+            # SB11: after STerm/ATerm (with optional Close*/Sp*/ParaSep) -> break
+            boundaries.append(pos_bytes)
+            continue
+
+        # SB998: otherwise, do not break
+        continue
+
+    boundaries.append(total_bytes)  # SB2: eot ÷
+    return sorted(set(boundaries))
+
+
+#  endregion Sentence
+
+#  region Line
+
+
+def get_line_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+    """Download and parse LineBreak.txt.
+
+    Returns a dict mapping codepoints to their Line_Break property name
+    (e.g. BK, CR, LF, NL, SP, OP, CL, GL, BA, BB, B2, HY, AL, ID, NU, ...).
+    """
+    cache_path = _download_break_property_file("LineBreak.txt", version)
+    return _parse_break_property_file(cache_path)
+
+
+def get_line_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+    """Download and parse the official LineBreakTest.txt.
+
+    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    positions are byte offsets and include 0 and len(text). The test file marks only
+    break opportunities, not whether they are mandatory.
+    """
+    cache_path = _download_break_test_file("LineBreakTest.txt", version)
+    return _parse_break_test_file(cache_path)
+
+
+def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tuple]:
+    """Pure Python reference for UAX-14 mandatory line breaks.
+
+    Rather than reimplement the full pair-table (LB1-LB31), this baseline returns the set of
+    *mandatory* break boundaries (LB4/LB5: BK, CR, LF, NL), which is the property the
+    StringZilla line iterator's ``is_mandatory`` flag exposes. Soft break opportunities are
+    library-specific and validated separately against ``uniseg``.
+
+    Returns:
+        List of (byte_offset, mandatory) tuples. ``mandatory`` is always True here (every
+        returned offset is a hard break); the final eot boundary is reported as non-mandatory.
+    """
+    if props is None:
+        props = get_line_break_properties()
+
+    def prop_of(cp: int) -> str:
+        return props.get(cp, "AL")
+
+    codepoints = []
+    byte_offset = 0
+    for char in text:
+        cp = ord(char)
+        cp_bytes = char.encode("utf-8")
+        codepoints.append((cp, byte_offset, len(cp_bytes)))
+        byte_offset += len(cp_bytes)
+
+    if not codepoints:
+        return [(0, False)]
+
+    total_bytes = byte_offset
+    boundaries = []  # list of (offset, mandatory)
+    seen = set()
+
+    def add(offset: int, mandatory: bool):
+        if offset not in seen:
+            seen.add(offset)
+            boundaries.append((offset, mandatory))
+
+    add(0, False)  # LB2: sot, never a mandatory break
+
+    n = len(codepoints)
+    for i in range(1, n):
+        pos_bytes = codepoints[i][1]
+        prev_prop = prop_of(codepoints[i - 1][0])
+        curr_prop = prop_of(codepoints[i][0])
+
+        # LB5: CR x LF -> no break between
+        if prev_prop == "CR" and curr_prop == "LF":
+            continue
+        # LB4: BK !  (mandatory break after BK)
+        # LB5: CR ! , LF ! , NL !  (mandatory break after each)
+        if prev_prop in ("BK", "CR", "LF", "NL"):
+            add(pos_bytes, True)
+            continue
+
+    # eot boundary (LB3) - reported but not mandatory
+    add(total_bytes, False)
+    return sorted(boundaries)
+
+
+#  endregion Line

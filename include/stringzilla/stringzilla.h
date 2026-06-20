@@ -93,7 +93,7 @@
 #include "stringzilla/utf8_words.h"        // `sz_utf8_word_find_boundaries`, `sz_rune_word_break_property`
 #include "stringzilla/utf8_graphemes.h"    // `sz_utf8_grapheme_find_boundaries`
 #include "stringzilla/utf8_sentences.h"    // `sz_utf8_sentence_find_boundaries`
-#include "stringzilla/utf8_lines.h"        // `sz_utf8_line_find_boundaries`
+#include "stringzilla/utf8_lines.h"        // `sz_utf8_find_linewraps`
 #include "stringzilla/utf8_uncased_fold.h" // `sz_utf8_uncased_fold`
 #include "stringzilla/utf8_uncased.h"      // `sz_utf8_uncased_find`, `sz_utf8_uncased_order`
 #include "stringzilla/utf8_norm.h"         // `sz_utf8_norm`, `sz_utf8_norm_violation`

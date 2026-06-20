@@ -11,6 +11,9 @@
  *  - Newline enumeration - @b utf8_find_newlines.
  *  - Whitespace enumeration - @b utf8_find_whitespaces (Unicode White_Space property).
  *  - UAX-29 word-boundary segmentation, forward & reverse - @b utf8_word_find_boundaries / @b _rfind_boundary.
+ *  - UAX-29 grapheme-cluster segmentation, forward & reverse - @b utf8_grapheme_find_boundaries / @b _rfind.
+ *  - UAX-29 sentence-boundary segmentation - @b utf8_sentence_find_boundaries.
+ *  - UAX-14 line-break segmentation - @b utf8_find_linewraps.
  *  - UTF-8 -> UTF-32 transcoding - @b utf8_unpack_chunk.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
@@ -39,50 +42,14 @@
 #include "bench.hpp"
 #include "test_stringzilla.hpp" // `log_environment`
 
-using namespace ashvardanian::stringzilla::scripts;
+#include "stringzilla/utf8_codepoints.h" // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_unpack_chunk`
+#include "stringzilla/utf8_delimiters.h" // `sz_utf8_find_newlines`, `sz_utf8_find_whitespaces`
+#include "stringzilla/utf8_words.h"      // `sz_utf8_word_find_boundaries`, `sz_utf8_word_rfind_boundaries`
+#include "stringzilla/utf8_graphemes.h"  // `sz_utf8_grapheme_find_boundaries`, `sz_utf8_grapheme_rfind_boundaries`
+#include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentence_find_boundaries`
+#include "stringzilla/utf8_lines.h"      // `sz_utf8_find_linewraps`
 
-// Each `SZ_IF_<ISA>(...)` expands to its argument when that backend is compiled in, else to nothing. This
-// keeps every per-kernel registration block a flat, readable list instead of nested `#if` ladders.
-#if SZ_USE_HASWELL
-#define SZ_IF_HASWELL(...) __VA_ARGS__
-#else
-#define SZ_IF_HASWELL(...)
-#endif
-#if SZ_USE_ICELAKE
-#define SZ_IF_ICELAKE(...) __VA_ARGS__
-#else
-#define SZ_IF_ICELAKE(...)
-#endif
-#if SZ_USE_NEON
-#define SZ_IF_NEON(...) __VA_ARGS__
-#else
-#define SZ_IF_NEON(...)
-#endif
-#if SZ_USE_SVE2
-#define SZ_IF_SVE2(...) __VA_ARGS__
-#else
-#define SZ_IF_SVE2(...)
-#endif
-#if SZ_USE_V128
-#define SZ_IF_V128(...) __VA_ARGS__
-#else
-#define SZ_IF_V128(...)
-#endif
-#if SZ_USE_RVV
-#define SZ_IF_RVV(...) __VA_ARGS__
-#else
-#define SZ_IF_RVV(...)
-#endif
-#if SZ_USE_POWERVSX
-#define SZ_IF_POWERVSX(...) __VA_ARGS__
-#else
-#define SZ_IF_POWERVSX(...)
-#endif
-#if SZ_USE_LASX
-#define SZ_IF_LASX(...) __VA_ARGS__
-#else
-#define SZ_IF_LASX(...)
-#endif
+using namespace ashvardanian::stringzilla::scripts;
 
 #pragma region Wrappers
 
@@ -141,7 +108,7 @@ struct utf8_enumerate_delimiters {
     }
 };
 
-/** @brief  Segments each token into UAX-29 words forward; checksum = number of words. */
+/** @brief  Segments each token into UAX-29 words/graphemes forward; checksum = number of segments. */
 template <auto func_>
 struct utf8_word_forward_from_sz {
     environment_t const &env;
@@ -165,7 +132,7 @@ struct utf8_word_forward_from_sz {
     }
 };
 
-/** @brief  Segments each token into UAX-29 words from the end backward; checksum = number of words. */
+/** @brief  Segments each token into UAX-29 words/graphemes from the end backward; checksum = number of segments. */
 template <auto func_>
 struct utf8_word_reverse_from_sz {
     environment_t const &env;
@@ -224,186 +191,312 @@ struct utf8_unpack_from_sz {
 void bench_utf8_count(environment_t const &env) {
     auto base_v = utf8_count_from_sz<sz_utf8_count_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_count_serial", base_v).log();
-    SZ_IF_HASWELL(
-        bench_unary(env, "sz_utf8_count_haswell", base_v, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);)
-    SZ_IF_ICELAKE(
-        bench_unary(env, "sz_utf8_count_icelake", base_v, utf8_count_from_sz<sz_utf8_count_icelake> {env}).log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_count_neon", base_v, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_count_sve2", base_v, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_count_v128", base_v, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_count_rvv", base_v, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);)
-    SZ_IF_POWERVSX(
-        bench_unary(env, "sz_utf8_count_powervsx", base_v, utf8_count_from_sz<sz_utf8_count_powervsx> {env}).log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_count_lasx", base_v, utf8_count_from_sz<sz_utf8_count_lasx> {env}).log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_count_haswell", base_v, utf8_count_from_sz<sz_utf8_count_haswell> {env}).log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_count_icelake", base_v, utf8_count_from_sz<sz_utf8_count_icelake> {env}).log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_count_neon", base_v, utf8_count_from_sz<sz_utf8_count_neon> {env}).log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_count_sve2", base_v, utf8_count_from_sz<sz_utf8_count_sve2> {env}).log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_count_v128", base_v, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_count_rvv", base_v, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_count_powervsx", base_v, utf8_count_from_sz<sz_utf8_count_powervsx> {env}).log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_count_lasx", base_v, utf8_count_from_sz<sz_utf8_count_lasx> {env}).log(base);
+#endif
 }
 
 void bench_utf8_find_nth(environment_t const &env) {
     auto base_v = utf8_find_nth_from_sz<sz_utf8_find_nth_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_find_nth_serial", base_v).log();
-    SZ_IF_HASWELL(
-        bench_unary(env, "sz_utf8_find_nth_haswell", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_haswell> {env})
-            .log(base);)
-    SZ_IF_ICELAKE(
-        bench_unary(env, "sz_utf8_find_nth_icelake", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_icelake> {env})
-            .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_nth_neon", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_neon> {env})
-                   .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_nth_sve2", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_sve2> {env})
-                   .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_find_nth_v128", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128> {env})
-                   .log(base);)
-    SZ_IF_RVV(
-        bench_unary(env, "sz_utf8_find_nth_rvv", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_rvv> {env}).log(base);)
-    SZ_IF_POWERVSX(
-        bench_unary(env, "sz_utf8_find_nth_powervsx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_powervsx> {env})
-            .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_nth_lasx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_lasx> {env})
-                   .log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_find_nth_haswell", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_find_nth_icelake", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_find_nth_neon", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_neon> {env}).log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_find_nth_sve2", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_sve2> {env}).log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_find_nth_v128", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128> {env}).log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_find_nth_rvv", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_rvv> {env}).log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_find_nth_powervsx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_find_nth_lasx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_lasx> {env}).log(base);
+#endif
 }
 
 void bench_utf8_find_newlines(environment_t const &env) {
     auto base_v = utf8_enumerate_delimiters<sz_utf8_find_newlines_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_find_newlines_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_newlines_haswell", base_v,
-                              utf8_enumerate_delimiters<sz_utf8_find_newlines_haswell> {env})
-                      .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_newlines_icelake", base_v,
-                              utf8_enumerate_delimiters<sz_utf8_find_newlines_icelake> {env})
-                      .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_newlines_neon", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_newlines_neon> {env})
-                   .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_newlines_sve2", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_newlines_sve2> {env})
-                   .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_find_newlines_v128", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_newlines_v128> {env})
-                   .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_newlines_rvv", base_v,
-                          utf8_enumerate_delimiters<sz_utf8_find_newlines_rvv> {env})
-                  .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_newlines_powervsx", base_v,
-                               utf8_enumerate_delimiters<sz_utf8_find_newlines_powervsx> {env})
-                       .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_newlines_lasx", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_newlines_lasx> {env})
-                   .log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_find_newlines_haswell", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_newlines_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_find_newlines_icelake", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_newlines_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_find_newlines_neon", base_v, utf8_enumerate_delimiters<sz_utf8_find_newlines_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_find_newlines_sve2", base_v, utf8_enumerate_delimiters<sz_utf8_find_newlines_sve2> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_find_newlines_v128", base_v, utf8_enumerate_delimiters<sz_utf8_find_newlines_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_find_newlines_rvv", base_v, utf8_enumerate_delimiters<sz_utf8_find_newlines_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_find_newlines_powervsx", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_newlines_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_find_newlines_lasx", base_v, utf8_enumerate_delimiters<sz_utf8_find_newlines_lasx> {env})
+        .log(base);
+#endif
 }
 
 void bench_utf8_find_whitespaces(environment_t const &env) {
     auto base_v = utf8_enumerate_delimiters<sz_utf8_find_whitespaces_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_find_whitespaces_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_find_whitespaces_haswell", base_v,
-                              utf8_enumerate_delimiters<sz_utf8_find_whitespaces_haswell> {env})
-                      .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_find_whitespaces_icelake", base_v,
-                              utf8_enumerate_delimiters<sz_utf8_find_whitespaces_icelake> {env})
-                      .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_find_whitespaces_neon", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_neon> {env})
-                   .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_find_whitespaces_sve2", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_sve2> {env})
-                   .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_find_whitespaces_v128", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_v128> {env})
-                   .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_find_whitespaces_rvv", base_v,
-                          utf8_enumerate_delimiters<sz_utf8_find_whitespaces_rvv> {env})
-                  .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_find_whitespaces_powervsx", base_v,
-                               utf8_enumerate_delimiters<sz_utf8_find_whitespaces_powervsx> {env})
-                       .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_find_whitespaces_lasx", base_v,
-                           utf8_enumerate_delimiters<sz_utf8_find_whitespaces_lasx> {env})
-                   .log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_find_whitespaces_haswell", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_find_whitespaces_icelake", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_find_whitespaces_neon", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_find_whitespaces_sve2", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_sve2> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_find_whitespaces_v128", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_find_whitespaces_rvv", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_find_whitespaces_powervsx", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_find_whitespaces_lasx", base_v,
+                utf8_enumerate_delimiters<sz_utf8_find_whitespaces_lasx> {env})
+        .log(base);
+#endif
 }
 
 void bench_utf8_word_find_boundaries(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_word_find_boundaries_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_find_boundaries_haswell", base_v,
-                              utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_haswell> {env})
-                      .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_find_boundaries_icelake", base_v,
-                              utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_icelake> {env})
-                      .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_find_boundaries_neon", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_neon> {env})
-                   .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_find_boundaries_sve2", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_sve2> {env})
-                   .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_word_find_boundaries_v128", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_v128> {env})
-                   .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_find_boundaries_rvv", base_v,
-                          utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_rvv> {env})
-                  .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_find_boundaries_powervsx", base_v,
-                               utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_powervsx> {env})
-                       .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_find_boundaries_lasx", base_v,
-                           utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_lasx> {env})
-                   .log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_word_find_boundaries_haswell", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_word_find_boundaries_icelake", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_word_find_boundaries_neon", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_word_find_boundaries_sve2", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_sve2> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_word_find_boundaries_v128", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_word_find_boundaries_rvv", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_word_find_boundaries_powervsx", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_word_find_boundaries_lasx", base_v,
+                utf8_word_forward_from_sz<sz_utf8_word_find_boundaries_lasx> {env})
+        .log(base);
+#endif
 }
 
 void bench_utf8_word_rfind_boundaries(environment_t const &env) {
     auto base_v = utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_word_rfind_boundaries_serial", base_v).log();
-    SZ_IF_HASWELL(bench_unary(env, "sz_utf8_word_rfind_boundaries_haswell", base_v,
-                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_haswell> {env})
-                      .log(base);)
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_word_rfind_boundaries_icelake", base_v,
-                              utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_icelake> {env})
-                      .log(base);)
-    SZ_IF_NEON(bench_unary(env, "sz_utf8_word_rfind_boundaries_neon", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_neon> {env})
-                   .log(base);)
-    SZ_IF_SVE2(bench_unary(env, "sz_utf8_word_rfind_boundaries_sve2", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_sve2> {env})
-                   .log(base);)
-    SZ_IF_V128(bench_unary(env, "sz_utf8_word_rfind_boundaries_v128", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_v128> {env})
-                   .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_word_rfind_boundaries_rvv", base_v,
-                          utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_rvv> {env})
-                  .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_word_rfind_boundaries_powervsx", base_v,
-                               utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_powervsx> {env})
-                       .log(base);)
-    SZ_IF_LASX(bench_unary(env, "sz_utf8_word_rfind_boundaries_lasx", base_v,
-                           utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_lasx> {env})
-                   .log(base);)
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_haswell", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_icelake", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_neon", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_sve2", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_sve2> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_v128", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_rvv", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_powervsx", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_word_rfind_boundaries_lasx", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_word_rfind_boundaries_lasx> {env})
+        .log(base);
+#endif
+}
+
+void bench_utf8_grapheme_find_boundaries(environment_t const &env) {
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_grapheme_find_boundaries_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_grapheme_find_boundaries_serial", base_v).log();
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_grapheme_find_boundaries_icelake", base_v,
+                utf8_word_forward_from_sz<sz_utf8_grapheme_find_boundaries_icelake> {env})
+        .log(base);
+#endif
+}
+
+void bench_utf8_grapheme_rfind_boundaries(environment_t const &env) {
+    auto base_v = utf8_word_reverse_from_sz<sz_utf8_grapheme_rfind_boundaries_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_grapheme_rfind_boundaries_serial", base_v).log();
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_grapheme_rfind_boundaries_icelake", base_v,
+                utf8_word_reverse_from_sz<sz_utf8_grapheme_rfind_boundaries_icelake> {env})
+        .log(base);
+#endif
+}
+
+void bench_utf8_sentence_find_boundaries(environment_t const &env) {
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_sentence_find_boundaries_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_sentence_find_boundaries_serial", base_v).log();
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_sentence_find_boundaries_icelake", base_v,
+                utf8_word_forward_from_sz<sz_utf8_sentence_find_boundaries_icelake> {env})
+        .log(base);
+#endif
+}
+
+void bench_utf8_find_linewraps(environment_t const &env) {
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_find_linewraps_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_find_linewraps_serial", base_v).log();
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_find_linewraps_icelake", base_v,
+                utf8_word_forward_from_sz<sz_utf8_find_linewraps_icelake> {env})
+        .log(base);
+#endif
 }
 
 void bench_utf8_unpack_chunk(environment_t const &env) {
     auto base_v = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", base_v).log();
-    SZ_IF_ICELAKE(bench_unary(env, "sz_utf8_unpack_chunk_icelake", base_v,
-                              utf8_unpack_from_sz<sz_utf8_unpack_chunk_icelake> {env})
-                      .log(base);)
-    SZ_IF_NEON(
-        bench_unary(env, "sz_utf8_unpack_chunk_neon", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env})
-            .log(base);)
-    SZ_IF_V128(
-        bench_unary(env, "sz_utf8_unpack_chunk_v128", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_v128> {env})
-            .log(base);)
-    SZ_IF_RVV(bench_unary(env, "sz_utf8_unpack_chunk_rvv", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_rvv> {env})
-                  .log(base);)
-    SZ_IF_POWERVSX(bench_unary(env, "sz_utf8_unpack_chunk_powervsx", base_v,
-                               utf8_unpack_from_sz<sz_utf8_unpack_chunk_powervsx> {env})
-                       .log(base);)
-    SZ_IF_LASX(
-        bench_unary(env, "sz_utf8_unpack_chunk_lasx", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_lasx> {env})
-            .log(base);)
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_unpack_chunk_icelake", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_unpack_chunk_neon", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_unpack_chunk_v128", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_unpack_chunk_rvv", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_rvv> {env}).log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_unpack_chunk_powervsx", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_powervsx> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_unpack_chunk_lasx", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_lasx> {env})
+        .log(base);
+#endif
 }
 
 #pragma endregion
 
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    std::printf("Welcome to StringZilla UTF-8 Iteration Benchmarks!\n");
+    std::printf("Welcome to StringZilla UTF-8 Benchmarks!\n");
     if (auto code = log_environment(); code != 0) return code;
 
     std::printf("Building up the environment...\n");
@@ -412,7 +505,7 @@ int main(int argc, char const **argv) {
         "xlsum.csv",                       // Default to xlsum for multilingual coverage
         environment_t::tokenization_t::lines_k);
 
-    std::printf("Starting UTF-8 iteration benchmarks...\n");
+    std::printf("Starting UTF-8 benchmarks...\n");
 
     bench_utf8_count(env);
     bench_utf8_find_nth(env);
@@ -420,6 +513,10 @@ int main(int argc, char const **argv) {
     bench_utf8_find_whitespaces(env);
     bench_utf8_word_find_boundaries(env);
     bench_utf8_word_rfind_boundaries(env);
+    bench_utf8_grapheme_find_boundaries(env);
+    bench_utf8_grapheme_rfind_boundaries(env);
+    bench_utf8_sentence_find_boundaries(env);
+    bench_utf8_find_linewraps(env);
     bench_utf8_unpack_chunk(env);
 
     std::printf("All benchmarks passed.\n");

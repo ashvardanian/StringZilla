@@ -22,17 +22,14 @@ extern "C" {
  *  the spans between consecutive UAX-14 break opportunities, so a single call segments the entire input without
  *  the caller having to loop and restart a scan for every break.
  *
- *  Unlike the word/grapheme/sentence kernels, line break distinguishes @b mandatory breaks (UAX-14 rules LB4/LB5
- *  - hard breaks after BK/CR/LF/NL that the caller must honor) from allowed wrap opportunities. `mandatory[i]`
- *  is set to a non-zero flag when the break @b ending segment @p i (i.e. the boundary at
- *  `line_starts[i] + line_lengths[i]`) is mandatory, and zero when it is merely an allowed wrap point.
+ *  This emits every wrap opportunity (both the mandatory LB4/LB5 hard breaks and the allowed soft-wrap points).
+ *  To split only on the hard breaks (the `str.splitlines` behavior) use `sz_utf8_find_newlines` instead, which
+ *  enumerates exactly the LB4/LB5 break positions.
  *
  *  @param text UTF-8 encoded text.
  *  @param length Byte length of @p text.
  *  @param line_starts Output array of segment byte offsets (at least @p lines_capacity entries).
  *  @param line_lengths Output array of segment byte lengths (at least @p lines_capacity entries).
- *  @param mandatory Output array of mandatory-break flags (at least @p lines_capacity entries): non-zero marks a
- *         UAX-14 LB4/LB5 hard break, zero an allowed wrap opportunity.
  *  @param lines_capacity Capacity of the output arrays, in entries.
  *  @param bytes_consumed Optional output: byte offset up to which the input was segmented. Equals @p length
  *         when everything fit; otherwise it is the start of the first segment that did not fit (a break
@@ -41,25 +38,25 @@ extern "C" {
  *
  *  @note No zero-length segments are emitted; @p length == 0 returns 0. Line segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_line_find_boundaries(                       //
-    sz_cptr_t text, sz_size_t length,                                    //
-    sz_size_t *line_starts, sz_size_t *line_lengths, sz_u8_t *mandatory, //
+SZ_DYNAMIC sz_size_t sz_utf8_find_linewraps(         //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed);
 
 #pragma endregion
 
 #pragma region Platform-Specific Backends
 
-/** @copydoc sz_utf8_line_find_boundaries */
-SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                        sz_size_t *line_lengths, sz_u8_t *mandatory,
-                                                        sz_size_t lines_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_find_linewraps_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                  sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                  sz_size_t *bytes_consumed);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_line_find_boundaries */
-SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                         sz_size_t *line_lengths, sz_u8_t *mandatory,
-                                                         sz_size_t lines_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_find_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_find_linewraps_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                   sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                   sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -72,15 +69,13 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_icelake(sz_cptr_t text, sz_size
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_line_find_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                  sz_size_t *line_lengths, sz_u8_t *mandatory, sz_size_t lines_capacity,
-                                                  sz_size_t *bytes_consumed) {
+SZ_DYNAMIC sz_size_t sz_utf8_find_linewraps(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                            sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_line_find_boundaries_icelake(text, length, line_starts, line_lengths, mandatory, lines_capacity,
-                                                bytes_consumed);
+    return sz_utf8_find_linewraps_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
-    return sz_utf8_line_find_boundaries_serial(text, length, line_starts, line_lengths, mandatory, lines_capacity,
-                                               bytes_consumed);
+    return sz_utf8_find_linewraps_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #endif
 }
 

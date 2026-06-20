@@ -542,6 +542,15 @@ void test_utf8_all();
 void test_utf8_safety();
 void test_utf8_words_unit();
 void test_utf8_ligature_unit();
+void test_utf8_grapheme_unit();
+void test_utf8_grapheme_safety();
+void test_utf8_grapheme_all();
+void test_utf8_sentence_unit();
+void test_utf8_sentence_safety();
+void test_utf8_sentence_all();
+void test_utf8_line_unit();
+void test_utf8_line_safety();
+void test_utf8_line_all();
 void test_norm_unit();
 void test_norm_all();
 
