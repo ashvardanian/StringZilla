@@ -795,12 +795,12 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
         warp_tasks_density_order_<task_t> const order {};
         size_t temp_storage_bytes = 0;
         cub::DeviceMergeSort::SortKeys(nullptr, temp_storage_bytes, warp_tasks_begin, warp_level_count, order, stream);
-        if (grouping_scratch.try_resize(temp_storage_bytes) == status_t::success_k) {
+        if (grouping_scratch.try_resize(temp_storage_bytes) == status_t::success_k)
             cub::DeviceMergeSort::SortKeys(grouping_scratch.data(), temp_storage_bytes, warp_tasks_begin,
                                            warp_level_count, order, stream);
-            cudaStreamSynchronize(stream);
-        }
-        // On scratch-allocation failure the middle stays partition-ordered: correct, only less optimally grouped.
+        // No drain here: the run-length-encode below consumes the sort on the same stream, so it is already ordered
+        // after it. On scratch-allocation failure the middle stays partition-ordered: correct, only less optimally
+        // grouped.
     }
     if (!warp_level_count) return result;
 
@@ -836,29 +836,29 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     if (!raw_group_count) return result;
 
     {
-        size_t scan_bytes = 0;
+        warp_tasks_memory_requirement_functor_<task_t> const memory_functor {};
+        cub::TransformInputIterator<size_t, warp_tasks_memory_requirement_functor_<task_t>, task_t const *>
+            memory_iterator(warp_tasks_begin, memory_functor);
+        // Size BOTH the exclusive-sum (group begin offsets) and the segmented Max (per-group shared-memory footprint)
+        // up front, then grow the shared CUB scratch ONCE to the larger - so no `try_resize` (a `cudaFree`/`cudaMalloc`
+        // device barrier) ever runs while a previously-enqueued CUB kernel is still in flight on the stream. Both calls
+        // pass their own byte count (<= capacity) and run sequentially on the stream, so they safely share the buffer.
+        size_t scan_bytes = 0, reduce_bytes = 0;
         if (cub::DeviceScan::ExclusiveSum(nullptr, scan_bytes, run_lengths, begin_offsets,
                                           static_cast<int>(raw_group_count), stream) != cudaSuccess)
             return result;
-        if (grouping_scratch.try_resize_uninitialized(scan_bytes) == status_t::bad_alloc_k) return result;
-        if (cub::DeviceScan::ExclusiveSum(grouping_scratch.data(), scan_bytes, run_lengths, begin_offsets,
-                                          static_cast<int>(raw_group_count), stream) != cudaSuccess)
-            return result;
-    }
-    {
-        warp_tasks_memory_requirement_functor_<task_t> const memory_functor {};
-        cub::TransformInputIterator<size_t, warp_tasks_memory_requirement_functor_<task_t>, task_t const *>
-            memory_iterator(&*warp_tasks_begin, memory_functor);
-        // The segmented Max needs each segment's [begin, end); `begin_offsets` is the begin array and
-        // `begin_offsets + 1` the end array, so we materialize the final end (== `warp_level_count`) first.
-        size_t reduce_bytes = 0;
         if (cub::DeviceSegmentedReduce::Max(nullptr, reduce_bytes, memory_iterator, group_max_memory,
                                             static_cast<int>(raw_group_count), begin_offsets, begin_offsets + 1,
                                             stream) != cudaSuccess)
             return result;
-        if (grouping_scratch.try_resize_uninitialized(reduce_bytes) == status_t::bad_alloc_k) return result;
-        // Append the trailing segment end to `begin_offsets` so `begin_offsets + 1` is a valid end array. Enqueued on
-        // the same stream as the reduce that consumes it; the host source outlives the trailing `cudaStreamSynchronize`.
+        if (grouping_scratch.try_resize_uninitialized(sz_max_of_two(scan_bytes, reduce_bytes)) == status_t::bad_alloc_k)
+            return result;
+        if (cub::DeviceScan::ExclusiveSum(grouping_scratch.data(), scan_bytes, run_lengths, begin_offsets,
+                                          static_cast<int>(raw_group_count), stream) != cudaSuccess)
+            return result;
+        // The segmented Max needs each segment's [begin, end); `begin_offsets` is the begin array and `begin_offsets + 1`
+        // the end array, so the trailing end (== `warp_level_count`) is appended on the stream after the scan. The host
+        // source outlives the trailing `cudaStreamSynchronize` that drains this block.
         if (cudaMemcpyAsync(begin_offsets + raw_group_count, &warp_level_count, sizeof(size_t), cudaMemcpyHostToDevice,
                             stream) != cudaSuccess)
             return result;

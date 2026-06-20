@@ -1866,13 +1866,14 @@ static constexpr u32_t levenshtein_priority_register_u8_k = 5;
 static constexpr u32_t levenshtein_priority_register_u16_k = 6;
 static constexpr u32_t levenshtein_priority_device_k = 7;
 
-/** @brief Final dense tier ids 0..4 used for run-length counting. */
+/** @brief Final dense tier ids 0..5 used for run-length counting (the myers block sorts word1 < generic < cooperative). */
 static constexpr u32_t levenshtein_tier_myers_word1_k = 0;
 static constexpr u32_t levenshtein_tier_myers_generic_k = 1;
-static constexpr u32_t levenshtein_tier_register_u8_k = 2;
-static constexpr u32_t levenshtein_tier_register_u16_k = 3;
-static constexpr u32_t levenshtein_tier_device_k = 4;
-static constexpr int levenshtein_tier_count_k = 5;
+static constexpr u32_t levenshtein_tier_myers_cooperative_k = 2;
+static constexpr u32_t levenshtein_tier_register_u8_k = 3;
+static constexpr u32_t levenshtein_tier_register_u16_k = 4;
+static constexpr u32_t levenshtein_tier_device_k = 5;
+static constexpr int levenshtein_tier_count_k = 6;
 
 /**
  *  @brief Shorter-length at/above which a unit-cost Levenshtein pair leaves the bit-parallel Myers tiers and routes
@@ -1887,9 +1888,18 @@ static constexpr int levenshtein_tier_count_k = 5;
 inline static constexpr size_t levenshtein_myers_max_shorter_k = 256;
 
 /**
+ *  @brief Shorter-length cap for the warp-COOPERATIVE Myers tier (lane = word). Between @ref levenshtein_myers_max_shorter_k
+ *         and this cap, one warp scores one pair with the words spread across lanes (@ref
+ *         unit_myers_multiword_cooperative_per_cuda_warp_): it fills the warp from a single pair and never spills, so it
+ *         beats both the (spilling) one-thread-per-pair multi-word Myers and the DP wavefront for long and/or few-pair
+ *         inputs. 2048 = 32 words = one word per lane. Above it, pairs fall through to the tiled DP device tier.
+ */
+inline static constexpr size_t levenshtein_myers_cooperative_max_shorter_k = 2048;
+
+/**
  *  @brief Whether a task routes to the bit-parallel Myers tiers. Only unit-cost linear Levenshtein can, and only when
- *         its shorter side is at most @ref levenshtein_myers_max_shorter_k; affine, non-unit-cost linear, and longer
- *         unit-cost pairs fall through to the register / device split (the Needleman-Wunsch DP tiers).
+ *         its shorter side is at most @ref levenshtein_myers_cooperative_max_shorter_k; affine, non-unit-cost linear, and
+ *         longer unit-cost pairs fall through to the register / device split (the Needleman-Wunsch DP tiers).
  */
 enum class levenshtein_tier_mode_t {
     /** @brief Unit-cost linear: `shorter <= 64` -> register Myers, `64 < shorter <= cap` -> generic Myers, else DP tiers. */
@@ -1903,7 +1913,7 @@ template <typename char_type_>
 __host__ __device__ __forceinline__ bool levenshtein_task_uses_myers(cuda_similarity_task<char_type_> const &task,
                                                                      levenshtein_tier_mode_t mode) noexcept {
     return mode == levenshtein_tier_mode_t::myers_and_registers_k &&
-           task.shorter.size() <= levenshtein_myers_max_shorter_k;
+           task.shorter.size() <= levenshtein_myers_cooperative_max_shorter_k;
 }
 
 /** @brief Group-ordering priority placed in the key MSBs for one task. */
@@ -1921,9 +1931,11 @@ __host__ __device__ __forceinline__ u32_t levenshtein_task_tier_priority(cuda_si
 template <typename char_type_>
 __host__ __device__ __forceinline__ u32_t levenshtein_task_dense_tier(cuda_similarity_task<char_type_> const &task,
                                                                       levenshtein_tier_mode_t mode) noexcept {
-    if (levenshtein_task_uses_myers(task, mode))
-        return task.shorter.size() <= levenshtein_myers_word1_cap_k ? levenshtein_tier_myers_word1_k
-                                                                    : levenshtein_tier_myers_generic_k;
+    if (levenshtein_task_uses_myers(task, mode)) {
+        if (task.shorter.size() <= levenshtein_myers_word1_cap_k) return levenshtein_tier_myers_word1_k;
+        if (task.shorter.size() <= levenshtein_myers_max_shorter_k) return levenshtein_tier_myers_generic_k;
+        return levenshtein_tier_myers_cooperative_k;
+    }
     if (task.fits_in_registers())
         return task.bytes_per_cell == one_byte_per_cell_k ? levenshtein_tier_register_u8_k
                                                           : levenshtein_tier_register_u16_k;
@@ -2056,6 +2068,40 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, //
 
     int const block = 256;
     unsigned const grid = static_cast<unsigned>(sz_min_of_two((count + block - 1) / block, size_t(1024)));
+
+    // Single-tier fast path: when every task already shares one dense tier (uniform-length cross-products - the tiny
+    // "words" regime, where the radix sort / gather / run-length-encode would separate nothing), probe the tier-id
+    // range over the cell-ordered tasks with one Min + one Max reduction. If it collapses to a point, that tier owns
+    // every task and intra-tier order is irrelevant to the per-tier kernels, so `tasks_` stays as materialized and the
+    // whole sort / gather / RLE pipeline is skipped - drained by the single synchronize this probe already needs.
+    {
+        dense_tier_functor.tasks = buffers.tasks_.data();
+        cub::CountingInputIterator<size_t> counting_iterator(0);
+        cub::TransformInputIterator<u32_t, dense_tier_functor_type_, cub::CountingInputIterator<size_t>> tier_iterator(
+            counting_iterator, dense_tier_functor);
+        u32_t *const min_tier_out = unique_tiers;
+        u32_t *const max_tier_out = unique_tiers + 1;
+        size_t min_bytes = 0, max_bytes = 0;
+        if (cub::DeviceReduce::Min(nullptr, min_bytes, tier_iterator, min_tier_out, static_cast<int>(count),
+                                   executor.stream()) != cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        if (cub::DeviceReduce::Max(nullptr, max_bytes, tier_iterator, max_tier_out, static_cast<int>(count),
+                                   executor.stream()) != cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        if (buffers.cub_buffer_.try_resize_uninitialized(sz_max_of_two(min_bytes, max_bytes)) == status_t::bad_alloc_k)
+            return {status_t::bad_alloc_k};
+        if (cub::DeviceReduce::Min(buffers.cub_buffer_.data(), min_bytes, tier_iterator, min_tier_out,
+                                   static_cast<int>(count), executor.stream()) != cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        if (cub::DeviceReduce::Max(buffers.cub_buffer_.data(), max_bytes, tier_iterator, max_tier_out,
+                                   static_cast<int>(count), executor.stream()) != cudaSuccess)
+            return make_cuda_status(cudaGetLastError());
+        if (cudaStreamSynchronize(executor.stream()) != cudaSuccess) return make_cuda_status(cudaGetLastError());
+        if (*min_tier_out == *max_tier_out) {
+            tier_counts[*min_tier_out] = count;
+            return {status_t::success_k, cudaSuccess};
+        }
+    }
 
     // Build the packed sort keys + identity permutation via the engine-owned build-keys kernel.
     {
@@ -2198,10 +2244,11 @@ struct device_tier_maxima_t {
  *         outputs (engine-owned, device-accessible). The stream is synchronized before the host reads the results.
  */
 template <typename char_type_, typename cub_temp_type_, typename maxima_scratch_type_>
-cuda_status_t reduce_device_tier_maxima_(cuda_similarity_task<char_type_> const *tasks, size_t count,
+cuda_status_t reduce_device_tier_maxima_(span<cuda_similarity_task<char_type_> const> tasks,
                                          cub_temp_type_ &cub_temp, maxima_scratch_type_ &maxima_scratch,
                                          cudaStream_t stream, device_tier_maxima_t &maxima) noexcept {
     maxima = {};
+    size_t const count = tasks.size();
     if (!count) return {status_t::success_k, cudaSuccess};
     if (maxima_scratch.try_resize_uninitialized(3) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
     u32_t *const max_shorter_out = maxima_scratch.data();
@@ -2210,11 +2257,11 @@ cuda_status_t reduce_device_tier_maxima_(cuda_similarity_task<char_type_> const 
 
     using task_t = cuda_similarity_task<char_type_>;
     cub::TransformInputIterator<u32_t, task_shorter_length_functor<char_type_>, task_t const *> shorter_iterator(
-        tasks, task_shorter_length_functor<char_type_> {});
+        tasks.data(), task_shorter_length_functor<char_type_> {});
     cub::TransformInputIterator<u32_t, task_longer_length_functor<char_type_>, task_t const *> longer_iterator(
-        tasks, task_longer_length_functor<char_type_> {});
+        tasks.data(), task_longer_length_functor<char_type_> {});
     cub::TransformInputIterator<u32_t, task_bytes_per_cell_functor<char_type_>, task_t const *> bytes_per_cell_iterator(
-        tasks, task_bytes_per_cell_functor<char_type_> {});
+        tasks.data(), task_bytes_per_cell_functor<char_type_> {});
 
     auto const reduce_max = [&](auto input_iterator, u32_t *output) -> cuda_status_t {
         size_t reduce_bytes = 0;
@@ -2248,10 +2295,11 @@ cuda_status_t reduce_device_tier_maxima_(cuda_similarity_task<char_type_> const 
  *         @p maxima.max_bytes_per_cell is left unset (cell width is chosen from the rune-count magnitude by the caller).
  */
 template <typename char_type_, typename cub_temp_type_, typename maxima_scratch_type_>
-cuda_status_t reduce_device_tier_rune_maxima_(cuda_similarity_task<char_type_> const *tasks, size_t count,
+cuda_status_t reduce_device_tier_rune_maxima_(span<cuda_similarity_task<char_type_> const> tasks,
                                               cub_temp_type_ &cub_temp, maxima_scratch_type_ &maxima_scratch,
                                               cudaStream_t stream, device_tier_maxima_t &maxima) noexcept {
     maxima = {};
+    size_t const count = tasks.size();
     if (!count) return {status_t::success_k, cudaSuccess};
     if (maxima_scratch.try_resize_uninitialized(2) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
     u32_t *const max_shorter_out = maxima_scratch.data();
@@ -2259,9 +2307,9 @@ cuda_status_t reduce_device_tier_rune_maxima_(cuda_similarity_task<char_type_> c
 
     using task_t = cuda_similarity_task<char_type_>;
     cub::TransformInputIterator<u32_t, task_shorter_runes_functor<char_type_>, task_t const *> shorter_iterator(
-        tasks, task_shorter_runes_functor<char_type_> {});
+        tasks.data(), task_shorter_runes_functor<char_type_> {});
     cub::TransformInputIterator<u32_t, task_longer_runes_functor<char_type_>, task_t const *> longer_iterator(
-        tasks, task_longer_runes_functor<char_type_> {});
+        tasks.data(), task_longer_runes_functor<char_type_> {});
 
     auto const reduce_max = [&](auto input_iterator, u32_t *output) -> cuda_status_t {
         size_t reduce_bytes = 0;
@@ -2976,6 +3024,175 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_per_cuda_warp_( /
             task.result = distance;
         }
     }
+}
+
+/**
+ *  @brief Warp-cooperative multi-word bit-parallel Myers (unit-cost Levenshtein): one @b WARP scores one pair with
+ *         @b lane @b w @b owning @b word @b w of the bit-vector state. Unlike @ref unit_myers_multiword_per_cuda_warp_
+ *         (which spreads a query's candidate row across lanes and ripples the words sequentially per lane), this kernel
+ *         parallelizes a @b single pair's words across the warp, exchanging the two cross-word carries in registers:
+ *         the addition carry out of `(Eq & VP) + VP` via a Kogge-Stone warp prefix scan, and the Ph/Mh shift-by-one
+ *         word-boundary bit via a single `__shfl_up`. This fills the warp from one pair (no need for >= 32 candidates),
+ *         so it wins for @b long sequences and/or @b few pairs - exactly where one-thread-per-pair starves the device -
+ *         and holds only one word's state per lane, so it never spills the way the thread-multiword kernel does. The
+ *         per-word recurrence is bit-identical to @ref unit_myers_multiword_per_cuda_warp_. Cross-product, unit-cost,
+ *         shorter side up to `words_count_ * 64` bytes; the longer side (scanned) is unbounded.
+ */
+template <typename task_type_, typename char_type_ = char, sz_capability_t capability_ = sz_cap_cuda_k,
+          unsigned words_count_ = 1>
+__global__ __launch_bounds__(256, 4) void unit_myers_multiword_cooperative_per_cuda_warp_( //
+    task_type_ *tasks, size_t count) {
+
+    unsigned const warp_in_block = threadIdx.x >> 5, lane = threadIdx.x & 31u;
+    extern __shared__ u64_t shared_cooperative_match_masks[]; // [warps_per_block][words_count_ * 256]
+    u64_t *const match_masks = shared_cooperative_match_masks + static_cast<size_t>(warp_in_block) * (words_count_ * 256);
+    size_t const warp_index = (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) >> 5;
+    size_t const warps_per_device = (static_cast<size_t>(gridDim.x) * blockDim.x) >> 5;
+
+    for (size_t pair = warp_index; pair < count; pair += warps_per_device) {
+        task_type_ &task = tasks[pair];
+        // Myers builds the bitmask table on the SHORTER side and scans the LONGER (the recurrence is symmetric in its
+        // two operands); the task constructor guarantees `shorter.size() <= longer.size()`.
+        char_type_ const *const shorter_ptr = task.shorter.data();
+        char_type_ const *const longer_ptr = task.longer.data();
+        u32_t const shorter_length = static_cast<u32_t>(task.shorter.size());
+        u32_t const longer_length = static_cast<u32_t>(task.longer.size());
+        if (shorter_length == 0) {
+            if (lane == 0) task.result = longer_length;
+            continue;
+        }
+
+        u32_t const words = (shorter_length + 63u) >> 6; // <= words_count_ by construction (gated on host)
+        bool const active = lane < words;
+        u32_t const last_word = words - 1u, last_bit = (shorter_length - 1u) & 63u;
+        u64_t *const lane_row = match_masks + static_cast<size_t>(lane) * 256; // this lane's word OWNS its 256-entry row
+
+        // Build the match-masks with lane w owning word w: each active lane fills ONLY its own row from its <= 64
+        // shorter chars, so no two lanes ever touch the same slot - no atomics and no warp barrier needed (the scan
+        // below reads only this lane's own row, written by this same lane in program order).
+        if (active) {
+            for (unsigned symbol_index = 0; symbol_index < 256u; ++symbol_index) lane_row[symbol_index] = 0;
+            u32_t const word_base = lane * 64u;
+            u32_t const word_length = sz_min_of_two(shorter_length - word_base, 64u);
+            for (u32_t position = 0; position != word_length; ++position)
+                lane_row[static_cast<u8_t>(shorter_ptr[word_base + position])] |= (u64_t)1 << position;
+        }
+
+        u64_t vertical_positive = active ? ~(u64_t)0 : 0;
+        u64_t vertical_negative = 0;
+        size_t distance = (lane == last_word) ? shorter_length : 0;
+
+        for (u32_t position = 0; position != longer_length; ++position) {
+            u8_t const symbol = static_cast<u8_t>(longer_ptr[position]);
+            u64_t const pattern_matches = active ? lane_row[symbol] : 0;
+            u64_t const addition_term = pattern_matches & vertical_positive;
+            u64_t const sum_low = addition_term + vertical_positive;
+
+            // Kogge-Stone carry-lookahead for the cross-word addition carry: generate = this word carries out on its
+            // own; propagate = an incoming carry passes straight through. The inclusive scan leaves `generate` as the
+            // carry-out of words [0..lane]; the carry INTO word w is its lower neighbor's scan value.
+            u64_t generate = (sum_low < addition_term) ? 1ull : 0ull;
+            u64_t propagate = (sum_low == ~(u64_t)0) ? 1ull : 0ull;
+            if (!active) generate = 0ull, propagate = 0ull;
+            for (unsigned step = 1; step < 32u; step <<= 1) {
+                u64_t const generate_below = __shfl_up_sync(0xffffffffu, generate, step);
+                u64_t const propagate_below = __shfl_up_sync(0xffffffffu, propagate, step);
+                if (lane >= step) generate = generate | (propagate & generate_below), propagate = propagate & propagate_below;
+            }
+            u64_t const carry_below = __shfl_up_sync(0xffffffffu, generate, 1);
+            u64_t const addition_carry = (lane == 0) ? 0ull : carry_below;
+
+            u64_t const sum = sum_low + addition_carry;
+            u64_t const diagonal_zero = (sum ^ vertical_positive) | pattern_matches | vertical_negative;
+            u64_t horizontal_positive = vertical_negative | ~(diagonal_zero | vertical_positive);
+            u64_t horizontal_negative = vertical_positive & diagonal_zero;
+            if (lane == last_word) {
+                distance += (horizontal_positive >> last_bit) & 1;
+                distance -= (horizontal_negative >> last_bit) & 1;
+            }
+            // Cross-word left-shift-by-one: each lane pulls bit 63 of its lower neighbor; word 0 takes the +1 boundary.
+            u64_t const horizontal_positive_below = __shfl_up_sync(0xffffffffu, horizontal_positive >> 63, 1);
+            u64_t const horizontal_negative_below = __shfl_up_sync(0xffffffffu, horizontal_negative >> 63, 1);
+            u64_t const horizontal_positive_carry = (lane == 0) ? 1ull : horizontal_positive_below;
+            u64_t const horizontal_negative_carry = (lane == 0) ? 0ull : horizontal_negative_below;
+            horizontal_positive = (horizontal_positive << 1) | horizontal_positive_carry;
+            horizontal_negative = (horizontal_negative << 1) | horizontal_negative_carry;
+            vertical_positive = horizontal_negative | ~(diagonal_zero | horizontal_positive);
+            vertical_negative = horizontal_positive & diagonal_zero;
+        }
+        if (lane == last_word) task.result = distance;
+    }
+}
+
+/**
+ *  @brief Fused single-word Myers for the tier-homogeneous tiny regime (both sides <= 64 bytes): one thread per
+ *         (query, candidate) cell derives its indices from the flat cell id, runs single-word Myers reading the two
+ *         strings straight from the O(Q+C) descriptor spans, and writes the distance @b directly into the result
+ *         matrix - skipping the per-cell task materialization, the tier sort/gather/RLE, and the result scatter
+ *         entirely. This collapses the host-orchestration overhead that leaves the GPU >60% idle on tiny-token
+ *         ("words") cross-products. Unit-cost only; the symmetric path maps the flat index into the lower triangle and
+ *         mirrors the write. The single-word Peq is computed on the fly per scanned char (cheap for short tokens).
+ */
+template <typename char_type_, typename value_type_>
+__global__ void unit_myers_singleword_direct_per_cuda_cell_(                       //
+    span<char_type_ const> const *queries, span<char_type_ const> const *candidates, //
+    size_t queries_count, size_t candidates_count, size_t row_stride,             //
+    cross_similarities_t cross_kind, value_type_ *results) {
+
+    bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
+    size_t const total_cells = is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
+    size_t const cell_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (cell_index >= total_cells) return;
+
+    size_t query_index, candidate_index;
+    if (is_symmetric) {
+        double const discriminant = 8.0 * static_cast<double>(cell_index) + 1.0;
+        size_t row = static_cast<size_t>((sqrt(discriminant) - 1.0) * 0.5);
+        while (row * (row + 1) / 2 > cell_index) row -= 1;
+        while ((row + 1) * (row + 2) / 2 <= cell_index) row += 1;
+        query_index = row;
+        candidate_index = cell_index - row * (row + 1) / 2;
+    }
+    else {
+        query_index = cell_index / candidates_count;
+        candidate_index = cell_index % candidates_count;
+    }
+    span<char_type_ const> const query = queries[query_index];
+    span<char_type_ const> const candidate = candidates[candidate_index];
+    bool const query_is_shorter = query.size() <= candidate.size();
+    char_type_ const *const shorter_ptr = query_is_shorter ? query.data() : candidate.data();
+    char_type_ const *const longer_ptr = query_is_shorter ? candidate.data() : query.data();
+    u32_t const shorter_length = static_cast<u32_t>(query_is_shorter ? query.size() : candidate.size());
+    u32_t const longer_length = static_cast<u32_t>(query_is_shorter ? candidate.size() : query.size());
+
+    size_t distance;
+    if (shorter_length == 0) { distance = longer_length; }
+    else {
+        u64_t vertical_positive = ~(u64_t)0, vertical_negative = 0;
+        int signed_distance = static_cast<int>(shorter_length);
+        u64_t const top_bit = (u64_t)1 << (shorter_length - 1u);
+        for (u32_t position = 0; position != longer_length; ++position) {
+            u8_t const symbol = static_cast<u8_t>(longer_ptr[position]);
+            u64_t pattern_matches = 0; // on-the-fly single-word Peq over the <= 64-char shorter side
+            for (u32_t index = 0; index != shorter_length; ++index)
+                pattern_matches |= static_cast<u64_t>(static_cast<u8_t>(shorter_ptr[index]) == symbol) << index;
+            u64_t const addition_term = pattern_matches & vertical_positive;
+            u64_t const sum = addition_term + vertical_positive;
+            u64_t const diagonal_zero = (sum ^ vertical_positive) | pattern_matches | vertical_negative;
+            u64_t horizontal_positive = vertical_negative | ~(diagonal_zero | vertical_positive);
+            u64_t horizontal_negative = vertical_positive & diagonal_zero;
+            signed_distance += (horizontal_positive & top_bit) ? 1 : 0;
+            signed_distance -= (horizontal_negative & top_bit) ? 1 : 0;
+            horizontal_positive = (horizontal_positive << 1) | (u64_t)1;
+            horizontal_negative = (horizontal_negative << 1);
+            vertical_positive = horizontal_negative | ~(diagonal_zero | horizontal_positive);
+            vertical_negative = horizontal_positive & diagonal_zero;
+        }
+        distance = static_cast<size_t>(signed_distance);
+    }
+    results[query_index * row_stride + candidate_index] = static_cast<value_type_>(distance);
+    if (is_symmetric && candidate_index != query_index)
+        results[candidate_index * row_stride + query_index] = static_cast<value_type_>(distance);
 }
 
 /**
@@ -3990,6 +4207,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         struct myers_t {
             kernel_shape_t singleword_thread, multiword_thread, singleword_warp;
             kernel_shape_t multiword_warp_2, multiword_warp_4, multiword_warp_8, multiword_warp_16, multiword_warp_32;
+            // Warp-cooperative (lane = word) shapes for the long-and/or-few-pair regime; one warp scores one pair.
+            kernel_shape_t cooperative_warp_8, cooperative_warp_16, cooperative_warp_32;
         } myers;
         /** @brief Device-side task build / result scatter / on-GPU tier router. */
         struct infra_t {
@@ -4134,6 +4353,24 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 32u>, 64,
                 myers_candidates_shared32_k, true);
             if (status.status != status_t::success_k) return {table, status};
+            // Warp-cooperative (lane = word) shapes: one warp scores one pair, so its shared `match_masks` is a single
+            // pair's `words * 256` `u64_t`. The 8/16/32-word shapes cover shorter <= 512/1024/2048; block widths shrink
+            // (8 -> 4 -> 2 warps) to keep `warps_per_block * words * 256 * 8` under the ~227 KB opt-in ceiling.
+            status = resolve_kernel_shape(
+                table.myers.cooperative_warp_8,
+                (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 8u>, 256,
+                myers_candidates_shared8_k, true);
+            if (status.status != status_t::success_k) return {table, status};
+            status = resolve_kernel_shape(
+                table.myers.cooperative_warp_16,
+                (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 16u>, 128,
+                myers_candidates_shared16_k, true);
+            if (status.status != status_t::success_k) return {table, status};
+            status = resolve_kernel_shape(
+                table.myers.cooperative_warp_32,
+                (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 32u>, 64,
+                myers_candidates_shared32_k, true);
+            if (status.status != status_t::success_k) return {table, status};
         }
         // Device-side task materialization (all-pairs or symmetric); grid is sized from the cell count, so no
         // occupancy precompute is needed. Levenshtein is always minimize / global.
@@ -4228,9 +4465,60 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             return {status_t::bad_alloc_k};
         for (size_t query_index = 0; query_index < queries_count; ++query_index)
             buffers_.query_descs_[query_index] = {queries[query_index].data(), queries[query_index].length()};
-        for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index)
-            buffers_.candidate_descs_[candidate_index] = {candidates[candidate_index].data(),
-                                                          candidates[candidate_index].length()};
+        size_t max_candidate_length = 0;
+        for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
+            size_t const candidate_length = candidates[candidate_index].length();
+            buffers_.candidate_descs_[candidate_index] = {candidates[candidate_index].data(), candidate_length};
+            if (candidate_length > max_candidate_length) max_candidate_length = candidate_length;
+        }
+
+        // WORDS direct-score fast path: when every live cell is single-word Myers (unit-cost, both sides <= 64) and the
+        // result matrix is device-accessible, skip the task array, the tier sort/gather/RLE, and the result scatter
+        // entirely - one thread per cell reads the two strings from the descriptors, runs single-word Myers, and writes
+        // straight into the matrix. This removes the host-orchestration overhead that leaves the GPU >60% idle on
+        // tiny-token cross-products. Bit-identical to the tiered path (same Levenshtein recurrence, unique distance).
+        constexpr bool is_affine_cross_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
+        if constexpr (!is_affine_cross_k) {
+            bool const is_unit_cost = substituter_.match == 0 && substituter_.mismatch == 1 &&
+                                      gap_costs_.open_or_extend == 1;
+            if (is_unit_cost && live_cells && cross_max_query_length_ <= levenshtein_myers_word1_cap_k &&
+                max_candidate_length <= levenshtein_myers_word1_cap_k &&
+                is_device_accessible_memory((void const *)results.data)) {
+                using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
+                kernel_shape_t direct_shape;
+                cuda_status_t const direct_resolve = resolve_kernel_shape(
+                    direct_shape, (void const *)&unit_myers_singleword_direct_per_cuda_cell_<char, results_value_t>, 256,
+                    0, false);
+                if (direct_resolve.status != status_t::success_k) return direct_resolve;
+                span<char const> *direct_queries = buffers_.query_descs_.data();
+                span<char const> *direct_candidates = buffers_.candidate_descs_.data();
+                results_value_t *results_ptr = results.data;
+                size_t queries_count_arg = queries_count, candidates_count_arg = candidates_count,
+                       row_stride_arg = row_stride;
+                cross_similarities_t cross_kind_arg = cross_kind;
+                void *direct_args[7] = {(void *)&direct_queries,    (void *)&direct_candidates,
+                                        (void *)&queries_count_arg, (void *)&candidates_count_arg,
+                                        (void *)&row_stride_arg,    (void *)&cross_kind_arg,
+                                        (void *)&results_ptr};
+                unsigned const direct_block = 256;
+                unsigned const direct_grid = static_cast<unsigned>((live_cells + direct_block - 1) / direct_block);
+                if (timer_.ensure_created() != CUDA_SUCCESS) return make_cuda_status(cudaGetLastError());
+                if (timer_.record_start(executor.stream()) != CUDA_SUCCESS)
+                    return make_cuda_status(cudaGetLastError());
+                CUresult const direct_error = cuda_launch_t {}
+                                                  .grid(direct_grid)
+                                                  .block(direct_block)
+                                                  .shared(0)
+                                                  .stream(executor.stream())
+                                                  .launch(direct_shape.function, direct_args);
+                if (direct_error != CUDA_SUCCESS) return make_cuda_status(direct_error);
+                if (timer_.record_stop(executor.stream()) != CUDA_SUCCESS)
+                    return make_cuda_status(cudaGetLastError());
+                if (timer_.synchronize(executor.stream()) != CUDA_SUCCESS)
+                    return make_cuda_status(cudaGetLastError());
+                return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
+            }
+        }
 
         auto [kernel_table, kernels_status] = kernels();
         if (kernels_status.status != status_t::success_k) return kernels_status;
@@ -4258,8 +4546,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                                          .stream(executor.stream())
                                          .launch(kernel_table.infra.materialize_tasks.function, materialize_args);
         if (materialize_error != CUDA_SUCCESS) return make_cuda_status(materialize_error);
-        // The downstream tiering reads `tasks_` on the host (partition/sort), so drain the kernel first.
-        if (cudaStreamSynchronize(executor.stream()) != cudaSuccess) return make_cuda_status(cudaGetLastError());
+        /* No host drain: the materialize kernel and the device-side tier router run on the same stream, so the
+         * router's first kernel is already ordered after the writes; nothing reads `tasks_` on the host between. */
 
         cross_candidates_count_ = candidates_count;
         cross_kind_ = cross_kind;
@@ -4414,17 +4702,20 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         // holds `64 < shorter <= levenshtein_myers_max_shorter_k`.
         size_t const word1_count = tier_counts_[levenshtein_tier_myers_word1_k];
         size_t const generic_count = tier_counts_[levenshtein_tier_myers_generic_k];
-        size_t const myers_count = word1_count + generic_count;
+        size_t const cooperative_count = tier_counts_[levenshtein_tier_myers_cooperative_k];
+        // The thread-per-pair Myers range (`shorter <= 256`, the global-match-masks kernels) is followed by the
+        // warp-cooperative range (`256 < shorter <= 2048`); together they form the contiguous Myers block at the front.
+        size_t const thread_myers_count = word1_count + generic_count;
+        size_t const myers_count = thread_myers_count + cooperative_count;
 
-        // Bit-parallel Myers fast path: claim unit-cost Levenshtein pairs (match 0 / mismatch 1 / gap 1) whose shorter
-        // side is within `levenshtein_myers_max_shorter_k` and run the register-resident single-word kernel (shorter <=
-        // 64) plus the size-generic kernel (the rest) - faster than the DP tiers in that range. The router places them
-        // at the front; the register/device tiers below operate on the remaining `[myers_count, size)` tasks (which now
-        // include longer unit-cost pairs, scored by the same DP wavefront as Needleman-Wunsch). (Linear engine only -
-        // register/device tiers below operate on the remaining `[myers_count, size)` tasks. (Linear engine only -
-        // Myers can't encode affine or weighted costs.)
+        /* Bit-parallel Myers fast path: claim unit-cost Levenshtein pairs (match 0 / mismatch 1 / gap 1) whose shorter
+         * side is within `levenshtein_myers_max_shorter_k` and run the register-resident single-word kernel (shorter <=
+         * 64) plus the size-generic kernel (the rest) - faster than the DP tiers in that range. The router places them at
+         * the front; the register/device tiers below operate on the remaining `[myers_count, size)` tasks (which now
+         * include longer unit-cost pairs, scored by the same DP wavefront as Needleman-Wunsch). Linear engine only -
+         * Myers can't encode affine or weighted costs. */
         if constexpr (!is_affine_k) {
-            if (myers_count) {
+            if (thread_myers_count) {
                 // The size-generic kernel sizes its per-thread scratch to the widest pair it may run: words_count =
                 // ceil(max_generic_shorter / 64) `match_masks` rows of 256 plus 2*words_count VP/VN slots. The single-word
                 // kernel needs a flat 256-entry `match_masks` per thread. Both launches reuse the buffer sequentially (each
@@ -4436,7 +4727,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                 if (generic_count) {
                     device_tier_maxima_t generic_maxima {};
                     cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                        tasks.data() + word1_count, generic_count, buffers_.cub_buffer_,
+                        {tasks.data() + word1_count, generic_count}, buffers_.cub_buffer_,
                         buffers_.device_maxima_scratch_, executor.stream(), generic_maxima);
                     if (maxima_status.status != status_t::success_k) return maxima_status;
                     u32_t const words_count = (generic_maxima.max_shorter + 63u) >> 6;
@@ -4473,6 +4764,42 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                 launch_myers(kernel_table.myers.singleword_thread, 0, word1_count, 256);
                 launch_myers(kernel_table.myers.multiword_thread, word1_count, generic_count, generic_stride);
                 if (myers_status.status != status_t::success_k) return myers_status;
+            }
+
+            // Warp-cooperative Myers tier (`256 < shorter <= 2048`): one warp scores one pair with the words spread
+            // across lanes. It fills the warp from a single pair (no candidate-reuse needed) and never spills, so it
+            // beats both the spilling thread-multiword Myers and the DP wavefront for these long/few-pair bands. The
+            // match-masks are built per-pair in shared (lane = word, no atomics), so no global scratch is needed. Pick
+            // the word-count shape (<= 8/16/32 words = 512/1024/2048) from the tier's longest pair; block widths shrink
+            // (8/4/2 warps) to keep `warps_per_block * words * 256 * 8` under the ~227 KB opt-in shared ceiling.
+            if (cooperative_count) {
+                device_tier_maxima_t cooperative_maxima {};
+                cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
+                    {tasks.data() + thread_myers_count, cooperative_count}, buffers_.cub_buffer_,
+                    buffers_.device_maxima_scratch_, executor.stream(), cooperative_maxima);
+                if (maxima_status.status != status_t::success_k) return maxima_status;
+                u32_t const cooperative_words = (cooperative_maxima.max_shorter + 63u) >> 6; // 5..32
+                kernel_shape_t const *shape_ptr;
+                unsigned warps_per_block, words_rounded;
+                if (cooperative_words <= 8)
+                    shape_ptr = &kernel_table.myers.cooperative_warp_8, warps_per_block = 8, words_rounded = 8;
+                else if (cooperative_words <= 16)
+                    shape_ptr = &kernel_table.myers.cooperative_warp_16, warps_per_block = 4, words_rounded = 16;
+                else
+                    shape_ptr = &kernel_table.myers.cooperative_warp_32, warps_per_block = 2, words_rounded = 32;
+                unsigned const block_threads = warps_per_block * 32u;
+                unsigned const cooperative_shared_k = warps_per_block * words_rounded * 256u * (unsigned)sizeof(u64_t);
+                unsigned const blocks = shape_ptr->blocks_per_multiprocessor * specs.streaming_multiprocessors;
+                task_t *tasks_ptr = tasks.data() + thread_myers_count;
+                size_t cooperative_count_arg = cooperative_count;
+                void *args[2] = {(void *)&tasks_ptr, (void *)&cooperative_count_arg};
+                CUresult const e = cuda_launch_t {}
+                                       .grid(blocks)
+                                       .block(block_threads)
+                                       .shared(cooperative_shared_k)
+                                       .stream(executor.stream())
+                                       .launch(shape_ptr->function, args);
+                if (e != CUDA_SUCCESS) return make_cuda_status(e);
             }
         }
 
@@ -4532,7 +4859,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
             static constexpr unsigned tiled_warps_per_block_k = 8, tiled_tile_side_k = 128;
             device_tier_maxima_t maxima;
             cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                device_level_tasks.data(), device_level_tasks.size(), buffers_.cub_buffer_,
+                {device_level_tasks.data(), device_level_tasks.size()}, buffers_.cub_buffer_,
                 buffers_.device_maxima_scratch_, executor.stream(), maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
             unsigned const max_bytes_per_cell = sz_max_of_two(maxima.max_bytes_per_cell,
@@ -4840,7 +5167,7 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             // kernel). Rune counts - not byte lengths - drive the tier choice, the cell width, and the frontier sizing.
             device_tier_maxima_t rune_maxima;
             cuda_status_t const maxima_status = reduce_device_tier_rune_maxima_<char_t>(
-                tasks.data(), tasks.size(), buffers_.cub_buffer_, buffers_.device_maxima_scratch_, executor.stream(),
+                {tasks.data(), tasks.size()}, buffers_.cub_buffer_, buffers_.device_maxima_scratch_, executor.stream(),
                 rune_maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
 
@@ -5626,7 +5953,7 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
             static constexpr unsigned tiled_warps_per_block_k = 8, tiled_tile_side_k = 128;
             device_tier_maxima_t maxima;
             cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                device_level_tasks.data(), device_level_tasks.size(), buffers.cub_buffer_,
+                {device_level_tasks.data(), device_level_tasks.size()}, buffers.cub_buffer_,
                 buffers.device_maxima_scratch_, executor.stream(), maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
             unsigned const max_bytes_per_cell = sz_max_of_two(maxima.max_bytes_per_cell,
