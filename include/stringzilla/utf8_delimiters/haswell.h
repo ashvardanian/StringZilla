@@ -84,7 +84,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_haswell_(                                /
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_haswell(      //
+SZ_PUBLIC sz_size_t sz_utf8_newlines_haswell(           //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -147,13 +147,13 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_haswell(      //
 
     // Skip a CRLF's trailing LF if it straddles into the serial tail (the CR was emitted as a 2-byte match).
     if (position != 0 && position < length && text_u8[position - 1] == '\r' && text_u8[position] == '\n') ++position;
-    count += sz_utf8_find_newlines_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
-                                           match_offsets + count, match_lengths + count, matches_capacity - count,
-                                           bytes_consumed);
+    count += sz_utf8_newlines_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
+                                      match_offsets + count, match_lengths + count, matches_capacity - count,
+                                      bytes_consumed);
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_haswell(   //
+SZ_PUBLIC sz_size_t sz_utf8_whitespaces_haswell(        //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -229,9 +229,9 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_haswell(   //
         position += 30;
     }
 
-    count += sz_utf8_find_whitespaces_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
-                                              match_offsets + count, match_lengths + count, matches_capacity - count,
-                                              bytes_consumed);
+    count += sz_utf8_whitespaces_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
+                                         match_offsets + count, match_lengths + count, matches_capacity - count,
+                                         bytes_consumed);
     return count;
 }
 

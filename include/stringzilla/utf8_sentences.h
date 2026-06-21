@@ -34,7 +34,7 @@ extern "C" {
  *
  *  @note No zero-length sentences are emitted; @p length == 0 returns 0. Sentence segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_sentence_find_boundaries(       //
+SZ_DYNAMIC sz_size_t sz_utf8_sentences(                      //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
@@ -43,16 +43,16 @@ SZ_DYNAMIC sz_size_t sz_utf8_sentence_find_boundaries(       //
 
 #pragma region Platform-Specific Backends
 
-/** @copydoc sz_utf8_sentence_find_boundaries */
-SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_serial(sz_cptr_t text, sz_size_t length,
-                                                            sz_size_t *sentence_starts, sz_size_t *sentence_lengths,
-                                                            sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_sentences */
+SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                             sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                             sz_size_t *bytes_consumed);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_sentence_find_boundaries */
-SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_icelake(sz_cptr_t text, sz_size_t length,
-                                                             sz_size_t *sentence_starts, sz_size_t *sentence_lengths,
-                                                             sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_sentences */
+SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                              sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                              sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -65,15 +65,15 @@ SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_icelake(sz_cptr_t text, sz_
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_sentence_find_boundaries(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                                      sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                                      sz_size_t *bytes_consumed) {
+SZ_DYNAMIC sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                       sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                       sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_sentence_find_boundaries_icelake(text, length, sentence_starts, sentence_lengths, sentences_capacity,
-                                                    bytes_consumed);
+    return sz_utf8_sentences_icelake(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                     bytes_consumed);
 #else
-    return sz_utf8_sentence_find_boundaries_serial(text, length, sentence_starts, sentence_lengths, sentences_capacity,
-                                                   bytes_consumed);
+    return sz_utf8_sentences_serial(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                    bytes_consumed);
 #endif
 }
 

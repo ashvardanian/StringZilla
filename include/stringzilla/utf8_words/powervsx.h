@@ -67,9 +67,9 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigne
     return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *word_starts, sz_size_t *word_lengths,       //
+SZ_PUBLIC sz_size_t sz_utf8_words_powervsx(          //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -170,115 +170,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_powervsx( //
     word_lengths[words] = length - word_start;
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
-    return words;
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_powervsx( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *word_starts, sz_size_t *word_lengths,        //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
-    // Move back one codepoint from the end (position length is always a boundary, WB2).
-    sz_size_t position = length - 1;
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-
-    // Descending counterpart of the forward `compact2_lut`: row `[m]` gathers a 2-lane sub-block's set `u64`
-    // boundary positions to the front in HIGH-to-LOW lane order. For submask `0b11` lane 1 is emitted first
-    // (its bytes [8,16) lead), then lane 0; single-lane submasks coincide with the ascending table.
-    static unsigned char const compact2_lut_descending[4][16] = {
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-        {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-        {8, 9, 10, 11, 12, 13, 14, 15, 8, 9, 10, 11, 12, 13, 14, 15},
-        {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7},
-    };
-
-    // Oracle-free fast path: an all-ASCII window [position-14, position+2) resolves boundaries at positions
-    // [position-12, position]; one fixed sub-block loop walks high-to-low, compacting each 2-lane group in
-    // descending lane order and emitting it as a shifted-difference (lane 0 carries the open `word_end`).
-    while (position > 0) {
-        sz_size_t base = position - 14; // lane j = byte base+j; lane 14 = byte position, trusted lanes [2,14]
-        int ascii_window = position >= 14 && position + 2 <= length;
-        __vector unsigned char window = vec_splats((unsigned char)0);
-        if (ascii_window) {
-            window = vec_xl(0, text_u8 + base);
-            ascii_window = !vec_any_ge(window, vec_splats((unsigned char)0x80));
-        }
-        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
-            if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-                if (words == words_capacity) {
-                    if (bytes_consumed) *bytes_consumed = word_end;
-                    return words;
-                }
-                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-                word_end = position;
-            }
-            position--;
-            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-            continue;
-        }
-
-        sz_u32_t boundary = sz_utf8_word_break_boundary_mask_powervsx_(window); // trusted lanes [2,14]
-
-        // Compact every trusted boundary directly into `word_starts + words` (one full-vector store per
-        // non-empty 2-lane sub-block, high-to-low), capping at `room` so the masked-store-less 2-lane spill
-        // never overshoots capacity; the final sub-block stages through a 2-element tail when it crosses `room`.
-        sz_size_t const room = words_capacity - words;
-        sz_size_t filled = 0;
-        for (sz_size_t sub_block = 8; sub_block-- > 0 && filled < room;) { // high-to-low for descending emission
-            sz_u32_t const submask = (boundary >> (sub_block * 2)) & 0x3u;
-            if (!submask) continue;
-
-            sz_size_t const group_base = base + sub_block * 2; // lane k of this sub-block = byte group_base+k
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
-            __vector unsigned long long const positions = {(unsigned long long)group_base,
-                                                           (unsigned long long)(group_base + 1)};
-            __vector unsigned char const permutation = vec_xl(0, compact2_lut_descending[submask]);
-            __vector unsigned long long const boundaries = (__vector unsigned long long)vec_perm(
-                (__vector unsigned char)positions, (__vector unsigned char)positions, permutation);
-            if (filled + 2 <= room) { vec_xst(boundaries, 0, (unsigned long long *)(word_starts + words + filled)); }
-            else { // Final sub-block: a 2-lane store would cross `room`, so emit ≤2 valid lanes via a tail buffer.
-                sz_size_t tail[2];
-                vec_xst(boundaries, 0, (unsigned long long *)tail);
-                sz_size_t const copy = sz_min_of_two(taken, room - filled);
-                for (sz_size_t k = 0; k < copy; ++k) word_starts[words + filled + k] = tail[k];
-            }
-            filled += taken;
-        }
-
-        // In-place shifted-difference: boundary `i`'s span ends at boundary `i-1` (or the open `word_end` for
-        // `i == 0`). `word_starts[words + i]` already holds boundary `i`; read it before computing the length and
-        // carry the previous boundary so no clobbered slot is re-read.
-        sz_size_t const stored = sz_min_of_two(filled, room);
-        sz_size_t previous_boundary = word_end;
-        for (sz_size_t i = 0; i < stored; ++i) {
-            sz_size_t const boundary_i = word_starts[words + i];
-            word_lengths[words + i] = previous_boundary - boundary_i;
-            previous_boundary = boundary_i;
-        }
-        words += stored;
-        if (stored) word_end = previous_boundary;
-        if (words == words_capacity) {
-            if (bytes_consumed) *bytes_consumed = word_end;
-            return words;
-        }
-        position = base + 1; // Resolved down to position-12; next unresolved boundary is at position-13.
-    }
-
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
     return words;
 }
 

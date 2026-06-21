@@ -159,9 +159,9 @@ SZ_INTERNAL void sz_utf8_word_store_lanes_neon_(uint64x2_t low, uint64x2_t high,
     for (sz_size_t lane = 0; lane < stored; ++lane) destination[lane] = scratch[lane];
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_neon( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+SZ_PUBLIC sz_size_t sz_utf8_words_neon(              //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;

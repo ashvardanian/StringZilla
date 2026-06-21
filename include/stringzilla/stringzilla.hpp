@@ -534,7 +534,7 @@ struct string_view_for<string_type_, true> {
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
 template <typename string_type_, typename matcher_type_>
-class range_matches {
+class find_matches_view {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
@@ -551,7 +551,7 @@ class range_matches {
     using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
     using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-    range_matches(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    find_matches_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
         matcher_type matcher_;
@@ -625,7 +625,7 @@ class range_matches {
  *  @see Similar to a pair of `boost::algorithm::find_iterator`.
  */
 template <typename string_type_, typename matcher_type_>
-class range_rmatches {
+class rfind_matches_view {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
@@ -642,7 +642,7 @@ class range_rmatches {
     string_type haystack_;
 
   public:
-    range_rmatches(string_type haystack, matcher_type needle) : matcher_(needle), haystack_(haystack) {}
+    rfind_matches_view(string_type haystack, matcher_type needle) : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
         matcher_type matcher_;
@@ -728,12 +728,12 @@ class range_rmatches {
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
- *  In some sense, represents the inverse operation to `range_matches`, as it reports not the search matches
+ *  In some sense, represents the inverse operation to `find_matches_view`, as it reports not the search matches
  *  but the data between them. Meaning that for `N` search matches, there will be `N+1` elements in the range.
- *  Unlike ::range_matches, this range can't be empty. It also can't report overlapping intervals.
+ *  Unlike ::find_matches_view, this range can't be empty. It also can't report overlapping intervals.
  */
 template <typename string_type_, typename matcher_type_, bool skip_empty_ = false>
-class range_splits {
+class find_splits_view {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
@@ -750,7 +750,7 @@ class range_splits {
     string_type haystack_;
 
   public:
-    range_splits(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    find_splits_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
         char const *start_;      // Start of current segment
@@ -853,12 +853,12 @@ class range_splits {
  *  @note Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  *  @see Similar to a pair of `boost::algorithm::split_iterator`.
  *
- *  In some sense, represents the inverse operation to `range_matches`, as it reports not the search matches
+ *  In some sense, represents the inverse operation to `find_matches_view`, as it reports not the search matches
  *  but the data between them. Meaning that for `N` search matches, there will be `N+1` elements in the range.
- *  Unlike ::range_matches, this range can't be empty. It also can't report overlapping intervals.
+ *  Unlike ::find_matches_view, this range can't be empty. It also can't report overlapping intervals.
  */
 template <typename string_type_, typename matcher_type_, bool skip_empty_ = false>
-class range_rsplits {
+class rfind_splits_view {
   public:
     using string_type = string_type_;
     using matcher_type = matcher_type_;
@@ -875,7 +875,7 @@ class range_rsplits {
     string_type haystack_;
 
   public:
-    range_rsplits(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    rfind_splits_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
 
     class iterator {
         char const *start_;      // Start of haystack (immutable)
@@ -976,7 +976,7 @@ class range_rsplits {
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_>
-class range_utf8_chars {
+class utf8_runes_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -988,8 +988,8 @@ class range_utf8_chars {
     string_type haystack_;
 
   public:
-    range_utf8_chars() noexcept = default;
-    range_utf8_chars(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_runes_view() noexcept = default;
+    utf8_runes_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *octets_start_;
@@ -1139,7 +1139,7 @@ class range_utf8_chars {
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
-class range_utf8_line_splits {
+class utf8_lines_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1151,8 +1151,8 @@ class range_utf8_line_splits {
     string_type haystack_;
 
   public:
-    range_utf8_line_splits() noexcept = default;
-    range_utf8_line_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_lines_view() noexcept = default;
+    utf8_lines_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
@@ -1168,7 +1168,7 @@ class range_utf8_line_splits {
         void refill_() noexcept {
             size_type region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
-            size_type delimiters = sz_utf8_find_newlines(suffix_, region, starts_, lengths_, steps_, &consumed);
+            size_type delimiters = sz_utf8_newlines(suffix_, region, starts_, lengths_, steps_, &consumed);
             // In place: delimiter `d` spans `[starts_[d], starts_[d] + lengths_[d])`; the segment before it runs
             // from the previous delimiter's end to this delimiter's start.
             size_type previous_end = 0;
@@ -1263,7 +1263,7 @@ class range_utf8_line_splits {
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
-class range_utf8_whitespace_splits {
+class utf8_tokens_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1275,8 +1275,8 @@ class range_utf8_whitespace_splits {
     string_type haystack_;
 
   public:
-    range_utf8_whitespace_splits() noexcept = default;
-    range_utf8_whitespace_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_tokens_view() noexcept = default;
+    utf8_tokens_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
@@ -1292,7 +1292,7 @@ class range_utf8_whitespace_splits {
         void refill_() noexcept {
             size_type region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
-            size_type delimiters = sz_utf8_find_whitespaces(suffix_, region, starts_, lengths_, steps_, &consumed);
+            size_type delimiters = sz_utf8_whitespaces(suffix_, region, starts_, lengths_, steps_, &consumed);
             size_type previous_end = 0;
             for (size_type d = 0; d < delimiters; ++d) {
                 size_type delimiter_start = starts_[d], delimiter_length = lengths_[d];
@@ -1379,12 +1379,12 @@ class range_utf8_whitespace_splits {
  *  @brief A range of string slices split at UAX-29 word boundaries, in order.
  *
  *  Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
- *  consecutive words are contiguous and no empty segments are produced. Drives `sz_utf8_word_find_boundaries`.
+ *  consecutive words are contiguous and no empty segments are produced. Drives `sz_utf8_words`.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_word_splits {
+class utf8_words_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1396,8 +1396,8 @@ class range_utf8_word_splits {
     string_type haystack_;
 
   public:
-    range_utf8_word_splits() noexcept = default;
-    range_utf8_word_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_words_view() noexcept = default;
+    utf8_words_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
@@ -1409,8 +1409,8 @@ class range_utf8_word_splits {
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_word_find_boundaries(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_,
-                                                  steps_, &consumed);
+            count_ = sz_utf8_words(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
+                                   &consumed);
             index_ = 0;
         }
 
@@ -1464,101 +1464,16 @@ class range_utf8_word_splits {
 };
 
 /**
- *  @brief A range of string slices split at UAX-29 word boundaries, from the end of the text backward.
- *
- *  Yields the same words as `range_utf8_word_splits` but last-to-first. Drives `sz_utf8_word_rfind_boundaries`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_word_rsplits {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    range_utf8_word_rsplits() noexcept = default;
-    range_utf8_word_rsplits(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *base_; // Start of original text (immutable; buffered offsets are relative to it)
-        size_type prefix_; // Length of the prefix `[0, prefix_)` still to segment on the next refill (0 when done)
-        size_type starts_[steps_];  // Buffered word offsets from `base_`, last word first
-        size_type lengths_[steps_]; // Buffered word lengths
-        size_type count_;           // Number of buffered words (0 once exhausted)
-        size_type index_;           // Index of the current word within the buffer
-
-        void fill_() noexcept {
-            sz_size_t consumed = 0;
-            count_ = sz_utf8_word_rfind_boundaries(base_, prefix_, starts_, lengths_, steps_, &consumed);
-            prefix_ = static_cast<size_type>(consumed); // Earliest boundary still segmented; 0 once the prefix is done.
-            index_ = 0;
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : base_(nullptr), prefix_(0), count_(0), index_(0) {}
-        iterator(string_view_type text) noexcept : base_(text.data()), prefix_(text.size()) { fill_(); }
-
-        reference operator*() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
-
-        iterator &operator++() noexcept {
-            if (++index_ < count_) return *this; // Still words buffered from the current batch (last → first).
-            fill_();                             // Refill from the remaining prefix; `count_` hits 0 at the end.
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    end_sentinel_type end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the words into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto word : *this) container.push_back(word);
-    }
-
-    /** @brief Copies the words into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto word : *this) container.push_back(word);
-        return std::move(container);
-    }
-};
-
-/**
  *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, in order.
  *
  *  Unlike whitespace splitting, the graphemes tile the input: every byte belongs to exactly one grapheme, so
  *  consecutive graphemes are contiguous and no empty segments are produced. Drives
- *  `sz_utf8_grapheme_find_boundaries`.
+ *  `sz_utf8_graphemes`.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_grapheme_splits {
+class utf8_graphemes_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1570,8 +1485,8 @@ class range_utf8_grapheme_splits {
     string_type haystack_;
 
   public:
-    range_utf8_grapheme_splits() noexcept = default;
-    range_utf8_grapheme_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_graphemes_view() noexcept = default;
+    utf8_graphemes_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
@@ -1583,8 +1498,8 @@ class range_utf8_grapheme_splits {
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_grapheme_find_boundaries(suffix_, static_cast<size_type>(end_ - suffix_), starts_,
-                                                      lengths_, steps_, &consumed);
+            count_ = sz_utf8_graphemes(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
+                                       &consumed);
             index_ = 0;
         }
 
@@ -1638,102 +1553,16 @@ class range_utf8_grapheme_splits {
 };
 
 /**
- *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, from the end backward.
- *
- *  Yields the same graphemes as `range_utf8_grapheme_splits` but last-to-first. Drives
- *  `sz_utf8_grapheme_rfind_boundaries`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_grapheme_rsplits {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    range_utf8_grapheme_rsplits() noexcept = default;
-    range_utf8_grapheme_rsplits(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *base_; // Start of original text (immutable; buffered offsets are relative to it)
-        size_type prefix_; // Length of the prefix `[0, prefix_)` still to segment on the next refill (0 when done)
-        size_type starts_[steps_];  // Buffered grapheme offsets from `base_`, last grapheme first
-        size_type lengths_[steps_]; // Buffered grapheme lengths
-        size_type count_;           // Number of buffered graphemes (0 once exhausted)
-        size_type index_;           // Index of the current grapheme within the buffer
-
-        void fill_() noexcept {
-            sz_size_t consumed = 0;
-            count_ = sz_utf8_grapheme_rfind_boundaries(base_, prefix_, starts_, lengths_, steps_, &consumed);
-            prefix_ = static_cast<size_type>(consumed); // Earliest boundary still segmented; 0 once the prefix is done.
-            index_ = 0;
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : base_(nullptr), prefix_(0), count_(0), index_(0) {}
-        iterator(string_view_type text) noexcept : base_(text.data()), prefix_(text.size()) { fill_(); }
-
-        reference operator*() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return string_view_type(base_ + starts_[index_], lengths_[index_]); }
-
-        iterator &operator++() noexcept {
-            if (++index_ < count_) return *this; // Still graphemes buffered from the current batch (last → first).
-            fill_();                             // Refill from the remaining prefix; `count_` hits 0 at the end.
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    end_sentinel_type end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the graphemes into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto grapheme : *this) container.push_back(grapheme);
-    }
-
-    /** @brief Copies the graphemes into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto grapheme : *this) container.push_back(grapheme);
-        return std::move(container);
-    }
-};
-
-/**
  *  @brief A range of string slices split at UAX-29 sentence boundaries, in order.
  *
  *  Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one sentence, so
  *  consecutive sentences are contiguous and no empty segments are produced. Drives
- *  `sz_utf8_sentence_find_boundaries`.
+ *  `sz_utf8_sentences`.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_sentence_splits {
+class utf8_sentences_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1745,8 +1574,8 @@ class range_utf8_sentence_splits {
     string_type haystack_;
 
   public:
-    range_utf8_sentence_splits() noexcept = default;
-    range_utf8_sentence_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_sentences_view() noexcept = default;
+    utf8_sentences_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
@@ -1758,8 +1587,8 @@ class range_utf8_sentence_splits {
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_sentence_find_boundaries(suffix_, static_cast<size_type>(end_ - suffix_), starts_,
-                                                      lengths_, steps_, &consumed);
+            count_ = sz_utf8_sentences(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
+                                       &consumed);
             index_ = 0;
         }
 
@@ -1818,12 +1647,12 @@ class range_utf8_sentence_splits {
  *  Unlike whitespace splitting, the segments tile the input: every byte belongs to exactly one segment, so
  *  consecutive segments are contiguous and no empty segments are produced. Each segment ends at an allowed
  *  line break opportunity (both mandatory hard breaks and soft wrap points). Drives
- *  `sz_utf8_find_linewraps`. To split only on hard line breaks use `utf8_split_lines` instead.
+ *  `sz_utf8_linewraps`. To split only on hard line breaks use `utf8_lines` instead.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class range_utf8_linewrap_splits {
+class utf8_linewraps_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1835,8 +1664,8 @@ class range_utf8_linewrap_splits {
     string_type haystack_;
 
   public:
-    range_utf8_linewrap_splits() noexcept = default;
-    range_utf8_linewrap_splits(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_linewraps_view() noexcept = default;
+    utf8_linewraps_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
@@ -1848,8 +1677,8 @@ class range_utf8_linewrap_splits {
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_find_linewraps(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                            &consumed);
+            count_ = sz_utf8_linewraps(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
+                                       &consumed);
             index_ = 0;
         }
 
@@ -1907,7 +1736,7 @@ class range_utf8_linewrap_splits {
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_matches<string_type_, matcher_find<string_type_, include_overlaps_type>> find_all(
+find_matches_view<string_type_, matcher_find<string_type_, include_overlaps_type>> find_all(
     string_type_ const &h, string_type_ const &n, include_overlaps_type = {}) noexcept {
     return {h, n};
 }
@@ -1917,7 +1746,7 @@ range_matches<string_type_, matcher_find<string_type_, include_overlaps_type>> f
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rmatches<string_type_, matcher_rfind<string_type_, include_overlaps_type>> rfind_all(
+rfind_matches_view<string_type_, matcher_rfind<string_type_, include_overlaps_type>> rfind_all(
     string_type_ const &h, string_type_ const &n, include_overlaps_type = {}) noexcept {
     return {h, n};
 }
@@ -1927,7 +1756,7 @@ range_rmatches<string_type_, matcher_rfind<string_type_, include_overlaps_type>>
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_matches<string_type_, matcher_find<string_type_, exclude_overlaps_type>> find_all(
+find_matches_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> find_all(
     string_type_ const &h, string_type_ const &n, exclude_overlaps_type) noexcept {
     return {h, n};
 }
@@ -1937,7 +1766,7 @@ range_matches<string_type_, matcher_find<string_type_, exclude_overlaps_type>> f
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rmatches<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rfind_all(
+rfind_matches_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rfind_all(
     string_type_ const &h, string_type_ const &n, exclude_overlaps_type) noexcept {
     return {h, n};
 }
@@ -1947,8 +1776,8 @@ range_rmatches<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>>
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_matches<string_type_, matcher_find_first_of<string_type_>> find_all_characters(string_type_ const &h,
-                                                                                     string_type_ const &n) noexcept {
+find_matches_view<string_type_, matcher_find_first_of<string_type_>> find_all_characters(
+    string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -1957,8 +1786,8 @@ range_matches<string_type_, matcher_find_first_of<string_type_>> find_all_charac
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rmatches<string_type_, matcher_find_last_of<string_type_>> rfind_all_characters(string_type_ const &h,
-                                                                                      string_type_ const &n) noexcept {
+rfind_matches_view<string_type_, matcher_find_last_of<string_type_>> rfind_all_characters(
+    string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -1967,7 +1796,7 @@ range_rmatches<string_type_, matcher_find_last_of<string_type_>> rfind_all_chara
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_matches<string_type_, matcher_find_first_not_of<string_type_>> find_all_other_characters(
+find_matches_view<string_type_, matcher_find_first_not_of<string_type_>> find_all_other_characters(
     string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
@@ -1977,7 +1806,7 @@ range_matches<string_type_, matcher_find_first_not_of<string_type_>> find_all_ot
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rmatches<string_type_, matcher_find_last_not_of<string_type_>> rfind_all_other_characters(
+rfind_matches_view<string_type_, matcher_find_last_not_of<string_type_>> rfind_all_other_characters(
     string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
@@ -1987,8 +1816,8 @@ range_rmatches<string_type_, matcher_find_last_not_of<string_type_>> rfind_all_o
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_splits<string_type_, matcher_find<string_type_, exclude_overlaps_type>> split(string_type_ const &h,
-                                                                                    string_type_ const &n) noexcept {
+find_splits_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> split(
+    string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -1997,8 +1826,8 @@ range_splits<string_type_, matcher_find<string_type_, exclude_overlaps_type>> sp
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rsplits<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rsplit(string_type_ const &h,
-                                                                                       string_type_ const &n) noexcept {
+rfind_splits_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rsplit(
+    string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -2007,8 +1836,8 @@ range_rsplits<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> 
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_splits<string_type_, matcher_find_first_of<string_type_>> split_characters(string_type_ const &h,
-                                                                                 string_type_ const &n) noexcept {
+find_splits_view<string_type_, matcher_find_first_of<string_type_>> split_characters(string_type_ const &h,
+                                                                                     string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -2017,8 +1846,8 @@ range_splits<string_type_, matcher_find_first_of<string_type_>> split_characters
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rsplits<string_type_, matcher_find_last_of<string_type_>> rsplit_characters(string_type_ const &h,
-                                                                                  string_type_ const &n) noexcept {
+rfind_splits_view<string_type_, matcher_find_last_of<string_type_>> rsplit_characters(string_type_ const &h,
+                                                                                      string_type_ const &n) noexcept {
     return {h, n};
 }
 
@@ -2027,7 +1856,7 @@ range_rsplits<string_type_, matcher_find_last_of<string_type_>> rsplit_character
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_splits<string_type_, matcher_find_first_not_of<string_type_>> split_other_characters(
+find_splits_view<string_type_, matcher_find_first_not_of<string_type_>> split_other_characters(
     string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
@@ -2037,7 +1866,7 @@ range_splits<string_type_, matcher_find_first_not_of<string_type_>> split_other_
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string_type_>
-range_rsplits<string_type_, matcher_find_last_not_of<string_type_>> rsplit_other_characters(
+rfind_splits_view<string_type_, matcher_find_last_not_of<string_type_>> rsplit_other_characters(
     string_type_ const &h, string_type_ const &n) noexcept {
     return {h, n};
 }
@@ -2931,7 +2760,7 @@ class basic_string_slice {
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
-    range_utf8_chars<string_slice> utf8_chars() const noexcept { return {*this}; }
+    utf8_runes_view<string_slice> utf8_runes() const noexcept { return {*this}; }
 
     /**
      *  @brief Split the string by Unicode newline characters (UTF-8 aware).
@@ -2939,7 +2768,7 @@ class basic_string_slice {
      *
      *  Splits on all 7 Unicode newline characters + CRLF sequence.
      */
-    range_utf8_line_splits<string_slice> utf8_split_lines() const noexcept { return {*this}; }
+    utf8_lines_view<string_slice> utf8_lines() const noexcept { return {*this}; }
 
     /**
      *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
@@ -2949,46 +2778,40 @@ class basic_string_slice {
      *  Consecutive whitespace is treated as a single delimiter.
      *  Empty segments are skipped.
      */
-    range_utf8_whitespace_splits<string_slice> utf8_split() const noexcept { return {*this}; }
+    utf8_tokens_view<string_slice> utf8_tokens() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-29 words, in order.
      *
-     *  Unlike `utf8_split()`, the words tile the input contiguously (no empty segments). Each yielded slice is
+     *  Unlike `utf8_tokens()`, the words tile the input contiguously (no empty segments). Each yielded slice is
      *  the span between consecutive TR29 word boundaries.
      */
-    range_utf8_word_splits<string_slice> utf8_split_words() const noexcept { return {*this}; }
-
-    /** @brief Lazily splits the string into UAX-29 words, from the end backward (last word first). */
-    range_utf8_word_rsplits<string_slice> utf8_rsplit_words() const noexcept { return {*this}; }
+    utf8_words_view<string_slice> utf8_words() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-29 grapheme clusters, in order.
      *
-     *  Unlike `utf8_split()`, the graphemes tile the input contiguously (no empty segments). Each yielded slice is
+     *  Unlike `utf8_tokens()`, the graphemes tile the input contiguously (no empty segments). Each yielded slice is
      *  the span between consecutive TR29 grapheme cluster boundaries.
      */
-    range_utf8_grapheme_splits<string_slice> utf8_split_graphemes() const noexcept { return {*this}; }
-
-    /** @brief Lazily splits the string into UAX-29 grapheme clusters, from the end backward (last grapheme first). */
-    range_utf8_grapheme_rsplits<string_slice> utf8_rsplit_graphemes() const noexcept { return {*this}; }
+    utf8_graphemes_view<string_slice> utf8_graphemes() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-29 sentences, in order.
      *
-     *  Unlike `utf8_split()`, the sentences tile the input contiguously (no empty segments). Each yielded slice is
+     *  Unlike `utf8_tokens()`, the sentences tile the input contiguously (no empty segments). Each yielded slice is
      *  the span between consecutive TR29 sentence boundaries.
      */
-    range_utf8_sentence_splits<string_slice> utf8_split_sentences() const noexcept { return {*this}; }
+    utf8_sentences_view<string_slice> utf8_sentences() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-14 line-breakable segments, in order.
      *
-     *  Distinct from `utf8_split_lines()`, which splits only on hard (mandatory) Unicode newline characters. Here
+     *  Distinct from `utf8_lines()`, which splits only on hard (mandatory) Unicode newline characters. Here
      *  every byte belongs to exactly one segment ending at an allowed line break opportunity, including both the
      *  mandatory hard breaks and the soft wrap points.
      */
-    range_utf8_linewrap_splits<string_slice> utf8_split_linewraps() const noexcept { return {*this}; }
+    utf8_linewraps_view<string_slice> utf8_linewraps() const noexcept { return {*this}; }
 
 #pragma endregion
 #pragma region String Arguments
@@ -3105,14 +2928,14 @@ class basic_string_slice {
 
 #pragma region Search Ranges
 
-    using find_all_type = range_matches<string_slice, matcher_find<string_view, include_overlaps_type>>;
-    using rfind_all_type = range_rmatches<string_slice, matcher_rfind<string_view, include_overlaps_type>>;
+    using find_all_type = find_matches_view<string_slice, matcher_find<string_view, include_overlaps_type>>;
+    using rfind_all_type = rfind_matches_view<string_slice, matcher_rfind<string_view, include_overlaps_type>>;
 
-    using find_disjoint_type = range_matches<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
-    using rfind_disjoint_type = range_rmatches<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
+    using find_disjoint_type = find_matches_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
+    using rfind_disjoint_type = rfind_matches_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using find_all_chars_type = range_matches<string_slice, matcher_find_first_of<string_view, byteset>>;
-    using rfind_all_chars_type = range_rmatches<string_slice, matcher_find_last_of<string_view, byteset>>;
+    using find_all_chars_type = find_matches_view<string_slice, matcher_find_first_of<string_view, byteset>>;
+    using rfind_all_chars_type = rfind_matches_view<string_slice, matcher_find_last_of<string_view, byteset>>;
 
     /**  @brief Find all potentially @b overlapping occurrences of a given string. */
     find_all_type find_all(string_view needle, include_overlaps_type = {}) const noexcept { return {*this, needle}; }
@@ -3132,11 +2955,11 @@ class basic_string_slice {
     /**  @brief Find all occurrences of given characters in @b reverse order. */
     rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
 
-    using split_type = range_splits<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
-    using rsplit_type = range_rsplits<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
+    using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
+    using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using split_chars_type = range_splits<string_slice, matcher_find_first_of<string_view, byteset>>;
-    using rsplit_chars_type = range_rsplits<string_slice, matcher_find_last_of<string_view, byteset>>;
+    using split_chars_type = find_splits_view<string_slice, matcher_find_first_of<string_view, byteset>>;
+    using rsplit_chars_type = rfind_splits_view<string_slice, matcher_find_last_of<string_view, byteset>>;
 
     /**  @brief Split around occurrences of a given string. */
     split_type split(string_view delimiter) const noexcept { return {*this, delimiter}; }
@@ -4778,7 +4601,7 @@ class basic_string {
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
-    range_utf8_chars<basic_string> utf8_chars() const noexcept { return {*this}; }
+    utf8_runes_view<basic_string> utf8_runes() const noexcept { return {*this}; }
 
     /**
      *  @brief Split the string by Unicode newline characters (UTF-8 aware).
@@ -4786,7 +4609,7 @@ class basic_string {
      *
      *  Splits on all 7 Unicode newline characters + CRLF sequence.
      */
-    range_utf8_line_splits<basic_string> utf8_split_lines() const noexcept { return {*this}; }
+    utf8_lines_view<basic_string> utf8_lines() const noexcept { return {*this}; }
 
     /**
      *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
@@ -4794,13 +4617,10 @@ class basic_string {
      *
      *  Splits on all 25 Unicode whitespace characters. Empty segments (consecutive whitespace) are skipped.
      */
-    range_utf8_whitespace_splits<basic_string> utf8_split() const noexcept { return {*this}; }
+    utf8_tokens_view<basic_string> utf8_tokens() const noexcept { return {*this}; }
 
     /** @brief Lazily splits the string into UAX-29 words, in order (words tile the input contiguously). */
-    range_utf8_word_splits<basic_string> utf8_split_words() const noexcept { return {*this}; }
-
-    /** @brief Lazily splits the string into UAX-29 words, from the end backward (last word first). */
-    range_utf8_word_rsplits<basic_string> utf8_rsplit_words() const noexcept { return {*this}; }
+    utf8_words_view<basic_string> utf8_words() const noexcept { return {*this}; }
 
     /**
      *  @brief Apply Unicode case folding to the string in-place.
@@ -5017,7 +4837,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
 
     // 1. The pattern and the replacement are of the same length.
     if (matcher.needle_length() == replacement.length()) {
-        using matches_type = range_matches<string_view, matcher_type>;
+        using matches_type = find_matches_view<string_view, matcher_type>;
         // Instead of iterating with `begin()` and `end()`, we could use the cheaper sentinel-based approach.
         //      for (string_view match : matches) { ... }
         matches_type matches = matches_type(this_view, {pattern});
@@ -5032,7 +4852,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         // Dealing with shorter replacements, we will avoid memory allocations, but we can also minimize the number
         // of `memmove`-s, by keeping one more iterator, pointing to the end of the last compacted area.
         // Having the split-ranges, however, we reuse their logic.
-        using splits_type = range_splits<string_view, matcher_type>;
+        using splits_type = find_splits_view<string_view, matcher_type>;
         splits_type splits = splits_type(this_view, {pattern});
         auto matches_iterator = splits.begin();
         auto compacted_end = (*matches_iterator).end();
@@ -5058,7 +4878,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         using rmatcher_type = typename std::conditional<is_same_type<pattern_type, byteset>::value,
                                                         matcher_find_last_of<string_view, pattern_type>,
                                                         matcher_rfind<string_view, exclude_overlaps_type>>::type;
-        using rmatches_type = range_rmatches<string_view, rmatcher_type>;
+        using rmatches_type = rfind_matches_view<string_view, rmatcher_type>;
         rmatches_type rmatches = rmatches_type(this_view, {pattern});
 
         // It's cheaper to iterate through the whole string once, counting the number of matches,
@@ -5075,7 +4895,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         this_view = view().front(old_length);
 
         // Now iterate through splits similarly to the 2nd case, but in reverse order.
-        using rsplits_type = range_rsplits<string_view, rmatcher_type>;
+        using rsplits_type = rfind_splits_view<string_view, rmatcher_type>;
         rsplits_type splits = rsplits_type(this_view, {pattern});
         auto splits_iterator = splits.begin();
 

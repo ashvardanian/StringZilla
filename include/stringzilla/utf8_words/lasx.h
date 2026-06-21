@@ -76,9 +76,9 @@ SZ_INTERNAL __m256i sz_utf8_word_shift_right_insert_lasx_(__m256i boundaries, sz
     return __lasx_xvinsgr2vr_d(shifted, (long long)carry, 0);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+SZ_PUBLIC sz_size_t sz_utf8_words_lasx(              //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -148,85 +148,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_lasx( //
     word_lengths[words] = length - word_start;
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
-    return words;
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_lasx( //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *word_starts, sz_size_t *word_lengths,    //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
-    sz_size_t position = length - 1;
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-
-    // Oracle-free fast path: an all-ASCII window [position-30, position+2) resolves boundaries at positions
-    // [position-28, position]; one fixed sub-block loop walks high-to-low, compacting each group in descending
-    // lane order and emitting it as a shifted-difference (lane 0 carries the open `word_end`).
-    static sz_u64_t const lane_ramp[4] = {0, 1, 2, 3};
-    __m256i const lane_ramp_u64x4 = __lasx_xvld(lane_ramp, 0);
-    while (position > 0) {
-        sz_size_t base = position - 30; // lane j = byte base+j; trusted lanes [2,30] → [position-28, position]
-        int ascii_window = position >= 30 && position + 2 <= length;
-        __m256i window = __lasx_xvreplgr2vr_b(0);
-        if (ascii_window) {
-            window = __lasx_xvld(text_u8 + base, 0);
-            ascii_window = sz_xvmovemask_b_utf8_lasx_(window) == 0;
-        }
-        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
-            if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-                if (words == words_capacity) {
-                    if (bytes_consumed) *bytes_consumed = word_end;
-                    return words;
-                }
-                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-                word_end = position;
-            }
-            position--;
-            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-            continue;
-        }
-
-        sz_u32_t boundary = sz_utf8_word_break_boundary_mask_lasx_(window); // trusted lanes [2,30]
-        for (sz_size_t sub_block = 8; sub_block-- > 0;) {                   // high-to-low for descending emission
-            sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
-            if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
-            sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
-
-            __m256i const positions = __lasx_xvadd_d(__lasx_xvreplgr2vr_d((long long)(base + sub_block * 4)),
-                                                     lane_ramp_u64x4);
-            __m256i const boundaries = __lasx_xvperm_w(positions,
-                                                       sz_utf8_word_compact4_permutation_descending_lasx_(submask));
-            __m256i const previous = sz_utf8_word_shift_right_insert_lasx_(boundaries, word_end);
-            __m256i const lengths = __lasx_xvsub_d(previous, boundaries);
-            sz_utf8_iterate_store_group_lasx_(boundaries, stored, word_starts + words);
-            sz_utf8_iterate_store_group_lasx_(lengths, stored, word_lengths + words);
-            words += stored;
-            if (stored) word_end = word_starts[words - 1];
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-        }
-        position = base + 1; // Resolved down to position-28; next unresolved boundary is at position-29.
-    }
-
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
     return words;
 }
 #endif // SZ_USE_LASX

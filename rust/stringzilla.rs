@@ -457,7 +457,7 @@ extern "C" {
         runes_capacity: usize,
         runes_unpacked: *mut usize,
     ) -> *const c_void;
-    pub(crate) fn sz_utf8_find_newlines(
+    pub(crate) fn sz_utf8_newlines(
         text: *const c_void,
         length: usize,
         match_offsets: *mut usize,
@@ -465,7 +465,7 @@ extern "C" {
         matches_capacity: usize,
         bytes_consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_find_whitespaces(
+    pub(crate) fn sz_utf8_whitespaces(
         text: *const c_void,
         length: usize,
         match_offsets: *mut usize,
@@ -491,15 +491,7 @@ extern "C" {
     ) -> *const c_void;
     pub(crate) fn sz_utf8_uncased_order(a: *const c_void, a_length: usize, b: *const c_void, b_length: usize) -> i32;
 
-    pub(crate) fn sz_utf8_word_find_boundaries(
-        text: *const c_void,
-        length: usize,
-        word_starts: *mut usize,
-        word_lengths: *mut usize,
-        words_capacity: usize,
-        bytes_consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_word_rfind_boundaries(
+    pub(crate) fn sz_utf8_words(
         text: *const c_void,
         length: usize,
         word_starts: *mut usize,
@@ -508,7 +500,7 @@ extern "C" {
         bytes_consumed: *mut usize,
     ) -> usize;
 
-    pub(crate) fn sz_utf8_grapheme_find_boundaries(
+    pub(crate) fn sz_utf8_graphemes(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
@@ -516,7 +508,7 @@ extern "C" {
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_grapheme_rfind_boundaries(
+    pub(crate) fn sz_utf8_sentences(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
@@ -524,15 +516,7 @@ extern "C" {
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_sentence_find_boundaries(
-        text: *const c_void,
-        length: usize,
-        starts: *mut usize,
-        lengths: *mut usize,
-        cap: usize,
-        consumed: *mut usize,
-    ) -> usize;
-    pub(crate) fn sz_utf8_find_linewraps(
+    pub(crate) fn sz_utf8_linewraps(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
@@ -2134,8 +2118,8 @@ impl<'a> Utf8View<'a> {
     }
 
     /// Returns an iterator over UTF-8 characters.
-    pub fn iter(&self) -> Utf8Chars<'a> {
-        Utf8Chars::new(self.octets)
+    pub fn iter(&self) -> Utf8Runes<'a> {
+        Utf8Runes::new(self.octets)
     }
 }
 
@@ -2156,7 +2140,7 @@ impl<'a> Utf8View<'a> {
 /// let chars: Vec<char> = view.iter().collect();
 /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 /// ```
-pub struct Utf8Chars<'a> {
+pub struct Utf8Runes<'a> {
     octets: &'a [u8],
     octets_offset: usize,
     runes: [u32; 64],
@@ -2164,7 +2148,7 @@ pub struct Utf8Chars<'a> {
     runes_offset: usize,
 }
 
-impl<'a> Utf8Chars<'a> {
+impl<'a> Utf8Runes<'a> {
     fn new(octets: &'a [u8]) -> Self {
         let mut iter = Self {
             octets,
@@ -2213,7 +2197,7 @@ impl<'a> Utf8Chars<'a> {
     }
 }
 
-impl<'a> Iterator for Utf8Chars<'a> {
+impl<'a> Iterator for Utf8Runes<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<char> {
@@ -2676,21 +2660,21 @@ impl<'a> Matcher<'a> for MatcherType<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RangeMatches}};
+/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, FindMatches}};
 ///
 /// let haystack = b"abababa";
 /// let matcher = MatcherType::Find(b"aba");
-/// let matches: Vec<&[u8]> = RangeMatches::new(haystack, matcher, false).collect();
+/// let matches: Vec<&[u8]> = FindMatches::new(haystack, matcher, false).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
 /// ```
-pub struct RangeMatches<'a> {
+pub struct FindMatches<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
     include_overlaps: bool,
 }
 
-impl<'a> RangeMatches<'a> {
+impl<'a> FindMatches<'a> {
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>, include_overlaps: bool) -> Self {
         Self {
             haystack,
@@ -2701,7 +2685,7 @@ impl<'a> RangeMatches<'a> {
     }
 }
 
-impl<'a> Iterator for RangeMatches<'a> {
+impl<'a> Iterator for FindMatches<'a> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2733,14 +2717,14 @@ impl<'a> Iterator for RangeMatches<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RangeSplits}};
+/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, FindSplits}};
 ///
 /// let haystack = b"a,b,c,d";
 /// let matcher = MatcherType::Find(b",");
-/// let splits: Vec<&[u8]> = RangeSplits::new(haystack, matcher).collect();
+/// let splits: Vec<&[u8]> = FindSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
 /// ```
-pub struct RangeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct FindSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
@@ -2748,14 +2732,14 @@ pub struct RangeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     skip_empty: bool,
 }
 
-impl<'a> RangeSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> FindSplits<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self::with_steps(haystack, matcher)
     }
 }
 
-impl<'a, const STEPS: usize> RangeSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> FindSplits<'a, STEPS> {
     /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
@@ -2796,7 +2780,7 @@ impl<'a, const STEPS: usize> RangeSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for FindSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2817,21 +2801,21 @@ impl<'a, const STEPS: usize> Iterator for RangeSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RangeRMatches}};
+/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RFindMatches}};
 ///
 /// let haystack = b"abababa";
 /// let matcher = MatcherType::RFind(b"aba");
-/// let matches: Vec<&[u8]> = RangeRMatches::new(haystack, matcher, false).collect();
+/// let matches: Vec<&[u8]> = RFindMatches::new(haystack, matcher, false).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
 /// ```
-pub struct RangeRMatches<'a> {
+pub struct RFindMatches<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
     include_overlaps: bool,
 }
 
-impl<'a> RangeRMatches<'a> {
+impl<'a> RFindMatches<'a> {
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>, include_overlaps: bool) -> Self {
         Self {
             haystack,
@@ -2842,7 +2826,7 @@ impl<'a> RangeRMatches<'a> {
     }
 }
 
-impl<'a> Iterator for RangeRMatches<'a> {
+impl<'a> Iterator for RFindMatches<'a> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2877,28 +2861,28 @@ impl<'a> Iterator for RangeRMatches<'a> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RangeRSplits}};
+/// use stringzilla::{stringzilla as sz, stringzilla::{MatcherType, RFindSplits}};
 ///
 /// let haystack = b"a,b,c,d";
 /// let matcher = MatcherType::RFind(b",");
-/// let splits: Vec<&[u8]> = RangeRSplits::new(haystack, matcher).collect();
+/// let splits: Vec<&[u8]> = RFindSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
 /// ```
-pub struct RangeRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct RFindSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: Option<usize>, // End of the not-yet-segmented prefix; `None` once the final segment is yielded
     skip_empty: bool,
 }
 
-impl<'a> RangeRSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> RFindSplits<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self::with_steps(haystack, matcher)
     }
 }
 
-impl<'a, const STEPS: usize> RangeRSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> RFindSplits<'a, STEPS> {
     /// Constructs an iterator with an explicit batch size (kept for API uniformity with the UTF-8 splits).
     pub fn with_steps(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
         Self {
@@ -2931,7 +2915,7 @@ impl<'a, const STEPS: usize> RangeRSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeRSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for RFindSplits<'a, STEPS> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2955,13 +2939,13 @@ impl<'a, const STEPS: usize> Iterator for RangeRSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8NewlineSplits};
+/// use stringzilla::stringzilla::{Utf8Lines};
 ///
 /// let text = b"Hello\nWorld\r\nRust";
-/// let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
+/// let lines: Vec<&[u8]> = Utf8Lines::new(text).collect();
 /// assert_eq!(lines, vec![&b"Hello"[..], &b"World"[..], &b"Rust"[..]]);
 /// ```
-pub struct RangeUtf8NewlineSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Lines<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize,           // Start of the not-yet-segmented suffix (moves past `text.len()` once done)
     starts: [usize; STEPS],  // Buffered segment offsets, relative to `suffix`
@@ -2973,16 +2957,16 @@ pub struct RangeUtf8NewlineSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STE
     skip_empty: bool,        // When set, `next()` skips zero-length segments
 }
 
-impl<'a> RangeUtf8NewlineSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Lines<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8NewlineSplits::<1>::with_steps(text)`.
+    /// `Utf8Lines::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8NewlineSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Lines<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` delimiters per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3013,7 +2997,7 @@ impl<'a, const STEPS: usize> RangeUtf8NewlineSplits<'a, STEPS> {
         let region = self.text.len() - self.suffix;
         let mut consumed = 0usize;
         let delimiters = unsafe {
-            sz_utf8_find_newlines(
+            sz_utf8_newlines(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 region,
                 self.starts.as_mut_ptr(),
@@ -3075,7 +3059,7 @@ impl<'a, const STEPS: usize> RangeUtf8NewlineSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8NewlineSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Lines<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3101,18 +3085,18 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8NewlineSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8WhitespaceSplits};
+/// use stringzilla::stringzilla::{Utf8Tokens};
 ///
 /// // Default KEEP policy: empties around the words are preserved.
 /// let text = b"  hi  ";
-/// let segments: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).collect();
+/// let segments: Vec<&[u8]> = Utf8Tokens::new(text).collect();
 /// assert_eq!(segments, vec![&b""[..], &b""[..], &b"hi"[..], &b""[..], &b""[..]]);
 ///
 /// // Opt in to dropping empties for token-style splitting.
-/// let tokens: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+/// let tokens: Vec<&[u8]> = Utf8Tokens::new(text).skip_empty().collect();
 /// assert_eq!(tokens, vec![&b"hi"[..]]);
 /// ```
-pub struct RangeUtf8WhitespaceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Tokens<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize,           // Start of the not-yet-segmented suffix (moves past `text.len()` once done)
     starts: [usize; STEPS],  // Buffered segment offsets, relative to `suffix`
@@ -3124,16 +3108,16 @@ pub struct RangeUtf8WhitespaceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_
     skip_empty: bool,        // When set, `next()` skips zero-length segments
 }
 
-impl<'a> RangeUtf8WhitespaceSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Tokens<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8WhitespaceSplits::<1>::with_steps(text)`.
+    /// `Utf8Tokens::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8WhitespaceSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Tokens<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` delimiters per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3165,7 +3149,7 @@ impl<'a, const STEPS: usize> RangeUtf8WhitespaceSplits<'a, STEPS> {
         let region = self.text.len() - self.suffix;
         let mut consumed = 0usize;
         let delimiters = unsafe {
-            sz_utf8_find_whitespaces(
+            sz_utf8_whitespaces(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 region,
                 self.starts.as_mut_ptr(),
@@ -3224,7 +3208,7 @@ impl<'a, const STEPS: usize> RangeUtf8WhitespaceSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8WhitespaceSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Tokens<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3254,12 +3238,12 @@ pub const ITERATORS_DEFAULT_STEPS: usize = 16;
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::RangeUtf8WordSplits;
+/// use stringzilla::stringzilla::Utf8Words;
 ///
-/// let words: Vec<&[u8]> = RangeUtf8WordSplits::new(b"Hi, world").collect();
+/// let words: Vec<&[u8]> = Utf8Words::new(b"Hi, world").collect();
 /// assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
 /// ```
-pub struct RangeUtf8WordSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Words<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered word offsets, relative to `suffix`
@@ -3268,16 +3252,16 @@ pub struct RangeUtf8WordSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS>
     index: usize,  // Index of the next word to yield from the buffer
 }
 
-impl<'a> RangeUtf8WordSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Words<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8WordSplits::<1>::with_steps(text)`.
+    /// `Utf8Words::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8WordSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Words<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` words per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3296,7 +3280,7 @@ impl<'a, const STEPS: usize> RangeUtf8WordSplits<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_word_find_boundaries(
+            sz_utf8_words(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3309,7 +3293,7 @@ impl<'a, const STEPS: usize> RangeUtf8WordSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8WordSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Words<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3331,87 +3315,6 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordSplits<'a, STEPS> {
     }
 }
 
-/// An iterator over UAX-29 words in UTF-8 text, from the end of the text backward (last word first).
-///
-/// Yields the same words as [`RangeUtf8WordSplits`], in reverse order.
-///
-/// # Examples
-///
-/// ```
-/// use stringzilla::stringzilla::RangeUtf8WordRSplits;
-///
-/// let words: Vec<&[u8]> = RangeUtf8WordRSplits::new(b"Hi, world").collect();
-/// assert_eq!(words, vec![&b"world"[..], &b" "[..], &b","[..], &b"Hi"[..]]);
-/// ```
-pub struct RangeUtf8WordRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
-    text: &'a [u8],
-    prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
-    starts: [usize; STEPS], // Buffered word offsets from the text start, last word first
-    lengths: [usize; STEPS], // Buffered word lengths
-    count: usize,  // Number of buffered words (0 once exhausted)
-    index: usize,  // Index of the next word to yield from the buffer
-}
-
-impl<'a> RangeUtf8WordRSplits<'a, ITERATORS_DEFAULT_STEPS> {
-    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
-    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8WordRSplits::<1>::with_steps(text)`.
-    pub fn new(text: &'a [u8]) -> Self {
-        Self::with_steps(text)
-    }
-}
-
-impl<'a, const STEPS: usize> RangeUtf8WordRSplits<'a, STEPS> {
-    /// Constructs an iterator buffering up to `STEPS` words per FFI call.
-    pub fn with_steps(text: &'a [u8]) -> Self {
-        let mut splits = Self {
-            text,
-            prefix: text.len(),
-            starts: [0; STEPS],
-            lengths: [0; STEPS],
-            count: 0,
-            index: 0,
-        };
-        splits.fill();
-        splits
-    }
-
-    /// Refills the buffer from the remaining prefix; `count` becomes 0 once the prefix is empty.
-    fn fill(&mut self) {
-        let mut consumed = 0usize;
-        self.count = unsafe {
-            sz_utf8_word_rfind_boundaries(
-                self.text.as_ptr() as *const c_void,
-                self.prefix,
-                self.starts.as_mut_ptr(),
-                self.lengths.as_mut_ptr(),
-                STEPS,
-                &mut consumed,
-            )
-        };
-        self.prefix = consumed; // Earliest boundary still segmented; 0 once the prefix is exhausted.
-        self.index = 0;
-    }
-}
-
-impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.count {
-            self.fill(); // Refill from the remaining prefix; `count` stays 0 once nothing is left.
-            if self.count == 0 {
-                return None;
-            }
-        }
-        // Offsets are relative to the text start; the buffer runs last word → first.
-        let begin = self.starts[self.index];
-        let end = begin + self.lengths[self.index];
-        self.index += 1;
-        Some(&self.text[begin..end])
-    }
-}
-
 /// An iterator over UAX-29 grapheme clusters in UTF-8 text, in order.
 ///
 /// Unlike whitespace splitting, the grapheme clusters tile the input: every byte belongs to exactly one
@@ -3421,12 +3324,12 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8WordRSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::RangeUtf8GraphemeSplits;
+/// use stringzilla::stringzilla::Utf8Graphemes;
 ///
-/// let graphemes: Vec<&[u8]> = RangeUtf8GraphemeSplits::new(b"Hi!").collect();
+/// let graphemes: Vec<&[u8]> = Utf8Graphemes::new(b"Hi!").collect();
 /// assert_eq!(graphemes, vec![&b"H"[..], &b"i"[..], &b"!"[..]]);
 /// ```
-pub struct RangeUtf8GraphemeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Graphemes<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered grapheme offsets, relative to `suffix`
@@ -3435,16 +3338,16 @@ pub struct RangeUtf8GraphemeSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_ST
     index: usize,  // Index of the next grapheme to yield from the buffer
 }
 
-impl<'a> RangeUtf8GraphemeSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Graphemes<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8GraphemeSplits::<1>::with_steps(text)`.
+    /// `Utf8Graphemes::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8GraphemeSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Graphemes<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` grapheme clusters per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3463,7 +3366,7 @@ impl<'a, const STEPS: usize> RangeUtf8GraphemeSplits<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_grapheme_find_boundaries(
+            sz_utf8_graphemes(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3476,7 +3379,7 @@ impl<'a, const STEPS: usize> RangeUtf8GraphemeSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Graphemes<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3498,88 +3401,6 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeSplits<'a, STEPS> {
     }
 }
 
-/// An iterator over UAX-29 grapheme clusters in UTF-8 text, from the end of the text backward (last
-/// cluster first).
-///
-/// Yields the same grapheme clusters as [`RangeUtf8GraphemeSplits`], in reverse order.
-///
-/// # Examples
-///
-/// ```
-/// use stringzilla::stringzilla::RangeUtf8GraphemeRSplits;
-///
-/// let graphemes: Vec<&[u8]> = RangeUtf8GraphemeRSplits::new(b"Hi!").collect();
-/// assert_eq!(graphemes, vec![&b"!"[..], &b"i"[..], &b"H"[..]]);
-/// ```
-pub struct RangeUtf8GraphemeRSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
-    text: &'a [u8],
-    prefix: usize, // Length of the prefix `[0, prefix)` still to segment on the next refill (0 once done)
-    starts: [usize; STEPS], // Buffered grapheme offsets from the text start, last cluster first
-    lengths: [usize; STEPS], // Buffered grapheme lengths
-    count: usize,  // Number of buffered graphemes (0 once exhausted)
-    index: usize,  // Index of the next grapheme to yield from the buffer
-}
-
-impl<'a> RangeUtf8GraphemeRSplits<'a, ITERATORS_DEFAULT_STEPS> {
-    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
-    /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8GraphemeRSplits::<1>::with_steps(text)`.
-    pub fn new(text: &'a [u8]) -> Self {
-        Self::with_steps(text)
-    }
-}
-
-impl<'a, const STEPS: usize> RangeUtf8GraphemeRSplits<'a, STEPS> {
-    /// Constructs an iterator buffering up to `STEPS` grapheme clusters per FFI call.
-    pub fn with_steps(text: &'a [u8]) -> Self {
-        let mut splits = Self {
-            text,
-            prefix: text.len(),
-            starts: [0; STEPS],
-            lengths: [0; STEPS],
-            count: 0,
-            index: 0,
-        };
-        splits.fill();
-        splits
-    }
-
-    /// Refills the buffer from the remaining prefix; `count` becomes 0 once the prefix is empty.
-    fn fill(&mut self) {
-        let mut consumed = 0usize;
-        self.count = unsafe {
-            sz_utf8_grapheme_rfind_boundaries(
-                self.text.as_ptr() as *const c_void,
-                self.prefix,
-                self.starts.as_mut_ptr(),
-                self.lengths.as_mut_ptr(),
-                STEPS,
-                &mut consumed,
-            )
-        };
-        self.prefix = consumed; // Earliest boundary still segmented; 0 once the prefix is exhausted.
-        self.index = 0;
-    }
-}
-
-impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeRSplits<'a, STEPS> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.count {
-            self.fill(); // Refill from the remaining prefix; `count` stays 0 once nothing is left.
-            if self.count == 0 {
-                return None;
-            }
-        }
-        // Offsets are relative to the text start; the buffer runs last cluster → first.
-        let begin = self.starts[self.index];
-        let end = begin + self.lengths[self.index];
-        self.index += 1;
-        Some(&self.text[begin..end])
-    }
-}
-
 /// An iterator over UAX-29 sentences in UTF-8 text, in order.
 ///
 /// Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one
@@ -3589,12 +3410,12 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8GraphemeRSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::RangeUtf8SentenceSplits;
+/// use stringzilla::stringzilla::Utf8Sentences;
 ///
-/// let sentences: Vec<&[u8]> = RangeUtf8SentenceSplits::new(b"Hi. Bye.").collect();
+/// let sentences: Vec<&[u8]> = Utf8Sentences::new(b"Hi. Bye.").collect();
 /// assert_eq!(sentences, vec![&b"Hi. "[..], &b"Bye."[..]]);
 /// ```
-pub struct RangeUtf8SentenceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Sentences<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered sentence offsets, relative to `suffix`
@@ -3603,16 +3424,16 @@ pub struct RangeUtf8SentenceSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_ST
     index: usize,  // Index of the next sentence to yield from the buffer
 }
 
-impl<'a> RangeUtf8SentenceSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Sentences<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8SentenceSplits::<1>::with_steps(text)`.
+    /// `Utf8Sentences::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8SentenceSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Sentences<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` sentences per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3631,7 +3452,7 @@ impl<'a, const STEPS: usize> RangeUtf8SentenceSplits<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_sentence_find_boundaries(
+            sz_utf8_sentences(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3644,7 +3465,7 @@ impl<'a, const STEPS: usize> RangeUtf8SentenceSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8SentenceSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Sentences<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3673,17 +3494,17 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8SentenceSplits<'a, STEPS> {
 ///
 /// Each yielded segment ends at a TR14 break opportunity, including soft breaks where a renderer *may*
 /// wrap but is not required to. To split only on hard line breaks (the "splitlines" behaviour), use the
-/// newline API ([`StringZillable::sz_utf8_newline_splits`]) instead.
+/// newline API ([`StringZillable::sz_utf8_lines`]) instead.
 ///
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::RangeUtf8LinewrapSplits;
+/// use stringzilla::stringzilla::Utf8Linewraps;
 ///
-/// let lines: Vec<&[u8]> = RangeUtf8LinewrapSplits::new(b"Hi\nBye").collect();
+/// let lines: Vec<&[u8]> = Utf8Linewraps::new(b"Hi\nBye").collect();
 /// assert_eq!(lines, vec![&b"Hi\n"[..], &b"Bye"[..]]);
 /// ```
-pub struct RangeUtf8LinewrapSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Linewraps<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR14 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered line offsets, relative to `suffix`
@@ -3692,16 +3513,16 @@ pub struct RangeUtf8LinewrapSplits<'a, const STEPS: usize = ITERATORS_DEFAULT_ST
     index: usize,  // Index of the next line to yield from the buffer
 }
 
-impl<'a> RangeUtf8LinewrapSplits<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Linewraps<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `RangeUtf8LinewrapSplits::<1>::with_steps(text)`.
+    /// `Utf8Linewraps::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> RangeUtf8LinewrapSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` lines per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3720,7 +3541,7 @@ impl<'a, const STEPS: usize> RangeUtf8LinewrapSplits<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_find_linewraps(
+            sz_utf8_linewraps(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3733,7 +3554,7 @@ impl<'a, const STEPS: usize> RangeUtf8LinewrapSplits<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for RangeUtf8LinewrapSplits<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Linewraps<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3766,10 +3587,10 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8LinewrapSplits<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8UncasedMatches, IndexSpan};
+/// use stringzilla::stringzilla::{Utf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"Hello WORLD, hello world";
-/// let matches: Vec<IndexSpan> = RangeUtf8UncasedMatches::new(haystack, b"hello").collect();
+/// let matches: Vec<IndexSpan> = Utf8UncasedMatches::new(haystack, b"hello").collect();
 /// assert_eq!(matches.len(), 2);
 /// assert_eq!(matches[0], IndexSpan::new(0, 5));
 /// assert_eq!(matches[1], IndexSpan::new(13, 5));
@@ -3778,13 +3599,13 @@ impl<'a, const STEPS: usize> Iterator for RangeUtf8LinewrapSplits<'a, STEPS> {
 /// With overlapping matches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{RangeUtf8UncasedMatches, IndexSpan};
+/// use stringzilla::stringzilla::{Utf8UncasedMatches, IndexSpan};
 ///
 /// let haystack = b"aAaAa";
-/// let matches: Vec<IndexSpan> = RangeUtf8UncasedMatches::with_overlaps(haystack, b"aA", true).collect();
+/// let matches: Vec<IndexSpan> = Utf8UncasedMatches::with_overlaps(haystack, b"aA", true).collect();
 /// assert_eq!(matches.len(), 4); // Overlapping matches
 /// ```
-pub struct RangeUtf8UncasedMatches<'a> {
+pub struct Utf8UncasedMatches<'a> {
     haystack: &'a [u8],
     needle: &'a [u8],
     metadata: Utf8UncasedNeedleMetadata,
@@ -3792,7 +3613,7 @@ pub struct RangeUtf8UncasedMatches<'a> {
     include_overlaps: bool,
 }
 
-impl<'a> RangeUtf8UncasedMatches<'a> {
+impl<'a> Utf8UncasedMatches<'a> {
     /// Creates a new iterator for non-overlapping uncased matches.
     pub fn new(haystack: &'a [u8], needle: &'a [u8]) -> Self {
         Self {
@@ -3816,7 +3637,7 @@ impl<'a> RangeUtf8UncasedMatches<'a> {
     }
 }
 
-impl<'a> Iterator for RangeUtf8UncasedMatches<'a> {
+impl<'a> Iterator for Utf8UncasedMatches<'a> {
     type Item = IndexSpan;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3914,7 +3735,7 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello🌍";
-    /// let view = text.sz_utf8_chars();
+    /// let view = text.sz_utf8_runes();
     ///
     /// // Lazy character count
     /// assert_eq!(view.len(), 6);
@@ -3926,7 +3747,7 @@ pub trait StringZillableUnary {
     /// let chars: Vec<char> = view.iter().collect();
     /// assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
     /// ```
-    fn sz_utf8_chars(&self) -> Utf8View<'_>;
+    fn sz_utf8_runes(&self) -> Utf8View<'_>;
 
     /// Returns an iterator over lines split by UTF-8 newline characters.
     ///
@@ -3939,12 +3760,12 @@ pub trait StringZillableUnary {
     /// use stringzilla::sz::StringZillableUnary;
     ///
     /// let text = "Hello\nWorld\r\nRust";
-    /// let lines: Vec<&str> = text.sz_utf8_newline_splits()
+    /// let lines: Vec<&str> = text.sz_utf8_lines()
     ///     .map(|line| std::str::from_utf8(line).unwrap())
     ///     .collect();
     /// assert_eq!(lines, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_utf8_newline_splits(&self) -> RangeUtf8NewlineSplits<'_>;
+    fn sz_utf8_lines(&self) -> Utf8Lines<'_>;
 
     /// Returns an iterator over segments split by UTF-8 whitespace characters.
     ///
@@ -3960,39 +3781,33 @@ pub trait StringZillableUnary {
     ///
     /// // KEEP (default): the double space between "Hello" and "World" yields an empty segment.
     /// let text = "Hello  World\tRust";
-    /// let segments: Vec<&str> = text.sz_utf8_whitespace_splits()
+    /// let segments: Vec<&str> = text.sz_utf8_tokens()
     ///     .map(|segment| std::str::from_utf8(segment).unwrap())
     ///     .collect();
     /// assert_eq!(segments, vec!["Hello", "", "World", "Rust"]);
     ///
     /// // skip_empty: drops the empties to yield only the non-empty tokens.
-    /// let tokens: Vec<&str> = text.sz_utf8_whitespace_splits()
+    /// let tokens: Vec<&str> = text.sz_utf8_tokens()
     ///     .skip_empty()
     ///     .map(|token| std::str::from_utf8(token).unwrap())
     ///     .collect();
     /// assert_eq!(tokens, vec!["Hello", "World", "Rust"]);
     /// ```
-    fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_>;
+    fn sz_utf8_tokens(&self) -> Utf8Tokens<'_>;
 
     /// Returns an iterator over UAX-29 words (Unicode TR29), in order. Words tile the input contiguously.
-    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_>;
-
-    /// Returns an iterator over UAX-29 words from the end of the text backward (last word first).
-    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_>;
+    fn sz_utf8_words(&self) -> Utf8Words<'_>;
 
     /// Returns an iterator over UAX-29 grapheme clusters (Unicode TR29), in order. Clusters tile the input contiguously.
-    fn sz_utf8_grapheme_splits(&self) -> RangeUtf8GraphemeSplits<'_>;
-
-    /// Returns an iterator over UAX-29 grapheme clusters from the end of the text backward (last cluster first).
-    fn sz_utf8_grapheme_rsplits(&self) -> RangeUtf8GraphemeRSplits<'_>;
+    fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;
 
     /// Returns an iterator over UAX-29 sentences (Unicode TR29), in order. Sentences tile the input contiguously.
-    fn sz_utf8_sentence_splits(&self) -> RangeUtf8SentenceSplits<'_>;
+    fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;
 
     /// Returns an iterator over UAX-14 line-break opportunities (Unicode TR14), in order. Linewrap segments tile the
     /// input contiguously, including soft break opportunities. For hard line splits only, use
-    /// [`Self::sz_utf8_newline_splits`].
-    fn sz_utf8_linewrap_splits(&self) -> RangeUtf8LinewrapSplits<'_>;
+    /// [`Self::sz_utf8_lines`].
+    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -4100,7 +3915,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_matches(needle).collect();
     /// assert_eq!(matches, vec![b"aba", b"aba", b"aba"]);
     /// ```
-    fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a>;
+    fn sz_matches(&'a self, needle: &'a N) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`, searching from the end.
     ///
@@ -4118,7 +3933,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_rmatches(needle).collect();
     /// assert_eq!(matches, vec![b"aba", b"aba", b"aba"]);
     /// ```
-    fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a>;
+    fn sz_rmatches(&'a self, needle: &'a N) -> RFindMatches<'a>;
 
     /// Returns an iterator over the substrings of `self` that are separated by the given `needle`.
     ///
@@ -4136,7 +3951,7 @@ where
     /// let splits: Vec<&[u8]> = haystack.sz_splits(needle).collect();
     /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
     /// ```
-    fn sz_splits(&'a self, needle: &'a N) -> RangeSplits<'a>;
+    fn sz_splits(&'a self, needle: &'a N) -> FindSplits<'a>;
 
     /// Returns an iterator over the substrings of `self` that are separated by the given `needle`, searching from the end.
     ///
@@ -4154,7 +3969,7 @@ where
     /// let splits: Vec<&[u8]> = haystack.sz_rsplits(needle).collect();
     /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
     /// ```
-    fn sz_rsplits(&'a self, needle: &'a N) -> RangeRSplits<'a>;
+    fn sz_rsplits(&'a self, needle: &'a N) -> RFindSplits<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`.
     ///
@@ -4172,7 +3987,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_first_of(needles).collect();
     /// assert_eq!(matches, vec![b"e", b"o", b"o"]);
     /// ```
-    fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+    fn sz_find_first_of(&'a self, needles: &'a N) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`, searching from the end.
     ///
@@ -4190,7 +4005,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_last_of(needles).collect();
     /// assert_eq!(matches, vec![b"o", b"o", b"e"]);
     /// ```
-    fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
+    fn sz_find_last_of(&'a self, needles: &'a N) -> RFindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`.
     ///
@@ -4208,7 +4023,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_first_not_of(needles).collect();
     /// assert_eq!(matches, vec![b"H", b"l", b"l", b",", b" ", b"w", b"r", b"l", b"d", b"!"]);
     /// ```
-    fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+    fn sz_find_first_not_of(&'a self, needles: &'a N) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`, searching from the end.
     ///
@@ -4226,7 +4041,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_last_not_of(needles).collect();
     /// assert_eq!(matches, vec![b"!", b"d", b"l", b"r", b"w", b" ", b",", b"l", b"l", b"H"]);
     /// ```
-    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
+    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RFindMatches<'a>;
 }
 
 impl<T> StringZillableUnary for T
@@ -4241,40 +4056,32 @@ where
         hash(self)
     }
 
-    fn sz_utf8_chars(&self) -> Utf8View<'_> {
+    fn sz_utf8_runes(&self) -> Utf8View<'_> {
         Utf8View::new(self.as_ref())
     }
 
-    fn sz_utf8_newline_splits(&self) -> RangeUtf8NewlineSplits<'_> {
-        RangeUtf8NewlineSplits::new(self.as_ref())
+    fn sz_utf8_lines(&self) -> Utf8Lines<'_> {
+        Utf8Lines::new(self.as_ref())
     }
 
-    fn sz_utf8_whitespace_splits(&self) -> RangeUtf8WhitespaceSplits<'_> {
-        RangeUtf8WhitespaceSplits::new(self.as_ref())
+    fn sz_utf8_tokens(&self) -> Utf8Tokens<'_> {
+        Utf8Tokens::new(self.as_ref())
     }
 
-    fn sz_utf8_word_splits(&self) -> RangeUtf8WordSplits<'_> {
-        RangeUtf8WordSplits::new(self.as_ref())
+    fn sz_utf8_words(&self) -> Utf8Words<'_> {
+        Utf8Words::new(self.as_ref())
     }
 
-    fn sz_utf8_word_rsplits(&self) -> RangeUtf8WordRSplits<'_> {
-        RangeUtf8WordRSplits::new(self.as_ref())
+    fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_> {
+        Utf8Graphemes::new(self.as_ref())
     }
 
-    fn sz_utf8_grapheme_splits(&self) -> RangeUtf8GraphemeSplits<'_> {
-        RangeUtf8GraphemeSplits::new(self.as_ref())
+    fn sz_utf8_sentences(&self) -> Utf8Sentences<'_> {
+        Utf8Sentences::new(self.as_ref())
     }
 
-    fn sz_utf8_grapheme_rsplits(&self) -> RangeUtf8GraphemeRSplits<'_> {
-        RangeUtf8GraphemeRSplits::new(self.as_ref())
-    }
-
-    fn sz_utf8_sentence_splits(&self) -> RangeUtf8SentenceSplits<'_> {
-        RangeUtf8SentenceSplits::new(self.as_ref())
-    }
-
-    fn sz_utf8_linewrap_splits(&self) -> RangeUtf8LinewrapSplits<'_> {
-        RangeUtf8LinewrapSplits::new(self.as_ref())
+    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_> {
+        Utf8Linewraps::new(self.as_ref())
     }
 }
 
@@ -4307,36 +4114,36 @@ where
         rfind_byte_not_from(self, needles)
     }
 
-    fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a> {
-        RangeMatches::new(self.as_ref(), MatcherType::Find(needle.as_ref()), true)
+    fn sz_matches(&'a self, needle: &'a N) -> FindMatches<'a> {
+        FindMatches::new(self.as_ref(), MatcherType::Find(needle.as_ref()), true)
     }
 
-    fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a> {
-        RangeRMatches::new(self.as_ref(), MatcherType::RFind(needle.as_ref()), true)
+    fn sz_rmatches(&'a self, needle: &'a N) -> RFindMatches<'a> {
+        RFindMatches::new(self.as_ref(), MatcherType::RFind(needle.as_ref()), true)
     }
 
-    fn sz_splits(&'a self, needle: &'a N) -> RangeSplits<'a> {
-        RangeSplits::new(self.as_ref(), MatcherType::Find(needle.as_ref()))
+    fn sz_splits(&'a self, needle: &'a N) -> FindSplits<'a> {
+        FindSplits::new(self.as_ref(), MatcherType::Find(needle.as_ref()))
     }
 
-    fn sz_rsplits(&'a self, needle: &'a N) -> RangeRSplits<'a> {
-        RangeRSplits::new(self.as_ref(), MatcherType::RFind(needle.as_ref()))
+    fn sz_rsplits(&'a self, needle: &'a N) -> RFindSplits<'a> {
+        RFindSplits::new(self.as_ref(), MatcherType::RFind(needle.as_ref()))
     }
 
-    fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
-        RangeMatches::new(self.as_ref(), MatcherType::FindFirstOf(needles.as_ref()), true)
+    fn sz_find_first_of(&'a self, needles: &'a N) -> FindMatches<'a> {
+        FindMatches::new(self.as_ref(), MatcherType::FindFirstOf(needles.as_ref()), true)
     }
 
-    fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
-        RangeRMatches::new(self.as_ref(), MatcherType::FindLastOf(needles.as_ref()), true)
+    fn sz_find_last_of(&'a self, needles: &'a N) -> RFindMatches<'a> {
+        RFindMatches::new(self.as_ref(), MatcherType::FindLastOf(needles.as_ref()), true)
     }
 
-    fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
-        RangeMatches::new(self.as_ref(), MatcherType::FindFirstNotOf(needles.as_ref()), true)
+    fn sz_find_first_not_of(&'a self, needles: &'a N) -> FindMatches<'a> {
+        FindMatches::new(self.as_ref(), MatcherType::FindFirstNotOf(needles.as_ref()), true)
     }
 
-    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
-        RangeRMatches::new(self.as_ref(), MatcherType::FindLastNotOf(needles.as_ref()), true)
+    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RFindMatches<'a> {
+        RFindMatches::new(self.as_ref(), MatcherType::FindLastNotOf(needles.as_ref()), true)
     }
 }
 
@@ -4566,9 +4373,9 @@ mod tests {
     fn iter_splits_byteset_skip_empty() {
         // Byteset matcher (split on any of ",;"): adjacent delimiters yield empties under the KEEP default.
         let haystack = b",a;;b,";
-        let kept: Vec<_> = RangeSplits::new(haystack, MatcherType::FindFirstOf(b",;")).collect();
+        let kept: Vec<_> = FindSplits::new(haystack, MatcherType::FindFirstOf(b",;")).collect();
         assert_eq!(kept, vec![&b""[..], b"a", &b""[..], b"b", &b""[..]]);
-        let nonempty: Vec<_> = RangeSplits::new(haystack, MatcherType::FindFirstOf(b",;"))
+        let nonempty: Vec<_> = FindSplits::new(haystack, MatcherType::FindFirstOf(b",;"))
             .skip_empty()
             .collect();
         assert_eq!(nonempty, vec![b"a", b"b"]);
@@ -4658,34 +4465,34 @@ mod tests {
     }
 
     #[test]
-    fn iter_range_matches_overlapping() {
+    fn iter_find_matches_overlapping() {
         let haystack = b"aaaa";
         let matcher = MatcherType::Find(b"aa");
-        let matches: Vec<_> = RangeMatches::new(haystack, matcher, true).collect();
+        let matches: Vec<_> = FindMatches::new(haystack, matcher, true).collect();
         assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
     }
 
     #[test]
-    fn iter_range_matches_non_overlapping() {
+    fn iter_find_matches_non_overlapping() {
         let haystack = b"aaaa";
         let matcher = MatcherType::Find(b"aa");
-        let matches: Vec<_> = RangeMatches::new(haystack, matcher, false).collect();
+        let matches: Vec<_> = FindMatches::new(haystack, matcher, false).collect();
         assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
     }
 
     #[test]
-    fn iter_range_rmatches_overlapping() {
+    fn iter_rfind_matches_overlapping() {
         let haystack = b"aaaa";
         let matcher = MatcherType::RFind(b"aa");
-        let matches: Vec<_> = RangeRMatches::new(haystack, matcher, true).collect();
+        let matches: Vec<_> = RFindMatches::new(haystack, matcher, true).collect();
         assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
     }
 
     #[test]
-    fn iter_range_rmatches_non_overlapping() {
+    fn iter_rfind_matches_non_overlapping() {
         let haystack = b"aaaa";
         let matcher = MatcherType::RFind(b"aa");
-        let matches: Vec<_> = RangeRMatches::new(haystack, matcher, false).collect();
+        let matches: Vec<_> = RFindMatches::new(haystack, matcher, false).collect();
         assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
     }
 
@@ -5050,14 +4857,14 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits() {
         let text = b"a\nb\r\nc\n\nd";
-        let lines: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<_> = Utf8Lines::new(text).collect();
         assert_eq!(lines, vec![b"a", b"b", b"c", &b""[..], b"d"]);
     }
 
     #[test]
     fn iter_newline_utf8_splits_unicode() {
         let text = "Hello\u{2028}World".as_bytes(); // LINE SEPARATOR
-        let lines: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<_> = Utf8Lines::new(text).collect();
         assert_eq!(lines, vec!["Hello".as_bytes(), "World".as_bytes()]);
     }
 
@@ -5066,7 +4873,7 @@ mod tests {
         // KEEP (default): every one of the 8 whitespace delimiters yields a segment, so leading,
         // trailing, and inner runs all surface empties (str::split semantics, matching C++/Python).
         let text = b"  a \t b\n\nc  ";
-        let segments: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        let segments: Vec<_> = Utf8Tokens::new(text).collect();
         assert_eq!(
             segments,
             vec![
@@ -5083,7 +4890,7 @@ mod tests {
             ]
         );
         // skip_empty: recovers the str::split_whitespace token behavior.
-        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        let tokens: Vec<_> = Utf8Tokens::new(text).skip_empty().collect();
         assert_eq!(tokens, vec![b"a", b"b", b"c"]);
     }
 
@@ -5091,28 +4898,28 @@ mod tests {
     fn iter_whitespace_utf8_splits_keep_default() {
         // The simple example from the doc comment: KEEP yields the surrounding empties, skip_empty drops them.
         let text = b"  hi  ";
-        let kept: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        let kept: Vec<_> = Utf8Tokens::new(text).collect();
         assert_eq!(kept, vec![&b""[..], &b""[..], b"hi", &b""[..], &b""[..]]);
-        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        let tokens: Vec<_> = Utf8Tokens::new(text).skip_empty().collect();
         assert_eq!(tokens, vec![b"hi"]);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits_unicode() {
         let text = "a\u{3000}b\u{2000}c".as_bytes(); // IDEOGRAPHIC SPACE, EN QUAD
-        let segments: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        let segments: Vec<_> = Utf8Tokens::new(text).collect();
         assert_eq!(segments, vec![b"a", b"b", b"c"]); // single delimiters between words: no empties
-        let tokens: Vec<_> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        let tokens: Vec<_> = Utf8Tokens::new(text).skip_empty().collect();
         assert_eq!(tokens, vec![b"a", b"b", b"c"]);
     }
 
     #[test]
     fn iter_whitespace_utf8_splits_skip_empty_all_whitespace() {
         let text = b"   \t  ";
-        let kept: Vec<_> = RangeUtf8WhitespaceSplits::new(text).collect();
+        let kept: Vec<_> = Utf8Tokens::new(text).collect();
         assert_eq!(kept.len(), 7); // 6 delimiters → 7 (all empty) segments
         assert!(kept.iter().all(|segment| segment.is_empty()));
-        let tokens: Vec<&[u8]> = RangeUtf8WhitespaceSplits::new(text).skip_empty().collect();
+        let tokens: Vec<&[u8]> = Utf8Tokens::new(text).skip_empty().collect();
         assert!(tokens.is_empty());
     }
 
@@ -5120,10 +4927,10 @@ mod tests {
     fn iter_newline_utf8_splits_skip_empty() {
         let text = b"a\nb\r\nc\n\nd";
         // Default KEEP: the back-to-back "\n\n" yields an empty line.
-        let kept: Vec<_> = RangeUtf8NewlineSplits::new(text).collect();
+        let kept: Vec<_> = Utf8Lines::new(text).collect();
         assert_eq!(kept, vec![b"a", b"b", b"c", &b""[..], b"d"]);
         // skip_empty: the empty line between "c" and "d" disappears.
-        let nonempty: Vec<_> = RangeUtf8NewlineSplits::new(text).skip_empty().collect();
+        let nonempty: Vec<_> = Utf8Lines::new(text).skip_empty().collect();
         assert_eq!(nonempty, vec![b"a", b"b", b"c", b"d"]);
     }
 
@@ -5134,9 +4941,9 @@ mod tests {
         // batches fit the whole input in one call.
         let text = b"\r\na\r\n\r\nb\r\nc\nd\n";
         let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b"c", b"d", b""];
-        let from_1: Vec<_> = RangeUtf8NewlineSplits::<1>::with_steps(text).collect();
-        let from_3: Vec<_> = RangeUtf8NewlineSplits::<3>::with_steps(text).collect();
-        let from_65: Vec<_> = RangeUtf8NewlineSplits::<65>::with_steps(text).collect();
+        let from_1: Vec<_> = Utf8Lines::<1>::with_steps(text).collect();
+        let from_3: Vec<_> = Utf8Lines::<3>::with_steps(text).collect();
+        let from_65: Vec<_> = Utf8Lines::<65>::with_steps(text).collect();
         assert_eq!(from_1, expected);
         assert_eq!(from_3, expected);
         assert_eq!(from_65, expected);
@@ -5144,21 +4951,15 @@ mod tests {
         // skip_empty across the same batch sizes.
         let nonempty: Vec<&[u8]> = vec![b"a", b"b", b"c", b"d"];
         assert_eq!(
-            RangeUtf8NewlineSplits::<1>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
+            Utf8Lines::<1>::with_steps(text).skip_empty().collect::<Vec<_>>(),
             nonempty
         );
         assert_eq!(
-            RangeUtf8NewlineSplits::<3>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
+            Utf8Lines::<3>::with_steps(text).skip_empty().collect::<Vec<_>>(),
             nonempty
         );
         assert_eq!(
-            RangeUtf8NewlineSplits::<65>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
+            Utf8Lines::<65>::with_steps(text).skip_empty().collect::<Vec<_>>(),
             nonempty
         );
     }
@@ -5167,23 +4968,12 @@ mod tests {
     fn iter_whitespace_utf8_splits_steps_invariance() {
         let text = b"  a \t b\n\nc  ";
         let expected: Vec<&[u8]> = vec![b"", b"", b"a", b"", b"", b"b", b"", b"c", b"", b""];
-        assert_eq!(
-            RangeUtf8WhitespaceSplits::<1>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
-        assert_eq!(
-            RangeUtf8WhitespaceSplits::<3>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
-        assert_eq!(
-            RangeUtf8WhitespaceSplits::<65>::with_steps(text).collect::<Vec<_>>(),
-            expected
-        );
+        assert_eq!(Utf8Tokens::<1>::with_steps(text).collect::<Vec<_>>(), expected);
+        assert_eq!(Utf8Tokens::<3>::with_steps(text).collect::<Vec<_>>(), expected);
+        assert_eq!(Utf8Tokens::<65>::with_steps(text).collect::<Vec<_>>(), expected);
         let tokens: Vec<&[u8]> = vec![b"a", b"b", b"c"];
         assert_eq!(
-            RangeUtf8WhitespaceSplits::<1>::with_steps(text)
-                .skip_empty()
-                .collect::<Vec<_>>(),
+            Utf8Tokens::<1>::with_steps(text).skip_empty().collect::<Vec<_>>(),
             tokens
         );
     }
@@ -5192,7 +4982,7 @@ mod tests {
     fn iter_newline_utf8_splits_trailing_newline() {
         // "\r\na\r\n\r\nb\r\n" should produce ["", "a", "", "b", ""]
         let text = b"\r\na\r\n\r\nb\r\n";
-        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<&[u8]> = Utf8Lines::new(text).collect();
         assert_eq!(lines.len(), 5, "Expected 5 lines");
         let expected: Vec<&[u8]> = vec![b"", b"a", b"", b"b", b""];
         assert_eq!(lines, expected);
@@ -5201,7 +4991,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_no_trailing() {
         let text = b"a\nb\nc";
-        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<&[u8]> = Utf8Lines::new(text).collect();
         assert_eq!(lines.len(), 3);
         assert_eq!(lines, vec![b"a", b"b", b"c"]);
     }
@@ -5209,7 +4999,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_empty_string() {
         let text = b"";
-        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<&[u8]> = Utf8Lines::new(text).collect();
         assert_eq!(lines.len(), 1);
         assert_eq!(lines, vec![b""]);
     }
@@ -5217,7 +5007,7 @@ mod tests {
     #[test]
     fn iter_newline_utf8_splits_single_newline() {
         let text = b"\n";
-        let lines: Vec<&[u8]> = RangeUtf8NewlineSplits::new(text).collect();
+        let lines: Vec<&[u8]> = Utf8Lines::new(text).collect();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines, vec![b"", b""]);
     }
@@ -5227,23 +5017,10 @@ mod tests {
         // Words tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
         // a tiny batch (STEPS == 1) exercises the refill seam on every word boundary.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = RangeUtf8WordSplits::new(text).collect();
-        assert_eq!(RangeUtf8WordSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8WordSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8WordSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
-
-        // The reverse iterator yields the same words last-first, also batch-size invariant.
-        let mut reversed = forward.clone();
-        reversed.reverse();
-        assert_eq!(RangeUtf8WordRSplits::new(text).collect::<Vec<_>>(), reversed);
-        assert_eq!(
-            RangeUtf8WordRSplits::<1>::with_steps(text).collect::<Vec<_>>(),
-            reversed
-        );
-        assert_eq!(
-            RangeUtf8WordRSplits::<65>::with_steps(text).collect::<Vec<_>>(),
-            reversed
-        );
+        let forward: Vec<&[u8]> = Utf8Words::new(text).collect();
+        assert_eq!(Utf8Words::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Words::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Words::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]
@@ -5251,32 +5028,10 @@ mod tests {
         // Grapheme clusters tile the input, so the yielded segments must match regardless of the batch size
         // `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every cluster boundary.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = RangeUtf8GraphemeSplits::new(text).collect();
-        assert_eq!(
-            RangeUtf8GraphemeSplits::<1>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
-        assert_eq!(
-            RangeUtf8GraphemeSplits::<3>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
-        assert_eq!(
-            RangeUtf8GraphemeSplits::<65>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
-
-        // The reverse iterator yields the same clusters last-first, also batch-size invariant.
-        let mut reversed = forward.clone();
-        reversed.reverse();
-        assert_eq!(RangeUtf8GraphemeRSplits::new(text).collect::<Vec<_>>(), reversed);
-        assert_eq!(
-            RangeUtf8GraphemeRSplits::<1>::with_steps(text).collect::<Vec<_>>(),
-            reversed
-        );
-        assert_eq!(
-            RangeUtf8GraphemeRSplits::<65>::with_steps(text).collect::<Vec<_>>(),
-            reversed
-        );
+        let forward: Vec<&[u8]> = Utf8Graphemes::new(text).collect();
+        assert_eq!(Utf8Graphemes::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Graphemes::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Graphemes::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]
@@ -5284,19 +5039,10 @@ mod tests {
         // Sentences tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
         // a tiny batch (STEPS == 1) exercises the refill seam on every sentence boundary.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = RangeUtf8SentenceSplits::new(text).collect();
-        assert_eq!(
-            RangeUtf8SentenceSplits::<1>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
-        assert_eq!(
-            RangeUtf8SentenceSplits::<3>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
-        assert_eq!(
-            RangeUtf8SentenceSplits::<65>::with_steps(text).collect::<Vec<_>>(),
-            forward
-        );
+        let forward: Vec<&[u8]> = Utf8Sentences::new(text).collect();
+        assert_eq!(Utf8Sentences::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Sentences::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Sentences::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]
@@ -5304,10 +5050,10 @@ mod tests {
         // Linewrap segments tile the input, so the yielded segments must match regardless of
         // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line-break opportunity.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = RangeUtf8LinewrapSplits::new(text).collect();
-        assert_eq!(RangeUtf8LinewrapSplits::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8LinewrapSplits::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(RangeUtf8LinewrapSplits::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        let forward: Vec<&[u8]> = Utf8Linewraps::new(text).collect();
+        assert_eq!(Utf8Linewraps::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linewraps::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linewraps::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]

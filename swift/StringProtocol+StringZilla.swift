@@ -405,7 +405,7 @@ extension StringZillaViewable {
             var cursor: sz_size_t = 0
             while cursor < length {
                 var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
-                let count = sz_utf8_word_find_boundaries(
+                let count = sz_utf8_words(
                     pointer.advanced(by: Int(cursor)), length - cursor, &wordStart, &wordLength, 1, &consumed)
                 if count == 0 { break }
                 let begin = cursor + wordStart // The first word of the suffix starts at offset 0.
@@ -414,27 +414,6 @@ extension StringZillaViewable {
                 let hi = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(end)), after: pointer)
                 ranges.append(lo..<hi)
                 cursor = end
-            }
-        }
-        return ranges
-    }
-
-    /// Splits the content into UAX-29 words from the end backward (last word first).
-    /// - Returns: Byte-accurate ranges into the receiver, one per word, in reverse order.
-    public func utf8WordsReversed() -> [Range<Index>] {
-        var ranges: [Range<Index>] = []
-        withStringZillaScope { pointer, length in
-            var end: sz_size_t = length
-            while end > 0 {
-                var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
-                let count = sz_utf8_word_rfind_boundaries(pointer, end, &wordStart, &wordLength, 1, &consumed)
-                if count == 0 { break }
-                // The last word of `[0, end)` ends exactly at `end`; continue over the prefix before it.
-                let lo = self.stringZillaByteOffset(forByte: pointer.advanced(by: Int(wordStart)), after: pointer)
-                let hi = self.stringZillaByteOffset(
-                    forByte: pointer.advanced(by: Int(wordStart + wordLength)), after: pointer)
-                ranges.append(lo..<hi)
-                end = wordStart
             }
         }
         return ranges
@@ -459,17 +438,17 @@ extension StringZillaViewable {
     /// The delimiters partition the text into the N+1 *gaps* between them, so a string with N whitespace
     /// characters yields N+1 segments. By default empty segments are kept (`skipEmpty: false`), which mirrors
     /// the cross-language KEEP policy. Pass `skipEmpty: true` to drop runs of whitespace as separators, e.g.
-    /// `"  hi  ".utf8Whitespace(skipEmpty: true)` -> `["hi"]`.
+    /// `"  hi  ".utf8Tokens(skipEmpty: true)` -> `["hi"]`.
     ///
     /// - Note: This differs from the Swift standard library's `split(omittingEmptySubsequences: true)`,
     ///   which drops empty subsequences by default. Pass `skipEmpty: true` for that behavior.
     /// - Parameter skipEmpty: When `true`, zero-length segments are omitted (default: `false`).
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
-    public func utf8Whitespace(skipEmpty: Bool = false) -> [Range<Index>] {
+    public func utf8Tokens(skipEmpty: Bool = false) -> [Range<Index>] {
         return utf8Split(skipEmpty: skipEmpty, onNewlines: false)
     }
 
-    /// Shared driver for delimiter-based UTF-8 splitting (`utf8Lines` / `utf8Whitespace`).
+    /// Shared driver for delimiter-based UTF-8 splitting (`utf8Lines` / `utf8Tokens`).
     ///
     /// Buffers delimiter boundaries through the multistep FFI kernel (just like `utf8Words()`), but whereas
     /// words *tile* the input, the delimiters here are discarded and the *gaps* between them become the
@@ -480,7 +459,7 @@ extension StringZillaViewable {
     ///
     /// - Parameters:
     ///   - skipEmpty: When `true`, zero-length segments are omitted.
-    ///   - onNewlines: When `true`, drives `sz_utf8_find_newlines`; otherwise `sz_utf8_find_whitespaces`.
+    ///   - onNewlines: When `true`, drives `sz_utf8_newlines`; otherwise `sz_utf8_whitespaces`.
     /// - Returns: Byte-accurate ranges into the receiver, one per segment.
     private func utf8Split(skipEmpty: Bool, onNewlines: Bool) -> [Range<Index>] {
         var ranges: [Range<Index>] = []
@@ -505,10 +484,10 @@ extension StringZillaViewable {
                 let delimiters = offsets.withUnsafeMutableBufferPointer { offsetsBuffer in
                     lengths.withUnsafeMutableBufferPointer { lengthsBuffer in
                         onNewlines
-                            ? sz_utf8_find_newlines(
+                            ? sz_utf8_newlines(
                                 pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
                                 lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
-                            : sz_utf8_find_whitespaces(
+                            : sz_utf8_whitespaces(
                                 pointer.advanced(by: Int(suffix)), region, offsetsBuffer.baseAddress,
                                 lengthsBuffer.baseAddress, sz_size_t(steps), &consumed)
                     }

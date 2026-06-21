@@ -121,9 +121,9 @@ SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_descending_haswell_(sz_u32
     return _mm256_loadu_si256((__m256i const *)compact_lut[submask & 0xFu]);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
-    sz_cptr_t text, sz_size_t length,                     //
-    sz_size_t *word_starts, sz_size_t *word_lengths,      //
+SZ_PUBLIC sz_size_t sz_utf8_words_haswell(           //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -199,89 +199,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_haswell( //
     word_lengths[words] = length - word_start;
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
-    return words;
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_haswell( //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *word_starts, sz_size_t *word_lengths,       //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
-    sz_size_t position = length - 1;
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-
-    // Oracle-free fast path: an all-ASCII window [position-30, position+2) resolves boundaries at positions
-    // [position-28, position]; one fixed sub-block loop walks high-to-low, compacting each group in descending
-    // lane order and emitting it as a shifted-difference (lane 0 carries the open `word_end`).
-    __m256i const lane_ramp = _mm256_setr_epi64x(0, 1, 2, 3);
-    __m256i const lane_shift_right = _mm256_setr_epi32(0, 0, 0, 1, 2, 3, 4, 5);
-    while (position > 0) {
-        sz_size_t base = position - 30; // lane j = byte base+j; trusted lanes [2,30] → [position-28, position]
-        int ascii_window = position >= 30 && position + 2 <= length;
-        __m256i window = _mm256_setzero_si256();
-        if (ascii_window) {
-            window = _mm256_loadu_si256((__m256i const *)(text_u8 + base));
-            ascii_window = _mm256_movemask_epi8(window) == 0;
-        }
-        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
-            if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-                if (words == words_capacity) {
-                    if (bytes_consumed) *bytes_consumed = word_end;
-                    return words;
-                }
-                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-                word_end = position;
-            }
-            position--;
-            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-            continue;
-        }
-
-        sz_u32_t boundary =
-            (~sz_utf8_word_break_join_mask_ascii_haswell_(sz_utf8_word_break_classify_ascii_haswell_(window))) &
-            0x7FFFFFFCu;                                  // trusted lanes [2,30]
-        for (sz_size_t sub_block = 8; sub_block-- > 0;) { // high-to-low for descending emission
-            sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
-            if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)_mm_popcnt_u32(submask);
-            sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
-
-            __m256i const positions = _mm256_add_epi64(_mm256_set1_epi64x((long long)(base + sub_block * 4)),
-                                                       lane_ramp);
-            __m256i const boundaries = _mm256_permutevar8x32_epi32(
-                positions, sz_utf8_word_compact4_permutation_descending_haswell_(submask));
-            __m256i const previous = _mm256_blend_epi32(_mm256_permutevar8x32_epi32(boundaries, lane_shift_right),
-                                                        _mm256_set1_epi64x((long long)word_end), 0x03);
-            __m256i const store_mask = sz_mm256_store_mask_epi64_(stored);
-            _mm256_maskstore_epi64((long long *)(word_starts + words), store_mask, boundaries);
-            _mm256_maskstore_epi64((long long *)(word_lengths + words), store_mask,
-                                   _mm256_sub_epi64(previous, boundaries));
-            words += stored;
-            if (stored) word_end = word_starts[words - 1];
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-        }
-        position = base + 1; // Resolved down to position-28; next unresolved boundary is at position-29.
-    }
-
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
     return words;
 }
 

@@ -201,7 +201,7 @@ SZ_INTERNAL sz_size_t sz_utf8_iterate_multistep_rvv_(   //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_rvv(          //
+SZ_PUBLIC sz_size_t sz_utf8_newlines_rvv(               //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -209,7 +209,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_rvv(          //
                                           1);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_rvv(       //
+SZ_PUBLIC sz_size_t sz_utf8_whitespaces_rvv(            //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

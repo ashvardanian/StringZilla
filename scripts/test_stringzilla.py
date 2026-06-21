@@ -41,11 +41,8 @@ import pytest
 # Import shared Unicode data loading functions
 from test_helpers import (
     UnicodeDataDownloadError,
-    parse_uncased_folding_file,
     get_uncased_folding_rules,
-    get_word_break_properties,
     get_word_break_test_cases,
-    baseline_word_boundaries,
     get_grapheme_break_properties,
     get_grapheme_break_test_cases,
     baseline_grapheme_boundaries,
@@ -2260,23 +2257,23 @@ def test_utf8_uncased_find_slicing():
         ("hello", "xyz", []),
     ],
 )
-def test_utf8_uncased_find_iter(haystack, needle, expected_matches):
+def test_utf8_uncased_matches(haystack, needle, expected_matches):
     """Parametrized test for uncased find iterator."""
-    matches = [str(m) for m in sz.utf8_uncased_find_iter(haystack, needle)]
+    matches = [str(m) for m in sz.utf8_uncased_matches(haystack, needle)]
     assert matches == expected_matches
     # Also test method form
-    matches_method = [str(m) for m in sz.Str(haystack).utf8_uncased_find_iter(needle)]
+    matches_method = [str(m) for m in sz.Str(haystack).utf8_uncased_matches(needle)]
     assert matches_method == expected_matches
 
 
-def test_utf8_uncased_find_iter_overlapping():
+def test_utf8_uncased_matches_overlapping():
     """Test overlapping vs non-overlapping modes and bytes input."""
     # Non-overlapping (default)
-    assert len(list(sz.utf8_uncased_find_iter("aaaa", "aa"))) == 2
+    assert len(list(sz.utf8_uncased_matches("aaaa", "aa"))) == 2
     # Overlapping
-    assert len(list(sz.utf8_uncased_find_iter("aaaa", "aa", include_overlapping=True))) == 3
+    assert len(list(sz.utf8_uncased_matches("aaaa", "aa", include_overlapping=True))) == 3
     # Bytes input
-    assert len(list(sz.utf8_uncased_find_iter(b"Hello HELLO", b"hello"))) == 2
+    assert len(list(sz.utf8_uncased_matches(b"Hello HELLO", b"hello"))) == 2
 
 
 def test_utf8_uncased_order():
@@ -2366,121 +2363,121 @@ def test_unit_utf8_count():
     assert sz.utf8_count("𐍈") == 1  # Gothic letter (4 bytes)
 
 
-def test_utf8_splitlines_iter():
+def test_utf8_lines():
     """Test UTF-8 line splitting iterator."""
     # Basic newline characters
-    assert list(sz.utf8_splitlines_iter("a\nb\nc")) == [Str("a"), Str("b"), Str("c")]
-    assert list(sz.utf8_splitlines_iter("a\rb\rc")) == [Str("a"), Str("b"), Str("c")]
-    assert list(sz.utf8_splitlines_iter("a\r\nb\r\nc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_lines("a\nb\nc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_lines("a\rb\rc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_lines("a\r\nb\r\nc")) == [Str("a"), Str("b"), Str("c")]
 
     # CRLF treated as single delimiter
-    result = list(sz.utf8_splitlines_iter("line1\r\nline2"))
+    result = list(sz.utf8_lines("line1\r\nline2"))
     assert len(result) == 2
     assert result[0] == Str("line1")
     assert result[1] == Str("line2")
 
     # Empty string: yields one empty Str (differs from Python's splitlines which returns [])
-    assert list(sz.utf8_splitlines_iter("")) == [Str("")]
+    assert list(sz.utf8_lines("")) == [Str("")]
 
     # No newlines
-    assert list(sz.utf8_splitlines_iter("hello")) == [Str("hello")]
+    assert list(sz.utf8_lines("hello")) == [Str("hello")]
 
     # Consecutive newlines create empty lines
-    result = list(sz.utf8_splitlines_iter("a\n\nb"))
+    result = list(sz.utf8_lines("a\n\nb"))
     assert len(result) == 3
     assert result[1] == Str("")  # Empty line between
 
     # Trailing newline: includes trailing empty (differs from Python which omits it)
-    result = list(sz.utf8_splitlines_iter("a\nb\n"))
+    result = list(sz.utf8_lines("a\nb\n"))
     assert len(result) == 3
     assert result[2] == Str("")
 
     # keepends=True
-    result = list(sz.utf8_splitlines_iter("a\nb\nc", keepends=True))
+    result = list(sz.utf8_lines("a\nb\nc", keepends=True))
     assert result[0] == Str("a\n")
     assert result[1] == Str("b\n")
     assert result[2] == Str("c")  # Last line has no newline
 
     # keepends=True with CRLF
-    result = list(sz.utf8_splitlines_iter("a\r\nb", keepends=True))
+    result = list(sz.utf8_lines("a\r\nb", keepends=True))
     assert result[0] == Str("a\r\n")
     assert result[1] == Str("b")
 
     # Unicode newlines: vertical tab, form feed
-    assert len(list(sz.utf8_splitlines_iter("a\vb\fc"))) == 3
+    assert len(list(sz.utf8_lines("a\vb\fc"))) == 3
 
     # Unicode newlines: NEL (U+0085), Line Separator (U+2028), Paragraph Separator (U+2029)
     nel = "\u0085"
     line_sep = "\u2028"
     para_sep = "\u2029"
-    assert len(list(sz.utf8_splitlines_iter(f"a{nel}b"))) == 2
-    assert len(list(sz.utf8_splitlines_iter(f"a{line_sep}b"))) == 2
-    assert len(list(sz.utf8_splitlines_iter(f"a{para_sep}b"))) == 2
+    assert len(list(sz.utf8_lines(f"a{nel}b"))) == 2
+    assert len(list(sz.utf8_lines(f"a{line_sep}b"))) == 2
+    assert len(list(sz.utf8_lines(f"a{para_sep}b"))) == 2
 
     # Method form on Str
-    result = list(sz.Str("a\nb").utf8_splitlines_iter())
+    result = list(sz.Str("a\nb").utf8_lines())
     assert result == [Str("a"), Str("b")]
 
     # skip_empty=True skips ALL empty segments (leading, middle, trailing)
     # This differs from Python's splitlines() which keeps middle empty lines
-    assert list(sz.utf8_splitlines_iter("", skip_empty=True)) == []
-    assert list(sz.utf8_splitlines_iter("a\nb\n", skip_empty=True)) == [Str("a"), Str("b")]
-    assert list(sz.utf8_splitlines_iter("a\n\nb", skip_empty=True)) == [Str("a"), Str("b")]  # skips middle empty
-    assert list(sz.utf8_splitlines_iter("\na\n", skip_empty=True)) == [Str("a")]  # skips leading & trailing
+    assert list(sz.utf8_lines("", skip_empty=True)) == []
+    assert list(sz.utf8_lines("a\nb\n", skip_empty=True)) == [Str("a"), Str("b")]
+    assert list(sz.utf8_lines("a\n\nb", skip_empty=True)) == [Str("a"), Str("b")]  # skips middle empty
+    assert list(sz.utf8_lines("\na\n", skip_empty=True)) == [Str("a")]  # skips leading & trailing
 
 
 @pytest.mark.parametrize(
     "text",
     ["hello\nworld", "a\r\nb\nc", "no newline", "trailing\n"],
 )
-def test_utf8_splitlines_iter_matches_python(text):
+def test_utf8_lines_matches_python(text):
     """Verify skip_empty=True matches Python's splitlines() for cases without middle empty lines."""
     py_result = text.splitlines()
-    sz_result = [str(s) for s in sz.utf8_splitlines_iter(text, skip_empty=True)]
+    sz_result = [str(s) for s in sz.utf8_lines(text, skip_empty=True)]
     assert sz_result == py_result
 
 
-def test_utf8_split_iter():
+def test_utf8_tokens():
     """Test UTF-8 whitespace splitting iterator."""
     # Basic whitespace: space, tab, newline
-    result = list(sz.utf8_split_iter("hello world"))
+    result = list(sz.utf8_tokens("hello world"))
     assert result == [Str("hello"), Str("world")]
 
-    result = list(sz.utf8_split_iter("a\tb\nc"))
+    result = list(sz.utf8_tokens("a\tb\nc"))
     assert result == [Str("a"), Str("b"), Str("c")]
 
     # Empty string: yields one empty Str (differs from Python's split which returns [])
-    assert list(sz.utf8_split_iter("")) == [Str("")]
+    assert list(sz.utf8_tokens("")) == [Str("")]
 
     # String with only whitespace: yields empty strings between delimiters
     # (differs from Python's split() which returns [] for whitespace-only strings)
-    result = list(sz.utf8_split_iter("   "))
+    result = list(sz.utf8_tokens("   "))
     assert all(str(s) == "" for s in result)
 
     # Consecutive whitespace creates empty strings between each delimiter
     # (differs from Python's split() which treats consecutive whitespace as single delimiter)
-    result = list(sz.utf8_split_iter("a   b"))
+    result = list(sz.utf8_tokens("a   b"))
     assert len(result) == 4  # a, '', '', b
     assert str(result[0]) == "a"
     assert str(result[-1]) == "b"
 
     # Leading/trailing whitespace creates empty strings
-    result = list(sz.utf8_split_iter("  hello  "))
+    result = list(sz.utf8_tokens("  hello  "))
     assert "hello" in [str(s) for s in result]
 
     # No whitespace
-    assert list(sz.utf8_split_iter("hello")) == [Str("hello")]
+    assert list(sz.utf8_tokens("hello")) == [Str("hello")]
 
     # Unicode whitespace: NO-BREAK SPACE (U+00A0)
     nbsp = "\u00a0"
-    result = list(sz.utf8_split_iter(f"a{nbsp}b"))
+    result = list(sz.utf8_tokens(f"a{nbsp}b"))
     assert len(result) == 2
     assert str(result[0]) == "a"
     assert str(result[1]) == "b"
 
     # Unicode whitespace: IDEOGRAPHIC SPACE (U+3000)
     ideo_space = "\u3000"
-    result = list(sz.utf8_split_iter(f"日本{ideo_space}語"))
+    result = list(sz.utf8_tokens(f"日本{ideo_space}語"))
     assert len(result) == 2
     assert str(result[0]) == "日本"
     assert str(result[1]) == "語"
@@ -2488,14 +2485,14 @@ def test_utf8_split_iter():
     # Unicode whitespace: EN SPACE (U+2002), EM SPACE (U+2003)
     en_space = "\u2002"
     em_space = "\u2003"
-    result = list(sz.utf8_split_iter(f"a{en_space}b{em_space}c"))
+    result = list(sz.utf8_tokens(f"a{en_space}b{em_space}c"))
     assert len(result) == 3
     assert str(result[0]) == "a"
     assert str(result[1]) == "b"
     assert str(result[2]) == "c"
 
     # Method form on Str
-    result = list(sz.Str("hello world").utf8_split_iter())
+    result = list(sz.Str("hello world").utf8_tokens())
     assert len(result) == 2
     assert str(result[0]) == "hello"
     assert str(result[1]) == "world"
@@ -2505,113 +2502,101 @@ def test_utf8_split_iter():
     "text",
     ["hello world", "  spaced  ", "a\tb\nc", "no-spaces", "   ", ""],
 )
-def test_utf8_split_iter_matches_python(text):
+def test_utf8_tokens_matches_python(text):
     """Verify skip_empty=True matches Python's split() behavior."""
     py_result = text.split()
-    sz_result = [str(s) for s in sz.utf8_split_iter(text, skip_empty=True)]
+    sz_result = [str(s) for s in sz.utf8_tokens(text, skip_empty=True)]
     assert sz_result == py_result
 
 
-def test_utf8_word_iter_basic():
+def test_utf8_words_basic():
     """Test basic word iteration."""
     # Simple two words
-    result = [str(w) for w in sz.utf8_word_iter("hello world")]
+    result = [str(w) for w in sz.utf8_words("hello world")]
     assert result == ["hello", " ", "world"]
 
     # Empty string
-    result = [str(w) for w in sz.utf8_word_iter("")]
+    result = [str(w) for w in sz.utf8_words("")]
     assert result == []
 
     # Single character
-    result = [str(w) for w in sz.utf8_word_iter("a")]
+    result = [str(w) for w in sz.utf8_words("a")]
     assert result == ["a"]
 
 
-def test_utf8_word_iter_reverse():
-    """Reverse iteration must yield the forward word list in reverse order."""
-    for text in ["", "a", "hello world", "don't", "3,14", "Größe привет мир 你好 42", "the quick brown fox, really!"]:
-        forward = [str(w) for w in sz.utf8_word_iter(text)]
-        reverse = [str(w) for w in sz.utf8_word_iter(text, reverse=True)]
-        assert reverse == list(reversed(forward))
-        assert "".join(forward) == text  # Words tile the input contiguously.
-
-
-def test_utf8_word_iter_skip_empty():
+def test_utf8_words_skip_empty():
     """Test skip_empty parameter."""
-    result = [str(w) for w in sz.utf8_word_iter("hello  world", skip_empty=True)]
+    result = [str(w) for w in sz.utf8_words("hello  world", skip_empty=True)]
     # Should skip empty segments at boundaries
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
 
 
-def test_utf8_word_iter_contractions():
+def test_utf8_words_contractions():
     """Test English contractions per TR29 rules."""
     # Per TR29, apostrophe between letters should not break
-    result = [str(w) for w in sz.utf8_word_iter("don't")]
+    result = [str(w) for w in sz.utf8_words("don't")]
     # TR29: "don't" should be one word (WB6-7: MidLetter rules)
     assert "don't" in result or result == ["don't"]
 
 
-def test_utf8_word_iter_unicode():
+def test_utf8_words_unicode():
     """Test UTF-8 multi-byte characters."""
     # German with eszett
-    result = [str(w) for w in sz.utf8_word_iter("Größe")]
+    result = [str(w) for w in sz.utf8_words("Größe")]
     assert "Größe" in result
 
     # Russian text
-    result = [str(w) for w in sz.utf8_word_iter("привет мир")]
+    result = [str(w) for w in sz.utf8_words("привет мир")]
     assert len(result) >= 2
 
     # CJK (each character is its own word in TR29)
-    result = [str(w) for w in sz.utf8_word_iter("你好")]
+    result = [str(w) for w in sz.utf8_words("你好")]
     # CJK characters are typically "Other" category - each is a boundary
     assert len(result) >= 1
 
 
-def test_utf8_word_iter_emoji():
+def test_utf8_words_emoji():
     """Test emoji handling."""
     # Simple emoji
-    result = [str(w) for w in sz.utf8_word_iter("hello 👋 world")]
+    result = [str(w) for w in sz.utf8_words("hello 👋 world")]
     assert "hello" in result
     assert "world" in result
 
 
-def test_utf8_word_iter_numbers():
+def test_utf8_words_numbers():
     """Test numeric handling per TR29."""
-    result = [str(w) for w in sz.utf8_word_iter("test123")]
+    result = [str(w) for w in sz.utf8_words("test123")]
     # ALetter followed by Numeric should not break (WB9)
     assert "test123" in result or result == ["test123"]
 
-    result = [str(w) for w in sz.utf8_word_iter("3.14")]
+    result = [str(w) for w in sz.utf8_words("3.14")]
     # Numeric with MidNum should stay together (WB11-12)
     assert "3.14" in result or len(result) <= 3
 
 
-def test_utf8_word_iter_str_method():
-    """Test the Str.utf8_word_iter() method."""
+def test_utf8_words_str_method():
+    """Test the Str.utf8_words() method."""
     s = Str("hello world")
     # Method requires text argument, even when called on Str object
-    result = [str(w) for w in s.utf8_word_iter(s)]
+    result = [str(w) for w in s.utf8_words(s)]
     assert result == ["hello", " ", "world"]
 
     # Also test via module function
-    result = [str(w) for w in sz.utf8_word_iter(s)]
+    result = [str(w) for w in sz.utf8_words(s)]
     assert result == ["hello", " ", "world"]
 
 
 @pytest.mark.parametrize("seed_value", [42, 0, 1, 314159, 271828])
 def test_utf8_word_boundary_fuzz(seed_value: int):
-    """Fuzz test: compare C implementation vs Python baseline.
+    """Fuzz test: compare the StringZilla word kernel against the INDEPENDENT ``uniseg`` UAX-29 implementation.
 
-    This tests that the StringZilla word boundary iterator produces
-    the same boundaries as the pure Python TR29 implementation.
+    The previous oracle (an in-repo pure-Python TR29 reimplementation, ``baseline_word_boundaries``) is itself
+    ~89% wrong vs ``uniseg`` on this charset, so it could never validate a correct kernel. ``uniseg`` is a
+    maintained third-party reference and agrees with the official ``WordBreakTest.txt``.
     """
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
     seed(seed_value)
-
-    try:
-        wb_props = get_word_break_properties()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode data files")
 
     # Generate random test strings. The charset deliberately spans every WB category — including the ones that a
     # naive kernel gets wrong: combining marks / Format / ZWJ (WB4, WB3c), emoji & symbol pictographs (WB3c),
@@ -2638,15 +2623,14 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
         length = randint(1, 100)
         text = "".join(choice(test_chars) for _ in range(length))
 
-        # Pure-Python TR29 baseline (oracle). Skip only if the baseline itself errors on a sample.
-        try:
-            expected_boundaries = baseline_word_boundaries(text, wb_props)
-        except Exception:
-            continue
+        # Independent UAX-29 oracle (uniseg): cumulative byte lengths of its segments.
+        expected_boundaries = [0]
+        for seg in uniseg_wordbreak.words(text):
+            expected_boundaries.append(expected_boundaries[-1] + len(seg.encode("utf-8")))
 
         # StringZilla boundaries = cumulative byte lengths of the emitted words.
         sz_boundaries = [0]
-        for word in sz.utf8_word_iter(text):
+        for word in sz.utf8_words(text):
             sz_boundaries.append(sz_boundaries[-1] + len(str(word).encode("utf-8")))
 
         # Exact match required — no `len >= 2` escape hatch.
@@ -2667,25 +2651,16 @@ def test_utf8_word_boundary_official_conformance():
         pytest.skip("Could not download Unicode test data")
 
     failures = []
-    for test_str, expected_char_boundaries in test_cases:
+    for test_str, expected_boundaries in test_cases:
         if not test_str:
             continue
 
         # The StringZilla iterator yields words back-to-back; their cumulative byte lengths are the boundaries.
         sz_boundaries = [0]
-        for word in sz.utf8_word_iter(test_str):
+        for word in sz.utf8_words(test_str):
             sz_boundaries.append(sz_boundaries[-1] + len(str(word).encode("utf-8")))
 
-        # Convert the expected character-index boundaries to byte offsets (TR29 includes 0 and len).
-        expected_boundaries = []
-        byte_pos = 0
-        for i, char in enumerate(test_str):
-            if i in expected_char_boundaries:
-                expected_boundaries.append(byte_pos)
-            byte_pos += len(char.encode("utf-8"))
-        if len(test_str) in expected_char_boundaries:
-            expected_boundaries.append(byte_pos)
-
+        # `get_word_break_test_cases` already returns BYTE boundaries (including 0 and len), matching `sz_boundaries`.
         if sz_boundaries != expected_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_boundaries}, got {sz_boundaries}")
@@ -2724,10 +2699,31 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
             out.append(out[-1] + len(seg.encode("utf-8")))
         return out
 
+    # Fixed multi-window regression strings: RI-parity and Mid-bridge carry once miscounted across the 64-byte
+    # window seam. Each exceeds one window — the case the random generator below now also covers (it previously
+    # used <=24 codepoints, which fits a single window and so could never exercise a seam).
+    seam_regressions = [
+        bytes.fromhex(
+            "E382AB2D0AF09F87A662C2ADF09F87A6CC800A5FF09F87A6F09F87A6C2AD0ACC88F09F87BAF09F8FBBCC88C2ADE281A0CC88F0"
+            "9F87A6F09F87A6E4B8ADE281A05F"
+        ).decode("utf-8"),
+        bytes.fromhex(
+            "5F27F09F87BAE4B8ADCC81F09F87A6F09F87A65FCC885FD7902DE29382CC8062F09F87A6E281A0F09F87BACC80CC88F09F8FBB"
+            "F09F87BACC81F09F87BA0AC2ADF09F87BACC88E382AB5F272ECC880AE4B8AD"
+        ).decode("utf-8"),
+        bytes.fromhex(
+            "5FE281A05F352CF09F988027F09F98805FCC88CC81E4B8ADE281A05F62CC8061E4B8ADE382AB35E281A0CC88CC88F09F8FBBCC"
+            "88E281A0CC80CC812735CC80E4B8ADCC81E2808DC3A9E380803527"
+        ).decode("utf-8"),
+    ]
+
     failures = []
-    for _ in range(2000):
-        text = "".join(choice(palette) for _ in range(randint(1, 24)))
-        sz_boundaries = boundaries(str(w) for w in sz.utf8_word_iter(text))
+    # Up to ~100 codepoints so most cases cross the 64-byte window boundary (multi-window seam coverage). The
+    # palette keeps ignorable runs short, so every run stays inside one window — the domain where the kernel must
+    # match exactly. (Pathological >64-byte ignorable runs exceed any fixed window; serial-only, out of scope here.)
+    samples = seam_regressions + ["".join(choice(palette) for _ in range(randint(1, 100))) for _ in range(2000)]
+    for text in samples:
+        sz_boundaries = boundaries(str(w) for w in sz.utf8_words(text))
         ref_boundaries = boundaries(uniseg_wordbreak.words(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)
@@ -2777,62 +2773,53 @@ def _char_boundaries_to_bytes(text: str, char_boundaries) -> list:
 #  region Grapheme iterator
 
 
-def test_utf8_grapheme_iter_basic():
+def test_utf8_graphemes_basic():
     """Test basic grapheme cluster iteration."""
     # Plain ASCII: one cluster per character.
-    result = [str(g) for g in sz.utf8_grapheme_iter("hello")]
+    result = [str(g) for g in sz.utf8_graphemes("hello")]
     assert result == ["h", "e", "l", "l", "o"]
 
     # Empty string.
-    assert [str(g) for g in sz.utf8_grapheme_iter("")] == []
+    assert [str(g) for g in sz.utf8_graphemes("")] == []
 
     # Base letter + combining acute accent stays a single cluster.
-    result = [str(g) for g in sz.utf8_grapheme_iter("é")]
+    result = [str(g) for g in sz.utf8_graphemes("é")]
     assert result == ["é"]
 
     # Emoji ZWJ family (man + ZWJ + woman + ZWJ + girl) is one cluster.
     family = "\U0001f468‍\U0001f469‍\U0001f467"
-    result = [str(g) for g in sz.utf8_grapheme_iter(family)]
+    result = [str(g) for g in sz.utf8_graphemes(family)]
     assert result == [family]
 
 
-def test_utf8_grapheme_iter_reverse():
-    """Reverse iteration must yield the forward cluster list reversed, and clusters tile the input."""
-    for text in ["", "a", "hello", "école", "Größe 你好", "\U0001f1e6\U0001f1fa abc"]:
-        forward = [str(g) for g in sz.utf8_grapheme_iter(text)]
-        reverse = [str(g) for g in sz.utf8_grapheme_iter(text, reverse=True)]
-        assert reverse == list(reversed(forward))
-        assert "".join(forward) == text  # Clusters tile the input contiguously.
-
-
-def test_utf8_grapheme_iter_skip_empty():
+def test_utf8_graphemes_skip_empty():
     """Test skip_empty parameter for grapheme iteration."""
-    result = [str(g) for g in sz.utf8_grapheme_iter("héllo", skip_empty=True)]
+    result = [str(g) for g in sz.utf8_graphemes("héllo", skip_empty=True)]
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
 
 
-def test_utf8_grapheme_iter_unicode():
+def test_utf8_graphemes_unicode():
     """Test UTF-8 multi-byte / combining / emoji grapheme coverage."""
     # Precomposed vs decomposed: decomposed should still be a single cluster.
-    assert [str(g) for g in sz.utf8_grapheme_iter("ä")] == ["ä"]
+    assert [str(g) for g in sz.utf8_graphemes("ä")] == ["ä"]
 
     # Regional indicator pair forms a single flag cluster.
     flag = "\U0001f1e6\U0001f1fa"
-    assert [str(g) for g in sz.utf8_grapheme_iter(flag)] == [flag]
+    assert [str(g) for g in sz.utf8_graphemes(flag)] == [flag]
 
     # Emoji with skin-tone modifier is one cluster.
     waver = "\U0001f44b\U0001f3fb"
-    assert [str(g) for g in sz.utf8_grapheme_iter(waver)] == [waver]
+    assert [str(g) for g in sz.utf8_graphemes(waver)] == [waver]
 
 
-def test_utf8_grapheme_iter_str_method():
-    """The Str.utf8_grapheme_iter() method must agree with the module function."""
+def test_utf8_graphemes_str_method():
+    """The Str.utf8_graphemes() method must agree with the module function."""
     s = Str("héllo")
-    method_result = [str(g) for g in s.utf8_grapheme_iter(s)]
-    module_result = [str(g) for g in sz.utf8_grapheme_iter(s)]
+    method_result = [str(g) for g in s.utf8_graphemes(s)]
+    module_result = [str(g) for g in sz.utf8_graphemes(s)]
     assert method_result == module_result
-    assert method_result == [str(g) for g in sz.utf8_grapheme_iter("héllo")]
+    assert method_result == [str(g) for g in sz.utf8_graphemes("héllo")]
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
@@ -2850,12 +2837,13 @@ def test_utf8_grapheme_boundary_fuzz(seed_value: int):
             expected = baseline_grapheme_boundaries(text, props)
         except Exception:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_grapheme_iter(text))
-        assert sz_boundaries == expected, (
-            "Grapheme boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
-                seed_value, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
-            )
+        sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
+        assert (
+            sz_boundaries == expected
+        ), "Grapheme boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
+            seed_value, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
         )
+
 
 def test_utf8_grapheme_boundary_official_conformance():
     """Full UAX-29 conformance against every case in the official GraphemeBreakTest.txt."""
@@ -2868,7 +2856,7 @@ def test_utf8_grapheme_boundary_official_conformance():
     for test_str, expected_byte_boundaries in test_cases:
         if not test_str:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_grapheme_iter(test_str))
+        sz_boundaries = _byte_boundaries(sz.utf8_graphemes(test_str))
         if sz_boundaries != expected_byte_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
@@ -2891,7 +2879,7 @@ def test_utf8_grapheme_differential_grapheme(seed_value: int):
     failures = []
     for _ in range(2000):
         text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
-        sz_boundaries = _byte_boundaries(sz.utf8_grapheme_iter(text))
+        sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
         ref_boundaries = _byte_boundaries(graphemes_fn(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)
@@ -2907,59 +2895,45 @@ def test_utf8_grapheme_differential_grapheme(seed_value: int):
 #  region Sentence iterator
 
 
-def test_utf8_sentence_iter_basic():
+def test_utf8_sentences_basic():
     """Test basic sentence iteration."""
-    result = [str(s) for s in sz.utf8_sentence_iter("Hello. World!")]
+    result = [str(s) for s in sz.utf8_sentences("Hello. World!")]
     assert len(result) == 2
     assert "".join(result) == "Hello. World!"
 
     # Empty string.
-    assert [str(s) for s in sz.utf8_sentence_iter("")] == []
+    assert [str(s) for s in sz.utf8_sentences("")] == []
 
     # No terminator: the whole text is one sentence.
-    assert [str(s) for s in sz.utf8_sentence_iter("no terminator here")] == ["no terminator here"]
+    assert [str(s) for s in sz.utf8_sentences("no terminator here")] == ["no terminator here"]
 
 
-def test_utf8_sentence_iter_reverse():
-    """Sentence iterator does not support reverse=True; assert that and verify forward tiling."""
-    text = "One. Two. Three."
-    forward = [str(s) for s in sz.utf8_sentence_iter(text)]
-    assert "".join(forward) == text  # Sentences tile the input contiguously.
-
-    try:
-        reverse = [str(s) for s in sz.utf8_sentence_iter(text, reverse=True)]
-    except TypeError:
-        pytest.skip("utf8_sentence_iter does not accept reverse=")
-    # If reverse is accepted, it must still be a valid reordering of the same segments.
-    assert sorted(reverse) == sorted(forward)
-
-
-def test_utf8_sentence_iter_skip_empty():
+def test_utf8_sentences_skip_empty():
     """Test skip_empty parameter for sentence iteration."""
-    result = [str(s) for s in sz.utf8_sentence_iter("A. B. C.", skip_empty=True)]
+    result = [str(s) for s in sz.utf8_sentences("A. B. C.", skip_empty=True)]
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
 
 
-def test_utf8_sentence_iter_unicode():
+def test_utf8_sentences_unicode():
     """Test UTF-8 multi-byte sentence coverage."""
     # Cyrillic sentences separated by a period and space.
-    result = [str(s) for s in sz.utf8_sentence_iter("Привет. Мир.")]
+    result = [str(s) for s in sz.utf8_sentences("Привет. Мир.")]
     assert "".join(result) == "Привет. Мир."
     assert len(result) >= 2
 
     # Ideographic full stop terminates a sentence.
-    result = [str(s) for s in sz.utf8_sentence_iter("你好。世界。")]
+    result = [str(s) for s in sz.utf8_sentences("你好。世界。")]
     assert "".join(result) == "你好。世界。"
 
 
-def test_utf8_sentence_iter_str_method():
-    """The Str.utf8_sentence_iter() method must agree with the module function."""
+def test_utf8_sentences_str_method():
+    """The Str.utf8_sentences() method must agree with the module function."""
     s = Str("Hello. World!")
-    method_result = [str(x) for x in s.utf8_sentence_iter(s)]
-    module_result = [str(x) for x in sz.utf8_sentence_iter(s)]
+    method_result = [str(x) for x in s.utf8_sentences(s)]
+    module_result = [str(x) for x in sz.utf8_sentences(s)]
     assert method_result == module_result
-    assert method_result == [str(x) for x in sz.utf8_sentence_iter("Hello. World!")]
+    assert method_result == [str(x) for x in sz.utf8_sentences("Hello. World!")]
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
@@ -2977,12 +2951,13 @@ def test_utf8_sentence_boundary_fuzz(seed_value: int):
             expected = baseline_sentence_boundaries(text, props)
         except Exception:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_sentence_iter(text))
-        assert sz_boundaries == expected, (
-            "Sentence boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
-                seed_value, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
-            )
+        sz_boundaries = _byte_boundaries(sz.utf8_sentences(text))
+        assert (
+            sz_boundaries == expected
+        ), "Sentence boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
+            seed_value, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
         )
+
 
 def test_utf8_sentence_boundary_official_conformance():
     """Full UAX-29 conformance against every case in the official SentenceBreakTest.txt."""
@@ -2995,7 +2970,7 @@ def test_utf8_sentence_boundary_official_conformance():
     for test_str, expected_byte_boundaries in test_cases:
         if not test_str:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_sentence_iter(test_str))
+        sz_boundaries = _byte_boundaries(sz.utf8_sentences(test_str))
         if sz_boundaries != expected_byte_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
@@ -3042,7 +3017,7 @@ def test_utf8_sentence_differential_icu(seed_value: int):
     failures = []
     for _ in range(500):
         text = "".join(choice(palette) for _ in range(randint(1, 24)))
-        sz_boundaries = _byte_boundaries(sz.utf8_sentence_iter(text))
+        sz_boundaries = _byte_boundaries(sz.utf8_sentences(text))
         ref_boundaries = _byte_boundaries(ref_segments(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)
@@ -3061,56 +3036,51 @@ def test_utf8_sentence_differential_icu(seed_value: int):
 #  region Line iterator
 
 
-def test_utf8_linewrap_iter_basic():
+def test_utf8_linewraps_basic():
     """Test basic line iteration yielding line-break-opportunity Str segments."""
-    result = [str(seg) for seg in sz.utf8_linewrap_iter("first\nsecond")]
+    result = [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
     assert "".join(result) == "first\nsecond"  # Segments tile the input.
 
     # Empty string yields nothing.
-    assert [str(seg) for seg in sz.utf8_linewrap_iter("")] == []
+    assert [str(seg) for seg in sz.utf8_linewraps("")] == []
 
     # A single short line still tiles back to the input.
-    result = [str(seg) for seg in sz.utf8_linewrap_iter("just one line")]
+    result = [str(seg) for seg in sz.utf8_linewraps("just one line")]
     assert "".join(result) == "just one line"
 
 
-def test_utf8_linewrap_iter_reverse():
-    """Line iterator does not support reverse=True; assert that and verify forward tiling."""
+def test_utf8_linewraps_tiling():
+    """Linewrap is forward-only; its segments tile the input contiguously."""
     text = "alpha\nbeta\ngamma"
-    forward = [str(seg) for seg in sz.utf8_linewrap_iter(text)]
-    assert "".join(forward) == text  # Segments tile the input.
-
-    try:
-        list(sz.utf8_linewrap_iter(text, reverse=True))
-    except TypeError:
-        pytest.skip("utf8_linewrap_iter does not accept reverse=")
+    forward = [str(seg) for seg in sz.utf8_linewraps(text)]
+    assert "".join(forward) == text
 
 
-def test_utf8_linewrap_iter_skip_empty():
+def test_utf8_linewraps_skip_empty():
     """Test skip_empty parameter for line iteration."""
-    result = [str(seg) for seg in sz.utf8_linewrap_iter("a\n\nb", skip_empty=True)]
+    result = [str(seg) for seg in sz.utf8_linewraps("a\n\nb", skip_empty=True)]
     assert len(result) > 0
     assert all(len(seg) > 0 for seg in result)
 
 
-def test_utf8_linewrap_iter_unicode():
+def test_utf8_linewraps_unicode():
     """Test UTF-8 multi-byte / Unicode coverage."""
-    result = [str(seg) for seg in sz.utf8_linewrap_iter("Größe привет")]
+    result = [str(seg) for seg in sz.utf8_linewraps("Größe привет")]
     assert "".join(result) == "Größe привет"
     # Segments tile the input.
 
     # CRLF is a single break opportunity, not two.
-    result = [str(seg) for seg in sz.utf8_linewrap_iter("a\r\nb")]
+    result = [str(seg) for seg in sz.utf8_linewraps("a\r\nb")]
     assert "".join(result) == "a\r\nb"
 
 
-def test_utf8_linewrap_iter_str_method():
-    """The Str.utf8_linewrap_iter() method must agree with the module function."""
+def test_utf8_linewraps_str_method():
+    """The Str.utf8_linewraps() method must agree with the module function."""
     s = Str("first\nsecond")
-    method_result = [str(seg) for seg in s.utf8_linewrap_iter(s)]
-    module_result = [str(seg) for seg in sz.utf8_linewrap_iter(s)]
+    method_result = [str(seg) for seg in s.utf8_linewraps(s)]
+    module_result = [str(seg) for seg in sz.utf8_linewraps(s)]
     assert method_result == module_result
-    assert method_result == [str(seg) for seg in sz.utf8_linewrap_iter("first\nsecond")]
+    assert method_result == [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
 
 
 def test_utf8_linewrap_boundary_official_conformance():
@@ -3128,7 +3098,7 @@ def test_utf8_linewrap_boundary_official_conformance():
     for test_str, expected_byte_boundaries in test_cases:
         if not test_str:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_linewrap_iter(test_str))
+        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(test_str))
         if sz_boundaries != expected_byte_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
@@ -3153,7 +3123,7 @@ def test_utf8_linewrap_differential_uniseg(seed_value: int):
     failures = []
     for _ in range(2000):
         text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
-        sz_boundaries = _byte_boundaries(sz.utf8_linewrap_iter(text))
+        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(text))
         ref_boundaries = _byte_boundaries(ref_segments(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)

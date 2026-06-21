@@ -159,9 +159,9 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
  *  @brief Plural UAX-29 grapheme cluster segmentation: one forward sweep emits every cluster into parallel
  *         `cluster_starts` / `cluster_lengths` arrays at each `sz_utf8_is_grapheme_boundary_serial` position.
  */
-SZ_PUBLIC sz_size_t sz_utf8_grapheme_find_boundaries_serial( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,   //
+SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t clusters = 0;
@@ -194,48 +194,6 @@ SZ_PUBLIC sz_size_t sz_utf8_grapheme_find_boundaries_serial( //
     cluster_lengths[clusters] = length - cluster_start;
     ++clusters;
     if (bytes_consumed) *bytes_consumed = length;
-    return clusters;
-}
-
-/** @brief Reverse counterpart of `sz_utf8_grapheme_find_boundaries_serial`: clusters emitted from the end backward. */
-SZ_PUBLIC sz_size_t sz_utf8_grapheme_rfind_boundaries_serial( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,    //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t clusters = 0;
-    if (length == 0 || clusters_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-
-    sz_size_t cluster_end = length;
-    sz_size_t position = length - 1;
-    while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
-
-    while (position > 0) {
-        if (sz_utf8_is_grapheme_boundary_serial(text, length, position)) {
-            if (clusters == clusters_capacity) {
-                if (bytes_consumed) *bytes_consumed = cluster_end;
-                return clusters;
-            }
-            cluster_starts[clusters] = position;
-            cluster_lengths[clusters] = cluster_end - position;
-            ++clusters;
-            cluster_end = position;
-        }
-        position--;
-        while (position > 0 && ((sz_u8_t)text[position] & 0xC0) == 0x80) position--;
-    }
-
-    if (clusters == clusters_capacity) {
-        if (bytes_consumed) *bytes_consumed = cluster_end;
-        return clusters;
-    }
-    cluster_starts[clusters] = 0;
-    cluster_lengths[clusters] = cluster_end;
-    ++clusters;
-    if (bytes_consumed) *bytes_consumed = 0;
     return clusters;
 }
 

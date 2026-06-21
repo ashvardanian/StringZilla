@@ -292,9 +292,8 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_emit_ascii_rvv_(                       
  *  strip anchored two bytes before the open boundary (`base = position-2`); all-ASCII strips emit in-register
  *  via `sz_utf8_word_break_emit_ascii_rvv_`, any other window takes one scalar codepoint step. The capacity cut
  *  sets `*bytes_consumed = word_start` (a true boundary) so a fresh next call restarts cleanly. */
-SZ_INTERNAL sz_size_t sz_utf8_word_find_boundaries_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                        sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                        sz_size_t *bytes_consumed) {
+SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                         sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t words = 0;
     sz_size_t word_start = 0; // Start of the in-progress word (always a true boundary).
@@ -346,94 +345,22 @@ SZ_INTERNAL sz_size_t sz_utf8_word_find_boundaries_rvv_(sz_cptr_t text, sz_size_
     return words;
 }
 
-/*  Reverse counterpart of `sz_utf8_word_find_boundaries_rvv_`. The strip is anchored so its top lane sits one
- *  byte past the open boundary (`base = position+2-vl`), giving trusted lanes [2, vl-2] → boundaries
- *  [position-vl+4, position]; emission runs high-to-low via the reversed-index path of the shared emitter. */
-SZ_INTERNAL sz_size_t sz_utf8_word_rfind_boundaries_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                         sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                         sz_size_t *bytes_consumed) {
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t words = 0;
-    sz_size_t word_end = length;     // End of the in-progress word (always a true boundary).
-    sz_size_t position = length - 1; // position `length` is a boundary; step back to the first reportable position
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-
-    while (position > 0 && words < words_capacity) {
-        sz_size_t vector_length = (position + 2 <= length) ? __riscv_vsetvl_e8m4(position + 2) : 0;
-        sz_size_t base = position + 2 - vector_length; // lane j = byte base+j
-        int ascii_window = position + 2 <= length && vector_length >= 5;
-        vuint8m4_t bytes_u8m4;
-        if (ascii_window) {
-            bytes_u8m4 = __riscv_vle8_v_u8m4(text_u8 + base, vector_length);
-            ascii_window = __riscv_vfirst_m_b2(__riscv_vmsgtu_vx_u8m4_b2(bytes_u8m4, 0x7F, vector_length),
-                                               vector_length) < 0;
-        }
-        if (ascii_window) {
-            int filled;
-            words += sz_utf8_word_break_emit_ascii_rvv_(bytes_u8m4, base, vector_length, word_starts, word_lengths,
-                                                        words, words_capacity, &word_end, 1, &filled);
-            if (filled) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-            position = base + 1; // Resolved down to position-vl+4; next unresolved boundary at position-vl+3.
-            continue;
-        }
-
-        // Non-ASCII window or near the edges: one scalar codepoint step.
-        if (sz_utf8_word_break_decision_at_rvv_(text, length, position)) {
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-            word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-            word_end = position;
-        }
-        position--;
-        while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-    }
-
-    // The leading span [0, word_end) is the last word (start of text is always a boundary).
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
-    return words;
-}
-
 /** @brief Common driver: route malformed UTF-8 to serial, otherwise run the vectorized window scan. */
 SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
                                                    sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                   sz_size_t *bytes_consumed, int reverse) {
+                                                   sz_size_t *bytes_consumed) {
     if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = (length == 0) ? 0 : (reverse ? length : 0);
+        if (bytes_consumed) *bytes_consumed = 0;
         return 0;
     }
     if (!sz_utf8_word_break_is_well_formed_rvv_(text, length))
-        return reverse ? sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
-                                                              bytes_consumed)
-                       : sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
-                                                             bytes_consumed);
-    return reverse ? sz_utf8_word_rfind_boundaries_rvv_(text, length, word_starts, word_lengths, words_capacity,
-                                                        bytes_consumed)
-                   : sz_utf8_word_find_boundaries_rvv_(text, length, word_starts, word_lengths, words_capacity,
-                                                       bytes_consumed);
+        return sz_utf8_words_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_words_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                     sz_size_t *bytes_consumed) {
-    return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 0);
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                      sz_size_t *bytes_consumed) {
-    return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed, 1);
+SZ_PUBLIC sz_size_t sz_utf8_words_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
+                                      sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
 #if defined(__clang__)

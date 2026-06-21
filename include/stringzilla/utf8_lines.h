@@ -23,7 +23,7 @@ extern "C" {
  *  the caller having to loop and restart a scan for every break.
  *
  *  This emits every wrap opportunity (both the mandatory LB4/LB5 hard breaks and the allowed soft-wrap points).
- *  To split only on the hard breaks (the `str.splitlines` behavior) use `sz_utf8_find_newlines` instead, which
+ *  To split only on the hard breaks (the `str.splitlines` behavior) use `sz_utf8_newlines` instead, which
  *  enumerates exactly the LB4/LB5 break positions.
  *
  *  @param text UTF-8 encoded text.
@@ -38,7 +38,7 @@ extern "C" {
  *
  *  @note No zero-length segments are emitted; @p length == 0 returns 0. Line segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_find_linewraps(         //
+SZ_DYNAMIC sz_size_t sz_utf8_linewraps(              //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed);
@@ -47,16 +47,16 @@ SZ_DYNAMIC sz_size_t sz_utf8_find_linewraps(         //
 
 #pragma region Platform-Specific Backends
 
-/** @copydoc sz_utf8_find_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_find_linewraps_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                  sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                  sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                             sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                             sz_size_t *bytes_consumed);
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_find_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_find_linewraps_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                                   sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                                   sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                              sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -69,13 +69,12 @@ SZ_PUBLIC sz_size_t sz_utf8_find_linewraps_icelake(sz_cptr_t text, sz_size_t len
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_find_linewraps(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                            sz_size_t *bytes_consumed) {
+SZ_DYNAMIC sz_size_t sz_utf8_linewraps(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                       sz_size_t *line_lengths, sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_find_linewraps_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linewraps_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
-    return sz_utf8_find_linewraps_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linewraps_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #endif
 }
 

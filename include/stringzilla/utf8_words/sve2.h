@@ -127,9 +127,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_compact_boundaries_sve2_(svbool_t boundary, s
     return produced;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+SZ_PUBLIC sz_size_t sz_utf8_words_sve2(              //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -140,8 +140,7 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2( //
 
     sz_size_t const window_bytes = svcntb();
     if (window_bytes < 16) // Too narrow to host the [2, W-2] trusted window: defer wholesale to serial.
-        return sz_utf8_word_find_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
-                                                   bytes_consumed);
+        return sz_utf8_words_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
@@ -205,88 +204,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_sve2( //
     word_lengths[words] = length - word_start;
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
-    return words;
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_sve2( //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *word_starts, sz_size_t *word_lengths,    //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-
-    sz_size_t const window_bytes = svcntb();
-    if (window_bytes < 16)
-        return sz_utf8_word_rfind_boundaries_serial(text, length, word_starts, word_lengths, words_capacity,
-                                                    bytes_consumed);
-
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
-    sz_size_t position = length - 1;
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-    // Sized to the 2048-bit SVE architectural maximum: one boundary per window byte, and `svcntb() <= 256`.
-    sz_u32_t boundaries[256];
-
-    // Oracle-free fast path: an all-ASCII window `[position-(window_bytes-2), position+2)` resolves boundaries at
-    // positions `[position-(window_bytes-4), position]`, walked high-to-low and carrying the open `word_end`.
-    while (position > 0) {
-        sz_size_t const base = position - (window_bytes - 2); // lane j = byte base+j; trusted [2, window_bytes-2]
-        sz_bool_t ascii_window = (sz_bool_t)(position >= window_bytes - 2 && position + 2 <= length);
-        svbool_t const window_pg = svptrue_b8();
-        svuint8_t window = svdup_n_u8(0);
-        if (ascii_window) {
-            window = svld1_u8(window_pg, text_u8 + base);
-            ascii_window = (sz_bool_t)!svptest_any(window_pg, svcmpge_n_u8(window_pg, window, 0x80));
-        }
-        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
-            if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-                if (words == words_capacity) {
-                    if (bytes_consumed) *bytes_consumed = word_end;
-                    return words;
-                }
-                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-                word_end = position;
-            }
-            position--;
-            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-            continue;
-        }
-
-        svuint8_t const classes = sz_utf8_word_break_classify_ascii_sve2_(window_pg, window);
-        svuint8_t const join = sz_utf8_word_break_join_lanes_sve2_(window_pg, classes);
-        svbool_t const trusted = svand_b_z(window_pg, svcmpge_n_u8(window_pg, svindex_u8(0, 1), 2),
-                                           svcmple_n_u8(window_pg, svindex_u8(0, 1), (sz_u8_t)(window_bytes - 2)));
-        svbool_t const boundary = svand_b_z(window_pg, trusted, svcmpeq_n_u8(window_pg, join, 0));
-
-        sz_size_t const found = sz_utf8_word_compact_boundaries_sve2_(boundary, base, window_bytes, boundaries);
-        sz_size_t const emit = sz_min_of_two(found, words_capacity - words);
-        // Emit high-to-low: the compacted positions are ascending, so walk them from the tail.
-        for (sz_size_t i = 0; i < emit; ++i) {
-            sz_size_t const this_boundary = boundaries[found - 1 - i];
-            word_starts[words] = this_boundary, word_lengths[words] = word_end - this_boundary, ++words;
-            word_end = this_boundary;
-        }
-        if (words == words_capacity) {
-            if (bytes_consumed) *bytes_consumed = word_end;
-            return words;
-        }
-        // Resolved down to position-(window_bytes-4); if all fit, the next unresolved boundary is at
-        // position-(window_bytes-3), otherwise resume from the open word end to re-classify the dropped head.
-        position = emit < found ? word_end : base + 1;
-    }
-
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
     return words;
 }
 

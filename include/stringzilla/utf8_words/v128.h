@@ -91,9 +91,9 @@ SZ_INTERNAL v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_
 
 #pragma endregion // Word boundary left-pack
 
-SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *word_starts, sz_size_t *word_lengths,   //
+SZ_PUBLIC sz_size_t sz_utf8_words_v128(              //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -177,99 +177,6 @@ SZ_PUBLIC sz_size_t sz_utf8_word_find_boundaries_v128( //
     word_lengths[words] = length - word_start;
     ++words;
     if (bytes_consumed) *bytes_consumed = length;
-    return words;
-}
-
-SZ_PUBLIC sz_size_t sz_utf8_word_rfind_boundaries_v128( //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *word_starts, sz_size_t *word_lengths,    //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t words = 0;
-    if (length == 0 || words_capacity == 0) {
-        if (bytes_consumed) *bytes_consumed = length;
-        return 0;
-    }
-    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-
-    sz_size_t word_end = length; // End of the word currently being accumulated (always a boundary).
-    // Move back one codepoint from the end (position length is always a boundary, WB2).
-    sz_size_t position = length - 1;
-    while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-
-    // Oracle-free fast path: an all-ASCII window [position-14, position+2) resolves boundaries at positions
-    // [position-12, position]; one fixed sub-block loop walks high-to-low, compacting each group in descending
-    // lane order and emitting it as a shifted-difference (lane 0 carries the open `word_end`).
-    while (position > 0) {
-        sz_size_t base = position - 14; // lane j = byte base+j; trusted lanes [2,14] → [position-12, position]
-        int ascii_window = position >= 14 && position + 2 <= length;
-        v128_t window = wasm_i8x16_splat(0);
-        if (ascii_window) {
-            window = wasm_v128_load(text_u8 + base);
-            ascii_window = ((sz_u32_t)wasm_i8x16_bitmask(window) & 0xFFFFu) == 0;
-        }
-        if (!ascii_window) { // Non-ASCII window or near the edges: one scalar codepoint step.
-            if (sz_utf8_is_word_boundary_serial(text, length, position)) {
-                if (words == words_capacity) {
-                    if (bytes_consumed) *bytes_consumed = word_end;
-                    return words;
-                }
-                word_starts[words] = position, word_lengths[words] = word_end - position, ++words;
-                word_end = position;
-            }
-            position--;
-            while (position > 0 && (text_u8[position] & 0xC0) == 0x80) position--;
-            continue;
-        }
-
-        sz_u32_t boundary = sz_utf8_word_break_boundary_mask_v128_(window); // trusted lanes [2,14]
-        // Each sub-block (walked high-to-low) compacts its set boundaries descending and emits the shifted-
-        // difference straight into `word_starts + words`: `word_end` itself is the carry seeded into lane 0, then
-        // re-read from the stored tail so a capacity cut lands on the last emit. WASM has no masked store, so a
-        // 4-lane vector store is used only when the whole vector fits; otherwise a ≤4-element tail buffer is copied.
-        for (sz_size_t sub_block = 4; sub_block-- > 0;) { // high-to-low for descending emission
-            sz_u32_t const submask = (boundary >> (sub_block * 4)) & 0xFu;
-            if (!submask) continue;
-            sz_size_t const taken = (sz_size_t)sz_u32_popcount(submask);
-            sz_size_t const stored = sz_min_of_two(taken, words_capacity - words);
-
-            v128_t const positions = wasm_u32x4_make(
-                (sz_u32_t)(base + sub_block * 4 + 0), (sz_u32_t)(base + sub_block * 4 + 1),
-                (sz_u32_t)(base + sub_block * 4 + 2), (sz_u32_t)(base + sub_block * 4 + 3));
-            v128_t const boundaries = wasm_i8x16_swizzle(positions,
-                                                         sz_utf8_word_compact4_permutation_descending_v128_(submask));
-            v128_t const previous = sz_utf8_word_shift_right_carry_v128_(boundaries,
-                                                                         wasm_u32x4_splat((sz_u32_t)word_end));
-            v128_t const lengths = wasm_i32x4_sub(previous, boundaries);
-            if (words + 4 <= words_capacity) {
-                wasm_v128_store(word_starts + words, boundaries);
-                wasm_v128_store(word_lengths + words, lengths);
-            }
-            else {
-                sz_size_t tail_starts[4], tail_lengths[4];
-                wasm_v128_store(tail_starts, boundaries);
-                wasm_v128_store(tail_lengths, lengths);
-                for (sz_size_t i = 0; i < stored; ++i)
-                    word_starts[words + i] = tail_starts[i], word_lengths[words + i] = tail_lengths[i];
-            }
-            words += stored;
-            if (stored) word_end = word_starts[words - 1]; // last boundary carries on
-            if (words == words_capacity) {
-                if (bytes_consumed) *bytes_consumed = word_end;
-                return words;
-            }
-        }
-        position = base + 1; // Resolved down to position-12; next unresolved boundary is at position-13.
-    }
-
-    if (words == words_capacity) {
-        if (bytes_consumed) *bytes_consumed = word_end;
-        return words;
-    }
-    word_starts[words] = 0;
-    word_lengths[words] = word_end;
-    ++words;
-    if (bytes_consumed) *bytes_consumed = 0;
     return words;
 }
 

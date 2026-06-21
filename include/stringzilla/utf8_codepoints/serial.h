@@ -67,33 +67,19 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_serial( //
     return text_cursor;
 }
 
-/** @brief Decode the UTF-8 codepoint at `*position`, advancing it; returns 0xFFFD on error. */
+/** @brief Decode the UTF-8 codepoint at `*position`, advancing it. Ill-formed bytes (lone continuation, overlong,
+ *         surrogate, out-of-range, truncated) decode to U+FFFD consuming one byte — the canonical replacement-char
+ *         substitution that the SIMD `sz_utf8_codepoints_decode_window_` mirrors byte-for-byte. */
 SZ_INTERNAL sz_rune_t sz_utf8_decode_(sz_cptr_t text, sz_size_t length, sz_size_t *position) {
     if (*position >= length) return 0;
-    sz_u8_t lead_byte = (sz_u8_t)text[*position];
-    if (lead_byte < 0x80) {
+    sz_rune_t rune;
+    sz_rune_length_t const consumed = sz_rune_parse(text + *position, text + length, &rune);
+    if (consumed == sz_utf8_invalid_k) {
         (*position)++;
-        return lead_byte;
+        return 0xFFFD;
     }
-    if ((lead_byte & 0xE0) == 0xC0 && *position + 1 < length) {
-        sz_rune_t rune = ((lead_byte & 0x1F) << 6) | (text[*position + 1] & 0x3F);
-        *position += 2;
-        return rune;
-    }
-    if ((lead_byte & 0xF0) == 0xE0 && *position + 2 < length) {
-        sz_rune_t rune = ((lead_byte & 0x0F) << 12) | ((text[*position + 1] & 0x3F) << 6) |
-                         (text[*position + 2] & 0x3F);
-        *position += 3;
-        return rune;
-    }
-    if ((lead_byte & 0xF8) == 0xF0 && *position + 3 < length) {
-        sz_rune_t rune = ((lead_byte & 0x07) << 18) | ((text[*position + 1] & 0x3F) << 12) |
-                         ((text[*position + 2] & 0x3F) << 6) | (text[*position + 3] & 0x3F);
-        *position += 4;
-        return rune;
-    }
-    (*position)++;
-    return 0xFFFD;
+    *position += consumed;
+    return rune;
 }
 
 /**

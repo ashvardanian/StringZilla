@@ -1015,7 +1015,7 @@ typedef sz_cptr_t (*sz_utf8_uncased_violation_t)(sz_cptr_t, sz_size_t);
 /** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), graphemes, sentences,
  *         lines, newlines, whitespace. Emits parallel (offset, length) arrays for each segment/delimiter plus a
  *         resume `bytes_consumed`. */
-typedef sz_size_t (*sz_utf8_find_boundaries_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
+typedef sz_size_t (*sz_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);

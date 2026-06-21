@@ -281,15 +281,6 @@ class StringZillaTests: XCTestCase {
         XCTAssertTrue(wordStrings.contains("world"))
     }
 
-    func testUtf8WordsReversedMirrorsForward() {
-        let text = "Die Temperaturschwankungen im Maß von etwa 20 µK."
-        let forward = text.utf8Words().map { String(text[$0]) }
-        let reversed = text.utf8WordsReversed().map { String(text[$0]) }
-        XCTAssertEqual(reversed, forward.reversed())
-        // Reverse traversal also tiles the input when read back-to-front.
-        XCTAssertEqual(reversed.reversed().joined(), text)
-    }
-
     // MARK: - Line / Whitespace Split Tests
 
     func testUtf8LinesKeepEmpty() {
@@ -325,28 +316,28 @@ class StringZillaTests: XCTestCase {
 
     func testUtf8WhitespaceKeepEmpty() {
         let text = "  hi  "
-        let segments = text.utf8Whitespace().map { String(text[$0]) }
+        let segments = text.utf8Tokens().map { String(text[$0]) }
         // Four spaces -> five gap segments, four of them empty.
         XCTAssertEqual(segments, ["", "", "hi", "", ""])
     }
 
     func testUtf8WhitespaceSkipEmpty() {
         let text = "  hi  "
-        let segments = text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }
+        let segments = text.utf8Tokens(skipEmpty: true).map { String(text[$0]) }
         XCTAssertEqual(segments, ["hi"])
     }
 
     func testUtf8WhitespaceTokenizes() {
         let text = "the quick\tbrown\nfox"
         // Mixed space / tab / newline whitespace all act as separators.
-        let tokens = text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }
+        let tokens = text.utf8Tokens(skipEmpty: true).map { String(text[$0]) }
         XCTAssertEqual(tokens, ["the", "quick", "brown", "fox"])
     }
 
     func testUtf8WhitespaceUnicodeSeparator() {
         // U+3000 IDEOGRAPHIC SPACE is a 3-byte whitespace codepoint and must split correctly.
         let text = "a\u{3000}b"
-        XCTAssertEqual(text.utf8Whitespace(skipEmpty: true).map { String(text[$0]) }, ["a", "b"])
+        XCTAssertEqual(text.utf8Tokens(skipEmpty: true).map { String(text[$0]) }, ["a", "b"])
     }
 
     // MARK: - Compare / Order Tests

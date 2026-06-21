@@ -109,14 +109,14 @@ typedef struct PyAPI {
 static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
-static PyTypeObject SplitIteratorType;
-static PyTypeObject Utf8SplitLinesIteratorType;
-static PyTypeObject Utf8SplitWhitespaceIteratorType;
-static PyTypeObject Utf8WordBoundaryIteratorType;
-static PyTypeObject Utf8GraphemeBoundaryIteratorType;
-static PyTypeObject Utf8SentenceBoundaryIteratorType;
-static PyTypeObject Utf8LinewrapBoundaryIteratorType;
-static PyTypeObject Utf8UncasedFindIteratorType;
+static PyTypeObject FindSplitsType;
+static PyTypeObject Utf8LinesType;
+static PyTypeObject Utf8TokensType;
+static PyTypeObject Utf8WordsType;
+static PyTypeObject Utf8GraphemesType;
+static PyTypeObject Utf8SentencesType;
+static PyTypeObject Utf8LinewrapsType;
+static PyTypeObject Utf8UncasedMatchesType;
 static PyTypeObject HasherType;
 static PyTypeObject Sha256Type;
 
@@ -192,16 +192,16 @@ typedef struct {
     /// @brief  Should we skip empty segments (trailing, leading, consecutive)?
     sz_bool_t skip_empty;
 
-} SplitIterator;
+} FindSplits;
 
 /**
  *  @brief  Iterator for splitting a UTF-8 string by Unicode newline characters.
  *
- *  Streams lines by refilling a small inline buffer with @c sz_utf8_find_newlines (the multistep delimiter
+ *  Streams lines by refilling a small inline buffer with @c sz_utf8_newlines (the multistep delimiter
  *  kernel), supporting all 7 Unicode newline characters plus CRLF sequences (one length-2 delimiter). The
  *  delimiter batch is transformed in place into segment (start, length) pairs: segment @c i runs from the end
  *  of delimiter @c i-1 to the start of delimiter @c i, with the trailing segment reaching end-of-text once the
- *  batch is exhausted. Mirrors the @c Utf8WordBoundaryIterator batched model.
+ *  batch is exhausted. Mirrors the @c Utf8Words batched model.
  *
  *  Termination: @c suffix > end (the suffix base moved past the text) or @c batch_count == 0.
  */
@@ -228,15 +228,15 @@ typedef struct {
     sz_size_t batch_advance; //< Bytes to advance `suffix` by when the batch drains.
     sz_bool_t primed;        //< Whether the first batch has been filled (lazy on first `__next__`).
 
-} Utf8SplitLinesIterator;
+} Utf8Lines;
 
 /**
  *  @brief  Iterator for splitting a UTF-8 string by Unicode whitespace characters.
  *
- *  Streams segments by refilling a small inline buffer with @c sz_utf8_find_whitespaces (the multistep
+ *  Streams segments by refilling a small inline buffer with @c sz_utf8_whitespaces (the multistep
  *  delimiter kernel), supporting all 25 Unicode White_Space characters. N whitespace delimiters yield N+1
  *  segments (including empties). The delimiter batch is transformed in place into segment (start, length)
- *  pairs, mirroring the @c Utf8WordBoundaryIterator batched model.
+ *  pairs, mirroring the @c Utf8Words batched model.
  *
  *  Termination: @c suffix > end (the suffix base moved past the text) or @c batch_count == 0.
  */
@@ -260,28 +260,25 @@ typedef struct {
     sz_size_t batch_advance; //< Bytes to advance `suffix` by when the batch drains.
     sz_bool_t primed;        //< Whether the first batch has been filled (lazy on first `__next__`).
 
-} Utf8SplitWhitespaceIterator;
+} Utf8Tokens;
 
 /**
  *  @brief  Iterator for finding word boundaries in UTF-8 text per Unicode TR29.
  *
- *  Streams words by refilling a small inline buffer with @c sz_utf8_word_find_boundaries (forward) or
- *  @c sz_utf8_word_rfind_boundaries (reverse), yielding one word per @c __next__. The buffer lives in the
- *  iterator itself - no extra allocation. Forward advances @c start past each batch; reverse keeps @c start
- *  fixed (the offset base) and retreats @c end, yielding words from the end of the text backward.
+ *  Streams words by refilling a small inline buffer with @c sz_utf8_words, yielding one word per
+ *  @c __next__. The buffer lives in the iterator itself - no extra allocation. @c start advances past
+ *  each batch as it is consumed.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj; //< For reference counting
 
-    sz_cptr_t start; //< Start of the original text; for forward, also the not-yet-segmented suffix start (a boundary).
-    sz_cptr_t end;   //< End of the not-yet-segmented prefix; immutable for forward, retreats for reverse.
+    sz_cptr_t start; //< Start of the original text; also the not-yet-segmented suffix start (a boundary).
+    sz_cptr_t end;   //< End of the not-yet-segmented prefix.
 
     /// @brief  Should we skip empty segments (consecutive boundaries)?
     sz_bool_t skip_empty;
-    /// @brief  Iterate words from the end of the text backward (last word first)?
-    sz_bool_t reverse;
 
     /// @brief  Inline batch of word offsets relative to @c start, refilled on demand.
     sz_size_t batch_starts[sz_iterators_default_steps_k];
@@ -289,28 +286,25 @@ typedef struct {
     sz_size_t batch_count; //< Number of words currently buffered.
     sz_size_t batch_index; //< Index of the next word to yield from the buffer.
 
-} Utf8WordBoundaryIterator;
+} Utf8Words;
 
 /**
  *  @brief  Iterator for finding grapheme cluster boundaries in UTF-8 text per Unicode TR29.
  *
- *  Streams grapheme clusters by refilling a small inline buffer with @c sz_utf8_grapheme_find_boundaries (forward)
- *  or @c sz_utf8_grapheme_rfind_boundaries (reverse), yielding one cluster per @c __next__. The buffer lives in
- *  the iterator itself - no extra allocation. Forward advances @c start past each batch; reverse keeps @c start
- *  fixed (the offset base) and retreats @c end, yielding clusters from the end of the text backward.
+ *  Streams grapheme clusters by refilling a small inline buffer with @c sz_utf8_graphemes, yielding
+ *  one cluster per @c __next__. The buffer lives in the iterator itself - no extra allocation. @c start
+ *  advances past each batch as it is consumed.
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *text_obj; //< For reference counting
 
-    sz_cptr_t start; //< Start of the original text; for forward, also the not-yet-segmented suffix start (a boundary).
-    sz_cptr_t end;   //< End of the not-yet-segmented prefix; immutable for forward, retreats for reverse.
+    sz_cptr_t start; //< Start of the original text; also the not-yet-segmented suffix start (a boundary).
+    sz_cptr_t end;   //< End of the not-yet-segmented prefix.
 
     /// @brief  Should we skip empty segments (consecutive boundaries)?
     sz_bool_t skip_empty;
-    /// @brief  Iterate clusters from the end of the text backward (last cluster first)?
-    sz_bool_t reverse;
 
     /// @brief  Inline batch of cluster offsets relative to @c start, refilled on demand.
     sz_size_t batch_starts[sz_iterators_default_steps_k];
@@ -318,12 +312,12 @@ typedef struct {
     sz_size_t batch_count; //< Number of clusters currently buffered.
     sz_size_t batch_index; //< Index of the next cluster to yield from the buffer.
 
-} Utf8GraphemeBoundaryIterator;
+} Utf8Graphemes;
 
 /**
  *  @brief  Iterator for finding sentence boundaries in UTF-8 text per Unicode TR29.
  *
- *  Streams sentences by refilling a small inline buffer with @c sz_utf8_sentence_find_boundaries, yielding one
+ *  Streams sentences by refilling a small inline buffer with @c sz_utf8_sentences, yielding one
  *  sentence per @c __next__. The buffer lives in the iterator itself - no extra allocation. Forward only:
  *  @c start advances past each batch as it is consumed.
  */
@@ -344,12 +338,12 @@ typedef struct {
     sz_size_t batch_count; //< Number of sentences currently buffered.
     sz_size_t batch_index; //< Index of the next sentence to yield from the buffer.
 
-} Utf8SentenceBoundaryIterator;
+} Utf8Sentences;
 
 /**
  *  @brief  Iterator for finding line-break opportunities (soft wrap points) in UTF-8 text per Unicode UAX14.
  *
- *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_find_linewraps, yielding one
+ *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_linewraps, yielding one
  *  @c Str view per @c __next__ for each UAX14 line-break-opportunity segment. The buffer lives in the iterator
  *  itself - no extra allocation. Forward only: @c start advances past each batch as it is consumed.
  */
@@ -370,7 +364,7 @@ typedef struct {
     sz_size_t batch_count; //< Number of line segments currently buffered.
     sz_size_t batch_index; //< Index of the next line segment to yield from the buffer.
 
-} Utf8LinewrapBoundaryIterator;
+} Utf8Linewraps;
 
 /**
  *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
@@ -393,7 +387,7 @@ typedef struct {
     /// @brief  Whether to allow overlapping matches.
     sz_bool_t include_overlapping;
 
-} Utf8UncasedFindIterator;
+} Utf8UncasedMatches;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
@@ -4612,13 +4606,13 @@ static PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, P
 /**
  *  @brief  Given parsed split settings, constructs an iterator that would produce that split.
  */
-static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj,                   //
-                                      sz_string_view_t const text, sz_string_view_t const separator, //
-                                      int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
-                                      sz_bool_t is_reverse, int skip_empty) {
+static FindSplits *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj,                   //
+                                   sz_string_view_t const text, sz_string_view_t const separator, //
+                                   int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
+                                   sz_bool_t is_reverse, int skip_empty) {
 
-    // Create a new `SplitIterator` object
-    SplitIterator *result_obj = (SplitIterator *)SplitIteratorType.tp_alloc(&SplitIteratorType, 0);
+    // Create a new `FindSplits` object
+    FindSplits *result_obj = (FindSplits *)FindSplitsType.tp_alloc(&FindSplitsType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     // Set its properties based on the slice
@@ -5166,7 +5160,7 @@ static PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_s
     return PyLong_FromSize_t(count);
 }
 
-static char const doc_utf8_splitlines_iter[] =                                           //
+static char const doc_utf8_lines[] =                                                     //
     "Create an iterator for splitting a string by Unicode newline characters.\n"         //
     "\n"                                                                                 //
     "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"   //
@@ -5184,17 +5178,17 @@ static char const doc_utf8_splitlines_iter[] =                                  
     "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"           //
     "\n"                                                                                 //
     "Example:\n"                                                                         //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_splitlines_iter())\n"                     //
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_lines())\n"                               //
     "  2";
 
-static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                               PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_lines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t min_args = !is_member;
     Py_ssize_t max_args = !is_member + 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_splitlines_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_lines() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5245,8 +5239,7 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
     }
 
     // Create the iterator
-    Utf8SplitLinesIterator *result_obj = (Utf8SplitLinesIterator *)Utf8SplitLinesIteratorType.tp_alloc(
-        &Utf8SplitLinesIteratorType, 0);
+    Utf8Lines *result_obj = (Utf8Lines *)Utf8LinesType.tp_alloc(&Utf8LinesType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->text_obj = text_obj;
@@ -5264,7 +5257,7 @@ static PyObject *Str_like_utf8_splitlines_iter(PyObject *self, PyObject *const *
     return (PyObject *)result_obj;
 }
 
-static char const doc_utf8_split_iter[] =                                                //
+static char const doc_utf8_tokens[] =                                                    //
     "Create an iterator for splitting a string by Unicode whitespace.\n"                 //
     "\n"                                                                                 //
     "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"        //
@@ -5283,17 +5276,17 @@ static char const doc_utf8_split_iter[] =                                       
     "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                //
     "\n"                                                                                 //
     "Example:\n"                                                                         //
-    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_iter())\n"                    //
+    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_tokens())\n"                        //
     "  3";
 
-static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_tokens(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t min_args = !is_member;
     Py_ssize_t max_args = !is_member + 1;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_split_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_tokens() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5330,8 +5323,7 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     }
 
     // Create the iterator
-    Utf8SplitWhitespaceIterator *result_obj = (Utf8SplitWhitespaceIterator *)Utf8SplitWhitespaceIteratorType.tp_alloc(
-        &Utf8SplitWhitespaceIteratorType, 0);
+    Utf8Tokens *result_obj = (Utf8Tokens *)Utf8TokensType.tp_alloc(&Utf8TokensType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     result_obj->text_obj = text_obj;
@@ -5348,8 +5340,8 @@ static PyObject *Str_like_utf8_split_iter(PyObject *self, PyObject *const *args,
     return (PyObject *)result_obj;
 }
 
-static char const doc_utf8_word_iter[] =                                             //
-    "utf8_word_iter(string, /, skip_empty=False, reverse=False)\n"                   //
+static char const doc_utf8_words[] =                                                 //
+    "utf8_words(string, /, skip_empty=False)\n"                                      //
     "\n"                                                                             //
     "Return an iterator yielding words per Unicode TR29 word boundary rules.\n"      //
     "Unlike str.split(), this is TR29 compliant and supports all Unicode scripts.\n" //
@@ -5357,29 +5349,25 @@ static char const doc_utf8_word_iter[] =                                        
     "Args:\n"                                                                        //
     "    string: The input UTF-8 string to split into words.\n"                      //
     "    skip_empty: If True, skip empty segments between consecutive boundaries.\n" //
-    "    reverse: If True, yield words from the end of the text backward.\n"         //
     "\n"                                                                             //
     "Returns:\n"                                                                     //
     "    Iterator yielding Str objects for each word.\n\n"                           //
     "\n"                                                                             //
     "Example:\n"                                                                     //
     "  >>> # Stream TR29 word tokens lazily:\n"                                      //
-    "  >>> 'world' in (str(w) for w in sz.utf8_word_iter('Hi, world'))\n"            //
-    "  True\n"                                                                       //
-    "  >>> [str(w) for w in sz.utf8_word_iter('a b', reverse=True)]\n"               //
-    "  ['b', ' ', 'a']";
+    "  >>> 'world' in (str(w) for w in sz.utf8_words('Hi, world'))\n"                //
+    "  True";
 
-static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *kwnames) {
-    int min_args = 1, max_args = 3;
+static PyObject *Str_like_utf8_words(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *kwnames) {
+    int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_word_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_words() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
     PyObject *text_obj = args[0];
     int skip_empty = 0;
-    int reverse = 0;
 
     // Parse keyword arguments
     if (kwnames) {
@@ -5388,12 +5376,10 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
             PyObject *key = PyTuple_GET_ITEM(kwnames, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0) { skip_empty = PyObject_IsTrue(value); }
-            else if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse = PyObject_IsTrue(value); }
         }
     }
-    // Check positional skip_empty / reverse
+    // Check positional skip_empty
     if (positional_args_count > 1) { skip_empty = PyObject_IsTrue(args[1]); }
-    if (positional_args_count > 2) { reverse = PyObject_IsTrue(args[2]); }
 
     sz_string_view_t text_view;
     if (PyObject_TypeCheck(text_obj, &StrType)) {
@@ -5415,7 +5401,7 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
         return NULL;
     }
 
-    Utf8WordBoundaryIterator *iter = PyObject_New(Utf8WordBoundaryIterator, &Utf8WordBoundaryIteratorType);
+    Utf8Words *iter = PyObject_New(Utf8Words, &Utf8WordsType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -5423,7 +5409,6 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     iter->start = text_view.start;
     iter->end = text_view.start + text_view.length;
     iter->skip_empty = skip_empty ? sz_true_k : sz_false_k;
-    iter->reverse = reverse ? sz_true_k : sz_false_k;
     iter->batch_count = 0;
     iter->batch_index = 0;
 
@@ -5431,8 +5416,8 @@ static PyObject *Str_like_utf8_word_iter(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_grapheme_iter[] =                                         //
-    "utf8_grapheme_iter(string, /, skip_empty=False, reverse=False)\n"               //
+static char const doc_utf8_graphemes[] =                                             //
+    "utf8_graphemes(string, /, skip_empty=False)\n"                                  //
     "\n"                                                                             //
     "Return an iterator yielding grapheme clusters per Unicode TR29 rules.\n"        //
     "A grapheme cluster is a user-perceived character (e.g. a base plus combining\n" //
@@ -5441,29 +5426,25 @@ static char const doc_utf8_grapheme_iter[] =                                    
     "Args:\n"                                                                        //
     "    string: The input UTF-8 string to split into grapheme clusters.\n"          //
     "    skip_empty: If True, skip empty segments between consecutive boundaries.\n" //
-    "    reverse: If True, yield clusters from the end of the text backward.\n"      //
     "\n"                                                                             //
     "Returns:\n"                                                                     //
     "    Iterator yielding Str objects for each grapheme cluster.\n\n"               //
     "\n"                                                                             //
     "Example:\n"                                                                     //
     "  >>> # Stream TR29 grapheme clusters lazily:\n"                                //
-    "  >>> [str(g) for g in sz.utf8_grapheme_iter('abc')]\n"                         //
-    "  ['a', 'b', 'c']\n"                                                            //
-    "  >>> [str(g) for g in sz.utf8_grapheme_iter('ab', reverse=True)]\n"            //
-    "  ['b', 'a']";
+    "  >>> [str(g) for g in sz.utf8_graphemes('abc')]\n"                             //
+    "  ['a', 'b', 'c']";
 
-static PyObject *Str_like_utf8_grapheme_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                             PyObject *kwnames) {
-    int min_args = 1, max_args = 3;
+static PyObject *Str_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *kwnames) {
+    int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_grapheme_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_graphemes() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
     PyObject *text_obj = args[0];
     int skip_empty = 0;
-    int reverse = 0;
 
     // Parse keyword arguments
     if (kwnames) {
@@ -5472,12 +5453,10 @@ static PyObject *Str_like_utf8_grapheme_iter(PyObject *self, PyObject *const *ar
             PyObject *key = PyTuple_GET_ITEM(kwnames, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0) { skip_empty = PyObject_IsTrue(value); }
-            else if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) { reverse = PyObject_IsTrue(value); }
         }
     }
-    // Check positional skip_empty / reverse
+    // Check positional skip_empty
     if (positional_args_count > 1) { skip_empty = PyObject_IsTrue(args[1]); }
-    if (positional_args_count > 2) { reverse = PyObject_IsTrue(args[2]); }
 
     sz_string_view_t text_view;
     if (PyObject_TypeCheck(text_obj, &StrType)) {
@@ -5499,7 +5478,7 @@ static PyObject *Str_like_utf8_grapheme_iter(PyObject *self, PyObject *const *ar
         return NULL;
     }
 
-    Utf8GraphemeBoundaryIterator *iter = PyObject_New(Utf8GraphemeBoundaryIterator, &Utf8GraphemeBoundaryIteratorType);
+    Utf8Graphemes *iter = PyObject_New(Utf8Graphemes, &Utf8GraphemesType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -5507,7 +5486,6 @@ static PyObject *Str_like_utf8_grapheme_iter(PyObject *self, PyObject *const *ar
     iter->start = text_view.start;
     iter->end = text_view.start + text_view.length;
     iter->skip_empty = skip_empty ? sz_true_k : sz_false_k;
-    iter->reverse = reverse ? sz_true_k : sz_false_k;
     iter->batch_count = 0;
     iter->batch_index = 0;
 
@@ -5515,8 +5493,8 @@ static PyObject *Str_like_utf8_grapheme_iter(PyObject *self, PyObject *const *ar
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_sentence_iter[] =                                            //
-    "utf8_sentence_iter(string, /, skip_empty=False)\n"                                 //
+static char const doc_utf8_sentences[] =                                                //
+    "utf8_sentences(string, /, skip_empty=False)\n"                                     //
     "\n"                                                                                //
     "Return an iterator yielding sentences per Unicode TR29 sentence boundary rules.\n" //
     "TR29 compliant and Unicode-script aware, unlike naive period splitting.\n"         //
@@ -5530,14 +5508,14 @@ static char const doc_utf8_sentence_iter[] =                                    
     "\n"                                                                                //
     "Example:\n"                                                                        //
     "  >>> # Stream TR29 sentences lazily:\n"                                           //
-    "  >>> len(list(sz.utf8_sentence_iter('Hi. Bye.'))) >= 2\n"                         //
+    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                             //
     "  True";
 
-static PyObject *Str_like_utf8_sentence_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                             PyObject *kwnames) {
+static PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *kwnames) {
     int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_sentence_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_sentences() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5576,7 +5554,7 @@ static PyObject *Str_like_utf8_sentence_iter(PyObject *self, PyObject *const *ar
         return NULL;
     }
 
-    Utf8SentenceBoundaryIterator *iter = PyObject_New(Utf8SentenceBoundaryIterator, &Utf8SentenceBoundaryIteratorType);
+    Utf8Sentences *iter = PyObject_New(Utf8Sentences, &Utf8SentencesType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -5591,12 +5569,12 @@ static PyObject *Str_like_utf8_sentence_iter(PyObject *self, PyObject *const *ar
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_linewrap_iter[] =                                         //
-    "utf8_linewrap_iter(string, /, skip_empty=False)\n"                              //
+static char const doc_utf8_linewraps[] =                                             //
+    "utf8_linewraps(string, /, skip_empty=False)\n"                                  //
     "\n"                                                                             //
     "Return an iterator yielding segments at line-break opportunities per UAX14.\n"  //
     "Each segment ends at a line-break opportunity (a soft wrap point).\n"           //
-    "For hard-line splitting (str.splitlines()), use utf8_splitlines_iter().\n"      //
+    "For hard-line splitting (str.splitlines()), use utf8_lines().\n"                //
     "\n"                                                                             //
     "Args:\n"                                                                        //
     "    string: The input UTF-8 string to split at line-break opportunities.\n"     //
@@ -5607,14 +5585,14 @@ static char const doc_utf8_linewrap_iter[] =                                    
     "\n"                                                                             //
     "Example:\n"                                                                     //
     "  >>> # Stream UAX14 line-break opportunities lazily:\n"                        //
-    "  >>> len(list(sz.utf8_linewrap_iter('a\\nb'))) >= 2\n"                         //
+    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                             //
     "  True";
 
-static PyObject *Str_like_utf8_linewrap_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                             PyObject *kwnames) {
+static PyObject *Str_like_utf8_linewraps(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *kwnames) {
     int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_linewrap_iter() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_linewraps() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5653,7 +5631,7 @@ static PyObject *Str_like_utf8_linewrap_iter(PyObject *self, PyObject *const *ar
         return NULL;
     }
 
-    Utf8LinewrapBoundaryIterator *iter = PyObject_New(Utf8LinewrapBoundaryIterator, &Utf8LinewrapBoundaryIteratorType);
+    Utf8Linewraps *iter = PyObject_New(Utf8Linewraps, &Utf8LinewrapsType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -5668,8 +5646,8 @@ static PyObject *Str_like_utf8_linewrap_iter(PyObject *self, PyObject *const *ar
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_uncased_find_iter[] =                                             //
-    "utf8_uncased_find_iter(haystack, needle, /, include_overlapping=False)\n"               //
+static char const doc_utf8_uncased_matches[] =                                               //
+    "utf8_uncased_matches(haystack, needle, /, include_overlapping=False)\n"                 //
     "\n"                                                                                     //
     "Iterate over all uncased matches of needle in haystack.\n"                              //
     "\n"                                                                                     //
@@ -5686,20 +5664,20 @@ static char const doc_utf8_uncased_find_iter[] =                                
     "    Str: Each matched region as a view into the original haystack.\n"                   //
     "\n"                                                                                     //
     "Examples:\n"                                                                            //
-    "    >>> list(sz.utf8_uncased_find_iter('Hello HELLO hello', 'hello'))\n"                //
+    "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                  //
     "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                              //
-    "    >>> list(sz.utf8_uncased_find_iter('Straße STRASSE', 'strasse'))\n"                 //
+    "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                   //
     "    [sz.Str('Straße'), sz.Str('STRASSE')]";
 
-static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const *args,
-                                                 Py_ssize_t positional_args_count, PyObject *kwnames) {
+static PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *kwnames) {
     // Check if called as member or module function
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     int min_args = is_member ? 1 : 2;
     int max_args = is_member ? 2 : 3;
 
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() requires %d to %d positional arguments, got %zd",
+        PyErr_Format(PyExc_TypeError, "utf8_uncased_matches() requires %d to %d positional arguments, got %zd",
                      min_args, max_args, positional_args_count);
         return NULL;
     }
@@ -5718,7 +5696,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
                 include_overlapping = PyObject_IsTrue(value);
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_uncased_find_iter() got unexpected keyword argument '%U'", key);
+                PyErr_Format(PyExc_TypeError, "utf8_uncased_matches() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
@@ -5737,7 +5715,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
     // Handle edge case: empty needle yields nothing
     if (needle_view.length == 0) {
         // Return an empty iterator by setting current = end
-        Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator, &Utf8UncasedFindIteratorType);
+        Utf8UncasedMatches *iter = PyObject_New(Utf8UncasedMatches, &Utf8UncasedMatchesType);
         if (!iter) return PyErr_NoMemory();
 
         iter->haystack_obj = haystack_obj;
@@ -5754,7 +5732,7 @@ static PyObject *Str_like_utf8_uncased_find_iter(PyObject *self, PyObject *const
     }
 
     // Allocate iterator
-    Utf8UncasedFindIterator *iter = PyObject_New(Utf8UncasedFindIterator, &Utf8UncasedFindIteratorType);
+    Utf8UncasedMatches *iter = PyObject_New(Utf8UncasedMatches, &Utf8UncasedMatchesType);
     if (!iter) return PyErr_NoMemory();
 
     iter->haystack_obj = haystack_obj;
@@ -6260,18 +6238,17 @@ static PyMethodDef Str_methods[] = {
 
     // UTF-8 aware operations
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
-    {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
-    {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
-    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
-    {"utf8_grapheme_iter", (PyCFunction)Str_like_utf8_grapheme_iter, SZ_METHOD_FLAGS, doc_utf8_grapheme_iter},
-    {"utf8_sentence_iter", (PyCFunction)Str_like_utf8_sentence_iter, SZ_METHOD_FLAGS, doc_utf8_sentence_iter},
-    {"utf8_linewrap_iter", (PyCFunction)Str_like_utf8_linewrap_iter, SZ_METHOD_FLAGS, doc_utf8_linewrap_iter},
+    {"utf8_lines", (PyCFunction)Str_like_utf8_lines, SZ_METHOD_FLAGS, doc_utf8_lines},
+    {"utf8_tokens", (PyCFunction)Str_like_utf8_tokens, SZ_METHOD_FLAGS, doc_utf8_tokens},
+    {"utf8_words", (PyCFunction)Str_like_utf8_words, SZ_METHOD_FLAGS, doc_utf8_words},
+    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
+    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
+    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
     {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
-    {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_find_iter},
+    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
@@ -6333,7 +6310,7 @@ static PyTypeObject StrType = {
 
 #pragma region Split Iterator
 
-static PyObject *SplitIteratorType_next(SplitIterator *self) {
+static PyObject *FindSplitsType_next(FindSplits *self) {
     sz_string_view_t result_memory;
 
     // Compute the next segment, looping past zero-length segments when `skip_empty` is set.
@@ -6385,19 +6362,19 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
     return (PyObject *)result_obj;
 }
 
-static void SplitIteratorType_dealloc(SplitIterator *self) {
+static void FindSplitsType_dealloc(FindSplits *self) {
     Py_XDECREF(self->text_obj);
     Py_XDECREF(self->separator_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *SplitIteratorType_iter(PyObject *self) {
+static PyObject *FindSplitsType_iter(PyObject *self) {
     Py_INCREF(self); // Iterator should return itself in __iter__.
     return self;
 }
 
-static char const doc_SplitIterator[] =                                                   //
-    "SplitIterator(string, separator, ...)\n"                                             //
+static char const doc_FindSplits[] =                                                      //
+    "FindSplits(string, separator, ...)\n"                                                //
     "\n"                                                                                  //
     "Text-splitting iterator for efficient string processing.\n"                          //
     "Provides lazy evaluation of string splits without materializing all results.\n"      //
@@ -6421,15 +6398,15 @@ static char const doc_SplitIterator[] =                                         
     "  01\n"                                                                              //
     "  15";
 
-static PyTypeObject SplitIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.SplitIterator",
-    .tp_basicsize = sizeof(SplitIterator),
+static PyTypeObject FindSplitsType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.FindSplits",
+    .tp_basicsize = sizeof(FindSplits),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)SplitIteratorType_dealloc,
+    .tp_dealloc = (destructor)FindSplitsType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_SplitIterator,
-    .tp_iter = SplitIteratorType_iter,
-    .tp_iternext = (iternextfunc)SplitIteratorType_next,
+    .tp_doc = doc_FindSplits,
+    .tp_iter = FindSplitsType_iter,
+    .tp_iternext = (iternextfunc)FindSplitsType_next,
 };
 
 #pragma endregion
@@ -6442,11 +6419,11 @@ static PyTypeObject SplitIteratorType = {
  *          delimiter `d`; once the batch reaches end-of-text a trailing segment to `end` is appended. When
  *          `keepends`, the delimiter bytes are reattached to the preceding segment (matching `str.splitlines`).
  */
-static void Utf8SplitLinesIterator_refill_(Utf8SplitLinesIterator *self) {
+static void Utf8Lines_refill_(Utf8Lines *self) {
     sz_size_t region = (sz_size_t)(self->end - self->suffix);
     sz_size_t consumed = 0;
-    sz_size_t delimiters = sz_utf8_find_newlines(self->suffix, region, self->batch_starts, self->batch_lengths,
-                                                 sz_iterators_default_steps_k, &consumed);
+    sz_size_t delimiters = sz_utf8_newlines(self->suffix, region, self->batch_starts, self->batch_lengths,
+                                            sz_iterators_default_steps_k, &consumed);
     // In place: delimiter `d` spans `[batch_starts[d], batch_starts[d] + batch_lengths[d])`; the segment before it
     // runs from the previous delimiter's end to this delimiter's start. With `keepends`, the delimiter bytes are
     // appended to that preceding segment.
@@ -6475,8 +6452,8 @@ static void Utf8SplitLinesIterator_refill_(Utf8SplitLinesIterator *self) {
  *  @brief  Position `batch_index` on the next yieldable segment, refilling and (when `skip_empty`) skipping
  *          zero-length segments. Leaves `batch_count == 0` as the end sentinel.
  */
-static void Utf8SplitLinesIterator_settle_(Utf8SplitLinesIterator *self) {
-    if (!self->primed) Utf8SplitLinesIterator_refill_(self);
+static void Utf8Lines_settle_(Utf8Lines *self) {
+    if (!self->primed) Utf8Lines_refill_(self);
     for (;;) {
         if (self->skip_empty)
             while (self->batch_index < self->batch_count && self->batch_lengths[self->batch_index] == 0)
@@ -6487,12 +6464,12 @@ static void Utf8SplitLinesIterator_settle_(Utf8SplitLinesIterator *self) {
             self->batch_count = 0;
             return;
         }
-        Utf8SplitLinesIterator_refill_(self);
+        Utf8Lines_refill_(self);
     }
 }
 
-static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
-    Utf8SplitLinesIterator_settle_(self);
+static PyObject *Utf8LinesType_next(Utf8Lines *self) {
+    Utf8Lines_settle_(self);
     if (self->batch_count == 0) return NULL;
 
     sz_size_t i = self->batch_index++;
@@ -6509,25 +6486,25 @@ static PyObject *Utf8SplitLinesIteratorType_next(Utf8SplitLinesIterator *self) {
     return (PyObject *)result_obj;
 }
 
-static void Utf8SplitLinesIteratorType_dealloc(Utf8SplitLinesIterator *self) {
+static void Utf8LinesType_dealloc(Utf8Lines *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8SplitLinesIteratorType_iter(PyObject *self) {
+static PyObject *Utf8LinesType_iter(PyObject *self) {
     Py_INCREF(self); // Iterator should return itself in __iter__.
     return self;
 }
 
-static char const doc_Utf8SplitLinesIterator[] =                                            //
-    "Utf8SplitLinesIterator(string, ...)\n"                                                 //
+static char const doc_Utf8Lines[] =                                                         //
+    "Utf8Lines(string, ...)\n"                                                              //
     "\n"                                                                                    //
     "UTF-8 aware line-splitting iterator using Unicode newline characters.\n"               //
     "Provides lazy evaluation of line splits without materializing all results.\n"          //
     "\n"                                                                                    //
     "Created by:\n"                                                                         //
-    "  - Str.utf8_splitlines_iter()\n"                                                      //
-    "  - sz.utf8_splitlines_iter()\n"                                                       //
+    "  - Str.utf8_lines()\n"                                                                //
+    "  - sz.utf8_lines()\n"                                                                 //
     "\n"                                                                                    //
     "Recognized newlines (7 characters + CRLF):\n"                                          //
     "  - U+000A LINE FEED (\\\\n)\n"                                                        //
@@ -6541,18 +6518,18 @@ static char const doc_Utf8SplitLinesIterator[] =                                
     "\n"                                                                                    //
     "Example:\n"                                                                            //
     "  >>> # Stream lines lazily (Unicode-aware: 7 newline types + CRLF), no list built:\n" //
-    "  >>> sum(1 for _ in sz.Str('first\\nsecond\\nthird').utf8_splitlines_iter())\n"       //
+    "  >>> sum(1 for _ in sz.Str('first\\nsecond\\nthird').utf8_lines())\n"                 //
     "  3";
 
-static PyTypeObject Utf8SplitLinesIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitLinesIterator",
-    .tp_basicsize = sizeof(Utf8SplitLinesIterator),
+static PyTypeObject Utf8LinesType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Lines",
+    .tp_basicsize = sizeof(Utf8Lines),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8SplitLinesIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8LinesType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8SplitLinesIterator,
-    .tp_iter = Utf8SplitLinesIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8SplitLinesIteratorType_next,
+    .tp_doc = doc_Utf8Lines,
+    .tp_iter = Utf8LinesType_iter,
+    .tp_iternext = (iternextfunc)Utf8LinesType_next,
 };
 
 #pragma endregion
@@ -6564,11 +6541,11 @@ static PyTypeObject Utf8SplitLinesIteratorType = {
  *          into segment (start, length) pairs. Segment `d` runs from the end of delimiter `d-1` to the start of
  *          delimiter `d`; once the batch reaches end-of-text a trailing segment to `end` is appended.
  */
-static void Utf8SplitWhitespaceIterator_refill_(Utf8SplitWhitespaceIterator *self) {
+static void Utf8Tokens_refill_(Utf8Tokens *self) {
     sz_size_t region = (sz_size_t)(self->end - self->suffix);
     sz_size_t consumed = 0;
-    sz_size_t delimiters = sz_utf8_find_whitespaces(self->suffix, region, self->batch_starts, self->batch_lengths,
-                                                    sz_iterators_default_steps_k, &consumed);
+    sz_size_t delimiters = sz_utf8_whitespaces(self->suffix, region, self->batch_starts, self->batch_lengths,
+                                               sz_iterators_default_steps_k, &consumed);
     sz_size_t previous_end = 0;
     for (sz_size_t d = 0; d < delimiters; ++d) {
         sz_size_t delimiter_start = self->batch_starts[d], delimiter_length = self->batch_lengths[d];
@@ -6594,8 +6571,8 @@ static void Utf8SplitWhitespaceIterator_refill_(Utf8SplitWhitespaceIterator *sel
  *  @brief  Position `batch_index` on the next yieldable segment, refilling and (when `skip_empty`) skipping
  *          zero-length segments. Leaves `batch_count == 0` as the end sentinel.
  */
-static void Utf8SplitWhitespaceIterator_settle_(Utf8SplitWhitespaceIterator *self) {
-    if (!self->primed) Utf8SplitWhitespaceIterator_refill_(self);
+static void Utf8Tokens_settle_(Utf8Tokens *self) {
+    if (!self->primed) Utf8Tokens_refill_(self);
     for (;;) {
         if (self->skip_empty)
             while (self->batch_index < self->batch_count && self->batch_lengths[self->batch_index] == 0)
@@ -6606,12 +6583,12 @@ static void Utf8SplitWhitespaceIterator_settle_(Utf8SplitWhitespaceIterator *sel
             self->batch_count = 0;
             return;
         }
-        Utf8SplitWhitespaceIterator_refill_(self);
+        Utf8Tokens_refill_(self);
     }
 }
 
-static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterator *self) {
-    Utf8SplitWhitespaceIterator_settle_(self);
+static PyObject *Utf8TokensType_next(Utf8Tokens *self) {
+    Utf8Tokens_settle_(self);
     if (self->batch_count == 0) return NULL;
 
     sz_size_t i = self->batch_index++;
@@ -6628,67 +6605,61 @@ static PyObject *Utf8SplitWhitespaceIteratorType_next(Utf8SplitWhitespaceIterato
     return (PyObject *)result_obj;
 }
 
-static void Utf8SplitWhitespaceIteratorType_dealloc(Utf8SplitWhitespaceIterator *self) {
+static void Utf8TokensType_dealloc(Utf8Tokens *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8SplitWhitespaceIteratorType_iter(PyObject *self) {
+static PyObject *Utf8TokensType_iter(PyObject *self) {
     Py_INCREF(self); // Iterator should return itself in __iter__.
     return self;
 }
 
-static char const doc_Utf8SplitWhitespaceIterator[] =                                    //
-    "Utf8SplitWhitespaceIterator(string, ...)\n"                                         //
-    "\n"                                                                                 //
-    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\n"  //
-    "Provides lazy evaluation similar to Python's str.split() with no separator.\n"      //
-    "\n"                                                                                 //
-    "Created by:\n"                                                                      //
-    "  - Str.utf8_split_iter()\n"                                                        //
-    "  - sz.utf8_split_iter()\n"                                                         //
-    "\n"                                                                                 //
-    "Recognized whitespace (25 Unicode White_Space characters):\n"                       //
-    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                            //
-    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                           //
-    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\n"                                  //
-    "  - CJK: IDEOGRAPHIC SPACE\n"                                                       //
-    "\n"                                                                                 //
-    "Example:\n"                                                                         //
-    "  >>> # Lazily tokenize on any of 25 Unicode whitespace characters:\n"              //
-    "  >>> max(len(tok) for tok in sz.Str('hello wonderful world').utf8_split_iter())\n" //
+static char const doc_Utf8Tokens[] =                                                    //
+    "Utf8Tokens(string, ...)\n"                                                         //
+    "\n"                                                                                //
+    "UTF-8 aware whitespace-splitting iterator using Unicode White_Space characters.\n" //
+    "Provides lazy evaluation similar to Python's str.split() with no separator.\n"     //
+    "\n"                                                                                //
+    "Created by:\n"                                                                     //
+    "  - Str.utf8_tokens()\n"                                                           //
+    "  - sz.utf8_tokens()\n"                                                            //
+    "\n"                                                                                //
+    "Recognized whitespace (25 Unicode White_Space characters):\n"                      //
+    "  - ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                           //
+    "  - Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                          //
+    "  - General Punctuation: EN/EM QUAD/SPACE, etc.\n"                                 //
+    "  - CJK: IDEOGRAPHIC SPACE\n"                                                      //
+    "\n"                                                                                //
+    "Example:\n"                                                                        //
+    "  >>> # Lazily tokenize on any of 25 Unicode whitespace characters:\n"             //
+    "  >>> max(len(tok) for tok in sz.Str('hello wonderful world').utf8_tokens())\n"    //
     "  9";
 
-static PyTypeObject Utf8SplitWhitespaceIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SplitWhitespaceIterator",
-    .tp_basicsize = sizeof(Utf8SplitWhitespaceIterator),
+static PyTypeObject Utf8TokensType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Tokens",
+    .tp_basicsize = sizeof(Utf8Tokens),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8SplitWhitespaceIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8TokensType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8SplitWhitespaceIterator,
-    .tp_iter = Utf8SplitWhitespaceIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8SplitWhitespaceIteratorType_next,
+    .tp_doc = doc_Utf8Tokens,
+    .tp_iter = Utf8TokensType_iter,
+    .tp_iternext = (iternextfunc)Utf8TokensType_next,
 };
 
 #pragma endregion
 
 #pragma region UTF8 Word Boundary Iterator
 
-static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *self) {
+static PyObject *Utf8WordsType_next(Utf8Words *self) {
     // Refill the inline batch when drained. TR29 never yields zero-length words, so the `skip_empty` option is
     // a no-op for word segmentation and needs no special handling here. Batch offsets are always relative to
-    // `self->start` (the immutable text origin), so only the moving bound (`start` forward, `end` reverse) and
-    // the boundary kernel differ between directions.
+    // `self->start` (the immutable text origin), which advances past each batch as it is consumed.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = self->reverse //
-                                ? sz_utf8_word_rfind_boundaries(self->start, (sz_size_t)(self->end - self->start),
-                                                                self->batch_starts, self->batch_lengths,
-                                                                sz_iterators_default_steps_k, &consumed)
-                                : sz_utf8_word_find_boundaries(self->start, (sz_size_t)(self->end - self->start),
-                                                               self->batch_starts, self->batch_lengths,
-                                                               sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_words(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                          self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -6698,12 +6669,10 @@ static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *sel
     sz_size_t word_len = self->batch_lengths[i];
 
     // Once the batch is drained, move the segmenting bound to the last buffered word's edge (a TR29 boundary)
-    // so the next refill resumes there. Forward batches run low→high, reverse high→low, so the last buffered
-    // word is the rightmost (forward) or leftmost (reverse) one respectively.
+    // so the next refill resumes there. Batches run low->high, so the last buffered word is the rightmost one.
     if (self->batch_index >= self->batch_count) {
         sz_size_t last = self->batch_count - 1;
-        if (self->reverse) self->end = self->start + self->batch_starts[last];    // leftmost emitted word's start
-        else self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost word's end
+        self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost word's end
     }
 
     Str *result_obj = Str_alloc_();
@@ -6717,25 +6686,25 @@ static PyObject *Utf8WordBoundaryIteratorType_next(Utf8WordBoundaryIterator *sel
     return (PyObject *)result_obj;
 }
 
-static void Utf8WordBoundaryIteratorType_dealloc(Utf8WordBoundaryIterator *self) {
+static void Utf8WordsType_dealloc(Utf8Words *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8WordBoundaryIteratorType_iter(PyObject *self) {
+static PyObject *Utf8WordsType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8WordBoundaryIterator[] =                        //
-    "Utf8WordBoundaryIterator(string, ...)\n"                             //
+static char const doc_Utf8Words[] =                                       //
+    "Utf8Words(string, ...)\n"                                            //
     "\n"                                                                  //
     "UTF-8 aware word boundary iterator per Unicode TR29 algorithm.\n"    //
     "Yields words (text segments between consecutive word boundaries).\n" //
     "\n"                                                                  //
     "Created by:\n"                                                       //
-    "  - Str.utf8_word_iter()\n"                                          //
-    "  - sz.utf8_word_iter()\n"                                           //
+    "  - Str.utf8_words()\n"                                              //
+    "  - sz.utf8_words()\n"                                               //
     "\n"                                                                  //
     "TR29 Word_Break rules implemented:\n"                                //
     "  - WB3: CR x LF (no break)\n"                                       //
@@ -6744,38 +6713,32 @@ static char const doc_Utf8WordBoundaryIterator[] =                        //
     "  - WB15-WB16: Regional Indicator pairs\n\n"                         //
     "\n"                                                                  //
     "Example:\n"                                                          //
-    "  >>> len(list(sz.utf8_word_iter('Hi there'))) >= 2\n"               //
+    "  >>> len(list(sz.utf8_words('Hi there'))) >= 2\n"                   //
     "  True";
 
-static PyTypeObject Utf8WordBoundaryIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8WordBoundaryIterator",
-    .tp_basicsize = sizeof(Utf8WordBoundaryIterator),
+static PyTypeObject Utf8WordsType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Words",
+    .tp_basicsize = sizeof(Utf8Words),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8WordBoundaryIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8WordsType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8WordBoundaryIterator,
-    .tp_iter = Utf8WordBoundaryIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8WordBoundaryIteratorType_next,
+    .tp_doc = doc_Utf8Words,
+    .tp_iter = Utf8WordsType_iter,
+    .tp_iternext = (iternextfunc)Utf8WordsType_next,
 };
 #pragma endregion
 
 #pragma region UTF8 Grapheme Boundary Iterator
 
-static PyObject *Utf8GraphemeBoundaryIteratorType_next(Utf8GraphemeBoundaryIterator *self) {
+static PyObject *Utf8GraphemesType_next(Utf8Graphemes *self) {
     // Refill the inline batch when drained. TR29 never yields zero-length clusters, so the `skip_empty` option is
     // a no-op for grapheme segmentation and needs no special handling here. Batch offsets are always relative to
-    // `self->start` (the immutable text origin), so only the moving bound (`start` forward, `end` reverse) and
-    // the boundary kernel differ between directions.
+    // `self->start` (the immutable text origin), which advances past each batch as it is consumed.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = self->reverse //
-                                ? sz_utf8_grapheme_rfind_boundaries(self->start, (sz_size_t)(self->end - self->start),
-                                                                    self->batch_starts, self->batch_lengths,
-                                                                    sz_iterators_default_steps_k, &consumed)
-                                : sz_utf8_grapheme_find_boundaries(self->start, (sz_size_t)(self->end - self->start),
-                                                                   self->batch_starts, self->batch_lengths,
-                                                                   sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_graphemes(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                              self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -6785,12 +6748,10 @@ static PyObject *Utf8GraphemeBoundaryIteratorType_next(Utf8GraphemeBoundaryItera
     sz_size_t cluster_len = self->batch_lengths[i];
 
     // Once the batch is drained, move the segmenting bound to the last buffered cluster's edge (a TR29 boundary)
-    // so the next refill resumes there. Forward batches run low->high, reverse high->low, so the last buffered
-    // cluster is the rightmost (forward) or leftmost (reverse) one respectively.
+    // so the next refill resumes there. Batches run low->high, so the last buffered cluster is the rightmost one.
     if (self->batch_index >= self->batch_count) {
         sz_size_t last = self->batch_count - 1;
-        if (self->reverse) self->end = self->start + self->batch_starts[last];    // leftmost emitted cluster's start
-        else self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost cluster's end
+        self->start += self->batch_starts[last] + self->batch_lengths[last]; // rightmost cluster's end
     }
 
     Str *result_obj = Str_alloc_();
@@ -6804,25 +6765,25 @@ static PyObject *Utf8GraphemeBoundaryIteratorType_next(Utf8GraphemeBoundaryItera
     return (PyObject *)result_obj;
 }
 
-static void Utf8GraphemeBoundaryIteratorType_dealloc(Utf8GraphemeBoundaryIterator *self) {
+static void Utf8GraphemesType_dealloc(Utf8Graphemes *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8GraphemeBoundaryIteratorType_iter(PyObject *self) {
+static PyObject *Utf8GraphemesType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8GraphemeBoundaryIterator[] =                             //
-    "Utf8GraphemeBoundaryIterator(string, ...)\n"                                  //
+static char const doc_Utf8Graphemes[] =                                            //
+    "Utf8Graphemes(string, ...)\n"                                                 //
     "\n"                                                                           //
     "UTF-8 aware grapheme cluster boundary iterator per Unicode TR29 algorithm.\n" //
     "Yields grapheme clusters (user-perceived characters).\n"                      //
     "\n"                                                                           //
     "Created by:\n"                                                                //
-    "  - Str.utf8_grapheme_iter()\n"                                               //
-    "  - sz.utf8_grapheme_iter()\n"                                                //
+    "  - Str.utf8_graphemes()\n"                                                   //
+    "  - sz.utf8_graphemes()\n"                                                    //
     "\n"                                                                           //
     "TR29 Grapheme_Cluster_Break rules implemented:\n"                             //
     "  - GB3: CR x LF (no break)\n"                                                //
@@ -6832,33 +6793,32 @@ static char const doc_Utf8GraphemeBoundaryIterator[] =                          
     "  - GB11-GB12: Emoji ZWJ and Regional Indicator pairs\n\n"                    //
     "\n"                                                                           //
     "Example:\n"                                                                   //
-    "  >>> len(list(sz.utf8_grapheme_iter('abc'))) == 3\n"                         //
+    "  >>> len(list(sz.utf8_graphemes('abc'))) == 3\n"                             //
     "  True";
 
-static PyTypeObject Utf8GraphemeBoundaryIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8GraphemeBoundaryIterator",
-    .tp_basicsize = sizeof(Utf8GraphemeBoundaryIterator),
+static PyTypeObject Utf8GraphemesType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Graphemes",
+    .tp_basicsize = sizeof(Utf8Graphemes),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8GraphemeBoundaryIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8GraphemesType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8GraphemeBoundaryIterator,
-    .tp_iter = Utf8GraphemeBoundaryIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8GraphemeBoundaryIteratorType_next,
+    .tp_doc = doc_Utf8Graphemes,
+    .tp_iter = Utf8GraphemesType_iter,
+    .tp_iternext = (iternextfunc)Utf8GraphemesType_next,
 };
 #pragma endregion
 
 #pragma region UTF8 Sentence Boundary Iterator
 
-static PyObject *Utf8SentenceBoundaryIteratorType_next(Utf8SentenceBoundaryIterator *self) {
+static PyObject *Utf8SentencesType_next(Utf8Sentences *self) {
     // Refill the inline batch when drained. TR29 never yields zero-length sentences, so the `skip_empty` option is
     // a no-op for sentence segmentation and needs no special handling here. Batch offsets are always relative to
     // `self->start` (the not-yet-segmented suffix start); forward only, so `start` advances past each batch.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = sz_utf8_sentence_find_boundaries(self->start, (sz_size_t)(self->end - self->start),
-                                                             self->batch_starts, self->batch_lengths,
-                                                             sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_sentences(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                              self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -6885,25 +6845,25 @@ static PyObject *Utf8SentenceBoundaryIteratorType_next(Utf8SentenceBoundaryItera
     return (PyObject *)result_obj;
 }
 
-static void Utf8SentenceBoundaryIteratorType_dealloc(Utf8SentenceBoundaryIterator *self) {
+static void Utf8SentencesType_dealloc(Utf8Sentences *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8SentenceBoundaryIteratorType_iter(PyObject *self) {
+static PyObject *Utf8SentencesType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8SentenceBoundaryIterator[] =                            //
-    "Utf8SentenceBoundaryIterator(string, ...)\n"                                 //
+static char const doc_Utf8Sentences[] =                                           //
+    "Utf8Sentences(string, ...)\n"                                                //
     "\n"                                                                          //
     "UTF-8 aware sentence boundary iterator per Unicode TR29 algorithm.\n"        //
     "Yields sentences (text segments between consecutive sentence boundaries).\n" //
     "\n"                                                                          //
     "Created by:\n"                                                               //
-    "  - Str.utf8_sentence_iter()\n"                                              //
-    "  - sz.utf8_sentence_iter()\n"                                               //
+    "  - Str.utf8_sentences()\n"                                                  //
+    "  - sz.utf8_sentences()\n"                                                   //
     "\n"                                                                          //
     "TR29 Sentence_Break rules implemented:\n"                                    //
     "  - SB3: CR x LF (no break)\n"                                               //
@@ -6913,33 +6873,32 @@ static char const doc_Utf8SentenceBoundaryIterator[] =                          
     "  - SB998: Otherwise no break\n\n"                                           //
     "\n"                                                                          //
     "Example:\n"                                                                  //
-    "  >>> len(list(sz.utf8_sentence_iter('Hi. Bye.'))) >= 2\n"                   //
+    "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                       //
     "  True";
 
-static PyTypeObject Utf8SentenceBoundaryIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8SentenceBoundaryIterator",
-    .tp_basicsize = sizeof(Utf8SentenceBoundaryIterator),
+static PyTypeObject Utf8SentencesType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Sentences",
+    .tp_basicsize = sizeof(Utf8Sentences),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8SentenceBoundaryIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8SentencesType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8SentenceBoundaryIterator,
-    .tp_iter = Utf8SentenceBoundaryIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8SentenceBoundaryIteratorType_next,
+    .tp_doc = doc_Utf8Sentences,
+    .tp_iter = Utf8SentencesType_iter,
+    .tp_iternext = (iternextfunc)Utf8SentencesType_next,
 };
 #pragma endregion
 
 #pragma region UTF8 Line Boundary Iterator
 
-static PyObject *Utf8LinewrapBoundaryIteratorType_next(Utf8LinewrapBoundaryIterator *self) {
+static PyObject *Utf8LinewrapsType_next(Utf8Linewraps *self) {
     // Refill the inline batch when drained. UAX14 never yields zero-length segments, so the `skip_empty` option is
     // a no-op for line segmentation and needs no special handling here. Batch offsets are always relative to
     // `self->start` (the not-yet-segmented suffix start); forward only, so `start` advances past each batch.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = sz_utf8_find_linewraps(self->start, (sz_size_t)(self->end - self->start),
-                                                   self->batch_starts, self->batch_lengths,
-                                                   sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_linewraps(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                              self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -6966,26 +6925,26 @@ static PyObject *Utf8LinewrapBoundaryIteratorType_next(Utf8LinewrapBoundaryItera
     return (PyObject *)result_obj;
 }
 
-static void Utf8LinewrapBoundaryIteratorType_dealloc(Utf8LinewrapBoundaryIterator *self) {
+static void Utf8LinewrapsType_dealloc(Utf8Linewraps *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8LinewrapBoundaryIteratorType_iter(PyObject *self) {
+static PyObject *Utf8LinewrapsType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8LinewrapBoundaryIterator[] =                           //
-    "Utf8LinewrapBoundaryIterator(string, ...)\n"                                //
+static char const doc_Utf8Linewraps[] =                                          //
+    "Utf8Linewraps(string, ...)\n"                                               //
     "\n"                                                                         //
     "UTF-8 aware line-break-opportunity iterator per Unicode UAX14 algorithm.\n" //
     "Yields Str views for each line-break-opportunity segment (a soft wrap).\n"  //
-    "For hard-line splitting (str.splitlines()), use utf8_splitlines_iter().\n"  //
+    "For hard-line splitting (str.splitlines()), use utf8_lines().\n"            //
     "\n"                                                                         //
     "Created by:\n"                                                              //
-    "  - Str.utf8_linewrap_iter()\n"                                             //
-    "  - sz.utf8_linewrap_iter()\n"                                              //
+    "  - Str.utf8_linewraps()\n"                                                 //
+    "  - sz.utf8_linewraps()\n"                                                  //
     "\n"                                                                         //
     "UAX14 Line_Break rules implemented:\n"                                      //
     "  - LB4-LB6: Mandatory breaks (BK, CR, LF, NL)\n"                           //
@@ -6994,24 +6953,24 @@ static char const doc_Utf8LinewrapBoundaryIterator[] =                          
     "  - LB15-LB31: Quotation, numbers, words, CJK rules\n\n"                    //
     "\n"                                                                         //
     "Example:\n"                                                                 //
-    "  >>> len(list(sz.utf8_linewrap_iter('a\\nb'))) >= 2\n"                     //
+    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                         //
     "  True";
 
-static PyTypeObject Utf8LinewrapBoundaryIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8LinewrapBoundaryIterator",
-    .tp_basicsize = sizeof(Utf8LinewrapBoundaryIterator),
+static PyTypeObject Utf8LinewrapsType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Linewraps",
+    .tp_basicsize = sizeof(Utf8Linewraps),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8LinewrapBoundaryIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8LinewrapsType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8LinewrapBoundaryIterator,
-    .tp_iter = Utf8LinewrapBoundaryIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8LinewrapBoundaryIteratorType_next,
+    .tp_doc = doc_Utf8Linewraps,
+    .tp_iter = Utf8LinewrapsType_iter,
+    .tp_iternext = (iternextfunc)Utf8LinewrapsType_next,
 };
 #pragma endregion
 
 #pragma region UTF8 Case Insensitive Find Iterator
 
-static PyObject *Utf8UncasedFindIteratorType_next(Utf8UncasedFindIterator *self) {
+static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
     // Check if we've reached the end
     sz_size_t remaining = (sz_size_t)(self->haystack_end - self->current);
     if (remaining == 0) return NULL;
@@ -7047,44 +7006,44 @@ static PyObject *Utf8UncasedFindIteratorType_next(Utf8UncasedFindIterator *self)
     return (PyObject *)result_obj;
 }
 
-static void Utf8UncasedFindIteratorType_dealloc(Utf8UncasedFindIterator *self) {
+static void Utf8UncasedMatchesType_dealloc(Utf8UncasedMatches *self) {
     Py_XDECREF(self->haystack_obj);
     Py_XDECREF(self->needle_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8UncasedFindIteratorType_iter(PyObject *self) {
+static PyObject *Utf8UncasedMatchesType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8UncasedFindIterator[] =                               //
-    "Utf8UncasedFindIterator(haystack, needle, ...)\n"                          //
+static char const doc_Utf8UncasedMatches[] =                                    //
+    "Utf8UncasedMatches(haystack, needle, ...)\n"                               //
     "\n"                                                                        //
     "Iterator yielding all uncased matches of needle in haystack.\n"            //
     "Uses Unicode case folding for proper handling of international text.\n"    //
     "\n"                                                                        //
     "Created by:\n"                                                             //
-    "  - Str.utf8_uncased_find_iter()\n"                                        //
-    "  - sz.utf8_uncased_find_iter()\n"                                         //
+    "  - Str.utf8_uncased_matches()\n"                                          //
+    "  - sz.utf8_uncased_matches()\n"                                           //
     "\n"                                                                        //
     "Each iteration yields a Str view of the matched region in the haystack.\n" //
     "The matched length may differ from needle length due to case folding\n"    //
     "expansions (e.g., German 'ß' matches 'SS').\n"                             //
     "\n"                                                                        //
     "Example:\n"                                                                //
-    "  >>> len(list(sz.utf8_uncased_find_iter('aAaA', 'a')))\n"                 //
+    "  >>> len(list(sz.utf8_uncased_matches('aAaA', 'a')))\n"                   //
     "  4";
 
-static PyTypeObject Utf8UncasedFindIteratorType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8UncasedFindIterator",
-    .tp_basicsize = sizeof(Utf8UncasedFindIterator),
+static PyTypeObject Utf8UncasedMatchesType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8UncasedMatches",
+    .tp_basicsize = sizeof(Utf8UncasedMatches),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8UncasedFindIteratorType_dealloc,
+    .tp_dealloc = (destructor)Utf8UncasedMatchesType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8UncasedFindIterator,
-    .tp_iter = Utf8UncasedFindIteratorType_iter,
-    .tp_iternext = (iternextfunc)Utf8UncasedFindIteratorType_next,
+    .tp_doc = doc_Utf8UncasedMatches,
+    .tp_iter = Utf8UncasedMatchesType_iter,
+    .tp_iternext = (iternextfunc)Utf8UncasedMatchesType_next,
 };
 
 #pragma endregion
@@ -9346,18 +9305,17 @@ static PyMethodDef stringzilla_methods[] = {
 
     // UTF-8 aware operations
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
-    {"utf8_splitlines_iter", (PyCFunction)Str_like_utf8_splitlines_iter, SZ_METHOD_FLAGS, doc_utf8_splitlines_iter},
-    {"utf8_split_iter", (PyCFunction)Str_like_utf8_split_iter, SZ_METHOD_FLAGS, doc_utf8_split_iter},
-    {"utf8_word_iter", (PyCFunction)Str_like_utf8_word_iter, SZ_METHOD_FLAGS, doc_utf8_word_iter},
-    {"utf8_grapheme_iter", (PyCFunction)Str_like_utf8_grapheme_iter, SZ_METHOD_FLAGS, doc_utf8_grapheme_iter},
-    {"utf8_sentence_iter", (PyCFunction)Str_like_utf8_sentence_iter, SZ_METHOD_FLAGS, doc_utf8_sentence_iter},
-    {"utf8_linewrap_iter", (PyCFunction)Str_like_utf8_linewrap_iter, SZ_METHOD_FLAGS, doc_utf8_linewrap_iter},
+    {"utf8_lines", (PyCFunction)Str_like_utf8_lines, SZ_METHOD_FLAGS, doc_utf8_lines},
+    {"utf8_tokens", (PyCFunction)Str_like_utf8_tokens, SZ_METHOD_FLAGS, doc_utf8_tokens},
+    {"utf8_words", (PyCFunction)Str_like_utf8_words, SZ_METHOD_FLAGS, doc_utf8_words},
+    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
+    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
+    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
     {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
-    {"utf8_uncased_find_iter", (PyCFunction)Str_like_utf8_uncased_find_iter, SZ_METHOD_FLAGS,
-     doc_utf8_uncased_find_iter},
+    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
@@ -9400,14 +9358,14 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&StrType) < 0) return NULL;
     if (PyType_Ready(&FileType) < 0) return NULL;
     if (PyType_Ready(&StrsType) < 0) return NULL;
-    if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SplitLinesIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SplitWhitespaceIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8WordBoundaryIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8GraphemeBoundaryIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SentenceBoundaryIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8LinewrapBoundaryIteratorType) < 0) return NULL;
-    if (PyType_Ready(&Utf8UncasedFindIteratorType) < 0) return NULL;
+    if (PyType_Ready(&FindSplitsType) < 0) return NULL;
+    if (PyType_Ready(&Utf8LinesType) < 0) return NULL;
+    if (PyType_Ready(&Utf8TokensType) < 0) return NULL;
+    if (PyType_Ready(&Utf8WordsType) < 0) return NULL;
+    if (PyType_Ready(&Utf8GraphemesType) < 0) return NULL;
+    if (PyType_Ready(&Utf8SentencesType) < 0) return NULL;
+    if (PyType_Ready(&Utf8LinewrapsType) < 0) return NULL;
+    if (PyType_Ready(&Utf8UncasedMatchesType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;
 
@@ -9486,9 +9444,9 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    Py_INCREF(&SplitIteratorType);
-    if (PyModule_AddObject(m, "SplitIterator", (PyObject *)&SplitIteratorType) < 0) {
-        Py_XDECREF(&SplitIteratorType);
+    Py_INCREF(&FindSplitsType);
+    if (PyModule_AddObject(m, "FindSplits", (PyObject *)&FindSplitsType) < 0) {
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
@@ -9496,10 +9454,10 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    Py_INCREF(&Utf8SplitLinesIteratorType);
-    if (PyModule_AddObject(m, "Utf8SplitLinesIterator", (PyObject *)&Utf8SplitLinesIteratorType) < 0) {
-        Py_XDECREF(&Utf8SplitLinesIteratorType);
-        Py_XDECREF(&SplitIteratorType);
+    Py_INCREF(&Utf8LinesType);
+    if (PyModule_AddObject(m, "Utf8Lines", (PyObject *)&Utf8LinesType) < 0) {
+        Py_XDECREF(&Utf8LinesType);
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
@@ -9507,11 +9465,11 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    Py_INCREF(&Utf8SplitWhitespaceIteratorType);
-    if (PyModule_AddObject(m, "Utf8SplitWhitespaceIterator", (PyObject *)&Utf8SplitWhitespaceIteratorType) < 0) {
-        Py_XDECREF(&Utf8SplitWhitespaceIteratorType);
-        Py_XDECREF(&Utf8SplitLinesIteratorType);
-        Py_XDECREF(&SplitIteratorType);
+    Py_INCREF(&Utf8TokensType);
+    if (PyModule_AddObject(m, "Utf8Tokens", (PyObject *)&Utf8TokensType) < 0) {
+        Py_XDECREF(&Utf8TokensType);
+        Py_XDECREF(&Utf8LinesType);
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
@@ -9522,7 +9480,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     Py_INCREF(&HasherType);
     if (PyModule_AddObject(m, "Hasher", (PyObject *)&HasherType) < 0) {
         Py_XDECREF(&HasherType);
-        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
@@ -9534,7 +9492,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyModule_AddObject(m, "Sha256", (PyObject *)&Sha256Type) < 0) {
         Py_XDECREF(&Sha256Type);
         Py_XDECREF(&HasherType);
-        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
@@ -9551,7 +9509,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         .sz_py_replace_strings_allocator = sz_py_replace_strings_allocator,
     };
     if (PyModule_AddObject(m, "_sz_py_api", PyCapsule_New(&sz_py_api, "_sz_py_api", NULL)) < 0) {
-        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&FindSplitsType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);

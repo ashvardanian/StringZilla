@@ -83,21 +83,19 @@ SZ_INTERNAL sz_size_t sz_line_break_cluster_base_(sz_u8_t const *raw, sz_u8_t co
 enum { sz_utf8_line_window_k = 1024 };
 
 /**
- *  @brief Plural UAX-14 line-break segmentation: one forward sweep emits every line opportunity into parallel
- *         `line_starts` / `line_lengths` arrays, with `mandatory[k]` flagging hard breaks (LB4/LB5).
- *         Forward-only (no reverse counterpart).
+ *  @brief Plural UAX-14 line-break segmentation: one forward sweep emits every UAX-14 break opportunity
+ *         (LB1-LB31) into parallel `line_starts` / `line_lengths` arrays. Forward-only (no reverse counterpart).
  *
  *  Implements LB1-LB31 with no caller scratch. The text is processed in fixed internal windows of at most
  *  `sz_utf8_line_window_k` codepoints decoded into small stack arrays (byte start, descriptor, LB1-resolved
  *  raw class, post-LB9/LB10 effective class). Each window is re-anchored at the current open line's start: an
  *  emitted opportunity is a hard reset point past which no LB rule reads, so re-decoding the open line from
  *  `line_start` is bit-identical to the whole-text sweep. When the window fills before the input ends,
- *  `bytes_consumed` carries the resume offset (the open line's start) for the next call. `mandatory` runs
- *  parallel to the emitted boundaries.
+ *  `bytes_consumed` carries the resume offset (the open line's start) for the next call.
  */
-SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
-    sz_cptr_t text, sz_size_t length,                                    //
-    sz_size_t *line_starts, sz_size_t *line_lengths, sz_u8_t *mandatory, //
+SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
+    sz_cptr_t text, sz_size_t length,                //
+    sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t lines = 0;
@@ -110,10 +108,12 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
     sz_u16_t descriptor_buffer[sz_utf8_line_window_k];
     sz_u8_t raw_buffer[sz_utf8_line_window_k];
     sz_u8_t eff_buffer[sz_utf8_line_window_k];
+    sz_u8_t prev_zwj_buffer[sz_utf8_line_window_k];
     sz_size_t *start = start_buffer;
     sz_u16_t *descriptor = descriptor_buffer;
     sz_u8_t *raw = raw_buffer;
     sz_u8_t *eff = eff_buffer;
+    sz_u8_t *prev_zwj = prev_zwj_buffer;
 
     /* `line_start` (absolute byte offset) anchors the current open line; each window decodes from here. */
     sz_size_t line_start = 0;
@@ -150,6 +150,40 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
          *  may emit the trailing span and stop; a forced cut resumes from the open line in the next call. */
         sz_bool_t const window_is_tail = (sz_bool_t)(!window_full && window_end == length);
 
+        /* LB9/LB10 cluster collapse (matches the SIMD path): drop a combining mark that attaches to a preceding
+         *  base so the rule sweep below sees exactly one entry per cluster and no rule's fixed-offset neighbour
+         *  lookup (left or right) can land on a mark. A lone mark (LB10) is kept but reclassified to AL. `prev_zwj`
+         *  records whether the codepoint immediately preceding each survivor was a ZWJ, preserving LB8a ("no break
+         *  after ZWJ") which the collapse would otherwise lose. `start` is compacted to the survivors' byte offsets,
+         *  so the emit naturally folds each cluster's marks into the segment of its base. */
+        {
+            sz_size_t kept = 0;
+            sz_bool_t attachable = sz_false_k, pending_zwj = sz_false_k;
+            for (sz_size_t i = 0; i < count; ++i) {
+                sz_u8_t cls = raw[i];
+                sz_bool_t const is_mark = (sz_bool_t)(cls == sz_line_break_cm_k || cls == sz_line_break_zwj_k);
+                if (is_mark && attachable) {
+                    pending_zwj = (sz_bool_t)(cls == sz_line_break_zwj_k);
+                    continue;
+                }
+                prev_zwj[kept] = (sz_u8_t)pending_zwj;
+                if (is_mark) {
+                    raw[kept] = sz_line_break_al_k, eff[kept] = sz_line_break_al_k, descriptor[kept] = 0;
+                    attachable = sz_true_k;
+                }
+                else {
+                    raw[kept] = cls, eff[kept] = cls, descriptor[kept] = descriptor[i];
+                    attachable = (sz_bool_t)(cls != sz_line_break_bk_k && cls != sz_line_break_cr_k &&
+                                             cls != sz_line_break_lf_k && cls != sz_line_break_nl_k &&
+                                             cls != sz_line_break_sp_k && cls != sz_line_break_zw_k);
+                }
+                start[kept] = start[i];
+                pending_zwj = (sz_bool_t)(cls == sz_line_break_zwj_k);
+                ++kept;
+            }
+            count = kept;
+        }
+
         /* LB9/LB10 effective class: CM/ZWJ attaches to the prior cluster base, else (LB10) acts as AL. */
         for (sz_size_t k = 0; k < count; ++k) {
             if (!sz_line_break_is_cm_or_zwj_(raw[k])) continue;
@@ -172,7 +206,6 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
             sz_u8_t b = eff[k - 1];
             sz_u8_t a = eff[k];
             sz_bool_t is_break = sz_false_k;
-            sz_bool_t is_mandatory = sz_false_k;
 
             /* last non-space context: nearest j<=k-1 with eff[j] != SP, plus whether spaces were skipped. */
             sz_size_t j = k - 1;
@@ -188,13 +221,11 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
 
             if (b == sz_line_break_bk_k) {
                 is_break = sz_true_k;
-                is_mandatory = sz_true_k;
                 goto decided;
             } // LB4
             if (b == sz_line_break_cr_k && a == sz_line_break_lf_k) { goto decided; } // LB5
             if (b == sz_line_break_cr_k || b == sz_line_break_lf_k || b == sz_line_break_nl_k) {
                 is_break = sz_true_k;
-                is_mandatory = sz_true_k;
                 goto decided;
             }
             if (a == sz_line_break_bk_k || a == sz_line_break_cr_k || a == sz_line_break_lf_k ||
@@ -210,7 +241,7 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
                 is_break = sz_true_k;
                 goto decided;
             }
-            if (raw[k - 1] == sz_line_break_zwj_k) { goto decided; } // LB8a
+            if (prev_zwj[k]) { goto decided; } // LB8a: no break after ZWJ (preserved across the cluster collapse)
             if (sz_line_break_is_cm_or_zwj_(raw[k]) && b != sz_line_break_bk_k && b != sz_line_break_cr_k &&
                 b != sz_line_break_lf_k && b != sz_line_break_nl_k && b != sz_line_break_sp_k &&
                 b != sz_line_break_zw_k) {
@@ -273,13 +304,15 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
             } // LB18
             /* LB19 (East-Asian-aware quotation). */
             if (a == sz_line_break_qu_k && !sz_line_break_descriptor_is_pi_(descriptor[k])) { goto decided; }
-            if (b == sz_line_break_qu_k && !sz_line_break_descriptor_is_pf_(descriptor[k - 1])) { goto decided; }
-            if (a == sz_line_break_qu_k && !sz_line_break_descriptor_is_eaw_(descriptor[k - 1])) { goto decided; }
+            if (b == sz_line_break_qu_k && !sz_line_break_descriptor_is_pf_(descriptor[b_base])) { goto decided; }
+            if (a == sz_line_break_qu_k && !sz_line_break_descriptor_is_eaw_(descriptor[b_base])) { goto decided; }
             if (a == sz_line_break_qu_k && (k + 1 >= count || !sz_line_break_descriptor_is_eaw_(descriptor[k + 1]))) {
                 goto decided;
             }
             if (b == sz_line_break_qu_k && !sz_line_break_descriptor_is_eaw_(descriptor[k])) { goto decided; }
-            if (b == sz_line_break_qu_k && (k < 2 || !sz_line_break_descriptor_is_eaw_(descriptor[k - 2]))) {
+            if (b == sz_line_break_qu_k &&
+                (b_base == 0 ||
+                 !sz_line_break_descriptor_is_eaw_(descriptor[sz_line_break_cluster_base_(raw, eff, b_base - 1)]))) {
                 goto decided;
             }
             if (a == sz_line_break_cb_k || b == sz_line_break_cb_k) {
@@ -304,9 +337,8 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
                 a == sz_line_break_ns_k || b == sz_line_break_bb_k) {
                 goto decided;
             } // LB21
-            if (k >= 2) { // LB21a: HL (HY|HH) x [^HL]
-                sz_u8_t bb2 = eff[k - 2];
-                if (bb2 == sz_line_break_hl_k && (b == sz_line_break_hy_k || b == sz_line_break_hh_k) &&
+            if (b_base > 0) { // LB21a: HL (HY|HH) x [^HL] -- the HL precedes the (HY|HH) cluster (skip its marks)
+                if (eff[b_base - 1] == sz_line_break_hl_k && (b == sz_line_break_hy_k || b == sz_line_break_hh_k) &&
                     a != sz_line_break_hl_k) {
                     goto decided;
                 }
@@ -427,7 +459,7 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
             }
             if (b == sz_line_break_cp_k &&
                 (a == sz_line_break_al_k || a == sz_line_break_hl_k || a == sz_line_break_nu_k) &&
-                !sz_line_break_descriptor_is_eaw_(descriptor[k - 1])) {
+                !sz_line_break_descriptor_is_eaw_(descriptor[b_base])) {
                 goto decided;
             }
             /* LB30a: RI RI keep pairs. */
@@ -461,7 +493,6 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
                 }
                 line_starts[lines] = local_line_start;
                 line_lengths[lines] = start[k] - local_line_start;
-                mandatory[lines] = (sz_u8_t)(is_mandatory ? 1 : 0);
                 ++lines;
                 local_line_start = start[k];
             }
@@ -479,7 +510,6 @@ SZ_PUBLIC sz_size_t sz_utf8_line_find_boundaries_serial(                 //
             }
             line_starts[lines] = local_line_start;
             line_lengths[lines] = length - local_line_start;
-            mandatory[lines] = 0;
             ++lines;
             if (bytes_consumed) *bytes_consumed = length;
             return lines;

@@ -61,8 +61,8 @@ typedef struct sz_implementations_t {
 
     sz_utf8_count_t utf8_count;
     sz_utf8_find_nth_t utf8_find_nth;
-    sz_utf8_find_boundaries_t utf8_find_newlines;
-    sz_utf8_find_boundaries_t utf8_find_whitespaces;
+    sz_utf8_segmenter_t utf8_newlines;
+    sz_utf8_segmenter_t utf8_whitespaces;
     sz_utf8_unpack_chunk_t utf8_unpack_chunk;
 
     sz_utf8_norm_t utf8_norm;
@@ -70,12 +70,10 @@ typedef struct sz_implementations_t {
     sz_utf8_uncased_fold_t utf8_uncased_fold;
     sz_utf8_uncased_find_t utf8_uncased_find;
 
-    sz_utf8_find_boundaries_t utf8_word_find_boundaries;
-    sz_utf8_find_boundaries_t utf8_word_rfind_boundaries;
-    sz_utf8_find_boundaries_t utf8_grapheme_find_boundaries;
-    sz_utf8_find_boundaries_t utf8_grapheme_rfind_boundaries;
-    sz_utf8_find_boundaries_t utf8_sentence_find_boundaries;
-    sz_utf8_find_boundaries_t utf8_find_linewraps;
+    sz_utf8_segmenter_t utf8_words;
+    sz_utf8_segmenter_t utf8_graphemes;
+    sz_utf8_segmenter_t utf8_sentences;
+    sz_utf8_segmenter_t utf8_linewraps;
     sz_utf8_uncased_order_t utf8_uncased_order;
 
     sz_sequence_argsort_t sequence_argsort;

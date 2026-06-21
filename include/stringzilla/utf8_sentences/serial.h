@@ -59,10 +59,43 @@ SZ_INTERNAL sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
 
-/** @brief Sentence_Break property of the codepoint starting at `start`. */
+/**
+ *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
+ *         Mirrors the SIMD `sz_utf8_codepoints_decode_window_` codepoint-start convention so the serial and
+ *         Ice Lake backends segment malformed input identically (UAX-29 leaves ill-formed bytes undefined).
+ */
+SZ_INTERNAL sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    sz_size_t next = position + 1;
+    while (next < length && ((sz_u8_t)text[next] & 0xC0) == 0x80) ++next;
+    return next;
+}
+
+/**
+ *  @brief Sentence_Break property of the codepoint starting at `start`, decoded BLINDLY to mirror the SIMD
+ *         `sz_utf8_codepoints_decode_window_`: the lead's strict length class (2-byte `110xxxxx`, 3-byte
+ *         `1110xxxx`, 4-byte `11110xxx`; everything else single-byte) selects how many following bytes are
+ *         folded in with no continuation/overlong/surrogate validation, missing trailing bytes read as zero.
+ *         Valid UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
+ */
 SZ_INTERNAL sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
-    sz_size_t decode = start;
-    sz_rune_t rune = sz_utf8_decode_(text, length, &decode);
+    sz_u8_t const lead = (sz_u8_t)text[start];
+    int const lead_length = ((lead & 0xE0u) == 0xC0u)   ? 2
+                            : ((lead & 0xF0u) == 0xE0u) ? 3
+                            : ((lead & 0xF8u) == 0xF0u) ? 4
+                                                        : 1;
+    sz_u8_t const byte1 = (start + 1 < length) ? (sz_u8_t)text[start + 1] : 0;
+    sz_u8_t const byte2 = (start + 2 < length) ? (sz_u8_t)text[start + 2] : 0;
+    sz_u8_t const byte3 = (start + 3 < length) ? (sz_u8_t)text[start + 3] : 0;
+    sz_rune_t rune;
+    switch (lead_length) {
+    case 2: rune = ((sz_rune_t)(lead & 0x1Fu) << 6) | (byte1 & 0x3Fu); break;
+    case 3: rune = ((sz_rune_t)(lead & 0x0Fu) << 12) | ((sz_rune_t)(byte1 & 0x3Fu) << 6) | (byte2 & 0x3Fu); break;
+    case 4:
+        rune = ((sz_rune_t)(lead & 0x07u) << 18) | ((sz_rune_t)(byte1 & 0x3Fu) << 12) |
+               ((sz_rune_t)(byte2 & 0x3Fu) << 6) | (byte3 & 0x3Fu);
+        break;
+    default: rune = lead; break;
+    }
     return sz_rune_sentence_break_property(rune);
 }
 
@@ -155,7 +188,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_sentence_boundary_serial(sz_cptr_t text, sz_size_
                 while (scan < length) {
                     sz_u8_t scan_prop = sz_sentence_break_property_at_(text, length, scan);
                     if (sz_sentence_break_is_transparent_(scan_prop)) {
-                        scan += sz_utf8_codepoint_length_((sz_u8_t)text[scan]);
+                        scan = sz_sentence_break_next_start_(text, length, scan);
                         continue;
                     }
                     if (scan_prop == sz_sentence_break_lower_k) {
@@ -165,7 +198,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_sentence_boundary_serial(sz_cptr_t text, sz_size_
                     if (scan_prop == sz_sentence_break_oletter_k || scan_prop == sz_sentence_break_upper_k ||
                         sz_sentence_break_is_parasep_(scan_prop) || sz_sentence_break_is_saterm_(scan_prop))
                         break;
-                    scan += sz_utf8_codepoint_length_((sz_u8_t)text[scan]);
+                    scan = sz_sentence_break_next_start_(text, length, scan);
                 }
                 if (found_lower) return sz_false_k;
             }
@@ -186,7 +219,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_sentence_boundary_serial(sz_cptr_t text, sz_size_
  *  @brief Plural UAX-29 sentence segmentation: one forward sweep emits every sentence into parallel
  *         `sentence_starts` / `sentence_lengths` arrays. Forward-only (no reverse counterpart).
  */
-SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_serial( //
+SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(                //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
@@ -198,7 +231,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_serial( //
     }
 
     sz_size_t sentence_start = 0;
-    sz_size_t position = sz_utf8_codepoint_length_((sz_u8_t)text[0]);
+    sz_size_t position = sz_sentence_break_next_start_(text, length, 0);
     while (position < length) {
         if (sz_utf8_is_sentence_boundary_serial(text, length, position)) {
             if (sentences == sentences_capacity) {
@@ -210,7 +243,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentence_find_boundaries_serial( //
             ++sentences;
             sentence_start = position;
         }
-        position += sz_utf8_codepoint_length_((sz_u8_t)text[position]);
+        position = sz_sentence_break_next_start_(text, length, position);
     }
 
     if (sentences == sentences_capacity) {

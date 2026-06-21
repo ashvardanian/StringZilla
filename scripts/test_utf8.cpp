@@ -112,17 +112,17 @@ static void print_utf8_test_bytes_(char const *label, char const *bytes, std::si
  *  @param whitespace_length     Byte length of @p whitespace_text.
  *  @param expected_whitespaces  Expected (offset, length) pairs of the whitespace matches.
  */
-static void check_utf8_unit_(                                                                         //
-    sz_utf8_count_t count, sz_utf8_find_boundaries_t newlines, sz_utf8_find_boundaries_t whitespaces, //
-    sz_cptr_t count_text, sz_size_t count_length, sz_size_t expected_count,                           //
-    sz_cptr_t newline_text, sz_size_t newline_length,                                                 //
-    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_newlines,                            //
-    sz_cptr_t whitespace_text, sz_size_t whitespace_length,                                           //
+static void check_utf8_unit_(                                                             //
+    sz_utf8_count_t count, sz_utf8_segmenter_t newlines, sz_utf8_segmenter_t whitespaces, //
+    sz_cptr_t count_text, sz_size_t count_length, sz_size_t expected_count,               //
+    sz_cptr_t newline_text, sz_size_t newline_length,                                     //
+    std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_newlines,                //
+    sz_cptr_t whitespace_text, sz_size_t whitespace_length,                               //
     std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_whitespaces) {
 
     assert(count(count_text, count_length) == expected_count);
 
-    auto check_boundaries = [](sz_utf8_find_boundaries_t finder, sz_cptr_t text, sz_size_t length,
+    auto check_boundaries = [](sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length,
                                std::vector<std::pair<sz_size_t, sz_size_t>> const &expected) {
         sz_size_t found_offsets[16], found_lengths[16], consumed = 0;
         sz_size_t const found = finder(text, length, found_offsets, found_lengths, 16u, &consumed);
@@ -148,7 +148,7 @@ static void check_utf8_unit_(                                                   
  *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
  *  the C++ `sz::string_view` wrappers, so a regression that the serial-vs-SIMD agreement tests would
  *  miss - because both share a wrong constant - is still caught against an external ground truth. This
- *  is the isolated coverage for `sz_utf8_find_newlines`, `sz_utf8_find_whitespaces`, `sz_utf8_find_nth`
+ *  is the isolated coverage for `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_find_nth`
  *  (whose SIMD variants are otherwise untested), and `sz_utf8_unpack_chunk` (otherwise untested in C++).
  */
 void test_utf8_unit() {
@@ -160,13 +160,13 @@ void test_utf8_unit() {
     sz_size_t const mixed_length = (sz_size_t)(sizeof(mixed) - 1);
     assert(mixed_length == 6u);
 
-    // `sz_utf8_find_newlines`: in "a\nb\r\nc" the `\n` is a length-1 newline at byte 1, and the `\r\n` is a
+    // `sz_utf8_newlines`: in "a\nb\r\nc" the `\n` is a length-1 newline at byte 1, and the `\r\n` is a
     // single length-2 newline at byte 3 (CRLF merges into one match).
     char const newline_text[] = "a\nb\r\nc";
     sz_size_t const newline_length = (sz_size_t)(sizeof(newline_text) - 1);
     std::vector<std::pair<sz_size_t, sz_size_t>> const newline_spans = {{1u, 1u}, {3u, 2u}};
 
-    // `sz_utf8_find_whitespaces`: in "a b\tc" the space is a length-1 match at byte 1, the tab at byte 3
+    // `sz_utf8_whitespaces`: in "a b\tc" the space is a length-1 match at byte 1, the tab at byte 3
     // (there is no CRLF merging in the whitespace set - each codepoint is its own match).
     char const whitespace_text[] = "a b\tc";
     sz_size_t const whitespace_length = (sz_size_t)(sizeof(whitespace_text) - 1);
@@ -174,19 +174,19 @@ void test_utf8_unit() {
 
     // `sz_utf8_count` (6 bytes, 3 codepoints) plus the newline/whitespace boundary anchors, driven through
     // the dispatched (automatic kernel), serial, and each natively-compiled backend.
-    check_utf8_unit_(sz_utf8_count, sz_utf8_find_newlines, sz_utf8_find_whitespaces, // Dispatched
+    check_utf8_unit_(sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces, // Dispatched
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
-    check_utf8_unit_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial, // serial
+    check_utf8_unit_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, // serial
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #if SZ_USE_HASWELL
-    check_utf8_unit_(sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell, // haswell
+    check_utf8_unit_(sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell, // haswell
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_unit_(sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake, // icelake
+    check_utf8_unit_(sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake, // icelake
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
@@ -312,7 +312,7 @@ void test_utf8_unit() {
     // Iterate over UTF-32 codepoints
     {
         auto chars = [](char const *t) {
-            return sz::string_view(t).utf8_chars().template to<std::vector<sz_rune_t>>();
+            return sz::string_view(t).utf8_runes().template to<std::vector<sz_rune_t>>();
         };
 
         // Basic ASCII and edge cases
@@ -402,13 +402,13 @@ void test_utf8_unit() {
     // Test 64-byte chunk boundaries and batch limits
     {
         // Critical 63, 64, 65 byte boundaries
-        let_assert(std::string s63(63, 'x'), sz::string_view(s63).utf8_chars().size() == 63);
-        let_assert(std::string s64(64, 'x'), sz::string_view(s64).utf8_chars().size() == 64);
-        let_assert(std::string s65(65, 'x'), sz::string_view(s65).utf8_chars().size() == 65);
+        let_assert(std::string s63(63, 'x'), sz::string_view(s63).utf8_runes().size() == 63);
+        let_assert(std::string s64(64, 'x'), sz::string_view(s64).utf8_runes().size() == 64);
+        let_assert(std::string s65(65, 'x'), sz::string_view(s65).utf8_runes().size() == 65);
 
         // ASCII batch limit: 16 characters max per Ice Lake iteration
-        let_assert(std::string s17(17, 'x'), sz::string_view(s17).utf8_chars().size() == 17);
-        let_assert(std::string s20(20, 'x'), sz::string_view(s20).utf8_chars().size() == 20);
+        let_assert(std::string s17(17, 'x'), sz::string_view(s17).utf8_runes().size() == 17);
+        let_assert(std::string s20(20, 'x'), sz::string_view(s20).utf8_runes().size() == 20);
 
         // 2-byte batch limit: 32 characters (64 bytes) max per iteration
         scope_assert(std::string cyr32, for (int i = 0; i < 32; ++i) cyr32 += "П",
@@ -435,15 +435,15 @@ void test_utf8_unit() {
         // Test sequences exceeding batch limits
         // 100 consecutive 2-byte (exceeds 32-char limit 3x)
         scope_assert(std::string cyr100, for (int i = 0; i < 100; ++i) cyr100 += "П",
-                     sz::string_view(cyr100).utf8_chars().size() == 100);
+                     sz::string_view(cyr100).utf8_runes().size() == 100);
 
         // 50 consecutive 3-byte (exceeds 16-char limit 3x)
         scope_assert(std::string cjk50, for (int i = 0; i < 50; ++i) cjk50 += "世",
-                     sz::string_view(cjk50).utf8_chars().size() == 50);
+                     sz::string_view(cjk50).utf8_runes().size() == 50);
 
         // 50 consecutive 4-byte (exceeds 16-char limit 3x)
         scope_assert(std::string emoji50, for (int i = 0; i < 50; ++i) emoji50 += "😀",
-                     sz::string_view(emoji50).utf8_chars().size() == 50);
+                     sz::string_view(emoji50).utf8_runes().size() == 50);
 
         // Asymmetric overflow: 20x (2 ASCII + 3 Cyrillic) = 100 chars, 140 bytes
         scope_assert(std::string overflow_asym, for (int i = 0; i < 20; ++i) overflow_asym += "aaПРС",
@@ -452,7 +452,7 @@ void test_utf8_unit() {
         // Test transitions at chunk boundaries
         // 63 bytes ASCII + 2-byte char (transition at 64-byte boundary)
         scope_assert(std::string boundary_test(63, 'x'), boundary_test += "П",
-                     sz::string_view(boundary_test).utf8_chars().size() == 64);
+                     sz::string_view(boundary_test).utf8_runes().size() == 64);
 
         // Asymmetric spanning boundary: 60 ASCII + 24 Cyrillic = 84 chars, 108 bytes
         scope_assert(
@@ -486,7 +486,7 @@ void test_utf8_unit() {
 
     // Split by Unicode newlines
     {
-        auto lines = [](sz::string_view t) { return t.utf8_split_lines().template to<std::vector<std::string>>(); };
+        auto lines = [](sz::string_view t) { return t.utf8_lines().template to<std::vector<std::string>>(); };
 
         // Basic newline types
         let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
@@ -528,7 +528,7 @@ void test_utf8_unit() {
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
-        auto words = [](sz::string_view t) { return t.utf8_split().template to<std::vector<std::string>>(); };
+        auto words = [](sz::string_view t) { return t.utf8_tokens().template to<std::vector<std::string>>(); };
 
         // Basic ASCII whitespace (6 single-byte chars)
         let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
@@ -622,7 +622,7 @@ void test_utf8_unit() {
 
         // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
         scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
-                     sz::string_view(long_ws).utf8_split().template to<std::vector<std::string>>().size() ==
+                     sz::string_view(long_ws).utf8_tokens().template to<std::vector<std::string>>().size() ==
                          101); // 100 spaces = 101 empty segments
 
         scope_assert(
@@ -631,7 +631,7 @@ void test_utf8_unit() {
                 for (int i = 0; i < 50; ++i) long_mixed += "word ";
                 long_mixed.pop_back();
             }, // Remove trailing space
-            sz::string_view(long_mixed).utf8_split().template to<std::vector<std::string>>().size() == 50); // 50 words
+            sz::string_view(long_mixed).utf8_tokens().template to<std::vector<std::string>>().size() == 50); // 50 words
     }
 
     // Test with `sz::string` - not just `sz::string_view`
@@ -639,14 +639,14 @@ void test_utf8_unit() {
         sz::string str = "Hello 世界";
         assert(str.utf8_count() == 8);
         assert(str.utf8_find_nth(6) == 6);
-        let_assert(auto c = str.utf8_chars().template to<std::vector<sz_rune_t>>(), c.size() == 8 && c[6] == 0x4E16);
+        let_assert(auto c = str.utf8_runes().template to<std::vector<sz_rune_t>>(), c.size() == 8 && c[6] == 0x4E16);
 
         sz::string multiline = "a\nb\nc";
-        let_assert(auto l = multiline.utf8_split_lines().template to<std::vector<std::string>>(),
+        let_assert(auto l = multiline.utf8_lines().template to<std::vector<std::string>>(),
                    l.size() == 3 && l[1] == "b");
 
         sz::string words_str = "foo bar baz";
-        let_assert(auto w = words_str.utf8_split().template to<std::vector<std::string>>(),
+        let_assert(auto w = words_str.utf8_tokens().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }
 
@@ -741,7 +741,7 @@ void test_utf8_ligature_unit() {
     let_assert(auto m = str("ss").utf8_uncased_find("\xC3\x9F"), m.offset == 0);
 }
 
-/** @brief Golden and reverse-equals-forward checks for UTF-8 (UAX #29) word-boundary detection. */
+/** @brief Golden checks for UTF-8 (UAX #29) word-boundary detection. */
 void test_utf8_words_unit() {
 
     // Test Unicode word boundary detection (TR29 Word_Break)
@@ -819,7 +819,7 @@ void test_utf8_words_unit() {
         assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
     }
 
-    // Segment `text` into UAX-29 words through one of the plural kernels (forward or reverse variant).
+    // Segment `text` into UAX-29 words through one of the plural kernels.
     using word_boundaries_t = sz_size_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
     auto uax29_segments = [](word_boundaries_t boundaries, sz::string_view text) {
         std::vector<sz_size_t> starts(text.size() + 1), lengths(text.size() + 1);
@@ -830,7 +830,7 @@ void test_utf8_words_unit() {
         for (sz_size_t i = 0; i != count; ++i) words.emplace_back(text.data() + starts[i], lengths[i]);
         return words;
     };
-    auto words = [&](sz::string_view text) { return uax29_segments(sz_utf8_word_find_boundaries, text); };
+    auto words = [&](sz::string_view text) { return uax29_segments(sz_utf8_words, text); };
 
     // Forward segmentation against hand-checked UAX-29 expectations.
     let_assert(auto w = words(""), w.empty());
@@ -844,21 +844,103 @@ void test_utf8_words_unit() {
     let_assert(auto w = words("a\r\nb"), w.size() == 3 && w[1] == "\r\n"); // WB3: CR × LF stay together
     let_assert(auto w = words("你好"), w.size() == 2 && w[0] == "你" && w[1] == "好"); // CJK: each is its own word
 
-    // For each input the active backend, the serial reference, and the forward & reverse C++ ranges must agree.
+    // For each input the active backend, the serial reference, and the forward C++ range must agree.
     auto check_consistency = [&](sz::string_view text) {
-        auto forward = uax29_segments(sz_utf8_word_find_boundaries, text);
-        std::vector<std::string> reversed(forward.rbegin(), forward.rend());
-        assert(uax29_segments(sz_utf8_word_find_boundaries_serial, text) == forward && "backend ≠ serial reference");
-        assert(uax29_segments(sz_utf8_word_rfind_boundaries, text) == reversed &&
-               "reverse pass ≠ reversed forward list");
-        assert(text.utf8_split_words().template to<std::vector<std::string>>() == forward &&
-               "utf8_split_words ≠ kernel");
-        assert(text.utf8_rsplit_words().template to<std::vector<std::string>>() == reversed &&
-               "utf8_rsplit_words ≠ kernel");
+        auto forward = uax29_segments(sz_utf8_words, text);
+        assert(uax29_segments(sz_utf8_words_serial, text) == forward && "backend ≠ serial reference");
+        assert(text.utf8_words().template to<std::vector<std::string>>() == forward && "utf8_words ≠ kernel");
     };
     for (sz::string_view text : {"", "a", "Hello, world!", "don't", "l'avion", "3,14", "1,2,3", "3,", "can't_stop",
                                  "a\r\nb", "Größe привет мир 你好 42", "the quick brown fox, really!"})
         check_consistency(text);
+
+    // Multi-window seam regressions: WB15/16 Regional_Indicator parity and WB6/7/11/12 Mid-bridge carry once
+    // miscounted across the 64-byte window boundary. The single-window inputs above can never exercise a seam, so
+    // these byte vectors (each > 64 bytes) are the regression guard — serial and icelake must still agree exactly.
+    auto from_hex = [](char const *h) {
+        std::string out;
+        auto nibble = [](char c) { return c <= '9' ? c - '0' : (c | 32) - 'a' + 10; };
+        for (; h[0] && h[1]; h += 2) out.push_back(static_cast<char>(nibble(h[0]) * 16 + nibble(h[1])));
+        return out;
+    };
+    for (
+        char const *seam_hex :
+        {// `RI RI RI` after a newline, straddling the seam (parity miscount dropped the boundary at byte 54).
+         "E382AB2D0AF09F87A662C2ADF09F87A6CC800A5FF09F87A6F09F87A6C2AD0ACC88F09F87BAF09F8FBBCC88C2ADE281A0CC88F09F" "87"
+                                                                                                                    "A6"
+                                                                                                                    "F0"
+                                                                                                                    "9F"
+                                                                                                                    "87"
+                                                                                                                    "A6"
+                                                                                                                    "E4"
+                                                                                                                    "B8"
+                                                                                                                    "AD"
+                                                                                                                    "E2"
+                                                                                                                    "81"
+                                                                                                                    "A0"
+                                                                                                                    "5"
+                                                                                                                    "F",
+         // 4-RI run with an inner Word_Joiner: the parity seed must thread across the seam (spurious break at 57).
+         "5F27F09F87BAE4B8ADCC81F09F87A6F09F87A65FCC885FD7902DE29382CC8062F09F87A6E281A0F09F87BACC80CC88F09F8FBBF0" "9F"
+                                                                                                                    "87"
+                                                                                                                    "BA"
+                                                                                                                    "CC"
+                                                                                                                    "81"
+                                                                                                                    "F0"
+                                                                                                                    "9F"
+                                                                                                                    "87"
+                                                                                                                    "BA"
+                                                                                                                    "0A"
+                                                                                                                    "C2"
+                                                                                                                    "AD"
+                                                                                                                    "F0"
+                                                                                                                    "9F"
+                                                                                                                    "87"
+                                                                                                                    "BA"
+                                                                                                                    "CC"
+                                                                                                                    "88"
+                                                                                                                    "E3"
+                                                                                                                    "82"
+                                                                                                                    "AB"
+                                                                                                                    "5F"
+                                                                                                                    "27"
+                                                                                                                    "2E"
+                                                                                                                    "CC"
+                                                                                                                    "88"
+                                                                                                                    "0A"
+                                                                                                                    "E4"
+                                                                                                                    "B8"
+                                                                                                                    "A"
+                                                                                                                    "D",
+         // WB12 `5 ' 5` bridge whose left digit is two codepoints back across a long ignorable run (spurious @60).
+         "5FE281A05F352CF09F988027F09F98805FCC88CC81E4B8ADE281A05F62CC8061E4B8ADE382AB35E281A0CC88CC88F09F8FBBCC88" "E2"
+                                                                                                                    "81"
+                                                                                                                    "A0"
+                                                                                                                    "CC"
+                                                                                                                    "80"
+                                                                                                                    "CC"
+                                                                                                                    "81"
+                                                                                                                    "27"
+                                                                                                                    "35"
+                                                                                                                    "CC"
+                                                                                                                    "80"
+                                                                                                                    "E4"
+                                                                                                                    "B8"
+                                                                                                                    "AD"
+                                                                                                                    "CC"
+                                                                                                                    "81"
+                                                                                                                    "E2"
+                                                                                                                    "80"
+                                                                                                                    "8D"
+                                                                                                                    "C3"
+                                                                                                                    "A9"
+                                                                                                                    "E3"
+                                                                                                                    "80"
+                                                                                                                    "80"
+                                                                                                                    "35"
+                                                                                                                    "2"
+                                                                                                                    "7"})
+        check_consistency(from_hex(seam_hex));
 
     // A long mixed string exercises the wide SIMD windows and their tails.
     scope_assert(
@@ -866,7 +948,7 @@ void test_utf8_words_unit() {
         [&] {
             for (int i = 0; i != 200; ++i) big += "hello world, foo_bar 42 don't ";
         }(),
-        uax29_segments(sz_utf8_word_find_boundaries, big) == uax29_segments(sz_utf8_word_find_boundaries_serial, big));
+        uax29_segments(sz_utf8_words, big) == uax29_segments(sz_utf8_words_serial, big));
 }
 
 #pragma region Segmentation Helpers
@@ -875,7 +957,7 @@ void test_utf8_words_unit() {
 static constexpr sz_size_t utf8_unit_capacity_k = 70;
 
 /** @brief Drive any boundary finder one-shot over @p text and return the emitted segments as byte strings. */
-static std::vector<std::string> utf8_segments_(sz_utf8_find_boundaries_t finder, sz::string_view text) {
+static std::vector<std::string> utf8_segments_(sz_utf8_segmenter_t finder, sz::string_view text) {
     std::vector<sz_size_t> starts(text.size() + 1), lengths(text.size() + 1);
     sz_size_t consumed = 0;
     sz_size_t const count = finder(text.data(), text.size(), starts.data(), lengths.data(), text.size() + 1, &consumed);
@@ -1014,21 +1096,14 @@ struct utf8_unit_case_t {
 
 /**
  *  @brief Drive one segmentation backend (dispatched / serial / ISA) over hand-checked golden vectors,
- *         asserting the forward segmentation matches and, when @p reverse_or_null is non-NULL, that the
- *         reverse pass equals the reversed forward list.
+ *         asserting the forward segmentation matches.
  *         Mirrors `check_utf8_unit_` (caller invokes once per backend).
  */
-static void check_utf8_segment_unit_(char const *family, sz_utf8_find_boundaries_t forward,
-                                     sz_utf8_find_boundaries_t reverse_or_null,
+static void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t forward,
                                      std::vector<utf8_unit_case_t> const &cases) {
     for (utf8_unit_case_t const &one : cases) {
         std::vector<std::string> const got = utf8_segments_(forward, one.text);
         assert(got == one.expected && family && "segment forward != golden");
-        if (reverse_or_null) {
-            std::vector<std::string> reversed = utf8_segments_(reverse_or_null, one.text);
-            std::reverse(reversed.begin(), reversed.end());
-            assert(reversed == got && family && "segment reverse pass != reversed forward list");
-        }
     }
 }
 
@@ -1082,13 +1157,10 @@ static std::vector<utf8_unit_case_t> utf8_line_unit_cases_() {
 void test_utf8_grapheme_unit() {
     std::printf("  - testing UTF-8 grapheme-cluster known-answer vectors...\n");
     std::vector<utf8_unit_case_t> const cases = utf8_grapheme_unit_cases_();
-    check_utf8_segment_unit_("grapheme", sz_utf8_grapheme_find_boundaries, sz_utf8_grapheme_rfind_boundaries,
-                             cases); // Dispatched
-    check_utf8_segment_unit_("grapheme", sz_utf8_grapheme_find_boundaries_serial,
-                             sz_utf8_grapheme_rfind_boundaries_serial, cases);
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes, cases); // Dispatched
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, cases);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("grapheme", sz_utf8_grapheme_find_boundaries_icelake,
-                             sz_utf8_grapheme_rfind_boundaries_icelake, cases);
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_icelake, cases);
 #endif
 }
 
@@ -1096,13 +1168,10 @@ void test_utf8_grapheme_unit() {
 void test_utf8_sentence_unit() {
     std::printf("  - testing UTF-8 sentence-break known-answer vectors...\n");
     std::vector<utf8_unit_case_t> const cases = utf8_sentence_unit_cases_();
-    check_utf8_segment_unit_("sentence", sz_utf8_sentence_find_boundaries, (sz_utf8_find_boundaries_t)SZ_NULL,
-                             cases); // Dispatched
-    check_utf8_segment_unit_("sentence", sz_utf8_sentence_find_boundaries_serial, (sz_utf8_find_boundaries_t)SZ_NULL,
-                             cases);
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences, cases); // Dispatched
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, cases);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("sentence", sz_utf8_sentence_find_boundaries_icelake, (sz_utf8_find_boundaries_t)SZ_NULL,
-                             cases);
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences_icelake, cases);
 #endif
 }
 
@@ -1110,11 +1179,10 @@ void test_utf8_sentence_unit() {
 void test_utf8_line_unit() {
     std::printf("  - testing UTF-8 line-break known-answer vectors...\n");
     std::vector<utf8_unit_case_t> const cases = utf8_line_unit_cases_();
-    check_utf8_segment_unit_("line", sz_utf8_find_linewraps, (sz_utf8_find_boundaries_t)SZ_NULL,
-                             cases); // Dispatched
-    check_utf8_segment_unit_("line", sz_utf8_find_linewraps_serial, (sz_utf8_find_boundaries_t)SZ_NULL, cases);
+    check_utf8_segment_unit_("line", sz_utf8_linewraps, cases); // Dispatched
+    check_utf8_segment_unit_("line", sz_utf8_linewraps_serial, cases);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("line", sz_utf8_find_linewraps_icelake, (sz_utf8_find_boundaries_t)SZ_NULL, cases);
+    check_utf8_segment_unit_("line", sz_utf8_linewraps_icelake, cases);
 #endif
 }
 
@@ -1125,14 +1193,12 @@ void test_utf8_line_unit() {
 /**
  *  @brief Feed malformed / invalid UTF-8 through any boundary finder, asserting it survives, every emitted
  *         segment is in-bounds, and `bytes_consumed <= length`. Mirrors the structure of `check_utf8_safety_`.
- *         When @p reverse_or_null is non-NULL the backward pass is checked too.
  */
-static void check_utf8_segment_safety_(char const *family, sz_utf8_find_boundaries_t forward,
-                                       sz_utf8_find_boundaries_t reverse_or_null,
+static void check_utf8_segment_safety_(char const *family, sz_utf8_segmenter_t forward,
                                        std::size_t random_input_count = scale_iterations(10000)) {
     sz_size_t offsets[utf8_unit_capacity_k + 1], lengths[utf8_unit_capacity_k + 1];
 
-    auto probe = [&](sz_utf8_find_boundaries_t finder, char const *input, std::size_t input_length) {
+    auto probe = [&](sz_utf8_segmenter_t finder, char const *input, std::size_t input_length) {
         sz_size_t bytes_consumed = 0;
         sz_size_t const found = finder(input, (sz_size_t)input_length, offsets, lengths,
                                        (sz_size_t)(utf8_unit_capacity_k + 1), &bytes_consumed);
@@ -1145,10 +1211,7 @@ static void check_utf8_segment_safety_(char const *family, sz_utf8_find_boundari
             assert(false && "segment finder emitted a span outside the input");
         }
     };
-    auto check = [&](char const *input, std::size_t input_length) {
-        probe(forward, input, input_length);
-        if (reverse_or_null) probe(reverse_or_null, input, input_length);
-    };
+    auto check = [&](char const *input, std::size_t input_length) { probe(forward, input, input_length); };
 
     char input[utf8_unit_capacity_k];
 
@@ -1188,13 +1251,10 @@ static void check_utf8_segment_safety_(char const *family, sz_utf8_find_boundari
 /** @brief Malformed-input safety of the grapheme finders through serial, dispatched, and each ISA backend. */
 void test_utf8_grapheme_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 grapheme kernels...\n");
-    check_utf8_segment_safety_("grapheme (serial)", sz_utf8_grapheme_find_boundaries_serial,
-                               sz_utf8_grapheme_rfind_boundaries_serial);
-    check_utf8_segment_safety_("grapheme (dispatched)", sz_utf8_grapheme_find_boundaries,
-                               sz_utf8_grapheme_rfind_boundaries);
+    check_utf8_segment_safety_("grapheme (serial)", sz_utf8_graphemes_serial);
+    check_utf8_segment_safety_("grapheme (dispatched)", sz_utf8_graphemes);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("grapheme (icelake)", sz_utf8_grapheme_find_boundaries_icelake,
-                               sz_utf8_grapheme_rfind_boundaries_icelake);
+    check_utf8_segment_safety_("grapheme (icelake)", sz_utf8_graphemes_icelake);
 #endif
     std::printf("    grapheme safety passed!\n");
 }
@@ -1202,13 +1262,10 @@ void test_utf8_grapheme_safety() {
 /** @brief Malformed-input safety of the sentence finder through serial, dispatched, and each ISA backend. */
 void test_utf8_sentence_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 sentence kernels...\n");
-    check_utf8_segment_safety_("sentence (serial)", sz_utf8_sentence_find_boundaries_serial,
-                               (sz_utf8_find_boundaries_t)SZ_NULL);
-    check_utf8_segment_safety_("sentence (dispatched)", sz_utf8_sentence_find_boundaries,
-                               (sz_utf8_find_boundaries_t)SZ_NULL);
+    check_utf8_segment_safety_("sentence (serial)", sz_utf8_sentences_serial);
+    check_utf8_segment_safety_("sentence (dispatched)", sz_utf8_sentences);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("sentence (icelake)", sz_utf8_sentence_find_boundaries_icelake,
-                               (sz_utf8_find_boundaries_t)SZ_NULL);
+    check_utf8_segment_safety_("sentence (icelake)", sz_utf8_sentences_icelake);
 #endif
     std::printf("    sentence safety passed!\n");
 }
@@ -1216,10 +1273,10 @@ void test_utf8_sentence_safety() {
 /** @brief Malformed-input safety of the line finder through serial, dispatched, and each ISA backend. */
 void test_utf8_line_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 line kernels...\n");
-    check_utf8_segment_safety_("line (serial)", sz_utf8_find_linewraps_serial, (sz_utf8_find_boundaries_t)SZ_NULL);
-    check_utf8_segment_safety_("line (dispatched)", sz_utf8_find_linewraps, (sz_utf8_find_boundaries_t)SZ_NULL);
+    check_utf8_segment_safety_("line (serial)", sz_utf8_linewraps_serial);
+    check_utf8_segment_safety_("line (dispatched)", sz_utf8_linewraps);
 #if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("line (icelake)", sz_utf8_find_linewraps_icelake, (sz_utf8_find_boundaries_t)SZ_NULL);
+    check_utf8_segment_safety_("line (icelake)", sz_utf8_linewraps_icelake);
 #endif
     std::printf("    line safety passed!\n");
 }
@@ -1267,7 +1324,7 @@ void test_norm_unit() {
 #pragma region Equivalence
 
 /** @brief Wraps the UTF-8 counting and boundary-finding kernels of one backend by their pointers. */
-template <sz_utf8_count_t count_, sz_utf8_find_boundaries_t newlines_, sz_utf8_find_boundaries_t whitespaces_>
+template <sz_utf8_count_t count_, sz_utf8_segmenter_t newlines_, sz_utf8_segmenter_t whitespaces_>
 struct utf8_from_sz_ {
     sz_size_t count(sz_cptr_t text, sz_size_t length) const noexcept { return count_(text, length); }
     sz_size_t newlines(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, //
@@ -1712,15 +1769,11 @@ static void assert_segment_invariants_(std::vector<sz_size_t> const &offsets, st
 /**
  *  @brief Differential fuzz of any ISA finder against the serial reference, enumerating segments via repeated
  *         streaming calls across the 6 capacities {len+64,65,63,16,3,1}, over random UTF-8 (valid and
- *         malformed) plus an alignment sweep. When @p *_reverse_or_null are non-NULL the reverse pass is fuzzed
- *         too. Asserts tiling/alignment invariants and capacity-independence (every capacity yields identical
- *         output).
+ *         malformed) plus an alignment sweep. Asserts tiling/alignment invariants and capacity-independence
+ *         (every capacity yields identical output).
  */
-static void test_utf8_segment_equivalence_(char const *family, sz_utf8_find_boundaries_t reference,
-                                           sz_utf8_find_boundaries_t candidate,
-                                           sz_utf8_find_boundaries_t reference_reverse_or_null,
-                                           sz_utf8_find_boundaries_t candidate_reverse_or_null,
-                                           utf8_segment_family_t corpus_family,
+static void test_utf8_segment_equivalence_(char const *family, sz_utf8_segmenter_t reference,
+                                           sz_utf8_segmenter_t candidate, utf8_segment_family_t corpus_family,
                                            std::size_t iterations = scale_iterations(2000)) {
     std::printf("  - testing %s serial-vs-ISA differential...\n", family);
 
@@ -1729,7 +1782,7 @@ static void test_utf8_segment_equivalence_(char const *family, sz_utf8_find_boun
 
     // Enumerate every segment via repeated streaming calls (resuming from `bytes_consumed`), so a small
     // `capacity` exercises the window loop, its resume logic, and the serial tail handoff.
-    auto enumerate = [&](sz_utf8_find_boundaries_t matcher, sz_cptr_t data, sz_size_t length, sz_size_t capacity,
+    auto enumerate = [&](sz_utf8_segmenter_t matcher, sz_cptr_t data, sz_size_t length, sz_size_t capacity,
                          std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
         offsets.clear(), lengths.clear();
         sz_size_t base = 0;
@@ -1746,8 +1799,8 @@ static void test_utf8_segment_equivalence_(char const *family, sz_utf8_find_boun
 
     std::vector<sz_size_t> reference_offsets, reference_lengths, candidate_offsets, candidate_lengths;
     std::vector<sz_size_t> first_offsets, first_lengths;
-    auto compare = [&](sz_utf8_find_boundaries_t left, sz_utf8_find_boundaries_t right, char const *what,
-                       sz_cptr_t data, sz_size_t length, utf8_corpus_flavor_t flavor, bool check_invariants) {
+    auto compare = [&](sz_utf8_segmenter_t left, sz_utf8_segmenter_t right, char const *what, sz_cptr_t data,
+                       sz_size_t length, utf8_corpus_flavor_t flavor, bool check_invariants) {
         sz_size_t const capacities[] = {length + 64, 65, 63, 16, 3, 1};
         sz_size_t max_capacity = 1;
         for (sz_size_t capacity : capacities) max_capacity = std::max(max_capacity, capacity);
@@ -1769,9 +1822,6 @@ static void test_utf8_segment_equivalence_(char const *family, sz_utf8_find_boun
     };
     auto check = [&](sz_cptr_t data, sz_size_t length, utf8_corpus_flavor_t flavor) {
         compare(reference, candidate, "segment offsets/lengths mismatch", data, length, flavor, true);
-        if (reference_reverse_or_null && candidate_reverse_or_null)
-            compare(reference_reverse_or_null, candidate_reverse_or_null, "reverse segment mismatch", data, length,
-                    flavor, false);
     };
 
     auto &rng = global_random_generator();
@@ -1826,9 +1876,9 @@ static void test_utf8_segment_equivalence_(char const *family, sz_utf8_find_boun
  *  @param unpack           Streaming chunk decoder under test (or NULL when this backend has no decoder).
  *  @param random_inputs    Number of random garbage buffers to fuzz on top of the exhaustive byte sweeps.
  */
-static void check_utf8_safety_(sz_utf8_count_t count, sz_utf8_find_boundaries_t newlines,
-                               sz_utf8_find_boundaries_t whitespaces, sz_utf8_norm_t norm,
-                               sz_utf8_unpack_chunk_t unpack, std::size_t random_inputs = scale_iterations(10000)) {
+static void check_utf8_safety_(sz_utf8_count_t count, sz_utf8_segmenter_t newlines, sz_utf8_segmenter_t whitespaces,
+                               sz_utf8_norm_t norm, sz_utf8_unpack_chunk_t unpack,
+                               std::size_t random_inputs = scale_iterations(10000)) {
 
     std::size_t const max_input_length = 70;
     // The normalizer's documented worst case is 18x the input for a single-codepoint compatibility
@@ -1841,7 +1891,7 @@ static void check_utf8_safety_(sz_utf8_count_t count, sz_utf8_find_boundaries_t 
         [[maybe_unused]] sz_size_t const counted = count(input, (sz_size_t)input_length);
 
         sz_size_t boundary_offsets[max_input_length + 1], boundary_lengths[max_input_length + 1];
-        auto check_boundaries = [&](sz_utf8_find_boundaries_t finder, char const *finder_name) {
+        auto check_boundaries = [&](sz_utf8_segmenter_t finder, char const *finder_name) {
             sz_size_t bytes_consumed = 0;
             sz_size_t const found = finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
                                            (sz_size_t)(max_input_length + 1), &bytes_consumed);
@@ -1936,54 +1986,48 @@ void test_utf8_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 kernels...\n");
 
     // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
-    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
-                       sz_utf8_norm_serial, sz_utf8_unpack_chunk_serial);
-    check_utf8_safety_(sz_utf8_count, sz_utf8_find_newlines, sz_utf8_find_whitespaces, sz_utf8_norm,
-                       sz_utf8_unpack_chunk);
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, sz_utf8_norm_serial,
+                       sz_utf8_unpack_chunk_serial);
+    check_utf8_safety_(sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces, sz_utf8_norm, sz_utf8_unpack_chunk);
 
 #if SZ_USE_HASWELL
-    check_utf8_safety_(sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell,
+    check_utf8_safety_(sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell,
                        sz_utf8_norm_haswell, SZ_NULL);
 #endif
 #if SZ_USE_SKYLAKE
-    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
-                       sz_utf8_norm_skylake, SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, sz_utf8_norm_skylake,
+                       SZ_NULL);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_safety_(sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake,
+    check_utf8_safety_(sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake,
                        sz_utf8_norm_icelake, sz_utf8_unpack_chunk_icelake);
 #endif
 #if SZ_USE_NEON
-    check_utf8_safety_(sz_utf8_count_neon, sz_utf8_find_newlines_neon, sz_utf8_find_whitespaces_neon, sz_utf8_norm_neon,
-                       SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon, sz_utf8_norm_neon, SZ_NULL);
 #endif
 #if SZ_USE_SVE
-    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial,
-                       sz_utf8_norm_sve, SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial, sz_utf8_norm_sve,
+                       SZ_NULL);
 #endif
 #if SZ_USE_SVE2
-    check_utf8_safety_(sz_utf8_count_sve2, sz_utf8_find_newlines_sve2, sz_utf8_find_whitespaces_sve2, sz_utf8_norm_sve2,
-                       SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2, sz_utf8_norm_sve2, SZ_NULL);
 #endif
 #if SZ_USE_V128
-    check_utf8_safety_(sz_utf8_count_v128, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128, sz_utf8_norm_v128,
-                       SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128, sz_utf8_norm_v128, SZ_NULL);
 #endif
 #if SZ_USE_V128RELAXED
     // Relaxed-V128 only specializes counting; boundaries and normalization fall back to the V128 kernels.
-    check_utf8_safety_(sz_utf8_count_v128relaxed, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128,
+    check_utf8_safety_(sz_utf8_count_v128relaxed, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128,
                        sz_utf8_norm_v128relaxed, SZ_NULL);
 #endif
 #if SZ_USE_RVV
-    check_utf8_safety_(sz_utf8_count_rvv, sz_utf8_find_newlines_rvv, sz_utf8_find_whitespaces_rvv, sz_utf8_norm_rvv,
-                       SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv, sz_utf8_norm_rvv, SZ_NULL);
 #endif
 #if SZ_USE_LASX
-    check_utf8_safety_(sz_utf8_count_lasx, sz_utf8_find_newlines_lasx, sz_utf8_find_whitespaces_lasx, sz_utf8_norm_lasx,
-                       SZ_NULL);
+    check_utf8_safety_(sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx, sz_utf8_norm_lasx, SZ_NULL);
 #endif
 #if SZ_USE_POWERVSX
-    check_utf8_safety_(sz_utf8_count_powervsx, sz_utf8_find_newlines_powervsx, sz_utf8_find_whitespaces_powervsx,
+    check_utf8_safety_(sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx,
                        sz_utf8_norm_powervsx, SZ_NULL);
 #endif
 
@@ -1996,51 +2040,43 @@ void test_utf8_safety() {
 
 /** @brief Run the UTF-8 count/newline/whitespace differential against every compiled SIMD backend. */
 void test_utf8_all() {
-    using reference_t =
-        utf8_from_sz_<sz_utf8_count_serial, sz_utf8_find_newlines_serial, sz_utf8_find_whitespaces_serial>;
+    using reference_t = utf8_from_sz_<sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial>;
 #if SZ_USE_HASWELL
     test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_haswell, sz_utf8_find_newlines_haswell, sz_utf8_find_whitespaces_haswell> {});
+        reference_t {}, utf8_from_sz_<sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell> {});
 #endif
 #if SZ_USE_ICELAKE
     test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_icelake, sz_utf8_find_newlines_icelake, sz_utf8_find_whitespaces_icelake> {});
+        reference_t {}, utf8_from_sz_<sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake> {});
 #endif
 #if SZ_USE_NEON
-    test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_neon, sz_utf8_find_newlines_neon, sz_utf8_find_whitespaces_neon> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon> {});
 #endif
 #if SZ_USE_SVE2
-    test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_sve2, sz_utf8_find_newlines_sve2, sz_utf8_find_whitespaces_sve2> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2> {});
 #endif
 #if SZ_USE_V128
-    test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_v128, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128> {});
 #endif
 #if SZ_USE_V128RELAXED
-    test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_v128relaxed, sz_utf8_find_newlines_v128, sz_utf8_find_whitespaces_v128> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_v128relaxed, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128> {});
 #endif
 #if SZ_USE_RVV
     test_utf8_equivalence(reference_t {},
-                          utf8_from_sz_<sz_utf8_count_rvv, sz_utf8_find_newlines_rvv, sz_utf8_find_whitespaces_rvv> {});
+                          utf8_from_sz_<sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv> {});
 #endif
 #if SZ_USE_LASX
-    test_utf8_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_lasx, sz_utf8_find_newlines_lasx, sz_utf8_find_whitespaces_lasx> {});
+    test_utf8_equivalence(reference_t {},
+                          utf8_from_sz_<sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx> {});
 #endif
 #if SZ_USE_POWERVSX
     test_utf8_equivalence(
         reference_t {},
-        utf8_from_sz_<sz_utf8_count_powervsx, sz_utf8_find_newlines_powervsx, sz_utf8_find_whitespaces_powervsx> {});
+        utf8_from_sz_<sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx> {});
 #endif
 }
 
@@ -2083,29 +2119,26 @@ void test_norm_all() {
 #endif
 }
 
-/** @brief Run the grapheme-cluster differential (forward + reverse) against every compiled SIMD backend. */
+/** @brief Run the grapheme-cluster differential against every compiled SIMD backend. */
 void test_utf8_grapheme_all() {
 #if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_("grapheme", sz_utf8_grapheme_find_boundaries_serial,
-                                   sz_utf8_grapheme_find_boundaries_icelake, sz_utf8_grapheme_rfind_boundaries_serial,
-                                   sz_utf8_grapheme_rfind_boundaries_icelake, utf8_segment_family_t::grapheme_k);
+    test_utf8_segment_equivalence_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake,
+                                   utf8_segment_family_t::grapheme_k);
 #endif
 }
 
 /** @brief Run the sentence-break differential against every compiled SIMD backend. */
 void test_utf8_sentence_all() {
 #if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_("sentence", sz_utf8_sentence_find_boundaries_serial,
-                                   sz_utf8_sentence_find_boundaries_icelake, (sz_utf8_find_boundaries_t)SZ_NULL,
-                                   (sz_utf8_find_boundaries_t)SZ_NULL, utf8_segment_family_t::sentence_k);
+    test_utf8_segment_equivalence_("sentence", sz_utf8_sentences_serial, sz_utf8_sentences_icelake,
+                                   utf8_segment_family_t::sentence_k);
 #endif
 }
 
 /** @brief Run the line-break differential against every compiled SIMD backend. */
 void test_utf8_line_all() {
 #if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_("line", sz_utf8_find_linewraps_serial, sz_utf8_find_linewraps_icelake,
-                                   (sz_utf8_find_boundaries_t)SZ_NULL, (sz_utf8_find_boundaries_t)SZ_NULL,
+    test_utf8_segment_equivalence_("line", sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake,
                                    utf8_segment_family_t::line_k);
 #endif
 }

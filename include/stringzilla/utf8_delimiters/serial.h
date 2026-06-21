@@ -19,7 +19,7 @@ extern "C" {
  *  A @c "\r\n" CRLF is one match of length 2 (its trailing LF is never emitted alone). `base` is added to every
  *  emitted offset and to `*bytes_consumed`, the resume offset, which is always a true delimiter boundary.
  */
-SZ_INTERNAL sz_size_t sz_utf8_find_newlines_serial_(    //
+SZ_INTERNAL sz_size_t sz_utf8_newlines_serial_(         //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -57,10 +57,10 @@ SZ_INTERNAL sz_size_t sz_utf8_find_newlines_serial_(    //
 /**
  *  @brief Scalar multistep whitespace scan: classify each codepoint inline and emit every delimiter.
  *
- *  Same contract as `sz_utf8_find_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
+ *  Same contract as `sz_utf8_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
  *  merging here - CR and LF are independent length-1 matches.
  */
-SZ_INTERNAL sz_size_t sz_utf8_find_whitespaces_serial_( //
+SZ_INTERNAL sz_size_t sz_utf8_whitespaces_serial_(      //
     sz_cptr_t text, sz_size_t length, sz_size_t base,   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -110,20 +110,18 @@ SZ_INTERNAL sz_size_t sz_utf8_find_whitespaces_serial_( //
     return match_count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_serial(       //
+SZ_PUBLIC sz_size_t sz_utf8_newlines_serial(            //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_find_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
-                                         bytes_consumed);
+    return sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_serial(    //
+SZ_PUBLIC sz_size_t sz_utf8_whitespaces_serial(         //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_find_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
-                                            bytes_consumed);
+    return sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
 
 #ifdef __cplusplus

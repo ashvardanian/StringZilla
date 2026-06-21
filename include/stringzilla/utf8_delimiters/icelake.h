@@ -29,7 +29,7 @@ extern "C" {
  *  Each 64-byte window is classified branchlessly into a `starts` mask plus a per-lane byte-length vector,
  *  then `vpcompressb` peels the matching lanes and lengths. Starts are trusted in lanes [0,61] (step 62) so
  *  any 2-/3-byte delimiter is fully loaded; a `t[pos-1] == '\r'` carry suppresses an LF closing an edge CRLF. */
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
+SZ_PUBLIC sz_size_t sz_utf8_newlines_icelake(           //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -41,7 +41,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
             lead_c2_vec = _mm512_set1_epi8('\xC2'), x_85_vec = _mm512_set1_epi8('\x85'),
             lead_e2_vec = _mm512_set1_epi8('\xE2'), byte_80_vec = _mm512_set1_epi8('\x80'),
             x_a8_vec = _mm512_set1_epi8('\xA8'), x_a9_vec = _mm512_set1_epi8('\xA9');
-    __m512i const lane_identity = sz_utf8_iterate_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
 
     while (position < length && count < matches_capacity) {
         sz_size_t const valid_lanes = length - position;
@@ -83,8 +83,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
         sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
         sz_size_t const emit = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit)
-            sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
-                                          match_offsets + count, match_lengths + count);
+            sz_utf8_codepoints_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position,
+                                             lane_identity, match_offsets + count, match_lengths + count);
         count += emit;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match
             position = match_offsets[count - 1] + match_lengths[count - 1];
@@ -99,7 +99,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_icelake(      //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
+SZ_PUBLIC sz_size_t sz_utf8_whitespaces_icelake(        //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -115,7 +115,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
             x_8d_vec = _mm512_set1_epi8('\x8D'), x_a8_vec = _mm512_set1_epi8('\xA8'),
             x_a9_vec = _mm512_set1_epi8('\xA9'), x_af_vec = _mm512_set1_epi8('\xAF'),
             x_9f_vec = _mm512_set1_epi8('\x9F');
-    __m512i const lane_identity = sz_utf8_iterate_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
 
     while (position < length && count < matches_capacity) {
         sz_size_t const valid_lanes = length - position;
@@ -169,8 +169,8 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_icelake(   //
         sz_size_t const window_matches = (sz_size_t)_mm_popcnt_u64(start_bits);
         sz_size_t const emit = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit)
-            sz_utf8_iterate_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position, lane_identity,
-                                          match_offsets + count, match_lengths + count);
+            sz_utf8_codepoints_peel_icelake_(start_bits, two_byte_starts, three_byte_starts, emit, position,
+                                             lane_identity, match_offsets + count, match_lengths + count);
         count += emit;
         if (count == matches_capacity) {
             position = match_offsets[count - 1] + match_lengths[count - 1];

@@ -79,7 +79,6 @@ using sz::literals::operator""_bs; // for `sz::byteset`
 using namespace std::literals; // for ""sv
 #endif
 
-
 #pragma region Helpers
 
 /**
@@ -98,9 +97,9 @@ using namespace std::literals; // for ""sv
  *  @param forward_offset     The expected offset of the first occurrence, or `SZ_SIZE_MAX` if absent.
  *  @param backward_offset    The expected offset of the last occurrence, or `SZ_SIZE_MAX` if absent.
  */
-static void check_find_unit_(                                       //
-    sz_cptr_t haystack, sz_size_t haystack_length,                   //
-    sz_cptr_t needle, sz_size_t needle_length,                       //
+static void check_find_unit_(                      //
+    sz_cptr_t haystack, sz_size_t haystack_length, //
+    sz_cptr_t needle, sz_size_t needle_length,     //
     sz_size_t forward_offset, sz_size_t backward_offset) {
 
     sz_cptr_t const forward_expected = forward_offset == SZ_SIZE_MAX ? SZ_NULL_CHAR : haystack + forward_offset;
@@ -169,17 +168,17 @@ void test_find_unit() {
     // `sz_find` / `sz_rfind`: the substring "o" occurs at offsets 4 and 7; the multi-byte needle "wor"
     // sits at offset 6; and a missing needle "xyz" yields `SZ_NULL_CHAR` (encoded as the `SZ_SIZE_MAX`
     // not-found sentinel). Each case is checked across every backend through `check_find_unit_`.
-    check_find_unit_(hello, hello_length, "o", 1, 4, 7);                     // Single-byte needle
-    check_find_unit_(hello, hello_length, "wor", 3, 6, 6);                   // Present multi-byte needle
+    check_find_unit_(hello, hello_length, "o", 1, 4, 7);                       // Single-byte needle
+    check_find_unit_(hello, hello_length, "wor", 3, 6, 6);                     // Present multi-byte needle
     check_find_unit_(hello, hello_length, "xyz", 3, SZ_SIZE_MAX, SZ_SIZE_MAX); // Missing needle
 
     // `sz_find_byte` / `sz_rfind_byte` in isolation: the byte 'l' occurs at offsets 2, 3, and 9.
-    assert(sz_find_byte(hello, hello_length, "l") == hello + 2);          // Dispatched (automatic kernel)
-    assert(sz_rfind_byte(hello, hello_length, "l") == hello + 9);         // Dispatched (automatic kernel)
-    assert(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);   // Manual propagation to the serial kernel
-    assert(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);  // Manual propagation to the serial kernel
-    assert(sz_find_byte(hello, hello_length, "z") == SZ_NULL_CHAR);       // Missing byte
-    assert(sz_rfind_byte(hello, hello_length, "z") == SZ_NULL_CHAR);      // Missing byte
+    assert(sz_find_byte(hello, hello_length, "l") == hello + 2);           // Dispatched (automatic kernel)
+    assert(sz_rfind_byte(hello, hello_length, "l") == hello + 9);          // Dispatched (automatic kernel)
+    assert(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);    // Manual propagation to the serial kernel
+    assert(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);   // Manual propagation to the serial kernel
+    assert(sz_find_byte(hello, hello_length, "z") == SZ_NULL_CHAR);        // Missing byte
+    assert(sz_rfind_byte(hello, hello_length, "z") == SZ_NULL_CHAR);       // Missing byte
     assert(sz_find_byte_serial(hello, hello_length, "z") == SZ_NULL_CHAR); // Missing byte, serial kernel
 #if SZ_USE_WESTMERE
     assert(sz_find_byte_westmere(hello, hello_length, "l") == hello + 2);
@@ -203,10 +202,12 @@ void test_find_unit() {
     sz_byteset_add(&vowels, 'i');
     sz_byteset_add(&vowels, 'o');
     sz_byteset_add(&vowels, 'u');
-    assert(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);         // Dispatched (automatic kernel)
-    assert(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7);        // Dispatched (automatic kernel)
-    assert(sz_find_byteset_serial(hello, hello_length, &vowels) == hello + 1);  // Manual propagation to the serial kernel
-    assert(sz_rfind_byteset_serial(hello, hello_length, &vowels) == hello + 7); // Manual propagation to the serial kernel
+    assert(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);  // Dispatched (automatic kernel)
+    assert(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7); // Dispatched (automatic kernel)
+    assert(sz_find_byteset_serial(hello, hello_length, &vowels) ==
+           hello + 1); // Manual propagation to the serial kernel
+    assert(sz_rfind_byteset_serial(hello, hello_length, &vowels) ==
+           hello + 7); // Manual propagation to the serial kernel
     // A set with none of the present bytes returns `SZ_NULL_CHAR`.
     sz_byteset_t digits;
     sz_byteset_init(&digits);
@@ -220,16 +221,16 @@ void test_find_unit() {
     // here; calling them is a link error. Re-add coverage once the implementation lands.
 
     // `sz_order` / `sz_equal`: lexicographic ordering and byte-equality on hand-verifiable pairs.
-    assert(sz_order("abc", 3, "abc", 3) == sz_equal_k);   // Equal strings
-    assert(sz_order("abc", 3, "abd", 3) == sz_less_k);    // Differ in the last byte
-    assert(sz_order("abd", 3, "abc", 3) == sz_greater_k); // Differ in the last byte
-    assert(sz_order("ab", 2, "abc", 3) == sz_less_k);     // Prefix orders before the longer string
-    assert(sz_order("abc", 3, "ab", 2) == sz_greater_k);  // Longer string orders after its prefix
-    assert(sz_equal("abc", "abc", 3) == sz_true_k);       // Identical bytes
-    assert(sz_equal("abc", "abd", 3) == sz_false_k);      // Differing bytes
-    assert(sz_order_serial("abc", 3, "abd", 3) == sz_less_k);  // Manual propagation to the serial kernel
-    assert(sz_equal_serial("abc", "abc", 3) == sz_true_k);     // Manual propagation to the serial kernel
-    assert(sz_equal_serial("abc", "abd", 3) == sz_false_k);    // Manual propagation to the serial kernel
+    assert(sz_order("abc", 3, "abc", 3) == sz_equal_k);       // Equal strings
+    assert(sz_order("abc", 3, "abd", 3) == sz_less_k);        // Differ in the last byte
+    assert(sz_order("abd", 3, "abc", 3) == sz_greater_k);     // Differ in the last byte
+    assert(sz_order("ab", 2, "abc", 3) == sz_less_k);         // Prefix orders before the longer string
+    assert(sz_order("abc", 3, "ab", 2) == sz_greater_k);      // Longer string orders after its prefix
+    assert(sz_equal("abc", "abc", 3) == sz_true_k);           // Identical bytes
+    assert(sz_equal("abc", "abd", 3) == sz_false_k);          // Differing bytes
+    assert(sz_order_serial("abc", 3, "abd", 3) == sz_less_k); // Manual propagation to the serial kernel
+    assert(sz_equal_serial("abc", "abc", 3) == sz_true_k);    // Manual propagation to the serial kernel
+    assert(sz_equal_serial("abc", "abd", 3) == sz_false_k);   // Manual propagation to the serial kernel
 #if SZ_USE_HASWELL
     assert(sz_order_haswell("abc", 3, "abd", 3) == sz_less_k);
     assert(sz_equal_haswell("abc", "abc", 3) == sz_true_k);
@@ -241,11 +242,11 @@ void test_find_unit() {
     assert(sz_equal_skylake("abc", "abd", 3) == sz_false_k);
 #endif
     // And the same orderings through the C++ `sz::string_view` comparison operators.
-    assert("abc"_sv == "abc"_sv);  // Equality operator
-    assert("abc"_sv != "abd"_sv);  // Inequality operator
-    assert("abc"_sv < "abd"_sv);   // Strictly-less operator
-    assert("abd"_sv > "abc"_sv);   // Strictly-greater operator
-    assert("ab"_sv < "abc"_sv);    // Prefix orders before the longer string
+    assert("abc"_sv == "abc"_sv); // Equality operator
+    assert("abc"_sv != "abd"_sv); // Inequality operator
+    assert("abc"_sv < "abd"_sv);  // Strictly-less operator
+    assert("abd"_sv > "abc"_sv);  // Strictly-greater operator
+    assert("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
 
     // Searching for a set of characters
     assert(sz::string_view("a").find_first_of("az") == 0);
@@ -422,32 +423,34 @@ void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size
 
     // Replays one haystack/needle pair at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, std::string const &needle) {
-        for_each_cacheline_offset_(haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
-            std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
-            sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
-            sz_size_t const needle_length = (sz_size_t)needle.size();
+        for_each_cacheline_offset_(
+            haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
+                std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
+                sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
+                sz_size_t const needle_length = (sz_size_t)needle.size();
 
-            sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
-            sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
-            assert(result_reference == result_candidate);
-        });
+                sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
+                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
+                assert(result_reference == result_candidate);
+            });
     };
 
     // Hand-picked edge cases: empty needle, not-found, needle at start, needle at end, needle == haystack,
     // repeated occurrences, and an embedded NUL byte.
-    compare_on("hello world", "");                  // Empty needle
-    compare_on("hello world", "xyz");               // Not found
-    compare_on("hello world", "hello");             // Needle at the start
-    compare_on("hello world", "world");             // Needle at the end
-    compare_on("hello world", "hello world");       // Needle equals the haystack
-    compare_on("abababab", "ab");                   // Repeated occurrences
+    compare_on("hello world", "");                                 // Empty needle
+    compare_on("hello world", "xyz");                              // Not found
+    compare_on("hello world", "hello");                            // Needle at the start
+    compare_on("hello world", "world");                            // Needle at the end
+    compare_on("hello world", "hello world");                      // Needle equals the haystack
+    compare_on("abababab", "ab");                                  // Repeated occurrences
     compare_on(std::string("a\0bc\0a", 6), std::string("\0a", 2)); // Embedded NUL byte
 
     // Random haystacks and needles of assorted lengths.
     for (sz_size_t iteration = 0; iteration != scale_iterations(inputs); ++iteration) {
-        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(global_random_generator());
-        std::size_t const needle_length =
-            std::uniform_int_distribution<std::size_t>(0, haystack_length + 4)(global_random_generator());
+        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0,
+                                                                                       200)(global_random_generator());
+        std::size_t const needle_length = std::uniform_int_distribution<std::size_t>(
+            0, haystack_length + 4)(global_random_generator());
         std::string haystack(haystack_length, '\0');
         std::string needle(needle_length, '\0');
         // A small alphabet makes spurious and overlapping matches likely, stressing the kernels.
@@ -483,25 +486,26 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
 
     // Replays one haystack at every intra-cacheline alignment and compares the backends.
     auto compare_on = [&](std::string const &haystack_pattern, sz_byteset_t const &byteset) {
-        for_each_cacheline_offset_(haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
-            std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
-            sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
+        for_each_cacheline_offset_(
+            haystack_pattern.size(), [&](sz_ptr_t haystack, [[maybe_unused]] std::size_t offset) {
+                std::memcpy(haystack, haystack_pattern.data(), haystack_pattern.size());
+                sz_size_t const haystack_length = (sz_size_t)haystack_pattern.size();
 
-            sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset);
-            sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset);
-            assert(result_reference == result_candidate);
-        });
+                sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset);
+                sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset);
+                assert(result_reference == result_candidate);
+            });
     };
 
     // Hand-picked edge cases: empty haystack, no member present, member at start, member at end,
     // all members, repeated members, and an embedded NUL byte.
-    compare_on("", vowels);                          // Empty haystack
-    compare_on("xyz wrld", vowels);                  // No member present
-    compare_on("apple", vowels);                     // Member at the start
-    compare_on("xyzo", vowels);                      // Member at the end
-    compare_on("aeiou", vowels);                     // Every byte is a member
-    compare_on("aaeeii", vowels);                    // Repeated members
-    compare_on(std::string("x\0aey\0", 6), vowels);  // Embedded NUL byte
+    compare_on("", vowels);                         // Empty haystack
+    compare_on("xyz wrld", vowels);                 // No member present
+    compare_on("apple", vowels);                    // Member at the start
+    compare_on("xyzo", vowels);                     // Member at the end
+    compare_on("aeiou", vowels);                    // Every byte is a member
+    compare_on("aaeeii", vowels);                   // Repeated members
+    compare_on(std::string("x\0aey\0", 6), vowels); // Embedded NUL byte
 
     // Random haystacks of assorted lengths against a random byteset.
     for (sz_size_t iteration = 0; iteration != scale_iterations(inputs); ++iteration) {
@@ -512,7 +516,8 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
             sz_byteset_add(&random_byteset,
                            (sz_u8_t)std::uniform_int_distribution<int>(0, 255)(global_random_generator()));
 
-        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0, 200)(global_random_generator());
+        std::size_t const haystack_length = std::uniform_int_distribution<std::size_t>(0,
+                                                                                       200)(global_random_generator());
         std::string haystack(haystack_length, '\0');
         randomize_string(&haystack[0], haystack_length);
         compare_on(haystack, random_byteset);
@@ -531,7 +536,7 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
  */
 template <typename stl_matcher_, typename sz_matcher_>
 void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_view needle_stl,
-                                             std::size_t misalignment) {
+                               std::size_t misalignment) {
     std::size_t const max_repeats = scale_iterations(128);
 
     // Allocate a buffer to store the haystack with enough padding to mis-align it.
@@ -629,36 +634,36 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
  *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
  */
 void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_view needle_stl,
-                                             std::size_t misalignment) {
+                               std::size_t misalignment) {
 
-    test_find_misaligned_fuzz<                                     //
-        sz::range_matches<std::string_view, sz::matcher_find<std::string_view>>, //
-        sz::range_matches<sz::string_view, sz::matcher_find<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                       //
+        sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>, //
+        sz::find_matches_view<sz::string_view, sz::matcher_find<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                       //
-        sz::range_rmatches<std::string_view, sz::matcher_rfind<std::string_view>>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_rfind<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                         //
+        sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>, //
+        sz::rfind_matches_view<sz::string_view, sz::matcher_rfind<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                              //
-        sz::range_matches<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
-        sz::range_matches<sz::string_view, sz::matcher_find_first_of<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                                //
+        sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
+        sz::find_matches_view<sz::string_view, sz::matcher_find_first_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                              //
-        sz::range_rmatches<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_find_last_of<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                                //
+        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
+        sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                  //
-        sz::range_matches<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
-        sz::range_matches<sz::string_view, sz::matcher_find_first_not_of<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                                    //
+        sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
+        sz::find_matches_view<sz::string_view, sz::matcher_find_first_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                  //
-        sz::range_rmatches<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_find_last_not_of<sz::string_view>>>(  //
+    test_find_misaligned_fuzz<                                                                    //
+        sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
+        sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 }
 
@@ -690,9 +695,9 @@ void test_find_misaligned_fuzz() {
     test_find_misaligned_fuzz("abcd", "abcd");
     test_find_misaligned_fuzz({sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
     test_find_misaligned_fuzz({sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
-                                            {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
+                              {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
     test_find_misaligned_fuzz({sz::ascii_printables(), sizeof(sz::ascii_printables())},
-                                            {sz::ascii_printables(), sizeof(sz::ascii_printables())});
+                              {sz::ascii_printables(), sizeof(sz::ascii_printables())});
 
     // When we are dealing with NULL characters inside the string
     test_find_misaligned_fuzz("\0", "\0");

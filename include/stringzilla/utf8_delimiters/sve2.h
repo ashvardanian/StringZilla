@@ -68,7 +68,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_tile_sve2_(                               
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_newlines_sve2(         //
+SZ_PUBLIC sz_size_t sz_utf8_newlines_sve2(              //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -77,8 +77,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_sve2(         //
     sz_size_t const step = svcntb();
     // Too narrow to host a safe 3-byte straddle and a 32-bit compaction sub-block? Delegate wholesale to serial.
     if (step < 16)
-        return sz_utf8_find_newlines_serial(text, length, match_offsets, match_lengths, matches_capacity,
-                                            bytes_consumed);
+        return sz_utf8_newlines_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 
     // Fixed logical tile (64 bytes when the register is wide enough), capped by the register width so the
     // shifted views for 2-/3-byte delimiters are always fully loaded on a full tile.
@@ -155,7 +154,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_newlines_sve2(         //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_sve2(      //
+SZ_PUBLIC sz_size_t sz_utf8_whitespaces_sve2(           //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -163,8 +162,7 @@ SZ_PUBLIC sz_size_t sz_utf8_find_whitespaces_sve2(      //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
     if (step < 16)
-        return sz_utf8_find_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity,
-                                               bytes_consumed);
+        return sz_utf8_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 
     sz_size_t const tile = step < 64 ? step : 64;
     svuint8_t const zeros = svdup_n_u8(0);
