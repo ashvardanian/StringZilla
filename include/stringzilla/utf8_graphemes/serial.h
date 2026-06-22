@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#pragma region UAX-29 Grapheme Cluster Boundaries
+#pragma region UAX 29 Grapheme Cluster Boundaries
 
 /** @brief Returns the packed Grapheme_Cluster_Break descriptor (gcb | incb << 4 | extpict << 6) for a codepoint. */
 SZ_PUBLIC sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
@@ -141,14 +141,14 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
     if (after_class == sz_grapheme_break_spacingmark_k) return sz_false_k;                                      // GB9a
     if (before_class == sz_grapheme_break_prepend_k) return sz_false_k;                                         // GB9b
 
-    /* GB9c: Indic conjunct Consonant [Extend Linker]* Linker [Extend Linker]* x Consonant. */
+    // GB9c: Indic conjunct Consonant [Extend Linker]* Linker [Extend Linker]* x Consonant.
     if (sz_grapheme_break_descriptor_incb_(after_descriptor) == sz_grapheme_incb_consonant_k) {
         sz_bool_t seen_linker = sz_false_k;
         sz_size_t scan = position;
         while (scan > 0) {
             sz_size_t scan_start = sz_utf8_previous_codepoint_start_(text, scan);
-            sz_u8_t scan_incb =
-                sz_grapheme_break_descriptor_incb_(sz_grapheme_break_property_at_(text, length, scan_start));
+            sz_u8_t scan_incb = sz_grapheme_break_descriptor_incb_(
+                sz_grapheme_break_property_at_(text, length, scan_start));
             if (scan_incb == sz_grapheme_incb_linker_k) {
                 seen_linker = sz_true_k;
                 scan = scan_start;
@@ -166,8 +166,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         }
     }
 
-    /* GB11: Extended_Pictographic Extend* ZWJ x Extended_Pictographic. Walk strictly before the ZWJ over
-     *  Extend* and require an Extended_Pictographic base. */
+    // GB11: Extended_Pictographic Extend* ZWJ x Extended_Pictographic. Walk strictly before the ZWJ over
+    // Extend* and require an Extended_Pictographic base.
     if (before_class == sz_grapheme_break_zwj_k && sz_grapheme_break_descriptor_extpict_(after_descriptor) &&
         before_start > 0) {
         sz_size_t walk = before_start; // we always inspect the codepoint that starts before `walk`
@@ -186,7 +186,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         if (found) return sz_false_k;
     }
 
-    /* GB12/GB13: Regional_Indicator x Regional_Indicator only across even-count runs (pairs). */
+    // GB12/GB13: Regional_Indicator x Regional_Indicator only across even-count runs (pairs).
     if (before_class == sz_grapheme_break_regional_indicator_k &&
         after_class == sz_grapheme_break_regional_indicator_k) {
         sz_size_t ri_count = 0;
@@ -207,8 +207,99 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
 }
 
 /**
- *  @brief Plural UAX-29 grapheme cluster segmentation: one forward sweep emits every cluster into parallel
- *         `cluster_starts` / `cluster_lengths` arrays at each `sz_utf8_is_grapheme_boundary_serial` position.
+ *  @brief Forward run-state carried across codepoints by the bulk segmenter, so the GB9c / GB11 / GB12-13
+ *         unbounded runs resolve in O(1) per codepoint instead of a backward re-walk (the scalar twin of the
+ *         Ice Lake register carry).
+ */
+typedef struct sz_grapheme_serial_state_t {
+    sz_u8_t previous_descriptor;           // packed descriptor of the previous codepoint
+    sz_bool_t regional_indicator_run_odd;  // RI run ending at the previous codepoint has odd length
+    sz_bool_t extended_pictographic_run;   // previous codepoint continues an (ExtPict Extend*) run
+    sz_bool_t zero_width_joiner_connector; // previous codepoint is a ZWJ closing an ExtPict run
+    sz_bool_t indic_conjunct_open;         // a Consonant-rooted InCB run is open at the previous codepoint
+    sz_bool_t indic_conjunct_seen_linker;  // ... and a Linker has appeared in that open run
+} sz_grapheme_serial_state_t;
+
+/** @brief Boundary decision between @p state's previous codepoint and the @p after codepoint, GB3..GB13 in O(1). */
+SZ_INTERNAL sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
+    sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
+    sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
+    if (before_class == sz_grapheme_break_cr_k && after_class == sz_grapheme_break_lf_k) return sz_false_k; // GB3
+    if (before_class == sz_grapheme_break_control_k || before_class == sz_grapheme_break_cr_k ||
+        before_class == sz_grapheme_break_lf_k)
+        return sz_true_k; // GB4
+    if (after_class == sz_grapheme_break_control_k || after_class == sz_grapheme_break_cr_k ||
+        after_class == sz_grapheme_break_lf_k)
+        return sz_true_k; // GB5
+    if (before_class == sz_grapheme_break_hangul_l_k &&
+        (after_class == sz_grapheme_break_hangul_l_k || after_class == sz_grapheme_break_hangul_v_k ||
+         after_class == sz_grapheme_break_hangul_lv_k || after_class == sz_grapheme_break_hangul_lvt_k))
+        return sz_false_k; // GB6
+    if ((before_class == sz_grapheme_break_hangul_lv_k || before_class == sz_grapheme_break_hangul_v_k) &&
+        (after_class == sz_grapheme_break_hangul_v_k || after_class == sz_grapheme_break_hangul_t_k))
+        return sz_false_k; // GB7
+    if ((before_class == sz_grapheme_break_hangul_lvt_k || before_class == sz_grapheme_break_hangul_t_k) &&
+        after_class == sz_grapheme_break_hangul_t_k)
+        return sz_false_k;                                                                                      // GB8
+    if (after_class == sz_grapheme_break_extend_k || after_class == sz_grapheme_break_zwj_k) return sz_false_k; // GB9
+    if (after_class == sz_grapheme_break_spacingmark_k) return sz_false_k;                                      // GB9a
+    if (before_class == sz_grapheme_break_prepend_k) return sz_false_k;                                         // GB9b
+    // GB9c: Consonant [Extend|Linker]* Linker [Extend|Linker]* x Consonant -- the open run carries the state.
+    if (sz_grapheme_break_descriptor_incb_(after) == sz_grapheme_incb_consonant_k && state->indic_conjunct_open &&
+        state->indic_conjunct_seen_linker)
+        return sz_false_k;
+    // GB11: ...ExtPict Extend* ZWJ x ExtPict -- the previous ZWJ-connector carries the run.
+    if (state->zero_width_joiner_connector && sz_grapheme_break_descriptor_extpict_(after)) return sz_false_k;
+    // GB12/GB13: RI x RI when the run ending at the previous RI is odd (so this RI completes a pair).
+    if (before_class == sz_grapheme_break_regional_indicator_k &&
+        after_class == sz_grapheme_break_regional_indicator_k && state->regional_indicator_run_odd)
+        return sz_false_k;
+    return sz_true_k; // GB999
+}
+
+/** @brief Advance @p state by the @p after codepoint: toggle/close the RI, ExtPict-ZWJ and InCB runs. */
+SZ_INTERNAL void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
+    sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
+    state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
+                                            ? (sz_bool_t)(!state->regional_indicator_run_odd)
+                                            : sz_false_k;
+    if (sz_grapheme_break_descriptor_extpict_(after)) {
+        state->extended_pictographic_run = sz_true_k;
+        state->zero_width_joiner_connector = sz_false_k;
+    }
+    else if (after_class == sz_grapheme_break_extend_k && state->extended_pictographic_run) {
+        state->zero_width_joiner_connector = sz_false_k; // Extend continues the ExtPict run
+    }
+    else if (after_class == sz_grapheme_break_zwj_k && state->extended_pictographic_run) {
+        state->zero_width_joiner_connector = sz_true_k; // ZWJ closes the run, opens the connector
+        state->extended_pictographic_run = sz_false_k;
+    }
+    else {
+        state->extended_pictographic_run = sz_false_k;
+        state->zero_width_joiner_connector = sz_false_k;
+    }
+    sz_u8_t const after_incb = sz_grapheme_break_descriptor_incb_(after);
+    if (after_incb == sz_grapheme_incb_consonant_k) {
+        state->indic_conjunct_open = sz_true_k;
+        state->indic_conjunct_seen_linker = sz_false_k;
+    }
+    else if (after_incb == sz_grapheme_incb_linker_k && state->indic_conjunct_open) {
+        state->indic_conjunct_seen_linker = sz_true_k;
+    }
+    else if (after_incb == sz_grapheme_incb_extend_k && state->indic_conjunct_open) {
+        // Extend continues the open conjunct run unchanged.
+    }
+    else {
+        state->indic_conjunct_open = sz_false_k;
+        state->indic_conjunct_seen_linker = sz_false_k;
+    }
+    state->previous_descriptor = after;
+}
+
+/**
+ *  @brief Plural UAX-29 grapheme cluster segmentation: ONE forward sweep emits every cluster into parallel
+ *         `cluster_starts` / `cluster_lengths`, carrying the GB9c/GB11/GB12-13 runs in a register state (O(n), no
+ *         backward re-walks). Byte-identical to the per-position `sz_utf8_is_grapheme_boundary_serial`.
  */
 SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
     sz_cptr_t text, sz_size_t length,                      //
@@ -222,9 +313,24 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
     }
 
     sz_size_t cluster_start = 0;
+    sz_grapheme_serial_state_t state;
+    state.regional_indicator_run_odd = sz_false_k;
+    state.extended_pictographic_run = sz_false_k;
+    state.zero_width_joiner_connector = sz_false_k;
+    state.indic_conjunct_open = sz_false_k;
+    state.indic_conjunct_seen_linker = sz_false_k;
+    sz_grapheme_serial_advance_(&state, sz_grapheme_break_property_at_(text, length, 0)); // seed from codepoint 0
+
     sz_size_t position = sz_grapheme_break_next_start_(text, length, 0);
     while (position < length) {
-        if (sz_utf8_is_grapheme_boundary_serial(text, length, position)) {
+        sz_u8_t const after_descriptor = sz_grapheme_break_property_at_(text, length, position);
+        // A leading orphan continuation before `position` has no real left codepoint: force a boundary (matches the
+        // window decoder, which excludes continuation bytes from codepoint starts). Bounded back-scan, amortized O(n).
+        sz_size_t const before_start = sz_utf8_previous_codepoint_start_(text, position);
+        sz_bool_t const boundary = (((sz_u8_t)text[before_start] & 0xC0u) == 0x80u)
+                                       ? sz_true_k
+                                       : sz_grapheme_serial_boundary_(&state, after_descriptor);
+        if (boundary) {
             if (clusters == clusters_capacity) {
                 if (bytes_consumed) *bytes_consumed = cluster_start;
                 return clusters;
@@ -234,6 +340,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
             ++clusters;
             cluster_start = position;
         }
+        sz_grapheme_serial_advance_(&state, after_descriptor);
         position = sz_grapheme_break_next_start_(text, length, position);
     }
 
@@ -248,7 +355,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
     return clusters;
 }
 
-#pragma endregion // UAX-29 Grapheme Cluster Boundaries
+#pragma endregion // UAX 29 Grapheme Cluster Boundaries
 
 #ifdef __cplusplus
 }
