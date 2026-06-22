@@ -13,6 +13,7 @@ Palette members are built from explicit codepoints (the source stays pure ASCII)
 delegated agent cannot silently NFC-normalize a raw multi-byte literal.
 """
 
+import itertools
 from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import pytest
@@ -326,3 +327,60 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
 
 
 #  endregion ICU oracles
+
+#  region Rule-derived generators
+
+# Generators that turn the UCD break-property / combining-class / decomposition tables (extracted in
+# test_helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
+
+
+def class_adjacency_strings(
+    representatives: dict, arity: int = 2, representatives_per_class: int = 1, max_cases: Optional[int] = None
+) -> List[str]:
+    """Build strings over the cartesian product of break classes — one representative codepoint per cell.
+
+    With one representative per class this enumerates every class-adjacency pair (arity 2) or triple (arity 3)
+    the segmentation rules can encounter, surfacing rule interactions the random palette rarely hits. `max_cases`
+    bounds the explosion (e.g. Line_Break's ~40 classes make full triples huge).
+    """
+    class_names = sorted(representatives)
+    chosen = {name: representatives[name][:representatives_per_class] for name in class_names}
+    results: List[str] = []
+    for class_combination in itertools.product(class_names, repeat=arity):
+        for codepoint_combination in itertools.product(*[chosen[name] for name in class_combination]):
+            results.append("".join(chr(codepoint) for codepoint in codepoint_combination))
+            if max_cases is not None and len(results) >= max_cases:
+                return results
+    return results
+
+
+def combining_scrambles(combining_classes: dict, rng, count: int, max_marks: int = 4) -> List[str]:
+    """Build `count` strings of a base letter followed by several non-zero-CCC combining marks in random order.
+
+    The non-canonical mark order stresses canonical reordering: NFD must reorder by combining class.
+    """
+    marks = [codepoint for codepoint, combining_class in combining_classes.items() if codepoint <= 0xFFFF]
+    base_letters = "aeoun"
+    results: List[str] = []
+    for _ in range(count):
+        base_letter = rng.choice(base_letters)
+        mark_count = rng.randint(2, max_marks)
+        scrambled_marks = [rng.choice(marks) for _ in range(mark_count)]
+        results.append(base_letter + "".join(chr(codepoint) for codepoint in scrambled_marks))
+    return results
+
+
+def decomposition_pairs(decomposition_mappings: dict, canonical_only: bool = True, limit: Optional[int] = None) -> list:
+    """Build (precomposed, decomposed) canonical-equivalent string pairs from the decomposition mappings."""
+    pairs = []
+    for codepoint in sorted(decomposition_mappings):
+        kind, targets = decomposition_mappings[codepoint]
+        if canonical_only and kind != "canonical":
+            continue
+        pairs.append((chr(codepoint), "".join(chr(target) for target in targets)))
+        if limit is not None and len(pairs) >= limit:
+            break
+    return pairs
+
+
+#  endregion Rule-derived generators

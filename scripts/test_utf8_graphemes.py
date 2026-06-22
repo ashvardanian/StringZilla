@@ -17,6 +17,9 @@ from test_helpers import (
     UnicodeDataDownloadError,
     get_grapheme_break_properties,
     get_grapheme_break_test_cases,
+    get_indic_conjunct_break_properties,
+    get_extended_pictographic,
+    representatives_by_class,
     baseline_grapheme_boundaries,
 )
 from test_utf8_helpers import (
@@ -24,6 +27,7 @@ from test_utf8_helpers import (
     adversarial_utf8_inputs,
     assert_segments_tile,
     byte_boundaries,
+    class_adjacency_strings,
     corpus_of_byte_length,
     icu_segmenter,
     window_seam_lengths,
@@ -205,3 +209,66 @@ def test_utf8_grapheme_differential_icu(seed_value: int):
 
 
 #  endregion Synthetic corner cases (safety / seam / ICU)
+
+
+#  region Rule-derived coverage (baseline validation + class adjacency)
+
+
+def test_baseline_grapheme_matches_official():
+    """Validate the oracle itself: baseline_grapheme_boundaries must reproduce every official
+    GraphemeBreakTest.txt case bit-exactly. A baseline that cannot pass the official suite cannot be trusted to
+    gate the random fuzz above — this catches a regressed/approximate baseline (e.g. an Extended_Pictographic
+    or Indic-conjunct gap) directly."""
+    try:
+        test_cases = get_grapheme_break_test_cases()
+        properties = get_grapheme_break_properties()
+        indic_conjunct_breaks = get_indic_conjunct_break_properties()
+        extended_pictographic = get_extended_pictographic()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode test data")
+
+    failures = []
+    for text, expected_byte_boundaries in test_cases:
+        if not text:
+            continue
+        got = baseline_grapheme_boundaries(text, properties, indic_conjunct_breaks, extended_pictographic)
+        if got != expected_byte_boundaries:
+            codepoints = " ".join(f"{ord(character):04X}" for character in text)
+            failures.append(f"  {codepoints}: expected {expected_byte_boundaries}, got {got}")
+
+    assert not failures, "baseline_grapheme_boundaries vs official GraphemeBreakTest ({} / {}):\n{}".format(
+        len(failures), len(test_cases), "\n".join(failures[:40])
+    )
+
+
+def test_utf8_grapheme_class_adjacency():
+    """Every Grapheme_Cluster_Break class-adjacency pair and triple — built from one representative codepoint
+    per class — must segment bit-exactly the same as ICU. Derives the corpus from the property table rather
+    than a hand-picked palette, so rare class interactions are exercised exhaustively."""
+    icu = pytest.importorskip("icu", reason="PyICU not installed")
+    try:
+        properties = get_grapheme_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode data files")
+
+    icu_graphemes = icu_segmenter("grapheme")
+    representatives = representatives_by_class(properties, count=1)
+    cases = class_adjacency_strings(representatives, arity=2)
+    cases += class_adjacency_strings(representatives, arity=3, max_cases=8000)
+
+    failures = []
+    for text in cases:
+        if not all(icu.Char.isdefined(ord(character)) for character in text):
+            continue  # skip representatives unassigned in the local ICU's Unicode version
+        sz_boundaries = byte_boundaries(sz.utf8_graphemes(text))
+        icu_boundaries = byte_boundaries(icu_graphemes(text))
+        if sz_boundaries != icu_boundaries:
+            codepoints = " ".join(f"{ord(character):04X}" for character in text)
+            failures.append(f"  {codepoints}\n    sz={sz_boundaries}\n    icu={icu_boundaries}")
+
+    assert not failures, "StringZilla vs ICU grapheme class-adjacency divergences ({}):\n{}".format(
+        len(failures), "\n".join(failures[:20])
+    )
+
+
+#  endregion Rule-derived coverage (baseline validation + class adjacency)

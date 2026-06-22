@@ -12,8 +12,13 @@ import pytest
 
 import stringzilla as sz
 
-from test_helpers import SEED_VALUES
-from test_utf8_helpers import icu_normalizer
+from test_helpers import (
+    SEED_VALUES,
+    UnicodeDataDownloadError,
+    get_combining_classes,
+    get_normalization_test_cases,
+)
+from test_utf8_helpers import combining_scrambles, icu_normalizer
 
 
 def test_unit_utf8_norm():
@@ -176,3 +181,61 @@ def test_utf8_norm_random_sequences_icu(form: str, seed_value: int):
 
 
 #  endregion Exhaustive ICU cross-check
+
+
+#  region Official conformance + canonical ordering
+
+
+def test_utf8_norm_official_conformance():
+    """Authoritative NFC/NFD/NFKC/NFKD conformance against the official NormalizationTest.txt.
+
+    Version-pinned to the project's target Unicode (17.0) and independent of ICU's or the host Python's
+    Unicode version, this is the normalization analogue of the *BreakTest.txt segmentation suites: for every
+    listed source string, each form must reproduce the file's expected column bit-exactly.
+    """
+    try:
+        cases = get_normalization_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode test data")
+
+    failures = []
+    for source, nfc, nfd, nfkc, nfkd in cases:
+        expected_by_form = {"NFC": nfc, "NFD": nfd, "NFKC": nfkc, "NFKD": nfkd}
+        for form, expected_text in expected_by_form.items():
+            expected = expected_text.encode("utf-8")
+            got = sz.utf8_norm(source, form)
+            if got != expected:
+                codepoints = " ".join(f"{ord(character):04X}" for character in source)
+                failures.append((form, codepoints, expected.hex(), got.hex()))
+
+    assert not failures, "NormalizationTest.txt conformance failures ({} / {} cases). First 10: {}".format(
+        len(failures), len(cases), failures[:10]
+    )
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_norm_canonical_ordering(seed_value: int):
+    """Independent canonical-ordering invariant: within each combining run, NFD output must order marks by
+    non-decreasing Canonical_Combining_Class. Checked over random non-canonical combining scrambles, using the
+    CCC table directly (no external normalizer needed)."""
+    try:
+        combining_classes = get_combining_classes()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode data files")
+
+    rng = Random(seed_value)
+    for text in combining_scrambles(combining_classes, rng, 300):
+        normalized = sz.utf8_norm(text, "NFD").decode("utf-8")
+        previous_class = 0
+        for character in normalized:
+            combining_class = combining_classes.get(ord(character), 0)
+            if combining_class == 0:
+                previous_class = 0
+                continue
+            assert combining_class >= previous_class, "Non-canonical CCC order in NFD of {}: {}".format(
+                " ".join(f"{ord(c):04X}" for c in text), " ".join(f"{ord(c):04X}" for c in normalized)
+            )
+            previous_class = combining_class
+
+
+#  endregion Official conformance + canonical ordering

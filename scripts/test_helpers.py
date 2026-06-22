@@ -62,15 +62,15 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
             with urllib.request.urlopen(url) as response:
                 zip_data = response.read()
             zip_bytes = io.BytesIO(zip_data)
-            with zipfile.ZipFile(zip_bytes) as zf:
-                xml_filename = zf.namelist()[0]
-                with zf.open(xml_filename) as xml_file:
+            with zipfile.ZipFile(zip_bytes) as zip_file:
+                xml_filename = zip_file.namelist()[0]
+                with zip_file.open(xml_filename) as xml_file:
                     xml_content = xml_file.read()
-                    with open(cache_path, "wb") as f:
-                        f.write(xml_content)
+                    with open(cache_path, "wb") as data_file:
+                        data_file.write(xml_content)
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download UCD XML from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download UCD XML from {url}: {error}")
     else:
         print(f"Using cached Unicode {version} UCD XML: {cache_path}")
 
@@ -81,12 +81,12 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
 def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
     """Return all assigned/defined codepoints in Unicode."""
     root = get_unicode_xml_data(version)
-    ns = {"ucd": "http://www.unicode.org/ns/2003/ucd/1.0"}
+    namespace = {"ucd": "http://www.unicode.org/ns/2003/ucd/1.0"}
     codepoints = []
-    for char in root.findall(".//ucd:char", ns):
-        cp_str = char.get("cp")
-        if cp_str:
-            codepoints.append(int(cp_str, 16))
+    for char in root.findall(".//ucd:char", namespace):
+        codepoint_string = char.get("cp")
+        if codepoint_string:
+            codepoints.append(int(codepoint_string, 16))
     return sorted(codepoints)
 
 
@@ -96,8 +96,8 @@ def parse_uncased_folding_file(filepath: str) -> Dict[int, bytes]:
     Uses status C (common) and F (full) mappings for full case folding.
     """
     folds = {}
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
+    with open(filepath, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -112,10 +112,10 @@ def parse_uncased_folding_file(filepath: str) -> Dict[int, bytes]:
             try:
                 codepoint = int(parts[0].strip(), 16)
                 # Mapping can be multiple codepoints separated by spaces (e.g., "0073 0073" for ß → ss)
-                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
+                target_codepoints = [int(hex_part, 16) for hex_part in parts[2].split("#")[0].strip().split()]
                 # Convert target codepoints to UTF-8 bytes
-                folded_str = "".join(chr(cp) for cp in target_cps)
-                folds[codepoint] = folded_str.encode("utf-8")
+                folded_string = "".join(chr(codepoint) for codepoint in target_codepoints)
+                folds[codepoint] = folded_string.encode("utf-8")
             except (ValueError, IndexError):
                 continue
     return folds
@@ -140,10 +140,10 @@ def _download_uncased_folding_file(version: str) -> str:
         try:
             # Use urlopen with 30-second timeout instead of urlretrieve
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as f:
-                    f.write(response.read())
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download CaseFolding.txt from {url}: {e}")
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download CaseFolding.txt from {url}: {error}")
 
     return cache_path
 
@@ -175,8 +175,8 @@ def get_uncased_folding_rules_as_codepoints(
     cache_path = _download_uncased_folding_file(version)
 
     folds = {}
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -187,9 +187,9 @@ def get_uncased_folding_rules_as_codepoints(
             if status not in ("C", "F"):
                 continue
             try:
-                source_cp = int(parts[0].strip(), 16)
-                target_cps = [int(x, 16) for x in parts[2].split("#")[0].strip().split()]
-                folds[source_cp] = target_cps
+                source_codepoint = int(parts[0].strip(), 16)
+                target_codepoints = [int(hex_part, 16) for hex_part in parts[2].split("#")[0].strip().split()]
+                folds[source_codepoint] = target_codepoints
             except (ValueError, IndexError):
                 continue
     return folds
@@ -213,14 +213,14 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
         try:
             urllib.request.urlretrieve(url, cache_path)
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download DerivedNormalizationProps.txt from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download DerivedNormalizationProps.txt from {url}: {error}")
     else:
         print(f"Using cached Unicode {version} DerivedNormalizationProps.txt: {cache_path}")
 
-    props: Dict[int, Dict[str, str]] = {}
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    properties: Dict[int, Dict[str, str]] = {}
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
                 continue
@@ -228,34 +228,34 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
             if len(parts) < 2:
                 continue
             try:
-                cp_range = parts[0].strip()
-                prop_value = parts[1].strip()
+                codepoint_range = parts[0].strip()
+                property_field = parts[1].strip()
 
                 # Parse property name and value (e.g., "NFC_QC" or "NFC_QC; N")
                 if len(parts) >= 3:
-                    prop_name = prop_value
-                    prop_val = parts[2].strip()
+                    property_name = property_field
+                    property_default = parts[2].strip()
                 else:
                     # Properties like "Full_Composition_Exclusion" are boolean
-                    prop_name = prop_value
-                    prop_val = "Y"
+                    property_name = property_field
+                    property_default = "Y"
 
                 # Parse codepoint range
-                if ".." in cp_range:
-                    start, end = cp_range.split("..")
-                    start_cp = int(start, 16)
-                    end_cp = int(end, 16)
+                if ".." in codepoint_range:
+                    start, end = codepoint_range.split("..")
+                    start_codepoint = int(start, 16)
+                    end_codepoint = int(end, 16)
                 else:
-                    start_cp = end_cp = int(cp_range, 16)
+                    start_codepoint = end_codepoint = int(codepoint_range, 16)
 
-                for cp in range(start_cp, end_cp + 1):
-                    if cp not in props:
-                        props[cp] = {}
-                    props[cp][prop_name] = prop_val
+                for codepoint in range(start_codepoint, end_codepoint + 1):
+                    if codepoint not in properties:
+                        properties[codepoint] = {}
+                    properties[codepoint][property_name] = property_default
             except (ValueError, IndexError):
                 continue
 
-    return props
+    return properties
 
 
 def _download_word_break_property_file(version: str) -> str:
@@ -267,11 +267,11 @@ def _download_word_break_property_file(version: str) -> str:
         print(f"Downloading Unicode {version} WordBreakProperty.txt from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as f:
-                    f.write(response.read())
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download WordBreakProperty.txt from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download WordBreakProperty.txt from {url}: {error}")
 
     return cache_path
 
@@ -290,9 +290,9 @@ def get_word_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
     """
     cache_path = _download_word_break_property_file(version)
 
-    props: Dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    properties: Dict[int, str] = {}
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
                 continue
@@ -300,23 +300,23 @@ def get_word_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
             if len(parts) < 2:
                 continue
             try:
-                cp_range = parts[0].strip()
-                prop_name = parts[1].strip()
+                codepoint_range = parts[0].strip()
+                property_name = parts[1].strip()
 
                 # Parse codepoint range
-                if ".." in cp_range:
-                    start, end = cp_range.split("..")
-                    start_cp = int(start, 16)
-                    end_cp = int(end, 16)
+                if ".." in codepoint_range:
+                    start, end = codepoint_range.split("..")
+                    start_codepoint = int(start, 16)
+                    end_codepoint = int(end, 16)
                 else:
-                    start_cp = end_cp = int(cp_range, 16)
+                    start_codepoint = end_codepoint = int(codepoint_range, 16)
 
-                for cp in range(start_cp, end_cp + 1):
-                    props[cp] = prop_name
+                for codepoint in range(start_codepoint, end_codepoint + 1):
+                    properties[codepoint] = property_name
             except (ValueError, IndexError):
                 continue
 
-    return props
+    return properties
 
 
 def _download_word_break_test_file(version: str) -> str:
@@ -328,11 +328,11 @@ def _download_word_break_test_file(version: str) -> str:
         print(f"Downloading Unicode {version} WordBreakTest.txt from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as f:
-                    f.write(response.read())
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download WordBreakTest.txt from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download WordBreakTest.txt from {url}: {error}")
 
     return cache_path
 
@@ -350,8 +350,8 @@ def get_word_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     cache_path = _download_word_break_test_file(version)
 
     test_cases = []
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
                 continue
@@ -363,30 +363,30 @@ def get_word_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
 
             codepoints = []
             boundaries = []
-            byte_pos = 0
+            byte_position = 0
 
             for part in parts:
                 part = part.strip()
                 if part == "÷":
-                    boundaries.append(byte_pos)
+                    boundaries.append(byte_position)
                 elif part == "×":
                     pass  # No boundary
                 elif part:
                     try:
-                        cp = int(part, 16)
-                        codepoints.append(cp)
-                        byte_pos += len(chr(cp).encode("utf-8"))
+                        codepoint = int(part, 16)
+                        codepoints.append(codepoint)
+                        byte_position += len(chr(codepoint).encode("utf-8"))
                     except ValueError:
                         continue
 
             if codepoints:
-                text = "".join(chr(cp) for cp in codepoints)
+                text = "".join(chr(codepoint) for codepoint in codepoints)
                 test_cases.append((text, boundaries))
 
     return test_cases
 
 
-def baseline_word_boundaries(text: str, wb_props: Dict[int, str] = None) -> List[int]:
+def baseline_word_boundaries(text: str, word_break_properties: Dict[int, str] = None) -> List[int]:
     """Pure Python implementation of TR29 word boundary algorithm.
 
     This serves as a reference baseline for testing the C implementation.
@@ -398,20 +398,20 @@ def baseline_word_boundaries(text: str, wb_props: Dict[int, str] = None) -> List
     Returns:
         List of byte positions that are word boundaries.
     """
-    if wb_props is None:
-        wb_props = get_word_break_properties()
+    if word_break_properties is None:
+        word_break_properties = get_word_break_properties()
 
-    def get_wb_prop(cp: int) -> str:
-        return wb_props.get(cp, "Other")
+    def word_break_property_of(codepoint: int) -> str:
+        return word_break_properties.get(codepoint, "Other")
 
     # Convert text to list of (codepoint, byte_offset, byte_length)
     codepoints = []
     byte_offset = 0
     for char in text:
-        cp = ord(char)
-        cp_bytes = char.encode("utf-8")
-        codepoints.append((cp, byte_offset, len(cp_bytes)))
-        byte_offset += len(cp_bytes)
+        codepoint = ord(char)
+        codepoint_bytes = char.encode("utf-8")
+        codepoints.append((codepoint, byte_offset, len(codepoint_bytes)))
+        byte_offset += len(codepoint_bytes)
 
     if not codepoints:
         return [0]
@@ -420,181 +420,185 @@ def baseline_word_boundaries(text: str, wb_props: Dict[int, str] = None) -> List
     boundaries = [0]  # WB1: sot ÷
 
     # Helper to check if a property is "ignorable" per WB4
-    def is_ignorable(prop: str) -> bool:
-        return prop in ("Extend", "Format", "ZWJ")
+    def is_ignorable(property_value: str) -> bool:
+        return property_value in ("Extend", "Format", "ZWJ")
 
     # Helper to get effective property (skipping WB4 ignorables)
-    def get_effective_prop_at(idx: int, direction: int = 1) -> str:
+    def effective_property_at(relative_index: int, direction: int = 1) -> str:
         """Get property at idx, or skip ignorables in direction."""
-        while 0 <= idx < len(codepoints):
-            prop = get_wb_prop(codepoints[idx][0])
-            if not is_ignorable(prop):
-                return prop
-            idx += direction
+        while 0 <= relative_index < len(codepoints):
+            property_value = word_break_property_of(codepoints[relative_index][0])
+            if not is_ignorable(property_value):
+                return property_value
+            relative_index += direction
         return "Other"
 
-    def is_ahletter(prop: str) -> bool:
-        return prop in ("ALetter", "Hebrew_Letter")
+    def is_aletter_or_hebrew_letter(property_value: str) -> bool:
+        return property_value in ("ALetter", "Hebrew_Letter")
 
-    def is_midnumletq(prop: str) -> bool:
-        return prop in ("MidNumLet", "Single_Quote")
+    def is_midnumlet_or_single_quote(property_value: str) -> bool:
+        return property_value in ("MidNumLet", "Single_Quote")
 
     # Check each position between codepoints
-    for i in range(1, len(codepoints)):
-        pos_bytes = codepoints[i][1]
+    for index in range(1, len(codepoints)):
+        boundary_byte_position = codepoints[index][1]
 
         # Get properties before and after this position
-        prev_cp = codepoints[i - 1][0]
-        curr_cp = codepoints[i][0]
-        prev_prop = get_wb_prop(prev_cp)
-        curr_prop = get_wb_prop(curr_cp)
+        previous_codepoint = codepoints[index - 1][0]
+        current_codepoint = codepoints[index][0]
+        previous_property = word_break_property_of(previous_codepoint)
+        current_property = word_break_property_of(current_codepoint)
 
         # WB3: Do not break between CR and LF
-        if prev_prop == "CR" and curr_prop == "LF":
+        if previous_property == "CR" and current_property == "LF":
             continue
 
         # WB3a: Break after CR, LF, Newline
-        if prev_prop in ("CR", "LF", "Newline"):
-            boundaries.append(pos_bytes)
+        if previous_property in ("CR", "LF", "Newline"):
+            boundaries.append(boundary_byte_position)
             continue
 
         # WB3b: Break before CR, LF, Newline
-        if curr_prop in ("CR", "LF", "Newline"):
-            boundaries.append(pos_bytes)
+        if current_property in ("CR", "LF", "Newline"):
+            boundaries.append(boundary_byte_position)
             continue
 
         # WB3c: Do not break within emoji ZWJ sequences
-        if prev_prop == "ZWJ":
+        if previous_property == "ZWJ":
             # Extended_Pictographic check would go here
             # For simplicity, just don't break after ZWJ
             continue
 
         # WB3d: Keep horizontal whitespace together
-        if prev_prop == "WSegSpace" and curr_prop == "WSegSpace":
+        if previous_property == "WSegSpace" and current_property == "WSegSpace":
             continue
 
         # WB4: Ignore Format and Extend
         # Get effective properties skipping ignorables
-        eff_prev = prev_prop
-        if is_ignorable(prev_prop):
+        effective_previous = previous_property
+        if is_ignorable(previous_property):
             # Look back for non-ignorable
-            for j in range(i - 2, -1, -1):
-                p = get_wb_prop(codepoints[j][0])
-                if not is_ignorable(p):
-                    eff_prev = p
+            for lookahead_index in range(index - 2, -1, -1):
+                scanned_property = word_break_property_of(codepoints[lookahead_index][0])
+                if not is_ignorable(scanned_property):
+                    effective_previous = scanned_property
                     break
             else:
-                eff_prev = "Other"
+                effective_previous = "Other"
 
-        eff_curr = curr_prop
+        effective_current = current_property
         # Note: we don't skip ignorables for current in simple cases
 
         # WB5: Do not break between letters
-        if is_ahletter(eff_prev) and is_ahletter(eff_curr):
+        if is_aletter_or_hebrew_letter(effective_previous) and is_aletter_or_hebrew_letter(effective_current):
             continue
 
         # WB6: Do not break letters across punctuation (looking ahead)
-        if is_ahletter(eff_prev) and curr_prop in ("MidLetter", "MidNumLet", "Single_Quote"):
+        if is_aletter_or_hebrew_letter(effective_previous) and current_property in (
+            "MidLetter",
+            "MidNumLet",
+            "Single_Quote",
+        ):
             # Look ahead for AHLetter
-            for j in range(i + 1, len(codepoints)):
-                next_prop = get_wb_prop(codepoints[j][0])
-                if is_ignorable(next_prop):
+            for lookahead_index in range(index + 1, len(codepoints)):
+                next_property = word_break_property_of(codepoints[lookahead_index][0])
+                if is_ignorable(next_property):
                     continue
-                if is_ahletter(next_prop):
+                if is_aletter_or_hebrew_letter(next_property):
                     # Don't break: AHLetter × (MidLetter|MidNumLetQ) × AHLetter
                     break
                 else:
-                    boundaries.append(pos_bytes)
+                    boundaries.append(boundary_byte_position)
                     break
             else:
-                boundaries.append(pos_bytes)
+                boundaries.append(boundary_byte_position)
             continue
 
         # WB7: Reverse of WB6
-        if curr_prop in ("MidLetter", "MidNumLet", "Single_Quote"):
+        if current_property in ("MidLetter", "MidNumLet", "Single_Quote"):
             # Already handled by WB6
             pass
 
-        if is_midnumletq(eff_prev) or eff_prev == "MidLetter":
-            if is_ahletter(eff_curr):
+        if is_midnumlet_or_single_quote(effective_previous) or effective_previous == "MidLetter":
+            if is_aletter_or_hebrew_letter(effective_current):
                 # Check if preceded by AHLetter
-                for j in range(i - 2, -1, -1):
-                    p = get_wb_prop(codepoints[j][0])
-                    if is_ignorable(p):
+                for lookahead_index in range(index - 2, -1, -1):
+                    scanned_property = word_break_property_of(codepoints[lookahead_index][0])
+                    if is_ignorable(scanned_property):
                         continue
-                    if is_ahletter(p):
+                    if is_aletter_or_hebrew_letter(scanned_property):
                         # Don't break: AHLetter × (MidLetter|MidNumLetQ) × AHLetter
                         break
                     else:
-                        boundaries.append(pos_bytes)
+                        boundaries.append(boundary_byte_position)
                         break
                 else:
-                    boundaries.append(pos_bytes)
+                    boundaries.append(boundary_byte_position)
                 continue
 
         # WB8: Do not break between digits
-        if eff_prev == "Numeric" and eff_curr == "Numeric":
+        if effective_previous == "Numeric" and effective_current == "Numeric":
             continue
 
         # WB9: Do not break letter-digit
-        if is_ahletter(eff_prev) and eff_curr == "Numeric":
+        if is_aletter_or_hebrew_letter(effective_previous) and effective_current == "Numeric":
             continue
 
         # WB10: Do not break digit-letter
-        if eff_prev == "Numeric" and is_ahletter(eff_curr):
+        if effective_previous == "Numeric" and is_aletter_or_hebrew_letter(effective_current):
             continue
 
         # WB11/12: Numeric separators
-        if eff_prev == "Numeric" and curr_prop in ("MidNum", "MidNumLet", "Single_Quote"):
+        if effective_previous == "Numeric" and current_property in ("MidNum", "MidNumLet", "Single_Quote"):
             # Look ahead for Numeric
-            for j in range(i + 1, len(codepoints)):
-                next_prop = get_wb_prop(codepoints[j][0])
-                if is_ignorable(next_prop):
+            for lookahead_index in range(index + 1, len(codepoints)):
+                next_property = word_break_property_of(codepoints[lookahead_index][0])
+                if is_ignorable(next_property):
                     continue
-                if next_prop == "Numeric":
+                if next_property == "Numeric":
                     break
                 else:
-                    boundaries.append(pos_bytes)
+                    boundaries.append(boundary_byte_position)
                     break
             else:
-                boundaries.append(pos_bytes)
+                boundaries.append(boundary_byte_position)
             continue
 
-        if curr_prop in ("MidNum", "MidNumLet", "Single_Quote") and eff_curr == "Numeric":
+        if current_property in ("MidNum", "MidNumLet", "Single_Quote") and effective_current == "Numeric":
             # WB12 - check preceding Numeric
             pass  # Handled above
 
         # WB13: Katakana
-        if eff_prev == "Katakana" and eff_curr == "Katakana":
+        if effective_previous == "Katakana" and effective_current == "Katakana":
             continue
 
         # WB13a: Connect with ExtendNumLet
-        if eff_prev in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana", "ExtendNumLet"):
-            if eff_curr == "ExtendNumLet":
+        if effective_previous in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana", "ExtendNumLet"):
+            if effective_current == "ExtendNumLet":
                 continue
 
         # WB13b: ExtendNumLet continues words
-        if eff_prev == "ExtendNumLet":
-            if eff_curr in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana"):
+        if effective_previous == "ExtendNumLet":
+            if effective_current in ("ALetter", "Hebrew_Letter", "Numeric", "Katakana"):
                 continue
 
         # WB15/16: Regional Indicators - keep pairs together
-        if eff_prev == "Regional_Indicator" and eff_curr == "Regional_Indicator":
+        if effective_previous == "Regional_Indicator" and effective_current == "Regional_Indicator":
             # Count preceding RIs - if odd, don't break
-            ri_count = 0
-            for j in range(i - 1, -1, -1):
-                p = get_wb_prop(codepoints[j][0])
-                if p == "Regional_Indicator":
-                    ri_count += 1
-                elif is_ignorable(p):
+            regional_indicator_count = 0
+            for lookahead_index in range(index - 1, -1, -1):
+                scanned_property = word_break_property_of(codepoints[lookahead_index][0])
+                if scanned_property == "Regional_Indicator":
+                    regional_indicator_count += 1
+                elif is_ignorable(scanned_property):
                     continue
                 else:
                     break
-            if ri_count % 2 == 1:
+            if regional_indicator_count % 2 == 1:
                 continue
 
         # WB999: Otherwise, break
-        boundaries.append(pos_bytes)
+        boundaries.append(boundary_byte_position)
 
     # WB2: ÷ eot
     boundaries.append(total_bytes)
@@ -615,20 +619,20 @@ def _download_break_property_file(filename: str, version: str) -> str:
         print(f"Downloading Unicode {version} {filename} from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as f:
-                    f.write(response.read())
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
 
     return cache_path
 
 
 def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
     """Parse a ``codepoint(..range) ; Property`` style UCD break-property file into a dict."""
-    props: Dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    properties: Dict[int, str] = {}
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
                 continue
@@ -636,19 +640,19 @@ def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
             if len(parts) < 2:
                 continue
             try:
-                cp_range = parts[0].strip()
-                prop_name = parts[1].strip()
-                if ".." in cp_range:
-                    start, end = cp_range.split("..")
-                    start_cp = int(start, 16)
-                    end_cp = int(end, 16)
+                codepoint_range = parts[0].strip()
+                property_name = parts[1].strip()
+                if ".." in codepoint_range:
+                    start, end = codepoint_range.split("..")
+                    start_codepoint = int(start, 16)
+                    end_codepoint = int(end, 16)
                 else:
-                    start_cp = end_cp = int(cp_range, 16)
-                for cp in range(start_cp, end_cp + 1):
-                    props[cp] = prop_name
+                    start_codepoint = end_codepoint = int(codepoint_range, 16)
+                for codepoint in range(start_codepoint, end_codepoint + 1):
+                    properties[codepoint] = property_name
             except (ValueError, IndexError):
                 continue
-    return props
+    return properties
 
 
 def _download_break_test_file(filename: str, version: str) -> str:
@@ -660,11 +664,11 @@ def _download_break_test_file(filename: str, version: str) -> str:
         print(f"Downloading Unicode {version} {filename} from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as f:
-                    f.write(response.read())
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
             print(f"Cached to {cache_path}")
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {e}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
 
     return cache_path
 
@@ -672,30 +676,30 @@ def _download_break_test_file(filename: str, version: str) -> str:
 def _parse_break_test_file(cache_path: str) -> List[tuple]:
     """Parse a UAX break-test file (``÷`` = break, ``×`` = no break) into (text, boundary_positions)."""
     test_cases = []
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             if not line:
                 continue
             parts = line.replace("÷", " ÷ ").replace("×", " × ").split()
             codepoints = []
             boundaries = []
-            byte_pos = 0
+            byte_position = 0
             for part in parts:
                 part = part.strip()
                 if part == "÷":
-                    boundaries.append(byte_pos)
+                    boundaries.append(byte_position)
                 elif part == "×":
                     pass
                 elif part:
                     try:
-                        cp = int(part, 16)
-                        codepoints.append(cp)
-                        byte_pos += len(chr(cp).encode("utf-8"))
+                        codepoint = int(part, 16)
+                        codepoints.append(codepoint)
+                        byte_position += len(chr(codepoint).encode("utf-8"))
                     except ValueError:
                         continue
             if codepoints:
-                text = "".join(chr(cp) for cp in codepoints)
+                text = "".join(chr(codepoint) for codepoint in codepoints)
                 test_cases.append((text, boundaries))
     return test_cases
 
@@ -725,23 +729,23 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[
         url = f"https://www.unicode.org/Public/{version}/ucd/DerivedCoreProperties.txt"
         try:
             urllib.request.urlretrieve(url, cache_path)
-        except Exception as e:
-            raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {e}")
-    incb: Dict[int, str] = {}
-    with open(cache_path, "r", encoding="utf-8") as f:
-        for line in f:
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {error}")
+    indic_conjunct_breaks: Dict[int, str] = {}
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
             line = line.split("#")[0].strip()
             parts = [part.strip() for part in line.split(";")]
             if len(parts) < 3 or parts[1] != "InCB":
                 continue
-            cp_range = parts[0]
-            if ".." in cp_range:
-                start_cp, end_cp = (int(bound, 16) for bound in cp_range.split(".."))
+            codepoint_range = parts[0]
+            if ".." in codepoint_range:
+                start_codepoint, end_codepoint = (int(bound, 16) for bound in codepoint_range.split(".."))
             else:
-                start_cp = end_cp = int(cp_range, 16)
-            for cp in range(start_cp, end_cp + 1):
-                incb[cp] = parts[2]
-    return incb
+                start_codepoint = end_codepoint = int(codepoint_range, 16)
+            for codepoint in range(start_codepoint, end_codepoint + 1):
+                indic_conjunct_breaks[codepoint] = parts[2]
+    return indic_conjunct_breaks
 
 
 def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
@@ -754,31 +758,38 @@ def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]
     return _parse_break_test_file(cache_path)
 
 
-def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None, incb: Dict[int, str] = None) -> List[int]:
+def baseline_grapheme_boundaries(
+    text: str,
+    properties: Dict[int, str] = None,
+    indic_conjunct_breaks: Dict[int, str] = None,
+    extended_pictographic: set = None,
+) -> List[int]:
     """Pure Python implementation of the UAX-29 extended grapheme cluster algorithm.
 
     Reference baseline for the C implementation. Returns byte positions of cluster boundaries.
     Covers GB1-GB999 including the Hangul, GB9c Indic-conjunct, emoji-ZWJ (GB11) and
     Regional_Indicator (GB12/13) rules.
     """
-    if props is None:
-        props = get_grapheme_break_properties()
-    if incb is None:
-        incb = get_indic_conjunct_break_properties()
+    if properties is None:
+        properties = get_grapheme_break_properties()
+    if indic_conjunct_breaks is None:
+        indic_conjunct_breaks = get_indic_conjunct_break_properties()
+    if extended_pictographic is None:
+        extended_pictographic = get_extended_pictographic()
 
-    def prop_of(cp: int) -> str:
-        return props.get(cp, "Other")
+    def property_of(codepoint: int) -> str:
+        return properties.get(codepoint, "Other")
 
-    def incb_of(cp: int) -> str:
-        return incb.get(cp, "None")
+    def indic_conjunct_of(codepoint: int) -> str:
+        return indic_conjunct_breaks.get(codepoint, "None")
 
     codepoints = []
     byte_offset = 0
     for char in text:
-        cp = ord(char)
-        cp_bytes = char.encode("utf-8")
-        codepoints.append((cp, byte_offset, len(cp_bytes)))
-        byte_offset += len(cp_bytes)
+        codepoint = ord(char)
+        codepoint_bytes = char.encode("utf-8")
+        codepoints.append((codepoint, byte_offset, len(codepoint_bytes)))
+        byte_offset += len(codepoint_bytes)
 
     if not codepoints:
         return [0]
@@ -786,90 +797,78 @@ def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None, incb: 
     total_bytes = byte_offset
     boundaries = [0]  # GB1: sot ÷
 
-    def is_extended_pictographic(cp: int) -> bool:
-        # Extended_Pictographic is supplied via Emoji-Data; approximate from common ranges. Regional_Indicators
-        # (U+1F1E6..U+1F1FF) have their own GCB class and are NOT Extended_Pictographic, so GB11's ZWJ bridge must
-        # not fire on `RI ZWJ RI` (that breaks after the ZWJ per GB9/GB999).
-        return (
-            0x1F000 <= cp <= 0x1FAFF
-            and not (0x1F1E6 <= cp <= 0x1F1FF)
-            or 0x2600 <= cp <= 0x27BF
-            or cp in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x2328, 0x2388)
-            or 0x2194 <= cp <= 0x21AA
-            or 0x231A <= cp <= 0x231B
-            or 0x24C2 == cp
-            or 0x25AA <= cp <= 0x25FE
-            or 0x2934 <= cp <= 0x2935
-            or 0x2B00 <= cp <= 0x2BFF
-        )
+    def is_extended_pictographic(codepoint: int) -> bool:
+        # Real Extended_Pictographic from emoji-data.txt. Regional_Indicators have their own GCB class and are
+        # NOT Extended_Pictographic, so GB11's ZWJ bridge correctly does not fire on `RI ZWJ RI`.
+        return codepoint in extended_pictographic
 
-    for i in range(1, len(codepoints)):
-        pos_bytes = codepoints[i][1]
-        prev_cp = codepoints[i - 1][0]
-        curr_cp = codepoints[i][0]
-        prev_prop = prop_of(prev_cp)
-        curr_prop = prop_of(curr_cp)
+    for index in range(1, len(codepoints)):
+        boundary_byte_position = codepoints[index][1]
+        previous_codepoint = codepoints[index - 1][0]
+        current_codepoint = codepoints[index][0]
+        previous_property = property_of(previous_codepoint)
+        current_property = property_of(current_codepoint)
 
         # GB3: CR x LF
-        if prev_prop == "CR" and curr_prop == "LF":
+        if previous_property == "CR" and current_property == "LF":
             continue
         # GB4: (Control | CR | LF) ÷
-        if prev_prop in ("Control", "CR", "LF"):
-            boundaries.append(pos_bytes)
+        if previous_property in ("Control", "CR", "LF"):
+            boundaries.append(boundary_byte_position)
             continue
         # GB5: ÷ (Control | CR | LF)
-        if curr_prop in ("Control", "CR", "LF"):
-            boundaries.append(pos_bytes)
+        if current_property in ("Control", "CR", "LF"):
+            boundaries.append(boundary_byte_position)
             continue
         # GB6: L x (L | V | LV | LVT)
-        if prev_prop == "L" and curr_prop in ("L", "V", "LV", "LVT"):
+        if previous_property == "L" and current_property in ("L", "V", "LV", "LVT"):
             continue
         # GB7: (LV | V) x (V | T)
-        if prev_prop in ("LV", "V") and curr_prop in ("V", "T"):
+        if previous_property in ("LV", "V") and current_property in ("V", "T"):
             continue
         # GB8: (LVT | T) x T
-        if prev_prop in ("LVT", "T") and curr_prop == "T":
+        if previous_property in ("LVT", "T") and current_property == "T":
             continue
         # GB9: x (Extend | ZWJ)
-        if curr_prop in ("Extend", "ZWJ"):
+        if current_property in ("Extend", "ZWJ"):
             continue
         # GB9a: x SpacingMark
-        if curr_prop == "SpacingMark":
+        if current_property == "SpacingMark":
             continue
         # GB9b: Prepend x
-        if prev_prop == "Prepend":
+        if previous_property == "Prepend":
             continue
         # GB9c: Consonant [Extend|Linker]* Linker [Extend|Linker]* x Consonant (Indic conjunct)
-        if incb_of(curr_cp) == "Consonant":
+        if indic_conjunct_of(current_codepoint) == "Consonant":
             seen_linker = False
-            k = i - 1
-            while k >= 0 and incb_of(codepoints[k][0]) in ("Extend", "Linker"):
-                if incb_of(codepoints[k][0]) == "Linker":
+            scan_index = index - 1
+            while scan_index >= 0 and indic_conjunct_of(codepoints[scan_index][0]) in ("Extend", "Linker"):
+                if indic_conjunct_of(codepoints[scan_index][0]) == "Linker":
                     seen_linker = True
-                k -= 1
-            if k >= 0 and seen_linker and incb_of(codepoints[k][0]) == "Consonant":
+                scan_index -= 1
+            if scan_index >= 0 and seen_linker and indic_conjunct_of(codepoints[scan_index][0]) == "Consonant":
                 continue
         # GB11: ExtPict Extend* ZWJ x ExtPict
-        if prev_prop == "ZWJ" and is_extended_pictographic(curr_cp):
-            j = i - 1
+        if previous_property == "ZWJ" and is_extended_pictographic(current_codepoint):
+            lookahead_index = index - 1
             # skip the ZWJ, then any Extend, looking for an Extended_Pictographic base
-            k = j - 1
-            while k >= 0 and prop_of(codepoints[k][0]) == "Extend":
-                k -= 1
-            if k >= 0 and is_extended_pictographic(codepoints[k][0]):
+            scan_index = lookahead_index - 1
+            while scan_index >= 0 and property_of(codepoints[scan_index][0]) == "Extend":
+                scan_index -= 1
+            if scan_index >= 0 and is_extended_pictographic(codepoints[scan_index][0]):
                 continue
         # GB12/GB13: RI x RI when preceding RI count is even
-        if prev_prop == "Regional_Indicator" and curr_prop == "Regional_Indicator":
-            ri_count = 0
-            for k in range(i - 1, -1, -1):
-                if prop_of(codepoints[k][0]) == "Regional_Indicator":
-                    ri_count += 1
+        if previous_property == "Regional_Indicator" and current_property == "Regional_Indicator":
+            regional_indicator_count = 0
+            for scan_index in range(index - 1, -1, -1):
+                if property_of(codepoints[scan_index][0]) == "Regional_Indicator":
+                    regional_indicator_count += 1
                 else:
                     break
-            if ri_count % 2 == 1:
+            if regional_indicator_count % 2 == 1:
                 continue
         # GB999: otherwise break
-        boundaries.append(pos_bytes)
+        boundaries.append(boundary_byte_position)
 
     boundaries.append(total_bytes)  # GB2: eot ÷
     return sorted(set(boundaries))
@@ -901,115 +900,115 @@ def get_sentence_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]
     return _parse_break_test_file(cache_path)
 
 
-def baseline_sentence_boundaries(text: str, props: Dict[int, str] = None) -> List[int]:
+def baseline_sentence_boundaries(text: str, properties: Dict[int, str] = None) -> List[int]:
     """Pure Python implementation of the UAX-29 sentence boundary algorithm.
 
     Reference baseline for the C implementation. Returns byte positions of sentence boundaries.
     Implements SB1-SB998 including the SB8/SB8a/SB9/SB10/SB11 ATerm/STerm machinery.
     """
-    if props is None:
-        props = get_sentence_break_properties()
+    if properties is None:
+        properties = get_sentence_break_properties()
 
-    def prop_of(cp: int) -> str:
-        return props.get(cp, "Other")
+    def property_of(codepoint: int) -> str:
+        return properties.get(codepoint, "Other")
 
     codepoints = []
     byte_offset = 0
     for char in text:
-        cp = ord(char)
-        cp_bytes = char.encode("utf-8")
-        codepoints.append((cp, byte_offset, len(cp_bytes)))
-        byte_offset += len(cp_bytes)
+        codepoint = ord(char)
+        codepoint_bytes = char.encode("utf-8")
+        codepoints.append((codepoint, byte_offset, len(codepoint_bytes)))
+        byte_offset += len(codepoint_bytes)
 
     if not codepoints:
         return [0]
 
     total_bytes = byte_offset
-    props_list = [prop_of(cp) for cp, _, _ in codepoints]
+    property_list = [property_of(codepoint) for codepoint, _, _ in codepoints]
 
-    def is_ignorable(prop: str) -> bool:
+    def is_ignorable(property_value: str) -> bool:
         # SB5: ignore Extend and Format for the purpose of the "before" context.
-        return prop in ("Extend", "Format")
+        return property_value in ("Extend", "Format")
 
-    def effective_before(idx: int) -> str:
+    def effective_before(relative_index: int) -> str:
         """Property of the last non-ignorable codepoint at or before idx (inclusive)."""
-        k = idx
-        while k >= 0 and is_ignorable(props_list[k]):
-            k -= 1
-        return props_list[k] if k >= 0 else "Other"
+        scan_index = relative_index
+        while scan_index >= 0 and is_ignorable(property_list[scan_index]):
+            scan_index -= 1
+        return property_list[scan_index] if scan_index >= 0 else "Other"
 
-    def parasep(prop: str) -> bool:
-        return prop in ("Sep", "CR", "LF")
+    def is_paragraph_separator(property_value: str) -> bool:
+        return property_value in ("Sep", "CR", "LF")
 
     boundaries = [0]  # SB1: sot ÷
 
-    n = len(codepoints)
-    for i in range(1, n):
-        pos_bytes = codepoints[i][1]
-        prev_prop = props_list[i - 1]
-        curr_prop = props_list[i]
+    codepoint_count = len(codepoints)
+    for index in range(1, codepoint_count):
+        boundary_byte_position = codepoints[index][1]
+        previous_property = property_list[index - 1]
+        current_property = property_list[index]
 
         # SB3: CR x LF
-        if prev_prop == "CR" and curr_prop == "LF":
+        if previous_property == "CR" and current_property == "LF":
             continue
         # SB4: Sep | CR | LF ÷
-        if parasep(prev_prop):
-            boundaries.append(pos_bytes)
+        if is_paragraph_separator(previous_property):
+            boundaries.append(boundary_byte_position)
             continue
         # SB5: x (Extend | Format) -> ignore (no break)
-        if curr_prop in ("Extend", "Format"):
+        if current_property in ("Extend", "Format"):
             continue
 
-        eff_prev = effective_before(i - 1)
+        effective_previous = effective_before(index - 1)
 
         # SB6: ATerm x Numeric
-        if eff_prev == "ATerm" and curr_prop == "Numeric":
+        if effective_previous == "ATerm" and current_property == "Numeric":
             continue
         # SB7: (Upper | Lower) ATerm x Upper
-        if eff_prev == "ATerm" and curr_prop == "Upper":
+        if effective_previous == "ATerm" and current_property == "Upper":
             # find the codepoint before the ATerm (skipping ignorables)
-            k = i - 2
-            while k >= 0 and is_ignorable(props_list[k]):
-                k -= 1
-            if k >= 0 and props_list[k] in ("Upper", "Lower"):
+            scan_index = index - 2
+            while scan_index >= 0 and is_ignorable(property_list[scan_index]):
+                scan_index -= 1
+            if scan_index >= 0 and property_list[scan_index] in ("Upper", "Lower"):
                 continue
         # Scan back over Close* and Sp* after an ATerm/STerm to find the sentence-terminator context.
         # SB8: ATerm Close* Sp* x (not (OLetter|Upper|Lower|Sep|CR|LF|STerm|ATerm))* Lower
         # SB8a: (STerm|ATerm) Close* Sp* x (SContinue | STerm | ATerm)
-        k = i - 1
-        while k >= 0 and is_ignorable(props_list[k]):
-            k -= 1
+        scan_index = index - 1
+        while scan_index >= 0 and is_ignorable(property_list[scan_index]):
+            scan_index -= 1
         # walk back through Sp
-        while k >= 0 and (props_list[k] == "Sp" or is_ignorable(props_list[k])):
-            k -= 1
+        while scan_index >= 0 and (property_list[scan_index] == "Sp" or is_ignorable(property_list[scan_index])):
+            scan_index -= 1
         # walk back through Close
-        while k >= 0 and (props_list[k] == "Close" or is_ignorable(props_list[k])):
-            k -= 1
-        term_prop = props_list[k] if k >= 0 else "Other"
+        while scan_index >= 0 and (property_list[scan_index] == "Close" or is_ignorable(property_list[scan_index])):
+            scan_index -= 1
+        terminator_property = property_list[scan_index] if scan_index >= 0 else "Other"
 
-        if term_prop in ("ATerm", "STerm"):
+        if terminator_property in ("ATerm", "STerm"):
             # SB8a
-            if curr_prop in ("SContinue", "STerm", "ATerm"):
+            if current_property in ("SContinue", "STerm", "ATerm"):
                 continue
-            if term_prop == "ATerm":
+            if terminator_property == "ATerm":
                 # SB8: look ahead skipping the "not separator/terminator/letter" run to a Lower
-                j = i
+                lookahead_index = index
                 lower_ahead = False
-                while j < n:
-                    p = props_list[j]
-                    if p == "Lower":
+                while lookahead_index < codepoint_count:
+                    scanned_property = property_list[lookahead_index]
+                    if scanned_property == "Lower":
                         lower_ahead = True
                         break
-                    if p in ("OLetter", "Upper", "Sep", "CR", "LF", "STerm", "ATerm"):
+                    if scanned_property in ("OLetter", "Upper", "Sep", "CR", "LF", "STerm", "ATerm"):
                         break
-                    j += 1
+                    lookahead_index += 1
                 if lower_ahead:
                     continue
             # SB9: (STerm|ATerm) Close* x (Close | Sp | Sep | CR | LF)
-            if curr_prop in ("Close", "Sp", "Sep", "CR", "LF"):
+            if current_property in ("Close", "Sp", "Sep", "CR", "LF"):
                 continue
             # SB11: after STerm/ATerm (with optional Close*/Sp*/ParaSep) -> break
-            boundaries.append(pos_bytes)
+            boundaries.append(boundary_byte_position)
             continue
 
         # SB998: otherwise, do not break
@@ -1045,7 +1044,7 @@ def get_line_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     return _parse_break_test_file(cache_path)
 
 
-def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tuple]:
+def baseline_line_boundaries(text: str, properties: Dict[int, str] = None) -> List[tuple]:
     """Pure Python reference for UAX-14 mandatory line breaks.
 
     Rather than reimplement the full pair-table (LB1-LB31), this baseline returns the set of
@@ -1057,19 +1056,19 @@ def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tu
         List of (byte_offset, mandatory) tuples. ``mandatory`` is always True here (every
         returned offset is a hard break); the final eot boundary is reported as non-mandatory.
     """
-    if props is None:
-        props = get_line_break_properties()
+    if properties is None:
+        properties = get_line_break_properties()
 
-    def prop_of(cp: int) -> str:
-        return props.get(cp, "AL")
+    def property_of(codepoint: int) -> str:
+        return properties.get(codepoint, "AL")
 
     codepoints = []
     byte_offset = 0
     for char in text:
-        cp = ord(char)
-        cp_bytes = char.encode("utf-8")
-        codepoints.append((cp, byte_offset, len(cp_bytes)))
-        byte_offset += len(cp_bytes)
+        codepoint = ord(char)
+        codepoint_bytes = char.encode("utf-8")
+        codepoints.append((codepoint, byte_offset, len(codepoint_bytes)))
+        byte_offset += len(codepoint_bytes)
 
     if not codepoints:
         return [(0, False)]
@@ -1085,19 +1084,19 @@ def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tu
 
     add(0, False)  # LB2: sot, never a mandatory break
 
-    n = len(codepoints)
-    for i in range(1, n):
-        pos_bytes = codepoints[i][1]
-        prev_prop = prop_of(codepoints[i - 1][0])
-        curr_prop = prop_of(codepoints[i][0])
+    codepoint_count = len(codepoints)
+    for index in range(1, codepoint_count):
+        boundary_byte_position = codepoints[index][1]
+        previous_property = property_of(codepoints[index - 1][0])
+        current_property = property_of(codepoints[index][0])
 
         # LB5: CR x LF -> no break between
-        if prev_prop == "CR" and curr_prop == "LF":
+        if previous_property == "CR" and current_property == "LF":
             continue
         # LB4: BK !  (mandatory break after BK)
         # LB5: CR ! , LF ! , NL !  (mandatory break after each)
-        if prev_prop in ("BK", "CR", "LF", "NL"):
-            add(pos_bytes, True)
+        if previous_property in ("BK", "CR", "LF", "NL"):
+            add(boundary_byte_position, True)
             continue
 
     # eot boundary (LB3) - reported but not mandatory
@@ -1106,6 +1105,156 @@ def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tu
 
 
 #  endregion Line
+
+#  region Hardening extractors
+
+# Extractors that derive hard synthetic corner cases and authoritative oracles directly from the UCD, rather
+# than from a hand-picked palette: the official NormalizationTest.txt, emoji-data Extended_Pictographic, the
+# canonical combining classes and decomposition mappings, and a per-break-class representative inverter.
+
+
+def _download_ucd_text(filename: str, subdir: str, version: str = UNICODE_VERSION) -> str:
+    """Download a UCD text file from an arbitrary subdir (e.g. ``ucd`` or ``ucd/emoji``) and cache it."""
+    cache_path = os.path.join(tempfile.gettempdir(), f"{filename[:-4]}-{version}.txt")
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/{subdir}/{filename}"
+        print(f"Downloading Unicode {version} {filename} from {url}...")
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(cache_path, "wb") as data_file:
+                    data_file.write(response.read())
+            print(f"Cached to {cache_path}")
+        except Exception as error:
+            raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
+    return cache_path
+
+
+def get_normalization_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+    """Download and parse the official NormalizationTest.txt.
+
+    Returns a list of (source, nfc, nfd, nfkc, nfkd) tuples, each a decoded `str`. This is the authoritative,
+    version-pinned conformance data for NFC/NFD/NFKC/NFKD — independent of ICU's or the host Python's Unicode
+    version. ``@PartN`` section markers and comments are skipped.
+    """
+    cache_path = _download_ucd_text("NormalizationTest.txt", "ucd", version)
+
+    def field_to_string(field: str) -> str:
+        return "".join(chr(int(codepoint, 16)) for codepoint in field.split())
+
+    cases = []
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
+            line = line.split("#")[0].strip()
+            if not line or line.startswith("@"):
+                continue
+            fields = [field.strip() for field in line.split(";")]
+            if len(fields) < 5:
+                continue
+            try:
+                cases.append(tuple(field_to_string(fields[index]) for index in range(5)))
+            except ValueError:
+                continue
+    return cases
+
+
+def get_emoji_properties(version: str = UNICODE_VERSION) -> Dict[int, set]:
+    """Download and parse emoji-data.txt into a dict mapping codepoints to their set of emoji property names.
+
+    Property names: Emoji, Emoji_Presentation, Emoji_Modifier, Emoji_Modifier_Base, Emoji_Component,
+    Extended_Pictographic.
+    """
+    cache_path = _download_ucd_text("emoji-data.txt", "ucd/emoji", version)
+
+    properties: Dict[int, set] = {}
+    with open(cache_path, "r", encoding="utf-8") as data_file:
+        for line in data_file:
+            line = line.split("#")[0].strip()
+            if not line:
+                continue
+            parts = line.split(";")
+            if len(parts) < 2:
+                continue
+            try:
+                codepoint_range = parts[0].strip()
+                property_name = parts[1].strip()
+                if ".." in codepoint_range:
+                    start_codepoint, end_codepoint = (int(bound, 16) for bound in codepoint_range.split(".."))
+                else:
+                    start_codepoint = end_codepoint = int(codepoint_range, 16)
+                for codepoint in range(start_codepoint, end_codepoint + 1):
+                    properties.setdefault(codepoint, set()).add(property_name)
+            except (ValueError, IndexError):
+                continue
+    return properties
+
+
+def get_extended_pictographic(version: str = UNICODE_VERSION) -> set:
+    """Return the set of Extended_Pictographic codepoints (the real GB11 / WB3c property from emoji-data.txt)."""
+    return {codepoint for codepoint, names in get_emoji_properties(version).items() if "Extended_Pictographic" in names}
+
+
+def get_combining_classes(version: str = UNICODE_VERSION) -> Dict[int, int]:
+    """Return a dict mapping codepoints to their Canonical_Combining_Class (from the UCD XML ``ccc`` attribute).
+
+    Only non-default entries matter for normalization reordering; codepoints absent from the map are ccc=0.
+    """
+    root = get_unicode_xml_data(version)
+    namespace = "{http://www.unicode.org/ns/2003/ucd/1.0}"
+    combining_classes: Dict[int, int] = {}
+    for char in root.iter(namespace + "char"):
+        codepoint = char.get("cp")
+        raw_combining_class = char.get("ccc")
+        if codepoint is None or raw_combining_class is None:
+            continue
+        value = int(raw_combining_class)
+        if value:
+            combining_classes[int(codepoint, 16)] = value
+    return combining_classes
+
+
+def get_decomposition_mappings(version: str = UNICODE_VERSION) -> Dict[int, tuple]:
+    """Return a dict mapping codepoints to ``(kind, [target_codepoints])`` decomposition mappings.
+
+    ``kind`` is ``"canonical"`` (UCD ``dt == "can"``) or ``"compatibility"`` (any other decomposition type).
+    Codepoints with no decomposition (``dm == "#"``) are excluded. Sourced from the UCD XML ``dm`` / ``dt``
+    attributes; used to build canonical-equivalent precomposed/decomposed pairs.
+    """
+    root = get_unicode_xml_data(version)
+    namespace = "{http://www.unicode.org/ns/2003/ucd/1.0}"
+    mappings: Dict[int, tuple] = {}
+    for char in root.iter(namespace + "char"):
+        codepoint = char.get("cp")
+        decomposition_mapping = char.get("dm")
+        if codepoint is None or not decomposition_mapping or decomposition_mapping == "#":
+            continue
+        decomposition_type = char.get("dt")
+        kind = "canonical" if decomposition_type in (None, "can") else "compatibility"
+        targets = [int(part, 16) for part in decomposition_mapping.split()]
+        mappings[int(codepoint, 16)] = (kind, targets)
+    return mappings
+
+
+def representatives_by_class(
+    properties: Dict[int, str], count: int = 3, bmp_only: bool = False
+) -> Dict[str, List[int]]:
+    """Invert a ``{codepoint: class_name}`` break-property dict into ``{class_name: [first-`count` codepoints]}``.
+
+    The enabler for class-adjacency corpora: with one representative codepoint per break class, a test can
+    construct strings exercising every class-adjacency pair (or triple) the segmentation rules can encounter.
+    """
+    representatives: Dict[str, List[int]] = {}
+    for codepoint in sorted(properties):
+        if 0xD800 <= codepoint <= 0xDFFF:
+            continue  # surrogates are never valid in UTF-8 text
+        if bmp_only and codepoint > 0xFFFF:
+            continue
+        bucket = representatives.setdefault(properties[codepoint], [])
+        if len(bucket) < count:
+            bucket.append(codepoint)
+    return representatives
+
+
+#  endregion Hardening extractors
 
 #  region General test scaffolding
 

@@ -13,10 +13,18 @@ import pytest
 import stringzilla as sz
 from stringzilla import Str
 
-from test_helpers import SEED_VALUES, UnicodeDataDownloadError, get_word_break_test_cases
+from test_helpers import (
+    SEED_VALUES,
+    UnicodeDataDownloadError,
+    get_word_break_properties,
+    get_word_break_test_cases,
+    representatives_by_class,
+)
 from test_utf8_helpers import (
     adversarial_utf8_inputs,
     assert_segments_tile,
+    byte_boundaries,
+    class_adjacency_strings,
     corpus_of_byte_length,
     window_seam_lengths,
 )
@@ -271,3 +279,36 @@ def test_utf8_word_seam(seed_value: int):
 
 
 #  endregion Synthetic corner cases (safety / seam)
+
+
+#  region Rule-derived coverage (class adjacency)
+
+
+def test_utf8_word_class_adjacency():
+    """Every Word_Break class-adjacency pair and triple — built from one representative codepoint per class —
+    must segment bit-exactly the same as the independent UAX-29 reference (uniseg). Derived from the property
+    table, this exercises rare class interactions (Mid* bridges, RI parity, ExtendNumLet) the palette misses."""
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
+    try:
+        properties = get_word_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode data files")
+
+    representatives = representatives_by_class(properties, count=1)
+    cases = class_adjacency_strings(representatives, arity=2)
+    cases += class_adjacency_strings(representatives, arity=3, max_cases=8000)
+
+    failures = []
+    for text in cases:
+        sz_boundaries = byte_boundaries(sz.utf8_words(text))
+        reference_boundaries = byte_boundaries(list(uniseg_wordbreak.words(text)))
+        if sz_boundaries != reference_boundaries:
+            codepoints = " ".join(f"{ord(character):04X}" for character in text)
+            failures.append(f"  {codepoints}\n    sz={sz_boundaries}\n    uniseg={reference_boundaries}")
+
+    assert not failures, "StringZilla vs uniseg word class-adjacency divergences ({}):\n{}".format(
+        len(failures), "\n".join(failures[:20])
+    )
+
+
+#  endregion Rule-derived coverage (class adjacency)

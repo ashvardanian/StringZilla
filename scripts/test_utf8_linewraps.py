@@ -12,12 +12,19 @@ import pytest
 import stringzilla as sz
 from stringzilla import Str
 
-from test_helpers import SEED_VALUES, UnicodeDataDownloadError, get_line_break_test_cases
+from test_helpers import (
+    SEED_VALUES,
+    UnicodeDataDownloadError,
+    get_line_break_properties,
+    get_line_break_test_cases,
+    representatives_by_class,
+)
 from test_utf8_helpers import (
     SEGMENTATION_PALETTE,
     adversarial_utf8_inputs,
     assert_segments_tile,
     byte_boundaries,
+    class_adjacency_strings,
     corpus_of_byte_length,
     window_seam_lengths,
 )
@@ -157,3 +164,37 @@ def test_utf8_linewrap_seam(seed_value: int):
 
 
 #  endregion Synthetic corner cases (safety / seam)
+
+
+#  region Rule-derived coverage (class adjacency)
+
+
+def test_utf8_linewrap_class_adjacency():
+    """Every Line_Break class-adjacency pair — built from one representative codepoint per class — checked
+    against uniseg. Line breaking has the largest property alphabet (~40 classes), so this derives far more
+    class interactions than the palette; agreement-gated (not bit-exact) because uniseg applies default UAX-14
+    tailorings StringZilla may differ on."""
+    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg not installed")
+    try:
+        properties = get_line_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode data files")
+
+    representatives = representatives_by_class(properties, count=1)
+    cases = class_adjacency_strings(representatives, arity=2)
+
+    failures = []
+    for text in cases:
+        sz_boundaries = byte_boundaries(sz.utf8_linewraps(text))
+        reference_boundaries = byte_boundaries(list(uniseg_linebreak.line_break_units(text)))
+        if sz_boundaries != reference_boundaries:
+            codepoints = " ".join(f"{ord(character):04X}" for character in text)
+            failures.append(f"  {codepoints}\n    sz={sz_boundaries}\n    uniseg={reference_boundaries}")
+
+    agreement = 1.0 - len(failures) / max(1, len(cases))
+    assert agreement >= 0.80, "StringZilla vs uniseg line class-adjacency agreement {:.2%} too low:\n{}".format(
+        agreement, "\n".join(failures[:20])
+    )
+
+
+#  endregion Rule-derived coverage (class adjacency)
