@@ -27,7 +27,9 @@ Check file headers for details.
 Unit tests validate correctness across all backends and programming languages.
 
 - `test_stringzilla.cpp` - C++ API tests against STL baselines
-- `test_stringzilla.py` - Python API tests against native strings
+- `test_*.py` - Python API tests against native strings, split per kernel family (`test_string.py`,
+  `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`) mirroring the C++
+  translation units; shared helpers in `test_helpers.py` / `test_utf8_helpers.py`
 - `test_stringzillas.cpp` - parallel CPU backend tests
 - `test_stringzillas.cu` - CUDA backend tests
 - `test.js` - JavaScript API tests

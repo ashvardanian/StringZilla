@@ -12,7 +12,26 @@ import tempfile
 import zipfile
 import urllib.request
 import xml.etree.ElementTree as ET
-from typing import Dict, List
+from random import choice, randint, seed
+from string import ascii_lowercase
+from typing import Dict, List, Optional
+
+# NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises a weird
+# error that is not an `ImportError`, so the naked `except` is a necessary evil mirrored from the old monolith.
+try:
+    import numpy as np
+
+    numpy_available = True
+except:  # noqa: E722
+    numpy_available = False
+
+# PyArrow is not available on most platforms; same defensive import contract as NumPy above.
+try:
+    import pyarrow as pa  # noqa: F401
+
+    pyarrow_available = True
+except:  # noqa: E722
+    pyarrow_available = False
 
 
 class UnicodeDataDownloadError(Exception):
@@ -1039,3 +1058,64 @@ def baseline_line_boundaries(text: str, props: Dict[int, str] = None) -> List[tu
 
 
 #  endregion Line
+
+#  region General test scaffolding
+
+# General fixtures and seeded-RNG helpers shared by every per-family test module (the Python analog of the
+# C++ `test_stringzilla.hpp` harness). Kept here so a split test file imports one place for both the Unicode
+# data loaders above and the seeding / random-string utilities below. The NumPy / PyArrow availability flags
+# and their defensive imports live in the top import block.
+
+# A random seed generated once at import time for this test run, logged by the `log_test_environment` fixture.
+# `SystemRandom` gives true randomness independent of the seeded RNG state.
+_random_seed_for_run = int.from_bytes(os.urandom(4), "little")
+
+# Reproducible test seeds for consistent CI runs (kept in sync with test_stringzillas.py).
+SEED_VALUES = [
+    42,  # Classic test seed
+    0,  # Edge case: zero seed
+    1,  # Minimal positive seed
+    314159,  # Pi digits
+    _random_seed_for_run,  # Random seed for this run (logged at startup)
+]
+
+# Override SEED_VALUES with an environment variable if set (for reproducible CI fuzzing).
+_env_seed = os.environ.get("SZ_TESTS_SEED")
+if _env_seed:
+    try:
+        _parsed_seed = int(_env_seed)
+        SEED_VALUES = [_parsed_seed]
+        print(f"SZ_TESTS_SEED={_parsed_seed} (from environment, overriding default seeds)")
+    except ValueError:
+        pass  # Keep default SEED_VALUES if parsing fails
+
+
+def seed_random_generators(seed_value: Optional[int] = None):
+    """Seed Python and NumPy RNGs for reproducibility."""
+    if seed_value is None:
+        return
+    seed(seed_value)
+    # Handle both NumPy 1.x and 2.x, and any import issues.
+    if numpy_available:
+        try:
+            np.random.seed(seed_value)
+        except (ImportError, AttributeError, Exception):
+            pass
+
+
+def get_random_string(length: Optional[int] = None, variability: Optional[int] = None) -> str:
+    """Build a random lowercase-ASCII string, with optional fixed `length` and alphabet `variability`."""
+    if length is None:
+        length = randint(3, 300)
+    if variability is None:
+        variability = len(ascii_lowercase)
+    return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+
+
+def is_equal_strings(native_strings, big_strings):
+    """Assert each StringZilla slice equals its native counterpart, pairwise."""
+    for native_slice, big_slice in zip(native_strings, big_strings):
+        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
+
+
+#  endregion General test scaffolding

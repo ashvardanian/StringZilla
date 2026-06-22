@@ -159,7 +159,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py scripts/test_doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
         # JavaScript
       - name: Set up Node.js
@@ -279,7 +279,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py scripts/test_doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Set up Rust
@@ -675,7 +675,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py scripts/test_doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
@@ -763,7 +763,7 @@ jobs:
           pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py scripts/test_doctests.py -s -vv --maxfail=1 --full-trace
+        run: python -X faulthandler -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
   test_alpine:
     name: Alpine Linux
@@ -818,7 +818,7 @@ jobs:
           pip install --break-system-packages pytest pytest-repeat
           pip install --break-system-packages .
       - name: Test Python
-        run: pytest scripts/test_stringzilla.py scripts/test_doctests.py -s -x
+        run: pytest scripts/ --ignore=scripts/test_stringzillas.py -s -x
 
         # Rust
       - name: Set up Rust

@@ -32,7 +32,9 @@ The project is split into the following parts:
 For minimal test coverage, check the following scripts:
 
 - `scripts/test_stringzilla.cpp` - tests C++ API (not underlying C) against STL.
-- `scripts/test_stringzilla.py` - tests Python API against native strings.
+- `scripts/test_*.py` - tests the Python API against native strings, split per kernel family
+  (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`)
+  mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
 - `scripts/test.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -209,7 +211,7 @@ SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
 SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 build_debug/stringzilla_test_cpp20
 
 # Python tests also respect SZ_TESTS_SEED
-SZ_TESTS_SEED=42 pytest scripts/test_stringzilla.py -v
+SZ_TESTS_SEED=42 pytest scripts/ --ignore=scripts/test_stringzillas.py -v
 ```
 
 When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
@@ -535,10 +537,10 @@ To clean up code before pushing:
 
 ```bash
 uv pip install ruff mypy bandit flake8
-uv run --no-project ruff check scripts/test_stringzilla.py --fix
-uv run --no-project mypy scripts/test_stringzilla.py --ignore-missing-imports
-uv run --no-project bandit scripts/test_stringzilla.py -s B101
-uv run --no-project flake8 scripts/test_stringzilla.py --max-line-length=120
+uv run --no-project ruff check scripts/test_*.py --fix
+uv run --no-project mypy scripts/test_*.py --ignore-missing-imports
+uv run --no-project bandit scripts/test_*.py -s B101
+uv run --no-project flake8 scripts/test_*.py --max-line-length=120
 ```
 
 ### Testing
@@ -547,8 +549,8 @@ For testing we use PyTest, which may not be installed on your system.
 
 ```bash
 uv pip install pytest pytest-repeat numpy pyarrow                                       # for repeated fuzzy tests
-uv run --no-project python -m pytest scripts/test_stringzilla.py                        # to run with default settings
-uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -p no:warnings   # to pass custom settings
+uv run --no-project python -m pytest scripts/ --ignore=scripts/test_stringzillas.py                      # default settings
+uv run --no-project python -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -x -p no:warnings # custom settings
 uv run --no-project python -m pytest scripts/test_doctests.py                           # to run the docstring examples
 uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```

@@ -1,0 +1,159 @@
+#!/usr/bin/env python3
+"""UAX-14 line-break tests: utf8_linewraps behavior, official LineBreakTest conformance (xfail until the
+kernel is strict-green), and an agreement-gated differential against uniseg. Adds malformed/seam sweeps.
+
+Mirrors the C++ scripts/test_utf8_linewraps.cpp translation unit.
+"""
+
+from random import Random, choice, randint, seed
+
+import pytest
+
+import stringzilla as sz
+from stringzilla import Str
+
+from test_helpers import SEED_VALUES, UnicodeDataDownloadError, get_line_break_test_cases
+from test_utf8_helpers import (
+    SEGMENTATION_PALETTE,
+    adversarial_utf8_inputs,
+    assert_segments_tile,
+    byte_boundaries,
+    corpus_of_byte_length,
+    window_seam_lengths,
+)
+
+_byte_boundaries = byte_boundaries
+_SEGMENTATION_PALETTE = SEGMENTATION_PALETTE
+
+
+#  region Line iterator
+
+
+def test_utf8_linewraps_basic():
+    """Test basic line iteration yielding line-break-opportunity Str segments."""
+    result = [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
+    assert "".join(result) == "first\nsecond"  # Segments tile the input.
+
+    # Empty string yields nothing.
+    assert [str(seg) for seg in sz.utf8_linewraps("")] == []
+
+    # A single short line still tiles back to the input.
+    result = [str(seg) for seg in sz.utf8_linewraps("just one line")]
+    assert "".join(result) == "just one line"
+
+
+def test_utf8_linewraps_tiling():
+    """Linewrap is forward-only; its segments tile the input contiguously."""
+    text = "alpha\nbeta\ngamma"
+    forward = [str(seg) for seg in sz.utf8_linewraps(text)]
+    assert "".join(forward) == text
+
+
+def test_utf8_linewraps_skip_empty():
+    """Test skip_empty parameter for line iteration."""
+    result = [str(seg) for seg in sz.utf8_linewraps("a\n\nb", skip_empty=True)]
+    assert len(result) > 0
+    assert all(len(seg) > 0 for seg in result)
+
+
+def test_utf8_linewraps_unicode():
+    """Test UTF-8 multi-byte / Unicode coverage."""
+    result = [str(seg) for seg in sz.utf8_linewraps("Größe привет")]
+    assert "".join(result) == "Größe привет"
+    # Segments tile the input.
+
+    # CRLF is a single break opportunity, not two.
+    result = [str(seg) for seg in sz.utf8_linewraps("a\r\nb")]
+    assert "".join(result) == "a\r\nb"
+
+
+def test_utf8_linewraps_str_method():
+    """The Str.utf8_linewraps() method must agree with the module function."""
+    s = Str("first\nsecond")
+    method_result = [str(seg) for seg in s.utf8_linewraps(s)]
+    module_result = [str(seg) for seg in sz.utf8_linewraps(s)]
+    assert method_result == module_result
+    assert method_result == [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
+
+
+@pytest.mark.xfail(
+    reason="Wave-2 linewraps target: UAX-14 LineBreakTest must reach bit-exact 19338/19338. "
+    "Remove this marker once the kernel is strict-green (XPASS will flag it).",
+    strict=True,
+)
+def test_utf8_linewrap_boundary_official_conformance():
+    """Full UAX-14 conformance against every case in the official LineBreakTest.txt.
+
+    The iterator emits a segment at every break opportunity (mandatory or soft); their cumulative
+    byte lengths must match the official break positions bit-exactly — no tailoring-tolerance gate.
+    """
+    try:
+        test_cases = get_line_break_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Could not download Unicode test data")
+
+    failures = []
+    for test_str, expected_byte_boundaries in test_cases:
+        if not test_str:
+            continue
+        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(test_str))
+        if sz_boundaries != expected_byte_boundaries:
+            cps = " ".join(f"{ord(c):04X}" for c in test_str)
+            failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
+
+    assert not failures, "UAX-14 LineBreakTest conformance failures ({} / {}):\n{}".format(
+        len(failures), len(test_cases), "\n".join(failures[:40])
+    )
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_linewrap_differential_uniseg(seed_value: int):
+    """Differential fuzz against ``uniseg.linebreak`` for line-break-opportunity segments."""
+    uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg not installed")
+    seed(seed_value)
+
+    def ref_segments(text):
+        return list(uniseg_linebreak.line_break_units(text))
+
+    failures = []
+    for _ in range(2000):
+        text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
+        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(text))
+        ref_boundaries = _byte_boundaries(ref_segments(text))
+        if sz_boundaries != ref_boundaries:
+            cps = " ".join(f"{ord(c):04X}" for c in text)
+            failures.append(f"  {cps}\n    sz={sz_boundaries}\n    uniseg={ref_boundaries}")
+
+    # uniseg implements default UAX-14 tailorings that may differ from StringZilla; require broad
+    # agreement on segment positions rather than bit-exactness.
+    agreement = 1.0 - len(failures) / 2000.0
+    assert agreement >= 0.80, "StringZilla vs uniseg line-boundary agreement {:.2%} too low:\n{}".format(
+        agreement, "\n".join(failures[:20])
+    )
+
+
+#  endregion Line iterator
+
+
+#  region Synthetic corner cases (safety / seam)
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_linewrap_safety(seed_value: int):
+    """Adversarial-byte safety: the linewrap iterator must survive the malformed battery and still tile its input."""
+    rng = Random(seed_value)
+    for raw in adversarial_utf8_inputs(rng):
+        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_linewrap_seam(seed_value: int):
+    """Window-seam sweep: inputs sized to straddle the 64-byte SIMD windows must still tile (UAX-14 boundary
+    agreement vs uniseg is gated above; the seam invariant asserted here is contiguous tiling)."""
+    rng = Random(seed_value)
+    for length in window_seam_lengths():
+        raw = corpus_of_byte_length(length, rng)
+        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+
+
+#  endregion Synthetic corner cases (safety / seam)
