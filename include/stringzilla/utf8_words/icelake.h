@@ -93,7 +93,7 @@ enum {
 enum {
     sz_utf8_word_break_astral_stage1_tiles_k = sizeof(sz_utf8_word_break_astral_s1_) / 64,
     sz_utf8_word_break_astral_stage2_tiles_k = sizeof(sz_utf8_word_break_astral_s2_) / 64,
-    sz_utf8_word_break_astral_leaf_tiles_k = sizeof(sz_utf8_word_break_astral_leaf_) / 64,
+    sz_utf8_word_break_astral_leaf_packed_tiles_k = sizeof(sz_utf8_word_break_astral_leaf_packed_) / 64,
 };
 
 /** @brief  Classify 16 astral codepoints (u32 lanes) into 16 Word_Break classes via the 4-stage astral trie:
@@ -114,8 +114,10 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepo
                                                                  sz_utf8_word_break_astral_stage2_tiles_k, leaf_index);
     __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
                                                  _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
-    return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_word_break_astral_leaf_,
-                                                   sz_utf8_word_break_astral_leaf_tiles_k, class_index);
+    // The Word_Break class fits in 4 bits, so the leaf is stored two cells per byte (half the tiles); the nibble
+    // cascade halves this stage's port-5 cost on the astral / emoji path.
+    return sz_utf8_codepoints_lut_cascade_nibble_icelake_(sz_utf8_word_break_astral_leaf_packed_,
+                                                          sz_utf8_word_break_astral_leaf_packed_tiles_k, class_index);
 }
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
