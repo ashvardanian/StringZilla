@@ -7,8 +7,8 @@
  *  This translation unit owns only the cross-cutting glue: the shared `sz_dispatch_table`
  *  definition, its one-time initialization, and the version & capabilities exports. The
  *  per-domain backends and `SZ_DYNAMIC` wrappers live in the sibling `compare.c`, `memory.c`,
- *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_codepoints.c`, `utf8_delimiters.c`,
- *  `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_lines.c`, `utf8_uncased_fold.c`,
+ *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_codepoints.c`, `utf8_tokens.c`,
+ *  `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linewraps.c`, `utf8_uncased_fold.c`,
  *  and `utf8_uncased.c`.
  */
 #include "dispatch.h"                // `sz_dispatch_table`, per-domain updaters, sets `SZ_DYNAMIC_DISPATCH 1`

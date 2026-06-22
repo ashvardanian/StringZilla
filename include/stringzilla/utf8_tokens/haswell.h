@@ -1,13 +1,13 @@
 /**
  *  @brief Haswell (AVX2) backend for UTF-8 newline and whitespace delimiter scanning.
- *  @file include/stringzilla/utf8_delimiters/haswell.h
+ *  @file include/stringzilla/utf8_tokens/haswell.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_HASWELL_H_
-#define STRINGZILLA_UTF8_DELIMITERS_HASWELL_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_HASWELL_H_
+#define STRINGZILLA_UTF8_TOKENS_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_delimiters/serial.h"
+#include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_codepoints/haswell.h"
 
 #ifdef __cplusplus
@@ -248,4 +248,4 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_haswell(        //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_HASWELL_H_
+#endif // STRINGZILLA_UTF8_TOKENS_HASWELL_H_

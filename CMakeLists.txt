@@ -620,11 +620,11 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/intersect.c
     c/stringzilla/utf8_norm.c
     c/stringzilla/utf8_codepoints.c
-    c/stringzilla/utf8_delimiters.c
+    c/stringzilla/utf8_tokens.c
     c/stringzilla/utf8_words.c
     c/stringzilla/utf8_graphemes.c
     c/stringzilla/utf8_sentences.c
-    c/stringzilla/utf8_lines.c
+    c/stringzilla/utf8_linewraps.c
     c/stringzilla/utf8_uncased_fold.c
     c/stringzilla/utf8_uncased.c
 )
@@ -909,7 +909,13 @@ if (STRINGZILLA_BUILD_TEST)
     set(STRINGZILLA_TEST_SOURCES
         scripts/test_stringzilla.cpp
         scripts/test_hash.cpp
-        scripts/test_utf8.cpp
+        scripts/test_utf8_codepoints.cpp
+        scripts/test_utf8_tokens.cpp
+        scripts/test_utf8_words.cpp
+        scripts/test_utf8_graphemes.cpp
+        scripts/test_utf8_sentences.cpp
+        scripts/test_utf8_linewraps.cpp
+        scripts/test_utf8_norm.cpp
         scripts/test_uncased.cpp
         scripts/test_string.cpp
         scripts/test_find.cpp

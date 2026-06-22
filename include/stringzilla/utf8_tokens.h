@@ -1,10 +1,10 @@
 /**
  *  @brief Hardware-accelerated UTF-8 newline and whitespace delimiter scanning.
- *  @file utf8_delimiters.h
+ *  @file utf8_tokens.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_H_
-#define STRINGZILLA_UTF8_DELIMITERS_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_H_
+#define STRINGZILLA_UTF8_TOKENS_H_
 
 #include "stringzilla/types.h"
 
@@ -221,15 +221,15 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_powervsx(sz_cptr_t text, sz_size_t lengt
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
-#include "stringzilla/utf8_delimiters/serial.h"
-#include "stringzilla/utf8_delimiters/icelake.h"
-#include "stringzilla/utf8_delimiters/haswell.h"
-#include "stringzilla/utf8_delimiters/neon.h"
-#include "stringzilla/utf8_delimiters/sve2.h"
-#include "stringzilla/utf8_delimiters/v128.h"
-#include "stringzilla/utf8_delimiters/rvv.h"
-#include "stringzilla/utf8_delimiters/lasx.h"
-#include "stringzilla/utf8_delimiters/powervsx.h"
+#include "stringzilla/utf8_tokens/serial.h"
+#include "stringzilla/utf8_tokens/icelake.h"
+#include "stringzilla/utf8_tokens/haswell.h"
+#include "stringzilla/utf8_tokens/neon.h"
+#include "stringzilla/utf8_tokens/sve2.h"
+#include "stringzilla/utf8_tokens/v128.h"
+#include "stringzilla/utf8_tokens/rvv.h"
+#include "stringzilla/utf8_tokens/lasx.h"
+#include "stringzilla/utf8_tokens/powervsx.h"
 
 #pragma region Dynamic Dispatch
 
@@ -290,4 +290,4 @@ SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_si
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_H_
+#endif // STRINGZILLA_UTF8_TOKENS_H_

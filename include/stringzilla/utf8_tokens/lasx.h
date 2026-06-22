@@ -1,13 +1,13 @@
 /**
  *  @brief LoongArch LASX backend for UTF-8 newline and whitespace delimiter scanning.
- *  @file include/stringzilla/utf8_delimiters/lasx.h
+ *  @file include/stringzilla/utf8_tokens/lasx.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_LASX_H_
-#define STRINGZILLA_UTF8_DELIMITERS_LASX_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_LASX_H_
+#define STRINGZILLA_UTF8_TOKENS_LASX_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_delimiters/serial.h"
+#include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_codepoints/lasx.h"
 
 #ifdef __cplusplus
@@ -226,4 +226,4 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_lasx(           //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_LASX_H_
+#endif // STRINGZILLA_UTF8_TOKENS_LASX_H_

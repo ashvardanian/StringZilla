@@ -1,13 +1,13 @@
 /**
  *  @brief NEON backend for UTF-8 newline and whitespace delimiter scanning.
- *  @file include/stringzilla/utf8_delimiters/neon.h
+ *  @file include/stringzilla/utf8_tokens/neon.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_NEON_H_
-#define STRINGZILLA_UTF8_DELIMITERS_NEON_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_NEON_H_
+#define STRINGZILLA_UTF8_TOKENS_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_delimiters/serial.h"
+#include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_codepoints/neon.h"
 
 #ifdef __cplusplus
@@ -297,4 +297,4 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_neon(           //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_NEON_H_
+#endif // STRINGZILLA_UTF8_TOKENS_NEON_H_

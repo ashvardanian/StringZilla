@@ -1,10 +1,10 @@
 /**
  *  @brief Serial backend for UTF-8 newline and whitespace delimiter scanning.
- *  @file include/stringzilla/utf8_delimiters/serial.h
+ *  @file include/stringzilla/utf8_tokens/serial.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_SERIAL_H_
-#define STRINGZILLA_UTF8_DELIMITERS_SERIAL_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_SERIAL_H_
+#define STRINGZILLA_UTF8_TOKENS_SERIAL_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes.h"
@@ -128,4 +128,4 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_serial(         //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_SERIAL_H_
+#endif // STRINGZILLA_UTF8_TOKENS_SERIAL_H_

@@ -1,13 +1,13 @@
 /**
  *  @brief Serial backend for UAX-14 line break boundaries.
- *  @file include/stringzilla/utf8_lines/serial.h
+ *  @file include/stringzilla/utf8_linewraps/serial.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINES_SERIAL_H_
-#define STRINGZILLA_UTF8_LINES_SERIAL_H_
+#ifndef STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_
+#define STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_lines/tables.h"
+#include "stringzilla/utf8_linewraps/tables.h"
 #include "stringzilla/utf8_codepoints/serial.h" // shared decode helpers
 #include "stringzilla/utf8_runes.h"
 
@@ -530,4 +530,4 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINES_SERIAL_H_
+#endif // STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_

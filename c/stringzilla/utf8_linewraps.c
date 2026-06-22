@@ -1,10 +1,10 @@
 /**
- *  @file c/stringzilla/utf8_lines.c
+ *  @file c/stringzilla/utf8_linewraps.c
  *  @brief Per-domain dispatch shim for UAX-14 line break segmentation.
  *  @author Ash Vardanian
  */
 #include "dispatch.h"
-#include <stringzilla/utf8_lines.h>
+#include <stringzilla/utf8_linewraps.h>
 
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_lines_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;

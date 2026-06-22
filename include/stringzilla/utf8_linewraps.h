@@ -1,10 +1,10 @@
 /**
  *  @brief Hardware-accelerated UAX-14 line break segmentation.
- *  @file utf8_lines.h
+ *  @file utf8_linewraps.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINES_H_
-#define STRINGZILLA_UTF8_LINES_H_
+#ifndef STRINGZILLA_UTF8_LINEWRAPS_H_
+#define STRINGZILLA_UTF8_LINEWRAPS_H_
 
 #include "stringzilla/types.h"
 
@@ -62,8 +62,8 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake(sz_cptr_t text, sz_size_t length, 
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
-#include "stringzilla/utf8_lines/serial.h"
-#include "stringzilla/utf8_lines/icelake.h"
+#include "stringzilla/utf8_linewraps/serial.h"
+#include "stringzilla/utf8_linewraps/icelake.h"
 
 #pragma region Dynamic Dispatch
 
@@ -86,4 +86,4 @@ SZ_DYNAMIC sz_size_t sz_utf8_linewraps(sz_cptr_t text, sz_size_t length, sz_size
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINES_H_
+#endif // STRINGZILLA_UTF8_LINEWRAPS_H_

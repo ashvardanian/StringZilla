@@ -43,11 +43,11 @@
 #include "test_stringzilla.hpp" // `log_environment`
 
 #include "stringzilla/utf8_codepoints.h" // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_unpack_chunk`
-#include "stringzilla/utf8_delimiters.h" // `sz_utf8_newlines`, `sz_utf8_whitespaces`
+#include "stringzilla/utf8_tokens.h" // `sz_utf8_newlines`, `sz_utf8_whitespaces`
 #include "stringzilla/utf8_words.h"      // `sz_utf8_words`
 #include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
 #include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
-#include "stringzilla/utf8_lines.h"      // `sz_utf8_linewraps`
+#include "stringzilla/utf8_linewraps.h"      // `sz_utf8_linewraps`
 
 using namespace ashvardanian::stringzilla::scripts;
 

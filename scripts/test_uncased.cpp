@@ -2225,7 +2225,7 @@ static void check_uncased_safety_(candidate_ candidate, std::size_t random_input
 /**
  *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
  *
- *  Mirrors `test_memory_safety()` / `test_utf8_safety()`: the registered no-arg driver owns the per-ISA
+ *  Mirrors `test_memory_safety()` / `test_utf8_codepoints_safety()`: the registered no-arg driver owns the per-ISA
  *  ladder while the file-local `check_uncased_safety_` checker runs the actual probes. The serial backend
  *  faces the same invalid-input contract as the SIMD ones, then one `#if SZ_USE_*` block per ISA.
  */

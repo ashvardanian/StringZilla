@@ -486,11 +486,11 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/intersect.c",
     "c/stringzilla/utf8_norm.c",
     "c/stringzilla/utf8_codepoints.c",
-    "c/stringzilla/utf8_delimiters.c",
+    "c/stringzilla/utf8_tokens.c",
     "c/stringzilla/utf8_words.c",
     "c/stringzilla/utf8_graphemes.c",
     "c/stringzilla/utf8_sentences.c",
-    "c/stringzilla/utf8_lines.c",
+    "c/stringzilla/utf8_linewraps.c",
     "c/stringzilla/utf8_uncased_fold.c",
     "c/stringzilla/utf8_uncased.c",
 ]

@@ -1,13 +1,13 @@
 /**
  *  @brief SVE2 backend for UTF-8 newline and whitespace delimiter scanning.
- *  @file include/stringzilla/utf8_delimiters/sve2.h
+ *  @file include/stringzilla/utf8_tokens/sve2.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_SVE2_H_
-#define STRINGZILLA_UTF8_DELIMITERS_SVE2_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_SVE2_H_
+#define STRINGZILLA_UTF8_TOKENS_SVE2_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_delimiters/serial.h"
+#include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_codepoints/sve2.h"
 
 #ifdef __cplusplus
@@ -251,4 +251,4 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_sve2(           //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_SVE2_H_
+#endif // STRINGZILLA_UTF8_TOKENS_SVE2_H_

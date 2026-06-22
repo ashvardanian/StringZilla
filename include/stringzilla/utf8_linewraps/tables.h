@@ -1,10 +1,10 @@
 /**
  *  @brief UAX-14 Line_Break property tables.
- *  @file include/stringzilla/utf8_lines/tables.h
+ *  @file include/stringzilla/utf8_linewraps/tables.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINES_TABLES_H_
-#define STRINGZILLA_UTF8_LINES_TABLES_H_
+#ifndef STRINGZILLA_UTF8_LINEWRAPS_TABLES_H_
+#define STRINGZILLA_UTF8_LINEWRAPS_TABLES_H_
 
 #include "stringzilla/types.h"
 
@@ -612,4 +612,4 @@ static const sz_u8_t sz_utf8_line_break_astral_idx_[618] = {
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINES_TABLES_H_
+#endif // STRINGZILLA_UTF8_LINEWRAPS_TABLES_H_

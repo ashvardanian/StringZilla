@@ -34,6 +34,63 @@ SZ_PUBLIC sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
     return 0;
 }
 
+/**
+ *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
+ *         Mirrors the SIMD `sz_utf8_codepoints_decode_window_` codepoint-start convention (every loaded
+ *         non-continuation byte begins a codepoint) so the serial and Ice Lake backends step over malformed
+ *         input identically. Stepping by the lead's declared byte length would skip past trailing
+ *         non-continuation bytes of a truncated lead, diverging from the window decoder.
+ */
+SZ_INTERNAL sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+    sz_size_t next = position + 1;
+    while (next < length && ((sz_u8_t)text[next] & 0xC0) == 0x80) ++next;
+    return next;
+}
+
+/**
+ *  @brief Grapheme_Cluster_Break descriptor of the codepoint starting at @p start, decoded BLINDLY to mirror the
+ *         Ice Lake `sz_grapheme_classify_window_` value reconstruction byte-for-byte (§6.1 value-based dispatch).
+ *
+ *         The lead's strict length class selects the fold width — ASCII `< 0x80` stays the raw byte, 3-byte
+ *         `1110xxxx` and 4-byte `11110xxx` use their reconstruction, and EVERY other non-ASCII lead (2-byte
+ *         `110xxxxx`, stray `0xF8..0xFF`, isolated `0xC0/0xC1`) folds through the 2-byte formula exactly as the
+ *         SIMD window does. No continuation / overlong / surrogate validation and no U+FFFD substitution: the
+ *         class is dispatched on the decoded VALUE so the serial and Ice Lake backends agree bit-for-bit on
+ *         ill-formed input (UAX-29 leaves such bytes undefined). Valid UTF-8 decodes identically to the checked
+ *         path; only malformed input differs, by design.
+ */
+SZ_INTERNAL sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+    sz_u8_t const lead = (sz_u8_t)text[start];
+    sz_u8_t const byte1 = (start + 1 < length) ? (sz_u8_t)text[start + 1] : 0;
+    sz_u8_t const byte2 = (start + 2 < length) ? (sz_u8_t)text[start + 2] : 0;
+    sz_u8_t const byte3 = (start + 3 < length) ? (sz_u8_t)text[start + 3] : 0;
+    sz_rune_t rune;
+    if (lead < 0x80u) { rune = lead; }
+    else if (lead >= 0xF8u) {
+        // `0xF8..0xFF` begin no valid UTF-8 sequence of any length and are not 2-/3-/4-byte lead patterns, so the
+        // SIMD window leaves them out of every lead-length mask. Classify as U+FFFD / Other (§6.2) with no neighbour
+        // fold, matching the Ice Lake backend exactly even when such a byte sits on a 64-byte window edge.
+        rune = 0xFFFDu;
+    }
+    else if ((lead & 0xF8u) == 0xF0u) {
+        sz_rune_t const plane = (sz_rune_t)((lead & 0x07u) << 2) | ((byte1 >> 4) & 0x03u);
+        sz_rune_t const mid = (sz_rune_t)((byte1 & 0x0Fu) << 4) | ((byte2 >> 2) & 0x0Fu);
+        sz_rune_t const lo = (sz_rune_t)((byte2 & 0x03u) << 6) | (byte3 & 0x3Fu);
+        rune = (plane << 16) | (mid << 8) | lo;
+    }
+    else if ((lead & 0xF0u) == 0xE0u) {
+        sz_u8_t const high = (sz_u8_t)(((lead & 0x0Fu) << 4) | ((byte1 >> 2) & 0x0Fu));
+        sz_u8_t const low = (sz_u8_t)(((byte1 & 0x03u) << 6) | (byte2 & 0x3Fu));
+        rune = ((sz_rune_t)high << 8) | low;
+    }
+    else {
+        sz_u8_t const high = (sz_u8_t)(((lead & 0x1Fu) >> 2) & 0x07u);
+        sz_u8_t const low = (sz_u8_t)(((lead & 0x03u) << 6) | (byte1 & 0x3Fu));
+        rune = ((sz_rune_t)high << 8) | low;
+    }
+    return sz_rune_grapheme_break_property(rune);
+}
+
 /** @brief Extracts the Grapheme_Cluster_Break class (bits 0-3) from a packed descriptor. */
 SZ_INTERNAL sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) { return (sz_u8_t)(descriptor & 0x0Fu); }
 /** @brief Extracts the Indic_Conjunct_Break value (bits 4-5) from a packed descriptor. */
@@ -54,13 +111,12 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
 
     sz_size_t before_start = sz_utf8_previous_codepoint_start_(text, position);
-    sz_size_t decode_before = before_start;
-    sz_rune_t before_rune = sz_utf8_decode_(text, length, &decode_before);
-    sz_size_t decode_after = position;
-    sz_rune_t after_rune = sz_utf8_decode_(text, length, &decode_after);
-
-    sz_u8_t before_descriptor = sz_rune_grapheme_break_property(before_rune);
-    sz_u8_t after_descriptor = sz_rune_grapheme_break_property(after_rune);
+    // When `prev_start` lands on an orphan continuation byte there is no real codepoint before `position`: the SIMD
+    // window excludes continuation bytes from `codepoint_starts`, so the codepoint at `position` is the FIRST real
+    // codepoint with no left context and the leading orphan bytes form their own cluster. Force a boundary to match.
+    if (((sz_u8_t)text[before_start] & 0xC0u) == 0x80u) return sz_true_k;
+    sz_u8_t before_descriptor = sz_grapheme_break_property_at_(text, length, before_start);
+    sz_u8_t after_descriptor = sz_grapheme_break_property_at_(text, length, position);
     sz_u8_t before_class = sz_grapheme_break_descriptor_gcb_(before_descriptor);
     sz_u8_t after_class = sz_grapheme_break_descriptor_gcb_(after_descriptor);
 
@@ -91,9 +147,8 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_size_t scan = position;
         while (scan > 0) {
             sz_size_t scan_start = sz_utf8_previous_codepoint_start_(text, scan);
-            sz_size_t decode_scan = scan_start;
-            sz_rune_t scan_rune = sz_utf8_decode_(text, length, &decode_scan);
-            sz_u8_t scan_incb = sz_grapheme_break_descriptor_incb_(sz_rune_grapheme_break_property(scan_rune));
+            sz_u8_t scan_incb =
+                sz_grapheme_break_descriptor_incb_(sz_grapheme_break_property_at_(text, length, scan_start));
             if (scan_incb == sz_grapheme_incb_linker_k) {
                 seen_linker = sz_true_k;
                 scan = scan_start;
@@ -119,9 +174,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_bool_t found = sz_false_k;
         for (;;) {
             sz_size_t walk_start = sz_utf8_previous_codepoint_start_(text, walk);
-            sz_size_t decode_walk = walk_start;
-            sz_rune_t walk_rune = sz_utf8_decode_(text, length, &decode_walk);
-            sz_u8_t walk_descriptor = sz_rune_grapheme_break_property(walk_rune);
+            sz_u8_t walk_descriptor = sz_grapheme_break_property_at_(text, length, walk_start);
             if (sz_grapheme_break_descriptor_gcb_(walk_descriptor) == sz_grapheme_break_extend_k && walk_start > 0) {
                 walk = walk_start;
                 continue;
@@ -140,9 +193,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_size_t scan = position;
         while (scan > 0) {
             sz_size_t scan_start = sz_utf8_previous_codepoint_start_(text, scan);
-            sz_size_t decode_scan = scan_start;
-            sz_rune_t scan_rune = sz_utf8_decode_(text, length, &decode_scan);
-            if (sz_grapheme_break_descriptor_gcb_(sz_rune_grapheme_break_property(scan_rune)) ==
+            if (sz_grapheme_break_descriptor_gcb_(sz_grapheme_break_property_at_(text, length, scan_start)) ==
                 sz_grapheme_break_regional_indicator_k) {
                 ++ri_count;
                 scan = scan_start;
@@ -171,7 +222,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
     }
 
     sz_size_t cluster_start = 0;
-    sz_size_t position = sz_utf8_codepoint_length_((sz_u8_t)text[0]);
+    sz_size_t position = sz_grapheme_break_next_start_(text, length, 0);
     while (position < length) {
         if (sz_utf8_is_grapheme_boundary_serial(text, length, position)) {
             if (clusters == clusters_capacity) {
@@ -183,7 +234,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
             ++clusters;
             cluster_start = position;
         }
-        position += sz_utf8_codepoint_length_((sz_u8_t)text[position]);
+        position = sz_grapheme_break_next_start_(text, length, position);
     }
 
     if (clusters == clusters_capacity) {

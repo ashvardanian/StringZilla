@@ -537,22 +537,27 @@ void test_hash_multiseed_all();
 
 #pragma region UTF-8
 
-void test_utf8_unit();
-void test_utf8_all();
-void test_utf8_safety();
+void test_utf8_codepoints_unit();
+void test_utf8_codepoints_safety();
+void test_utf8_codepoints_all();
+void test_utf8_tokens_unit();
+void test_utf8_tokens_safety();
+void test_utf8_tokens_all();
 void test_utf8_words_unit();
-void test_utf8_ligature_unit();
-void test_utf8_grapheme_unit();
-void test_utf8_grapheme_safety();
-void test_utf8_grapheme_all();
-void test_utf8_sentence_unit();
-void test_utf8_sentence_safety();
-void test_utf8_sentence_all();
-void test_utf8_line_unit();
-void test_utf8_line_safety();
-void test_utf8_line_all();
-void test_norm_unit();
-void test_norm_all();
+void test_utf8_words_safety();
+void test_utf8_words_all();
+void test_utf8_graphemes_unit();
+void test_utf8_graphemes_safety();
+void test_utf8_graphemes_all();
+void test_utf8_sentences_unit();
+void test_utf8_sentences_safety();
+void test_utf8_sentences_all();
+void test_utf8_linewraps_unit();
+void test_utf8_linewraps_safety();
+void test_utf8_linewraps_all();
+void test_utf8_norm_unit();
+void test_utf8_norm_safety();
+void test_utf8_norm_all();
 
 #pragma endregion // UTF-8
 

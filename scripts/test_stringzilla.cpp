@@ -186,22 +186,27 @@ int main(int argc, char const **argv) {
 #endif
 
     std::printf("\n=== UTF-8 ===\n");
-    failures += run_test("test_utf8_unit", test_utf8_unit);
-    failures += run_test("test_utf8_all", test_utf8_all);
-    failures += run_test("test_utf8_safety", test_utf8_safety);
+    failures += run_test("test_utf8_codepoints_unit", test_utf8_codepoints_unit);
+    failures += run_test("test_utf8_codepoints_safety", test_utf8_codepoints_safety);
+    failures += run_test("test_utf8_codepoints_all", test_utf8_codepoints_all);
+    failures += run_test("test_utf8_tokens_unit", test_utf8_tokens_unit);
+    failures += run_test("test_utf8_tokens_safety", test_utf8_tokens_safety);
+    failures += run_test("test_utf8_tokens_all", test_utf8_tokens_all);
     failures += run_test("test_utf8_words_unit", test_utf8_words_unit);
-    failures += run_test("test_utf8_ligature_unit", test_utf8_ligature_unit);
-    failures += run_test("test_utf8_grapheme_unit", test_utf8_grapheme_unit);
-    failures += run_test("test_utf8_grapheme_safety", test_utf8_grapheme_safety);
-    failures += run_test("test_utf8_grapheme_all", test_utf8_grapheme_all);
-    failures += run_test("test_utf8_sentence_unit", test_utf8_sentence_unit);
-    failures += run_test("test_utf8_sentence_safety", test_utf8_sentence_safety);
-    failures += run_test("test_utf8_sentence_all", test_utf8_sentence_all);
-    failures += run_test("test_utf8_line_unit", test_utf8_line_unit);
-    failures += run_test("test_utf8_line_safety", test_utf8_line_safety);
-    failures += run_test("test_utf8_line_all", test_utf8_line_all);
-    failures += run_test("test_norm_unit", test_norm_unit);
-    failures += run_test("test_norm_all", test_norm_all);
+    failures += run_test("test_utf8_words_safety", test_utf8_words_safety);
+    failures += run_test("test_utf8_words_all", test_utf8_words_all);
+    failures += run_test("test_utf8_graphemes_unit", test_utf8_graphemes_unit);
+    failures += run_test("test_utf8_graphemes_safety", test_utf8_graphemes_safety);
+    failures += run_test("test_utf8_graphemes_all", test_utf8_graphemes_all);
+    failures += run_test("test_utf8_sentences_unit", test_utf8_sentences_unit);
+    failures += run_test("test_utf8_sentences_safety", test_utf8_sentences_safety);
+    failures += run_test("test_utf8_sentences_all", test_utf8_sentences_all);
+    failures += run_test("test_utf8_linewraps_unit", test_utf8_linewraps_unit);
+    failures += run_test("test_utf8_linewraps_safety", test_utf8_linewraps_safety);
+    failures += run_test("test_utf8_linewraps_all", test_utf8_linewraps_all);
+    failures += run_test("test_utf8_norm_unit", test_utf8_norm_unit);
+    failures += run_test("test_utf8_norm_safety", test_utf8_norm_safety);
+    failures += run_test("test_utf8_norm_all", test_utf8_norm_all);
 
     std::printf("\n=== Uncased UTF-8 ===\n");
     failures += run_test("test_uncased_unit", test_uncased_unit);

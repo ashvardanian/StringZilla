@@ -1,10 +1,10 @@
 /**
- *  @file c/stringzilla/utf8_delimiters.c
+ *  @file c/stringzilla/utf8_tokens.c
  *  @brief Per-domain dispatch shim for UTF-8 newline and whitespace delimiter scanning.
  *  @author Ash Vardanian
  */
 #include "dispatch.h"
-#include <stringzilla/utf8_delimiters.h>
+#include <stringzilla/utf8_tokens.h>
 
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;
