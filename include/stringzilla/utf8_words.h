@@ -70,7 +70,7 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
  *  per call so the per-item overhead amortizes without an unbounded output buffer. It is only a default - any
  *  capacity works, and the kernels report `bytes_consumed` so the caller can resume past a full buffer.
  */
-enum { sz_iterators_default_steps_k = 16 };
+enum { sz_iterators_default_steps_k = 64 };
 
 /**
  *  @brief Check if a position in UTF-8 text is a word boundary per Unicode TR29.

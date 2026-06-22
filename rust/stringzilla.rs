@@ -3228,7 +3228,7 @@ impl<'a, const STEPS: usize> Iterator for Utf8Tokens<'a, STEPS> {
 /// `sz_iterators_default_steps_k` enum in `include/stringzilla/utf8_words.h`. Buffering this many
 /// boundaries per call amortizes the per-item dispatch/FFI overhead without an unbounded buffer; the
 /// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
-pub const ITERATORS_DEFAULT_STEPS: usize = 16;
+pub const ITERATORS_DEFAULT_STEPS: usize = 64;
 
 /// An iterator over UAX-29 words in UTF-8 text, in order.
 ///
