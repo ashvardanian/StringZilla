@@ -112,6 +112,29 @@ SZ_INTERNAL __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints) {
 }
 
 /**
+ *  @brief  Mask of lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges
+ *          (so they need no cold cascade): `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the tight interior exceptions
+ *          (Extend voicing marks `302A-3030` / `3099-309A`, `303D`, enclosed `3297` / `3299`). Mirrors the word
+ *          kernel's `cjk_combined` carve. Six `vpcmp`; called only when a cold lane is present.
+ */
+SZ_INTERNAL __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints) {
+    __mmask16 const run_a = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3000)),
+                                         _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xA66E)));
+    __mmask16 const run_b = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0xD7FC)),
+                                         _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xFB1D)));
+    __mmask16 const exception_run =
+        _kor_mask16(_kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x302A)),
+                                 _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x3030))),
+                    _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3099)),
+                                 _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x309A))));
+    __mmask16 const exception_point =
+        _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x303D)),
+                    _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3297)),
+                                _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3299))));
+    return _kandn_mask16(_kor_mask16(exception_run, exception_point), _kor_mask16(run_a, run_b));
+}
+
+/**
  *  @brief  Classify 16 codepoints (one u32 ZMM) into 16 packed Grapheme_Cluster_Break descriptors (one per low byte).
  *
  *  Each lane takes exactly one rare-class-gated path so a pure-ASCII / 2-byte / astral chunk never pays the cold
@@ -135,8 +158,13 @@ SZ_INTERNAL __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     __mmask16 const is_ascii = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x80));
     __mmask16 const below_0800 = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x800));
     __mmask16 const is_bmp = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x10000));
-    __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                        // 0x80..0x7FF
-    __mmask16 const is_cold = _kandn_mask16(is_hangul, _kandn_mask16(below_0800, is_bmp)); // 0x800..0xFFFF, non-Hangul
+    __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                       // 0x80..0x7FF
+    __mmask16 const cold_raw = _kandn_mask16(is_hangul, _kandn_mask16(below_0800, is_bmp)); // 0x800..0xFFFF, non-Hangul
+    // CJK / Kana arithmetic fast-path, gated behind any-cold-lane so ASCII / Hangul windows pay nothing: the carved
+    // lanes resolve to GCB=Other (descriptor 0, the zero-init value), so a pure-CJK window skips the 50-tile cascade.
+    // Byte-identical -- the cascade would produce the same Other for these lanes whether or not residual cold remains.
+    __mmask16 is_cold = cold_raw;
+    if (cold_raw) is_cold = _kandn_mask16(sz_grapheme_cjk_other_icelake_(codepoints), cold_raw);
     // `cp >= 0x110000` (e.g. the overlong `F4 90 80 80`) stays Other, matching serial.
     __mmask16 const is_astral = _kand_mask16(_kandn_mask16(is_bmp, (__mmask16)0xFFFF),
                                              _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32((int)0x110000)));
