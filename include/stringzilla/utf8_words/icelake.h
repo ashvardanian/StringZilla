@@ -7,7 +7,7 @@
  *  The text is consumed in 64-byte windows. Each window is decoded by the shared codepoint substrate and classified
  *  to a per-codepoint Word_Break property (ALetter, Numeric, MidLetter, Extend, Regional_Indicator, ...) entirely
  *  in-register: an ASCII permute, big arithmetic ranges, a codepoint < 0x800 page LUT, the shared two-stage trie for the
- *  scattered BMP residue, and a register-resident astral trie for the Supplementary Plane. Rules WB3-WB16 then run as
+ *  scattered BMP residue, and a aligned `.rodata` astral trie for the Supplementary Plane. Rules WB3-WB16 then run as
  *  branchless 64-lane bit algebra. The driver emits the boundaries it can fully trust and advances to the last
  *  resolved codepoint start; a small register carry (@ref sz_utf8_word_break_carry_t) threads the cross-window state.
  *
@@ -91,104 +91,31 @@ enum {
 /** @brief  64-byte ZMM tile counts spanning the flattened ASTRAL stage tables (BMP keeps the cheap arithmetic
  *          ranges + 2-byte page LUT, which already classify faster than a trie). */
 enum {
-    sz_utf8_word_break_astral_stage1_tiles_k = (sizeof(sz_utf8_word_break_astral_s1_) + 63) / 64,
-    sz_utf8_word_break_astral_stage2_tiles_k = (sizeof(sz_utf8_word_break_astral_s2_) + 63) / 64,
-    sz_utf8_word_break_astral_leaf_tiles_k = (sizeof(sz_utf8_word_break_astral_leaf_) + 63) / 64,
+    sz_utf8_word_break_astral_stage1_tiles_k = sizeof(sz_utf8_word_break_astral_s1_) / 64,
+    sz_utf8_word_break_astral_stage2_tiles_k = sizeof(sz_utf8_word_break_astral_s2_) / 64,
+    sz_utf8_word_break_astral_leaf_tiles_k = sizeof(sz_utf8_word_break_astral_leaf_) / 64,
 };
 
-/** @brief  Register-resident images of the word-break ASTRAL stage trie. Loaded ONCE by the driver, so the 4-byte
- *          (emoji / supplementary) classification is a fixed 4-stage walk instead of the old 476-range linear scan. */
-typedef struct sz_utf8_word_break_luts_icelake_t {
-    __m512i astral_high[4]; /**< 256 B `astral_s0` (offset >> 12 → stage-1 block id), four ZMM for `vpermb`. */
-    __m512i astral_stage1[sz_utf8_word_break_astral_stage1_tiles_k];
-    __m512i astral_stage2[sz_utf8_word_break_astral_stage2_tiles_k];
-    __m512i astral_leaf[sz_utf8_word_break_astral_leaf_tiles_k];
-} sz_utf8_word_break_luts_icelake_t;
-
-/** @brief  Load @p bytes of a flat byte table into @p tile_count 64-byte ZMM tiles, zero-padding the partial tail. */
-SZ_INTERNAL void sz_utf8_word_break_luts_load_icelake_(__m512i *tiles, sz_u8_t const *source, sz_size_t bytes,
-                                                       int tile_count) {
-    for (int tile = 0; tile < tile_count; ++tile) {
-        sz_align_(64) sz_u8_t padded[64];
-        for (int byte = 0; byte < 64; ++byte) {
-            sz_size_t const index = (sz_size_t)tile * 64 + byte;
-            padded[byte] = index < bytes ? source[index] : (sz_u8_t)0;
-        }
-        tiles[tile] = _mm512_load_si512(padded);
-    }
-}
-
-/** @brief  Load the astral stage tables into ZMM tiles. Called ONCE by the driver, outside the window loop. */
-SZ_INTERNAL void sz_utf8_word_break_luts_init_icelake_(sz_utf8_word_break_luts_icelake_t *luts) {
-    sz_utf8_word_break_luts_load_icelake_(luts->astral_high, sz_utf8_word_break_astral_s0_, 256, 4);
-    sz_utf8_word_break_luts_load_icelake_(luts->astral_stage1, sz_utf8_word_break_astral_s1_,
-                                          sizeof(sz_utf8_word_break_astral_s1_),
-                                          sz_utf8_word_break_astral_stage1_tiles_k);
-    sz_utf8_word_break_luts_load_icelake_(luts->astral_stage2, sz_utf8_word_break_astral_s2_,
-                                          sizeof(sz_utf8_word_break_astral_s2_),
-                                          sz_utf8_word_break_astral_stage2_tiles_k);
-    sz_utf8_word_break_luts_load_icelake_(luts->astral_leaf, sz_utf8_word_break_astral_leaf_,
-                                          sizeof(sz_utf8_word_break_astral_leaf_),
-                                          sz_utf8_word_break_astral_leaf_tiles_k);
-}
-
-/** @brief  256-entry byte LUT over four resident ZMM, per 32-bit lane index in [0,256). */
-SZ_INTERNAL __m512i sz_utf8_word_break_permute256_icelake_(__m512i const *quarter_tiles, __m512i index) {
-    __m512i const low_six = _mm512_and_si512(index, _mm512_set1_epi32(0x3F));
-    __m512i const top_two = _mm512_and_si512(index, _mm512_set1_epi32(0xC0));
-    __m512i const permuted0 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quarter_tiles[0]),
-                                               _mm512_set1_epi32(0xFF));
-    __m512i const permuted1 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quarter_tiles[1]),
-                                               _mm512_set1_epi32(0xFF));
-    __m512i const permuted2 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quarter_tiles[2]),
-                                               _mm512_set1_epi32(0xFF));
-    __m512i const permuted3 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quarter_tiles[3]),
-                                               _mm512_set1_epi32(0xFF));
-    __m512i result = permuted0;
-    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0x40)), result, permuted1);
-    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0x80)), result, permuted2);
-    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0xC0)), result, permuted3);
-    return result;
-}
-
-/** @brief  Gather-free indexed byte LUT held in @p tile_count 64-byte tiles, per 32-bit lane index: a `vpermi2b`
- *          cascade (low 7 bits within a tile-pair, the high bits select the pair via masked blends). */
-SZ_INTERNAL __m512i sz_utf8_word_break_lut_cascade_icelake_(__m512i const *tiles, int tile_count, __m512i index) {
-    __m512i const within = _mm512_and_si512(index, _mm512_set1_epi32(0x7F));
-    __m512i const selector = _mm512_srli_epi32(index, 7);
-    __m512i result = _mm512_setzero_si512();
-    int const pairs = (tile_count + 1) / 2;
-    for (int pair = 0; pair < pairs; ++pair) {
-        __m512i const low_tile = tiles[pair * 2];
-        __m512i const high_tile = (pair * 2 + 1 < tile_count) ? tiles[pair * 2 + 1] : _mm512_setzero_si512();
-        __m512i const picked = _mm512_and_si512(_mm512_permutex2var_epi8(low_tile, within, high_tile),
-                                                _mm512_set1_epi32(0xFF));
-        __mmask16 const here = _mm512_cmpeq_epi32_mask(selector, _mm512_set1_epi32(pair));
-        result = _mm512_mask_blend_epi32(here, result, picked);
-    }
-    return result;
-}
-
 /** @brief  Classify 16 astral codepoints (u32 lanes) into 16 Word_Break classes via the 4-stage astral trie:
- *          `astral_high` → stage1 → stage2 → leaf, addressed by the 8/4/4/4 split of `offset = codepoint - 0x10000`.
- *          Byte-identical to `sz_rune_word_break_property` for astral, replacing the 476-range linear fold. */
-SZ_INTERNAL __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepoints,
-                                                                  sz_utf8_word_break_luts_icelake_t const *luts) {
+ *          `astral_s0` → stage1 → stage2 → leaf, addressed by the 8/4/4/4 split of `offset = codepoint - 0x10000`,
+ *          every tile read straight from aligned `.rodata` (re-init-free — no per-call `luts`). Byte-identical to
+ *          `sz_rune_word_break_property` for astral, replacing the 476-range linear fold. */
+SZ_INTERNAL __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepoints) {
     __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
-    __m512i const stage1 = sz_utf8_word_break_permute256_icelake_(
-        luts->astral_high, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
+    __m512i const stage1 = sz_utf8_codepoints_permute256_icelake_(
+        sz_utf8_word_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
     __m512i const stage2_index = _mm512_add_epi32(
         _mm512_slli_epi32(stage1, 4), _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xF)));
-    __m512i const stage2 = sz_utf8_word_break_lut_cascade_icelake_(
-        luts->astral_stage1, sz_utf8_word_break_astral_stage1_tiles_k, stage2_index);
+    __m512i const stage2 = sz_utf8_codepoints_lut_cascade_icelake_(
+        sz_utf8_word_break_astral_s1_, sz_utf8_word_break_astral_stage1_tiles_k, stage2_index);
     __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
                                                 _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_word_break_lut_cascade_icelake_(luts->astral_stage2,
+    __m512i const leaf = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_word_break_astral_s2_,
                                                                  sz_utf8_word_break_astral_stage2_tiles_k, leaf_index);
     __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
                                                  _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
-    return sz_utf8_word_break_lut_cascade_icelake_(luts->astral_leaf, sz_utf8_word_break_astral_leaf_tiles_k,
-                                                   class_index);
+    return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_word_break_astral_leaf_,
+                                                   sz_utf8_word_break_astral_leaf_tiles_k, class_index);
 }
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
@@ -259,12 +186,11 @@ SZ_INTERNAL __m512i sz_utf8_word_break_small_page_icelake_(__m512i high, __m512i
     return _mm512_mask_blend_epi8(page_bit3, candidate[0], candidate[1]);
 }
 
-/** @brief  Classify the 4-byte (astral) lanes of a window via the register-resident astral trie. Four 16-lane chunks
+/** @brief  Classify the 4-byte (astral) lanes of a window via the aligned `.rodata` astral trie. Four 16-lane chunks
  *          reconstruct the 21-bit codepoint and walk the 4-stage trie; the caller blends the result onto `is_four_byte`
  *          lanes. Replaces the per-window 476-range linear fold. */
 SZ_INTERNAL __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window, __m512i next1, __m512i next2,
-                                                                   __m512i next3,
-                                                                   sz_utf8_word_break_luts_icelake_t const *luts) {
+                                                                   __m512i next3) {
     __m512i const byte0 = _mm512_and_si512(window, _mm512_set1_epi8(0x07));
     __m512i const byte1 = _mm512_and_si512(next1, _mm512_set1_epi8(0x3F));
     __m512i const byte2 = _mm512_and_si512(next2, _mm512_set1_epi8(0x3F));
@@ -283,7 +209,7 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i windo
         __m512i const codepoint = _mm512_or_si512(
             _mm512_or_si512(_mm512_slli_epi32(lead_bits, 18), _mm512_slli_epi32(continuation1, 12)),
             _mm512_or_si512(_mm512_slli_epi32(continuation2, 6), continuation3));
-        __m512i const chunk_class = sz_utf8_word_break_classify_astral16_icelake_(codepoint, luts);
+        __m512i const chunk_class = sz_utf8_word_break_classify_astral16_icelake_(codepoint);
         __m128i const class_bytes = _mm512_cvtepi32_epi8(chunk_class);
         __m512i const class_broadcast = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
                                                                  _mm512_castsi128_si512(class_bytes));
@@ -296,11 +222,10 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i windo
 /**
  *  @brief  Classify a 64-byte window to per-lane Word_Break properties. ASCII through the ASCII permute, BMP through
  *          arithmetic big ranges (Latin / Hangul / CJK) + the codepoint < 0x800 page LUT + the shared two-stage BMP trie for
- *          the residue; 4-byte leads through the register-resident astral trie. All cheap paths are rare-class gated.
+ *          the residue; 4-byte leads through the aligned `.rodata` astral trie. All cheap paths are rare-class gated.
  */
 SZ_INTERNAL __m512i sz_utf8_word_break_classify_window_icelake_( //
-    __m512i window, __m512i high, __m512i low, __mmask64 is_four_byte, __m512i next1, __m512i next2, __m512i next3,
-    sz_utf8_word_break_luts_icelake_t const *luts) {
+    __m512i window, __m512i high, __m512i low, __mmask64 is_four_byte, __m512i next1, __m512i next2, __m512i next3) {
     __mmask64 const is_ascii = ~_mm512_movepi8_mask(window);
     __mmask64 const high_eq_01 = _mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8(0x01));
     __mmask64 const high_eq_02 = _mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8(0x02));
@@ -320,8 +245,8 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_window_icelake_( //
     classes = _mm512_mask_blend_epi8(cjk_combined, classes, _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
     classes = _mm512_mask_blend_epi8(fast_aletter, classes, _mm512_set1_epi8((char)sz_utf8_word_break_aletter_k));
     if (is_four_byte)
-        classes = _mm512_mask_mov_epi8(
-            classes, is_four_byte, sz_utf8_word_break_classify_four_byte_icelake_(window, next1, next2, next3, luts));
+        classes = _mm512_mask_mov_epi8(classes, is_four_byte,
+                                       sz_utf8_word_break_classify_four_byte_icelake_(window, next1, next2, next3));
     if (is_ascii)
         classes = _mm512_mask_blend_epi8(is_ascii, classes, sz_utf8_word_break_classify_ascii_icelake_(window));
 
@@ -1031,8 +956,6 @@ SZ_PUBLIC sz_size_t sz_utf8_words_icelake(           //
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
-    sz_utf8_word_break_luts_icelake_t luts;
-    sz_utf8_word_break_luts_init_icelake_(&luts); // load the classifier stage tries ONCE, outside the window loop
 
     sz_size_t words = 0;      // words written to the output
     sz_size_t word_start = 0; // start byte of the currently open (unfinished) word
@@ -1059,7 +982,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_icelake(           //
         __m512i const next2 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), window);
         __m512i const next3 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)), window);
         __m512i classes = sz_utf8_word_break_classify_window_icelake_(window, high, low, decoded.four_byte_starts,
-                                                                      next1, next2, next3, &luts);
+                                                                      next1, next2, next3);
 
         // Canonical maximal-subpart partition (the serial reference's exact model after its malformed-UTF-8 fix):
         // a multi-byte lead claims continuation bytes only up to the first non-continuation OR its declared length,

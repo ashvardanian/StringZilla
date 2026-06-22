@@ -80,7 +80,7 @@ SZ_INTERNAL void sz_utf8_codepoints_peel_icelake_(                              
     }
 }
 
-#pragma region Bit-mask boundary algebra
+#pragma region Bit mask boundary algebra
 
 /** @brief  Smear set bits rightward (toward higher lanes) for @p steps, gated by the @p reach mask each step. */
 SZ_INTERNAL sz_u64_t sz_utf8_codepoints_smear_right_(sz_u64_t bits, sz_u64_t reach, int steps) {
@@ -126,7 +126,22 @@ SZ_INTERNAL sz_u64_t sz_utf8_codepoints_fill_left_(sz_u64_t seed, sz_u64_t gate)
     return bits;
 }
 
-#pragma endregion Bit-mask boundary algebra
+/**
+ *  @brief  Segmented exclusive prefix-XOR parity over each maximal @p gate run: lane i carries the XOR of @p seed
+ *          across the contiguous run of @p gate ending at i. The dual of @ref sz_utf8_codepoints_fill_right_ (OR ->
+ *          XOR), in log-depth Kogge-Stone doubling. Used by the grapheme GB12/13 Regional_Indicator parity scan.
+ */
+SZ_INTERNAL sz_u64_t sz_utf8_codepoints_segmented_parity_icelake_(sz_u64_t seed, sz_u64_t gate) {
+    sz_u64_t parity = seed;
+    sz_u64_t reach = gate;
+    for (int shift = 1; shift < 64; shift <<= 1) {
+        parity ^= (parity << shift) & reach;
+        reach &= reach << shift;
+    }
+    return parity;
+}
+
+#pragma endregion Bit mask boundary algebra
 
 #pragma region Decode window
 
@@ -146,15 +161,15 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_srl8_(__m512i value, int shift, sz_u8_t k
  *  `high`/`low` holding the low 16 bits, which the caller resolves through arithmetic ranges.
  */
 typedef struct sz_utf8_codepoints_window_t {
-    __m512i window;             /**< The raw 64 input bytes (continuation bytes included). */
-    __m512i high;               /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
-    __m512i low;                /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
-    __mmask64 continuation;     /**< Bit `i` set => lane `i` is a UTF-8 continuation byte `10xxxxxx`. */
-    __mmask64 codepoint_starts; /**< Bit `i` set => lane `i` begins a codepoint (loaded, non-continuation). */
-    __mmask64 two_byte_starts;  /**< Bit `i` set => lane `i` is a 2-byte lead `110xxxxx`. */
-    __mmask64 three_byte_starts;/**< Bit `i` set => lane `i` is a 3-byte lead `1110xxxx`. */
-    __mmask64 four_byte_starts; /**< Bit `i` set => lane `i` is a 4-byte lead `11110xxx`. */
-    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64) into lanes [0, loaded). */
+    __m512i window;              /**< The raw 64 input bytes (continuation bytes included). */
+    __m512i high;                /**< Per-lane `codepoint >> 8` for the codepoint that starts at this lane. */
+    __m512i low;                 /**< Per-lane `codepoint & 0xFF` for the codepoint that starts at this lane. */
+    __mmask64 continuation;      /**< Bit `i` set => lane `i` is a UTF-8 continuation byte `10xxxxxx`. */
+    __mmask64 codepoint_starts;  /**< Bit `i` set => lane `i` begins a codepoint (loaded, non-continuation). */
+    __mmask64 two_byte_starts;   /**< Bit `i` set => lane `i` is a 2-byte lead `110xxxxx`. */
+    __mmask64 three_byte_starts; /**< Bit `i` set => lane `i` is a 3-byte lead `1110xxxx`. */
+    __mmask64 four_byte_starts;  /**< Bit `i` set => lane `i` is a 4-byte lead `11110xxx`. */
+    sz_size_t loaded;            /**< Number of bytes actually loaded (<= 64) into lanes [0, loaded). */
 } sz_utf8_codepoints_window_t;
 
 /** @brief  Load up to 64 bytes from @p text (masked tail) and decode every lane into byte-domain halves. */
@@ -171,9 +186,8 @@ SZ_INTERNAL sz_utf8_codepoints_window_t sz_utf8_codepoints_decode_window_( //
     __m512i const next2 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), window);
 
     __mmask64 const loaded_lanes = load_mask;
-    __mmask64 const is_continuation =
-        _mm512_mask_cmpeq_epi8_mask(loaded_lanes, _mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)),
-                                    _mm512_set1_epi8((char)0x80));
+    __mmask64 const is_continuation = _mm512_mask_cmpeq_epi8_mask(
+        loaded_lanes, _mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)), _mm512_set1_epi8((char)0x80));
     result.continuation = is_continuation;
     result.codepoint_starts = loaded_lanes & ~is_continuation;
     result.two_byte_starts = _mm512_mask_cmpeq_epi8_mask(
@@ -193,8 +207,9 @@ SZ_INTERNAL sz_utf8_codepoints_window_t sz_utf8_codepoints_decode_window_( //
     __m512i const lead_four_bits = _mm512_and_si512(window, _mm512_set1_epi8(0x0F));
     __m512i const high_three_byte = _mm512_or_si512(_mm512_slli_epi16(lead_four_bits, 4),
                                                     sz_utf8_codepoints_srl8_(next1, 2, 0x0F));
-    __m512i const low_three_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
-                                                   _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
+    __m512i const low_three_byte = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
+        _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
 
     result.high = _mm512_mask_blend_epi8(result.three_byte_starts, high_two_byte, high_three_byte);
     result.low = _mm512_mask_blend_epi8(result.three_byte_starts, low_two_byte, low_three_byte);
@@ -203,7 +218,7 @@ SZ_INTERNAL sz_utf8_codepoints_window_t sz_utf8_codepoints_decode_window_( //
 
 #pragma endregion Decode window
 
-#pragma region In-register two-stage trie
+#pragma region In register two stage trie
 
 /**
  *  @brief  Gather one byte per 16-bit lane from a register-resident byte table @p table of @p count entries,
@@ -219,11 +234,12 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_gather_byte_(sz_u8_t const *table, int co
     for (int page_index = 0; page_index * 128 < count; ++page_index) {
         int const tile_base = page_index * 128;
         int const tile_remaining = count - tile_base;
-        __m512i const tile_lo = _mm512_maskz_loadu_epi8(sz_u64_clamp_mask_until_((sz_size_t)tile_remaining), table + tile_base);
-        __m512i const tile_hi = tile_remaining > 64
-                                    ? _mm512_maskz_loadu_epi8(sz_u64_clamp_mask_until_((sz_size_t)(tile_remaining - 64)),
-                                                              table + tile_base + 64)
-                                    : _mm512_setzero_si512();
+        __m512i const tile_lo = _mm512_maskz_loadu_epi8(sz_u64_clamp_mask_until_((sz_size_t)tile_remaining),
+                                                        table + tile_base);
+        __m512i const tile_hi = tile_remaining > 64 ? _mm512_maskz_loadu_epi8(
+                                                          sz_u64_clamp_mask_until_((sz_size_t)(tile_remaining - 64)),
+                                                          table + tile_base + 64)
+                                                    : _mm512_setzero_si512();
         __m512i const permuted = _mm512_permutex2var_epi8(tile_lo, within, tile_hi);
         __mmask32 const hit = _mm512_cmpeq_epi16_mask(page, _mm512_set1_epi16((short)page_index));
         result = _mm512_mask_mov_epi16(result, hit, _mm512_and_si512(permuted, _mm512_set1_epi16(0x00FF)));
@@ -244,11 +260,12 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_gather_word_(sz_u16_t const *table, int c
     for (int page_index = 0; page_index * 64 < count; ++page_index) {
         int const tile_base = page_index * 64;
         int const tile_remaining = count - tile_base;
-        __m512i const tile_lo = _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)tile_remaining), table + tile_base);
-        __m512i const tile_hi = tile_remaining > 32
-                                    ? _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)(tile_remaining - 32)),
-                                                               table + tile_base + 32)
-                                    : _mm512_setzero_si512();
+        __m512i const tile_lo = _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)tile_remaining),
+                                                         table + tile_base);
+        __m512i const tile_hi = tile_remaining > 32 ? _mm512_maskz_loadu_epi16(
+                                                          sz_u32_clamp_mask_until_((sz_size_t)(tile_remaining - 32)),
+                                                          table + tile_base + 32)
+                                                    : _mm512_setzero_si512();
         __m512i const permuted = _mm512_permutex2var_epi16(tile_lo, within, tile_hi);
         __mmask32 const hit = _mm512_cmpeq_epi16_mask(page, _mm512_set1_epi16((short)page_index));
         result = _mm512_mask_mov_epi16(result, hit, permuted);
@@ -286,8 +303,8 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_gather_word_(sz_u16_t const *table, int c
  */
 SZ_INTERNAL __m512i sz_utf8_codepoints_trie_walk_icelake_( //
     __m512i high, __m512i low,                             //
-    sz_u8_t const *l1, sz_u16_t const *l2, sz_u8_t const *leaf, int block, int superblock, int l1_count,
-    int l2_count, int leaf_count) {
+    sz_u8_t const *l1, sz_u16_t const *l2, sz_u8_t const *leaf, int block, int superblock, int l1_count, int l2_count,
+    int leaf_count) {
     __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)block));
     __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)superblock));
     __m512i const within_mask = _mm512_set1_epi16((short)(block - 1));
@@ -333,7 +350,56 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_trie_walk_icelake_( //
     return _mm512_packus_epi16(class_lo, class_hi);
 }
 
-#pragma endregion In-register two-stage trie
+/**
+ *  @brief  256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane @p index in [0,256). A
+ *          `vpermb` over the four resident quads; the high two bits of the index select the quad via masked blends.
+ *          Tiles load directly from `.rodata` (no per-call materialization), so the family classifiers stay
+ *          re-init-free. @p table must be `sz_align_(64)` and exactly 256 bytes.
+ */
+SZ_INTERNAL __m512i sz_utf8_codepoints_permute256_icelake_(sz_u8_t const *table, __m512i index) {
+    __m512i const quad0 = _mm512_load_si512((void const *)(table + 0 * 64));
+    __m512i const quad1 = _mm512_load_si512((void const *)(table + 1 * 64));
+    __m512i const quad2 = _mm512_load_si512((void const *)(table + 2 * 64));
+    __m512i const quad3 = _mm512_load_si512((void const *)(table + 3 * 64));
+    __m512i const low_six = _mm512_and_si512(index, _mm512_set1_epi32(0x3F));
+    __m512i const top_two = _mm512_and_si512(index, _mm512_set1_epi32(0xC0));
+    __m512i const permuted0 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quad0), _mm512_set1_epi32(0xFF));
+    __m512i const permuted1 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quad1), _mm512_set1_epi32(0xFF));
+    __m512i const permuted2 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quad2), _mm512_set1_epi32(0xFF));
+    __m512i const permuted3 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, quad3), _mm512_set1_epi32(0xFF));
+    __m512i result = permuted0;
+    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0x40)), result, permuted1);
+    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0x80)), result, permuted2);
+    result = _mm512_mask_blend_epi32(_mm512_cmpeq_epi32_mask(top_two, _mm512_set1_epi32(0xC0)), result, permuted3);
+    return result;
+}
+
+/**
+ *  @brief  Gather-free indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64 bytes, with a
+ *          per-32-bit-lane byte @p index_dwords in [0, tile_count*64). A `vpermi2b` cascade: each ZMM pair covers 128
+ *          byte slots addressed by the low 7 bits; the high bits select the pair via masked blends. Tiles load
+ *          directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init. No `vpgatherdd`.
+ *          @p table must be `sz_align_(64)` and zero-padded to `tile_count * 64` bytes.
+ */
+SZ_INTERNAL __m512i sz_utf8_codepoints_lut_cascade_icelake_(sz_u8_t const *table, int tile_count,
+                                                            __m512i index_dwords) {
+    __m512i const within = _mm512_and_si512(index_dwords, _mm512_set1_epi32(0x7F));
+    __m512i const selector = _mm512_srli_epi32(index_dwords, 7);
+    __m512i result = _mm512_setzero_si512();
+    int const pairs = (tile_count + 1) / 2;
+    for (int pair = 0; pair < pairs; ++pair) {
+        __m512i const low_tile = _mm512_load_si512((void const *)(table + (pair * 2) * 64));
+        __m512i const high_tile = (pair * 2 + 1 < tile_count)
+                                      ? _mm512_load_si512((void const *)(table + (pair * 2 + 1) * 64))
+                                      : _mm512_setzero_si512();
+        __m512i const picked = _mm512_permutex2var_epi8(low_tile, within, high_tile);
+        __mmask16 const here = _mm512_cmpeq_epi32_mask(selector, _mm512_set1_epi32(pair));
+        result = _mm512_mask_blend_epi32(here, result, _mm512_and_si512(picked, _mm512_set1_epi32(0xFF)));
+    }
+    return result;
+}
+
+#pragma endregion In register two stage trie
 
 #pragma region Drains
 
@@ -348,8 +414,8 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_trie_walk_icelake_( //
  *  `starts[]` / `lengths[]` in waves of eight, carrying the open segment across waves and windows via @p previous_io.
  */
 SZ_INTERNAL sz_size_t sz_utf8_codepoints_drain_forward_( //
-    sz_u64_t boundary, sz_size_t base, __m512i lane_identity, sz_size_t *starts, sz_size_t *lengths,
-    sz_size_t produced, sz_size_t capacity, sz_size_t *previous_io) {
+    sz_u64_t boundary, sz_size_t base, __m512i lane_identity, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced,
+    sz_size_t capacity, sz_size_t *previous_io) {
     __m512i const wave_shift = _mm512_add_epi8(lane_identity, _mm512_set1_epi8(8));
     sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
     __m512i packed = _mm512_maskz_compress_epi8(_cvtu64_mask64(boundary), lane_identity);
@@ -362,8 +428,7 @@ SZ_INTERNAL sz_size_t sz_utf8_codepoints_drain_forward_( //
         __m512i const segment_starts = _mm512_alignr_epi64(positions, _mm512_set1_epi64((long long)previous), 7);
         __mmask8 const store_mask = sz_u8_clamp_mask_until_(wave);
         _mm512_mask_storeu_epi64((void *)(starts + produced), store_mask, segment_starts);
-        _mm512_mask_storeu_epi64((void *)(lengths + produced), store_mask,
-                                 _mm512_sub_epi64(positions, segment_starts));
+        _mm512_mask_storeu_epi64((void *)(lengths + produced), store_mask, _mm512_sub_epi64(positions, segment_starts));
         produced += wave, emitted += wave;
         previous = (sz_u64_t)(starts[produced - 1] + lengths[produced - 1]);
         packed = _mm512_permutexvar_epi8(wave_shift, packed);
@@ -575,8 +640,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_icelake( //
         _mm512_mask_storeu_epi32(runes, sz_u16_mask_until_(runes_to_unpack), runes_vec.zmm);
 
         // Bytes consumed: one per ASCII, two per 2-byte sequence
-        sz_size_t two_byte_count =
-            (sz_size_t)_mm_popcnt_u64(_cvtmask16_u32(_kand_mask16(is_two_byte_char, sz_u16_mask_until_(runes_to_unpack))));
+        sz_size_t two_byte_count = (sz_size_t)_mm_popcnt_u64(
+            _cvtmask16_u32(_kand_mask16(is_two_byte_char, sz_u16_mask_until_(runes_to_unpack))));
         *runes_unpacked = runes_to_unpack;
         return text + runes_to_unpack + two_byte_count;
     }

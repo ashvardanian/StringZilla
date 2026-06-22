@@ -1,45 +1,6 @@
 /**
- *  @brief UAX-29 Word_Break property tables.
- *  @file include/stringzilla/utf8_words/tables.h
+ *  @file   include/stringzilla/utf8_words/tables.h
  *  @author Ash Vardanian
- */
-#ifndef STRINGZILLA_UTF8_WORDS_TABLES_H_
-#define STRINGZILLA_UTF8_WORDS_TABLES_H_
-
-#include "stringzilla/types.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/**
- *  @brief Unicode TR29 Word_Break property values (4-bit encoding, 0-15).
- *
- *  These values correspond to the Word_Break property from Unicode TR29.
- *  Used by `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
- */
-enum sz_utf8_word_break_t {
-    sz_utf8_word_break_other_k = 0,         /**< Default - creates word boundary */
-    sz_utf8_word_break_cr_k = 1,            /**< Carriage Return (U+000D) */
-    sz_utf8_word_break_lf_k = 2,            /**< Line Feed (U+000A) */
-    sz_utf8_word_break_newline_k = 3,       /**< Other newlines (VT, FF, NEL, LS, PS) */
-    sz_utf8_word_break_extend_k = 4,        /**< Combining marks (Mn, Me, Mc) */
-    sz_utf8_word_break_zwj_k = 5,           /**< Zero Width Joiner (U+200D) */
-    sz_utf8_word_break_format_k = 6,        /**< Format characters (Cf) */
-    sz_utf8_word_break_regional_ind_k = 7,  /**< Regional Indicator (U+1F1E6-U+1F1FF) */
-    sz_utf8_word_break_aletter_k = 8,       /**< Alphabetic letters */
-    sz_utf8_word_break_hebrew_letter_k = 9, /**< Hebrew script letters */
-    sz_utf8_word_break_numeric_k = 10,      /**< Digits (0-9 and other scripts) */
-    sz_utf8_word_break_katakana_k = 11,     /**< Japanese Katakana */
-    sz_utf8_word_break_extendnumlet_k = 12, /**< Underscore, connector punctuation */
-    sz_utf8_word_break_midletter_k = 13,    /**< Mid-letter punctuation (colon, etc.) */
-    sz_utf8_word_break_midnum_k = 14,       /**< Mid-number punctuation (comma, etc.) */
-    sz_utf8_word_break_mid_quotes_k = 15,   /**< MidNumLet + Single_Quote + Double_Quote */
-};
-
-#pragma region Word_Break tables
-
-/**
  *  @brief Gather-free UAX-29 Word_Break property tables. A codepoint maps to one of the 16
  *  `sz_utf8_word_break_t` values (see the walk in `sz_rune_word_break_property`). Derived from the UCD by:
  *
@@ -79,8 +40,46 @@ enum sz_utf8_word_break_t {
  *  astral_s1 = [value for row in stage1 for value in row]
  *  astral_s2 = [value for row in stage2 for value in row]
  *  astral_leaf = [value for row in leaf for value in row]  # word-break class indexed by (offset & 0xF)
+ *  # The Ice Lake astral cascade loads astral_s0/s1/s2/leaf as 64-byte tiles straight from `.rodata`, so each is
+ *  # stored `sz_align_(64)` and zero-padded to a multiple of 64 bytes (no per-call table materialization):
+ *  pad64 = lambda values: values + [0] * ((-len(values)) % 64)
  *  @endcode
  */
+#ifndef STRINGZILLA_UTF8_WORDS_TABLES_H_
+#define STRINGZILLA_UTF8_WORDS_TABLES_H_
+
+#include "stringzilla/types.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ *  @brief Unicode TR29 Word_Break property values (4-bit encoding, 0-15).
+ *
+ *  These values correspond to the Word_Break property from Unicode TR29.
+ *  Used by `sz_rune_word_break_property()` for full TR29-compliant boundary detection.
+ */
+enum sz_utf8_word_break_t {
+    sz_utf8_word_break_other_k = 0,         /**< Default - creates word boundary */
+    sz_utf8_word_break_cr_k = 1,            /**< Carriage Return (U+000D) */
+    sz_utf8_word_break_lf_k = 2,            /**< Line Feed (U+000A) */
+    sz_utf8_word_break_newline_k = 3,       /**< Other newlines (VT, FF, NEL, LS, PS) */
+    sz_utf8_word_break_extend_k = 4,        /**< Combining marks (Mn, Me, Mc) */
+    sz_utf8_word_break_zwj_k = 5,           /**< Zero Width Joiner (U+200D) */
+    sz_utf8_word_break_format_k = 6,        /**< Format characters (Cf) */
+    sz_utf8_word_break_regional_ind_k = 7,  /**< Regional Indicator (U+1F1E6-U+1F1FF) */
+    sz_utf8_word_break_aletter_k = 8,       /**< Alphabetic letters */
+    sz_utf8_word_break_hebrew_letter_k = 9, /**< Hebrew script letters */
+    sz_utf8_word_break_numeric_k = 10,      /**< Digits (0-9 and other scripts) */
+    sz_utf8_word_break_katakana_k = 11,     /**< Japanese Katakana */
+    sz_utf8_word_break_extendnumlet_k = 12, /**< Underscore, connector punctuation */
+    sz_utf8_word_break_midletter_k = 13,    /**< Mid-letter punctuation (colon, etc.) */
+    sz_utf8_word_break_midnum_k = 14,       /**< Mid-number punctuation (comma, etc.) */
+    sz_utf8_word_break_mid_quotes_k = 15,   /**< MidNumLet + Single_Quote + Double_Quote */
+};
+
+#pragma region Word_Break tables
 
 enum {
     sz_utf8_word_break_big_count_k = 4,
@@ -477,24 +476,27 @@ static const sz_u32_t sz_utf8_word_break_pict_u32_hi_[156] = {
  * sz_rune_word_break_property(codepoint) for every codepoint (byte-identical to the serial oracle by construction).
  * Replaces the per-window 476-range astral linear scan; the BMP fast paths (ASCII permute, arithmetic ranges,
  * 2-byte page LUT, BMP residue trie) are kept because they classify faster than a trie for the common scripts. */
-static const sz_u8_t sz_utf8_word_break_astral_s0_[256] = {
+sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_s0_[256] = {
     0, 1, 2, 3, 4, 5, 6, 5, 5, 5, 7, 8, 9, 10, 11, 12, 5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 13, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5};
-static const sz_u8_t sz_utf8_word_break_astral_s1_[224] = {
-    0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
-    28, 29, 30, 31, 6,  6,  6,  32, 33, 34, 35, 35, 35, 35, 35, 35, 35, 35, 35, 36, 6,  6,  6,  6,  37, 6,  6,  6,
-    6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  38, 6,  6,  39, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
-    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 40, 35, 35, 35, 35, 35, 35, 6,  6,  41, 42, 35, 43, 44, 45,
-    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 46, 47, 48, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
-    49, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 50, 35, 35, 51, 35, 52, 53, 35, 54, 55, 56, 57,
-    35, 35, 58, 35, 35, 35, 35, 59, 60, 61, 62, 35, 63, 64, 65, 66, 67, 68, 35, 35, 35, 35, 69, 35, 35, 70, 35, 71,
-    35, 35, 35, 35, 35, 35, 35, 50, 35, 35, 35, 35, 72, 73, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35};
-static const sz_u8_t sz_utf8_word_break_astral_s2_[1184] = {
+    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+};
+sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_s1_[256] = {
+    0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    29, 30, 31, 6,  6,  6,  32, 33, 34, 35, 35, 35, 35, 35, 35, 35, 35, 35, 36, 6,  6,  6,  6,  37, 6,  6,  6,  6,  6,
+    6,  6,  6,  6,  6,  6,  6,  6,  6,  38, 6,  6,  39, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
+    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 40, 35, 35, 35, 35, 35, 35, 6,  6,  41, 42, 35, 43, 44, 45, 35, 35, 35, 35,
+    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 46, 47, 48, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 49, 35, 35, 35, 35,
+    35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 50, 35, 35, 51, 35, 52, 53, 35, 54, 55, 56, 57, 35, 35, 58, 35, 35, 35,
+    35, 59, 60, 61, 62, 35, 63, 64, 65, 66, 67, 68, 35, 35, 35, 35, 69, 35, 35, 70, 35, 71, 35, 35, 35, 35, 35, 35, 35,
+    50, 35, 35, 35, 35, 72, 73, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+};
+sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_s2_[1216] = {
     0,   1,   2,   3,   4,   4,   5,   5,   1,   1,   1,   1,   1,   1,   1,   6,   5,   5,   5,   5,   1,   1,   1,
     7,   5,   5,   5,   5,   5,   5,   5,   8,   5,   5,   5,   5,   5,   5,   5,   5,   1,   9,   1,   1,   1,   10,
     11,  5,   1,   1,   12,  1,   6,   1,   1,   13,  1,   4,   1,   1,   14,  15,  5,   5,   1,   1,   1,   1,   1,
@@ -546,8 +548,10 @@ static const sz_u8_t sz_utf8_word_break_astral_s2_[1184] = {
     159, 1,   184, 185, 186, 187, 188, 189, 190, 17,  191, 17,  5,   5,   5,   5,   5,   5,   5,   1,   32,  1,   32,
     1,   32,  5,   5,   5,   5,   5,   192, 193, 5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,
     5,   170, 194, 5,   88,  88,  88,  88,  88,  88,  5,   5,   5,   5,   5,   5,   5,   5,   88,  88,  88,  88,  88,
-    88,  88,  88,  88,  88,  88,  88,  88,  88,  88,  5};
-static const sz_u8_t sz_utf8_word_break_astral_leaf_[3120] = {
+    88,  88,  88,  88,  88,  88,  88,  88,  88,  88,  5,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+    0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+};
+sz_align_(64) static const sz_u8_t sz_utf8_word_break_astral_leaf_[3136] = {
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  0,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -655,7 +659,9 @@ static const sz_u8_t sz_utf8_word_break_astral_leaf_[3120] = {
     8,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  0,  8,  8,  8,  8,  0,  8,  0,  8,  8,  8,  8,  8,
     8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  0,  8,  8,  8,  0,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  0,  0,
     0,  0,  0,  0,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,
-    7,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0};
+    7,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    0,  0,  0,  0,
+};
 
 /* Auxiliary astral ranges consumed by the serial Word_Break oracle (sz_rune_word_break_property). */
 static const sz_u32_t sz_utf8_word_break_astral_lo_[476] = {
