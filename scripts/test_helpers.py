@@ -714,6 +714,36 @@ def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> Dict[int, s
     return _parse_break_property_file(cache_path)
 
 
+def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+    """Download and parse the Indic_Conjunct_Break (InCB) property from DerivedCoreProperties.txt.
+
+    Returns a dict mapping codepoints to their InCB value ("Linker", "Consonant", or "Extend");
+    codepoints absent from the map are InCB=None. Used by `baseline_grapheme_boundaries` for GB9c.
+    """
+    cache_path = os.path.join(tempfile.gettempdir(), f"DerivedCoreProperties-{version}.txt")
+    if not os.path.exists(cache_path):
+        url = f"https://www.unicode.org/Public/{version}/ucd/DerivedCoreProperties.txt"
+        try:
+            urllib.request.urlretrieve(url, cache_path)
+        except Exception as e:
+            raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {e}")
+    incb: Dict[int, str] = {}
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            parts = [part.strip() for part in line.split(";")]
+            if len(parts) < 3 or parts[1] != "InCB":
+                continue
+            cp_range = parts[0]
+            if ".." in cp_range:
+                start_cp, end_cp = (int(bound, 16) for bound in cp_range.split(".."))
+            else:
+                start_cp = end_cp = int(cp_range, 16)
+            for cp in range(start_cp, end_cp + 1):
+                incb[cp] = parts[2]
+    return incb
+
+
 def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     """Download and parse the official GraphemeBreakTest.txt.
 
@@ -724,17 +754,23 @@ def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]
     return _parse_break_test_file(cache_path)
 
 
-def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None) -> List[int]:
+def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None, incb: Dict[int, str] = None) -> List[int]:
     """Pure Python implementation of the UAX-29 extended grapheme cluster algorithm.
 
     Reference baseline for the C implementation. Returns byte positions of cluster boundaries.
-    Covers GB1-GB999 including the Hangul, emoji-ZWJ (GB11) and Regional_Indicator (GB12/13) rules.
+    Covers GB1-GB999 including the Hangul, GB9c Indic-conjunct, emoji-ZWJ (GB11) and
+    Regional_Indicator (GB12/13) rules.
     """
     if props is None:
         props = get_grapheme_break_properties()
+    if incb is None:
+        incb = get_indic_conjunct_break_properties()
 
     def prop_of(cp: int) -> str:
         return props.get(cp, "Other")
+
+    def incb_of(cp: int) -> str:
+        return incb.get(cp, "None")
 
     codepoints = []
     byte_offset = 0
@@ -751,9 +787,12 @@ def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None) -> Lis
     boundaries = [0]  # GB1: sot ÷
 
     def is_extended_pictographic(cp: int) -> bool:
-        # Extended_Pictographic is supplied via Emoji-Data; approximate from common ranges.
+        # Extended_Pictographic is supplied via Emoji-Data; approximate from common ranges. Regional_Indicators
+        # (U+1F1E6..U+1F1FF) have their own GCB class and are NOT Extended_Pictographic, so GB11's ZWJ bridge must
+        # not fire on `RI ZWJ RI` (that breaks after the ZWJ per GB9/GB999).
         return (
             0x1F000 <= cp <= 0x1FAFF
+            and not (0x1F1E6 <= cp <= 0x1F1FF)
             or 0x2600 <= cp <= 0x27BF
             or cp in (0x00A9, 0x00AE, 0x203C, 0x2049, 0x2122, 0x2139, 0x2328, 0x2388)
             or 0x2194 <= cp <= 0x21AA
@@ -762,7 +801,6 @@ def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None) -> Lis
             or 0x25AA <= cp <= 0x25FE
             or 0x2934 <= cp <= 0x2935
             or 0x2B00 <= cp <= 0x2BFF
-            or 0x1F1E6 <= cp <= 0x1F1FF
         )
 
     for i in range(1, len(codepoints)):
@@ -801,6 +839,16 @@ def baseline_grapheme_boundaries(text: str, props: Dict[int, str] = None) -> Lis
         # GB9b: Prepend x
         if prev_prop == "Prepend":
             continue
+        # GB9c: Consonant [Extend|Linker]* Linker [Extend|Linker]* x Consonant (Indic conjunct)
+        if incb_of(curr_cp) == "Consonant":
+            seen_linker = False
+            k = i - 1
+            while k >= 0 and incb_of(codepoints[k][0]) in ("Extend", "Linker"):
+                if incb_of(codepoints[k][0]) == "Linker":
+                    seen_linker = True
+                k -= 1
+            if k >= 0 and seen_linker and incb_of(codepoints[k][0]) == "Consonant":
+                continue
         # GB11: ExtPict Extend* ZWJ x ExtPict
         if prev_prop == "ZWJ" and is_extended_pictographic(curr_cp):
             j = i - 1
