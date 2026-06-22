@@ -41,7 +41,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_graphemes(                    //
 
 #pragma endregion
 
-#pragma region Platform-Specific Backends
+#pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_graphemes */
 SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,

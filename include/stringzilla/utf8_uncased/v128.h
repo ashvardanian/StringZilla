@@ -98,7 +98,7 @@ SZ_INTERNAL sz_utf8_uncased_window_v128_t_ sz_utf8_uncased_load_window_v128_(sz_
 
 #pragma endregion // Helpers
 
-#pragma region Per-script fold strips
+#pragma region Per script fold strips
 
 SZ_INTERNAL void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
@@ -272,9 +272,9 @@ SZ_INTERNAL void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src,
     }
 }
 
-#pragma endregion // Per-script fold strips
+#pragma endregion // Per script fold strips
 
-#pragma region Per-script alarm strips
+#pragma region Per script alarm strips
 
 /** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
 SZ_INTERNAL void sz_utf8_uncased_alarm_window_(v128_t danger_second, sz_size_t pos, sz_size_t window, long *best) {
@@ -455,7 +455,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, 
     return best;
 }
 
-#pragma endregion // Per-script alarm strips
+#pragma endregion // Per script alarm strips
 
 #pragma region Scripted driver
 

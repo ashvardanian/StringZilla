@@ -71,7 +71,7 @@ typedef void (*sz_utf8_uncased_fold_strip_rvv_t_)(sz_u8_t const *source_ptr, sz_
 /** @brief Scans a strip for length-changing fold characters; returns the offset of the first, or -1. */
 typedef long (*sz_utf8_uncased_alarm_strip_rvv_t_)(sz_u8_t const *source_ptr, sz_size_t vector_length);
 
-#pragma region Per-Script Fold Strips
+#pragma region Per Script Fold Strips
 
 /*  Each `_fold_strip_rvv_` folds exactly `vector_length` bytes from `source_ptr` into `destination_ptr`, one-to-one.
  *  They are only ever called on regions the matching alarm has cleared of length-changing folds, so the
@@ -382,9 +382,9 @@ SZ_CI_RVV_NOINLINE_ void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t cons
     __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
 }
 
-#pragma endregion // Per-Script Fold Strips
+#pragma endregion // Per Script Fold Strips
 
-#pragma region Per-Script Alarm Strips
+#pragma region Per Script Alarm Strips
 
 /*  Each `_alarm_strip_rvv_` returns the lane offset of the FIRST length-changing fold character in the
  *  strip, or -1 if the strip is clean. Anchored at the SECOND byte of each multi-byte pattern (lead read
@@ -666,7 +666,7 @@ SZ_CI_RVV_NOINLINE_ long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const
     return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
 }
 
-#pragma endregion // Per-Script Alarm Strips
+#pragma endregion // Per Script Alarm Strips
 
 #pragma region Scripted Driver
 
@@ -827,7 +827,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_find_rvv_scripted_( //
 
 #pragma endregion // Scripted Driver
 
-#pragma region Per-Script Kernels
+#pragma region Per Script Kernels
 
 SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_rvv_ascii_( //
     sz_cptr_t haystack, sz_size_t haystack_length,     //
@@ -902,7 +902,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_rvv_georgian_( //
                                               needle, needle_length, needle_metadata, matched_length);
 }
 
-#pragma endregion // Per-Script Kernels
+#pragma endregion // Per Script Kernels
 
 SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_rvv(      //
     sz_cptr_t haystack, sz_size_t haystack_length, //

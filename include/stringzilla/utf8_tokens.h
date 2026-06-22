@@ -119,7 +119,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_si
 
 #pragma endregion
 
-#pragma region Platform-Specific Backends
+#pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_newlines */
 SZ_PUBLIC sz_size_t sz_utf8_newlines_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,

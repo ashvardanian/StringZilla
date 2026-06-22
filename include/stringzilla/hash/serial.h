@@ -642,7 +642,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *packed) {
     }
 }
 
-#pragma region Multi-Seed Hashing
+#pragma region Multi Seed Hashing
 
 /**
  *  @brief Splits a short (<= 64 byte) input into up to four de-interleaved 128-bit @b text-lanes, once.
@@ -720,7 +720,7 @@ SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,       
     }
 }
 
-#pragma endregion // Multi-Seed Hashing
+#pragma endregion // Multi Seed Hashing
 
 #pragma region Serial SHA256 Implementation
 

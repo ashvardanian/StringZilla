@@ -168,7 +168,7 @@ SZ_INTERNAL sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_s
 
 #pragma endregion // Helpers
 
-#pragma region Per-script strip handlers
+#pragma region Per script strip handlers
 
 /** @brief Fold one window of Latin (ASCII + Latin-1 C2/C3 + Latin Extended-A/B C4-C6). @sa RVV latin strip. */
 SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
@@ -419,7 +419,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_pt
                                       needs_serial);
 }
 
-#pragma endregion // Per-script strip handlers
+#pragma endregion // Per script strip handlers
 
 SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 

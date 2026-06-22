@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#pragma region UAX-29 Sentence Boundaries
+#pragma region UAX 29 Sentence Boundaries
 
 /** @brief Returns the UAX-29 Sentence_Break property (0-14) for a codepoint. */
 SZ_PUBLIC sz_u8_t sz_rune_sentence_break_property(sz_rune_t rune) {
@@ -257,7 +257,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(                //
     return sentences;
 }
 
-#pragma endregion // UAX-29 Sentence Boundaries
+#pragma endregion // UAX 29 Sentence Boundaries
 
 #ifdef __cplusplus
 }

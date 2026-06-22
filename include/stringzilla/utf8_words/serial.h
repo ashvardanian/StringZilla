@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#pragma region UAX-29 Word Boundaries
+#pragma region UAX 29 Word Boundaries
 
 /**
  *  @brief Returns the UAX-29 Word_Break property (0-15) for a codepoint.
@@ -306,7 +306,7 @@ SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_
         sz_size_t predecessor_start = sz_word_previous_start_(text, base_start);
         sz_size_t predecessor_at = predecessor_start;
         sz_rune_t predecessor_codepoint = sz_utf8_decode_(text, base_start, &predecessor_at);
-        /*  WB4 exception: an ignorable directly after a Newline/CR/LF is de-ignored and is its own base. */
+        //  WB4 exception: an ignorable directly after a Newline/CR/LF is de-ignored and is its own base.
         if (sz_word_is_newline_(sz_rune_word_break_property(predecessor_codepoint))) break;
         base_start = predecessor_start;
         base_codepoint = predecessor_codepoint;
@@ -363,18 +363,18 @@ SZ_INTERNAL sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t pos
  *         delegates here), so segmentation is identical in either direction.
  */
 SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
-    if (position == 0) return sz_true_k;      /* WB1 */
-    if (position >= length) return sz_true_k; /* WB2 */
-    /*  Never split INSIDE a codepoint - but only a continuation byte genuinely covered by a preceding lead's
-     *  maximal-subpart sequence is interior. A stray continuation (the lead stops short of it) is its OWN U+FFFD
-     *  codepoint, so a boundary may fall before it; matching the canonical forward decode keeps streamed segmentation
-     *  capacity-independent on malformed input. */
+    if (position == 0) return sz_true_k;      // WB1
+    if (position >= length) return sz_true_k; // WB2
+    // Never split INSIDE a codepoint - but only a continuation byte genuinely covered by a preceding lead's
+    // maximal-subpart sequence is interior. A stray continuation (the lead stops short of it) is its OWN U+FFFD
+    // codepoint, so a boundary may fall before it; matching the canonical forward decode keeps streamed segmentation
+    // capacity-independent on malformed input.
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) {
         sz_size_t lead = position;
         while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
         sz_size_t reach = lead;
         sz_utf8_decode_(text, length, &reach);
-        if (reach > position) return sz_false_k; /* interior byte of a valid multi-byte codepoint */
+        if (reach > position) return sz_false_k; // interior byte of a valid multi-byte codepoint
     }
 
     sz_size_t after_at = position;
@@ -387,79 +387,79 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     sz_u8_t immediate_property = sz_rune_word_break_property(immediate_codepoint);
 
     if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
-        return sz_false_k;                                                  /* WB3  CR x LF */
-    if (sz_word_is_newline_(immediate_property)) return sz_true_k;          /* WB3a break after Newline/CR/LF */
-    if (sz_word_is_newline_(next_property)) return sz_true_k;               /* WB3b break before Newline/CR/LF */
-    if (sz_utf8_word_break_is_ignorable_(next_property)) return sz_false_k; /* WB4 absorb Extend/Format/ZWJ */
+        return sz_false_k;                                                  // WB3  CR x LF
+    if (sz_word_is_newline_(immediate_property)) return sz_true_k;          // WB3a break after Newline/CR/LF
+    if (sz_word_is_newline_(next_property)) return sz_true_k;               // WB3b break before Newline/CR/LF
+    if (sz_utf8_word_break_is_ignorable_(next_property)) return sz_false_k; // WB4 absorb Extend/Format/ZWJ
 
     sz_word_element_t previous = sz_word_previous_element_(text, position);
     sz_u8_t previous_property = previous.property;
     sz_rune_t previous_codepoint = previous.codepoint;
 
     if (previous.ends_in_zwj && sz_rune_is_extended_pictographic(next_codepoint))
-        return sz_false_k; /* WB3c ZWJ x Extended_Pictographic */
-    /*  WB3c/WB3d precede WB4, so they test RAW adjacency: WB3d needs the immediate predecessor codepoint (an
-     *  intervening Extend, absorbed by WB4, must still force the break) rather than the folded element base. */
+        return sz_false_k; // WB3c ZWJ x Extended_Pictographic
+    // WB3c/WB3d precede WB4, so they test RAW adjacency: WB3d needs the immediate predecessor codepoint (an
+    // intervening Extend, absorbed by WB4, must still force the break) rather than the folded element base.
     if (sz_rune_is_wsegspace(immediate_codepoint) && sz_rune_is_wsegspace(next_codepoint))
-        return sz_false_k; /* WB3d WSegSpace x WSegSpace */
+        return sz_false_k; // WB3d WSegSpace x WSegSpace
 
     sz_bool_t previous_ah = sz_utf8_word_break_is_aletter_or_hebrew_(previous_property);
     sz_bool_t next_ah = sz_utf8_word_break_is_aletter_or_hebrew_(next_property);
 
-    if (previous_ah && next_ah) return sz_false_k; /* WB5 */
+    if (previous_ah && next_ah) return sz_false_k; // WB5
     if (previous_ah &&
         (next_property == sz_utf8_word_break_midletter_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
         sz_word_element_t after = sz_word_next_element_(text, length, position);
-        if (after.valid && sz_utf8_word_break_is_aletter_or_hebrew_(after.property)) return sz_false_k; /* WB6 */
+        if (after.valid && sz_utf8_word_break_is_aletter_or_hebrew_(after.property)) return sz_false_k; // WB6
     }
     if ((previous_property == sz_utf8_word_break_midletter_k ||
          sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
         next_ah) {
         sz_word_element_t before = sz_word_previous_element_(text, previous.start);
-        if (before.valid && sz_utf8_word_break_is_aletter_or_hebrew_(before.property)) return sz_false_k; /* WB7 */
+        if (before.valid && sz_utf8_word_break_is_aletter_or_hebrew_(before.property)) return sz_false_k; // WB7
     }
     if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
         sz_word_is_single_quote_(next_property, next_codepoint))
-        return sz_false_k; /* WB7a Hebrew x Single_Quote */
+        return sz_false_k; // WB7a Hebrew x Single_Quote
     if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
         sz_word_is_double_quote_(next_property, next_codepoint)) {
         sz_word_element_t after = sz_word_next_element_(text, length, position);
-        if (after.valid && after.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; /* WB7b */
+        if (after.valid && after.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; // WB7b
     }
     if (sz_word_is_double_quote_(previous_property, previous_codepoint) &&
         next_property == sz_utf8_word_break_hebrew_letter_k) {
         sz_word_element_t before = sz_word_previous_element_(text, previous.start);
-        if (before.valid && before.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; /* WB7c */
+        if (before.valid && before.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; // WB7c
     }
     if (previous_property == sz_utf8_word_break_numeric_k && next_property == sz_utf8_word_break_numeric_k)
-        return sz_false_k;                                                               /* WB8 */
-    if (previous_ah && next_property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB9 */
-    if (previous_property == sz_utf8_word_break_numeric_k && next_ah) return sz_false_k; /* WB10 */
+        return sz_false_k;                                                               // WB8
+    if (previous_ah && next_property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB9
+    if (previous_property == sz_utf8_word_break_numeric_k && next_ah) return sz_false_k; // WB10
     if ((previous_property == sz_utf8_word_break_midnum_k ||
          sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
         next_property == sz_utf8_word_break_numeric_k) {
         sz_word_element_t before = sz_word_previous_element_(text, previous.start);
-        if (before.valid && before.property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB11 */
+        if (before.valid && before.property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB11
     }
     if (previous_property == sz_utf8_word_break_numeric_k &&
         (next_property == sz_utf8_word_break_midnum_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
         sz_word_element_t after = sz_word_next_element_(text, length, position);
-        if (after.valid && after.property == sz_utf8_word_break_numeric_k) return sz_false_k; /* WB12 */
+        if (after.valid && after.property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB12
     }
     if (previous_property == sz_utf8_word_break_katakana_k && next_property == sz_utf8_word_break_katakana_k)
-        return sz_false_k; /* WB13 */
+        return sz_false_k; // WB13
     if ((previous_ah || previous_property == sz_utf8_word_break_numeric_k ||
          previous_property == sz_utf8_word_break_katakana_k ||
          previous_property == sz_utf8_word_break_extendnumlet_k) &&
         next_property == sz_utf8_word_break_extendnumlet_k)
-        return sz_false_k; /* WB13a */
+        return sz_false_k; // WB13a
     if (previous_property == sz_utf8_word_break_extendnumlet_k &&
         (next_ah || next_property == sz_utf8_word_break_numeric_k || next_property == sz_utf8_word_break_katakana_k))
-        return sz_false_k; /* WB13b */
+        return sz_false_k; // WB13b
     if (previous_property == sz_utf8_word_break_regional_ind_k && next_property == sz_utf8_word_break_regional_ind_k) {
-        if (sz_word_regional_run_before_(text, previous.start) % 2 == 0) return sz_false_k; /* WB15/WB16 */
+        if (sz_word_regional_run_before_(text, previous.start) % 2 == 0) return sz_false_k; // WB15/WB16
     }
-    return sz_true_k; /* WB999 */
+    return sz_true_k; // WB999
 }
 
 /*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel
@@ -513,7 +513,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
     return words;
 }
 
-#pragma endregion // UAX-29 Word Boundaries
+#pragma endregion // UAX 29 Word Boundaries
 
 #ifdef __cplusplus
 }

@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
-#pragma region Sentence_Break gather-free classifier
+#pragma region Sentence_Break gather free classifier
 
 /**
  *  @brief  Classify up to 64 codepoints (held one-per-lane in the decoded @p high / @p low byte halves) into
@@ -45,13 +45,13 @@ extern "C" {
  *  @param  four_byte_starts   Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
  *  @param  codepoint_starts   Lanes that begin any codepoint (non-continuation, in range).
  */
-SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                     //
+SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(             //
     __m512i raw_window, __m512i raw_next1, __m512i raw_next2, __m512i raw_next3, //
     __m512i high, __m512i low,                                                   //
     __mmask64 four_byte_starts, __mmask64 codepoint_starts) {
 
-    /*  ASCII / 2-byte lanes have `high < 0x08`, so the low 11 bits address the 2048-byte page LUT directly. The
-     *  index is `high[2:0]:low[7:0]`; `vpermi2b` selects within a 128-byte segment-pair, masked moves the pair. */
+    // ASCII / 2-byte lanes have `high < 0x08`, so the low 11 bits address the 2048-byte page LUT directly. The
+    // index is `high[2:0]:low[7:0]`; `vpermi2b` selects within a 128-byte segment-pair, masked moves the pair.
     __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
     __m512i const low_high_bit = sz_utf8_codepoints_srl8_(low, 7, 0x01);
     __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
@@ -67,9 +67,8 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                    
 
     // 3-byte BMP residue: the shared two-stage trie classifies all 64 lanes at once (no scalar cold loop).
     __m512i const trie_class = sz_utf8_codepoints_trie_walk_icelake_(
-        high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_,
-        sz_utf8_sentence_break_trie_leaf_, sz_utf8_sentence_break_trie_block_k,
-        sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
+        high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_, sz_utf8_sentence_break_trie_leaf_,
+        sz_utf8_sentence_break_trie_block_k, sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
 
     // Big homogeneous OLetter ranges as arithmetic compares (zero data) over the per-lane (high<<8|low).
     __mmask64 oletter = 0;
@@ -107,11 +106,11 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                    
     classes = _mm512_mask_mov_epi8(classes, trie_lanes, trie_class);
     classes = _mm512_mask_mov_epi8(classes, oletter, _mm512_set1_epi8((char)sz_sentence_break_oletter_k));
 
-    /*  Astral (4-byte) lanes: reconstruct the full 21-bit codepoint per lane and resolve through the sorted astral
-     *  range list with arithmetic compares (no gather). cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F).
-     *  The 21-bit value exceeds a byte lane, so we widen to 32-bit lanes in four 16-lane chunks and compare each
-     *  chunk against every astral range, blending the matching class back. The whole block only fires when a
-     *  4-byte lead is present (corpus astral residue < 0.1%), keeping the common path branch-free. */
+    // Astral (4-byte) lanes: reconstruct the full 21-bit codepoint per lane and resolve through the sorted astral
+    // range list with arithmetic compares (no gather). cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F).
+    // The 21-bit value exceeds a byte lane, so we widen to 32-bit lanes in four 16-lane chunks and compare each
+    // chunk against every astral range, blending the matching class back. The whole block only fires when a
+    // 4-byte lead is present (corpus astral residue < 0.1%), keeping the common path branch-free.
     if (is_astral) {
         __m512i const b0 = _mm512_and_si512(raw_window, _mm512_set1_epi8(0x07));
         __m512i const b1 = _mm512_and_si512(raw_next1, _mm512_set1_epi8(0x3F));
@@ -125,9 +124,8 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                    
             __m512i const w1 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b1)));
             __m512i const w2 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b2)));
             __m512i const w3 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b3)));
-            __m512i const cp = _mm512_or_si512(
-                _mm512_or_si512(_mm512_slli_epi32(w0, 18), _mm512_slli_epi32(w1, 12)),
-                _mm512_or_si512(_mm512_slli_epi32(w2, 6), w3));
+            __m512i const cp = _mm512_or_si512(_mm512_or_si512(_mm512_slli_epi32(w0, 18), _mm512_slli_epi32(w1, 12)),
+                                               _mm512_or_si512(_mm512_slli_epi32(w2, 6), w3));
             __mmask16 const lane_is_four = (__mmask16)((is_astral >> (chunk * 16)) & 0xFFFFu);
             __m512i astral_class = _mm512_setzero_si512();
             __mmask16 matched = 0;
@@ -150,18 +148,18 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                    
                 sz_u32_t const lo = sz_utf8_sentence_break_astral_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_astral_hi_[range];
                 if (hi < 0x10000u) continue; // BMP ranges are already resolved by the page LUT / trie / OLetter
-                __mmask16 const in_range =
-                    _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
-                    _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four & ~matched;
+                __mmask16 const in_range = _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
+                                           _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four &
+                                           ~matched;
                 astral_class = _mm512_mask_mov_epi32(astral_class, in_range,
                                                      _mm512_set1_epi32((int)sz_utf8_sentence_break_astral_cls_[range]));
                 matched |= in_range;
             }
-            /*  Narrow the 16 32-bit astral classes to 16 bytes (`vpmovdb`), broadcast them back to this chunk's byte
-             *  lanes via `vpexpandb`, and blend - fully vectorized, no scalar per-lane writeback. */
+            // Narrow the 16 32-bit astral classes to 16 bytes (`vpmovdb`), broadcast them back to this chunk's byte
+            // lanes via `vpexpandb`, and blend - fully vectorized, no scalar per-lane writeback.
             __m128i const astral_bytes = _mm512_cvtepi32_epi8(astral_class);
-            __m512i const astral_broadcast = _mm512_maskz_expand_epi8(
-                _cvtu64_mask64(0xFFFFull << (chunk * 16)), _mm512_castsi128_si512(astral_bytes));
+            __m512i const astral_broadcast = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
+                                                                      _mm512_castsi128_si512(astral_bytes));
             classes = _mm512_mask_mov_epi8(classes, _cvtu64_mask64((sz_u64_t)matched << (chunk * 16)),
                                            astral_broadcast);
         }
@@ -169,7 +167,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_(                    
     return classes;
 }
 
-#pragma endregion Sentence_Break gather-free classifier
+#pragma endregion Sentence_Break gather free classifier
 
 #pragma region Sentence_Break boundary algebra
 
@@ -215,7 +213,7 @@ typedef struct sz_utf8_sentence_break_carry_t {
 
 /** @brief  One classified block resolved into per-byte break bits plus the metadata the driver stitches. */
 typedef struct sz_utf8_sentence_break_window_t {
-    sz_u64_t breaks;    /**< Bit `i` set => a sentence boundary begins before the codepoint whose lead is byte-lane `i`. */
+    sz_u64_t breaks; /**< Bit `i` set => a sentence boundary begins before the codepoint whose lead is byte-lane `i`. */
     sz_size_t resolved; /**< Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted (SB8 edge). */
 } sz_utf8_sentence_break_window_t;
 
@@ -239,8 +237,8 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
 
     sz_u64_t const valid = sz_u64_mask_until_(loaded);
-    sz_u64_t const sb = start_bytes & valid;     // codepoint-lead lanes
-    sz_u64_t const cont = continuation & valid;   // UTF-8 continuation-byte lanes
+    sz_u64_t const sb = start_bytes & valid;    // codepoint-lead lanes
+    sz_u64_t const cont = continuation & valid; // UTF-8 continuation-byte lanes
     sz_u64_t const m_extend = sz_utf8_sentence_break_class_mask_(classes, sz_sentence_break_extend_k, sb);
     sz_u64_t const m_format = sz_utf8_sentence_break_class_mask_(classes, sz_sentence_break_format_k, sb);
     sz_u64_t const m_ignorable = m_extend | m_format;
@@ -286,12 +284,12 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     // significant`), flood that one more codepoint forward, read one lane on. The first significant lead's two-back
     // is the carried `prev_prev_eff`; the carried `prev_eff` reaches the second lead automatically through the
     // `eb_X` edge seed, mirroring the serial two-back lookbehind.
-    sz_u64_t const eb2_upper =
-        (sz_utf8_codepoints_fill_right_(eb_upper & significant, flow) << 1) |
-        sz_u64_or_if_(0ull, edge_region, have_prev && prev_prev_eff == sz_sentence_break_upper_k);
-    sz_u64_t const eb2_lower =
-        (sz_utf8_codepoints_fill_right_(eb_lower & significant, flow) << 1) |
-        sz_u64_or_if_(0ull, edge_region, have_prev && prev_prev_eff == sz_sentence_break_lower_k);
+    sz_u64_t const eb2_upper = (sz_utf8_codepoints_fill_right_(eb_upper & significant, flow) << 1) |
+                               sz_u64_or_if_(0ull, edge_region,
+                                             have_prev && prev_prev_eff == sz_sentence_break_upper_k);
+    sz_u64_t const eb2_lower = (sz_utf8_codepoints_fill_right_(eb_lower & significant, flow) << 1) |
+                               sz_u64_or_if_(0ull, edge_region,
+                                             have_prev && prev_prev_eff == sz_sentence_break_lower_k);
 
     // Two-phase monotone `SATerm Close* Sp*` shadow. `flow` already spans ignorables and all continuation bytes,
     // so only the Close / Sp lead classes widen each phase's gate. The carried open-run state seeds lane 0.
@@ -303,23 +301,22 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     sz_u64_t const lane0_close = (m_ignorable | m_close) & 1ull;
     sz_u64_t const lane0_sp = (m_ignorable | m_sp) & 1ull;
     sz_u64_t const lane0_sp_only = m_sp & 1ull;
-    sz_u64_t const open_no_sp = in_shadow_carry & ~saw_sp_carry; // open shadow still in its Close phase
+    sz_u64_t const open_no_sp = in_shadow_carry & ~saw_sp_carry;  // open shadow still in its Close phase
     sz_u64_t const open_with_sp = in_shadow_carry & saw_sp_carry; // open shadow already in its Sp phase
     sz_u64_t const carry_close_seed = sz_u64_or_if_(0ull, lane0_close, (int)open_no_sp);
-    sz_u64_t const carry_sp_seed =
-        sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)open_no_sp), lane0_sp, (int)open_with_sp);
+    sz_u64_t const carry_sp_seed = sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)open_no_sp), lane0_sp,
+                                                 (int)open_with_sp);
     sz_u64_t const carry_aterm_close = sz_u64_or_if_(0ull, lane0_close, (int)(open_no_sp & aterm_carry));
-    sz_u64_t const carry_aterm_sp =
-        sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)(open_no_sp & aterm_carry)), lane0_sp,
-                      (int)(open_with_sp & aterm_carry));
+    sz_u64_t const carry_aterm_sp = sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)(open_no_sp & aterm_carry)),
+                                                  lane0_sp, (int)(open_with_sp & aterm_carry));
 
-    sz_u64_t const close_phase =
-        sz_utf8_codepoints_fill_right_(m_saterm | carry_close_seed, gate_close) | carry_sp_seed;
+    sz_u64_t const close_phase = sz_utf8_codepoints_fill_right_(m_saterm | carry_close_seed, gate_close) |
+                                 carry_sp_seed;
     sz_u64_t const shadow = sz_utf8_codepoints_fill_right_(close_phase | carry_sp_seed, gate_sp);
     sz_u64_t const sp_in_shadow = (m_sp & shadow) | carry_sp_seed;
     sz_u64_t const saw_sp_upto = sz_utf8_codepoints_fill_right_(sp_in_shadow, gate_sp) & shadow;
-    sz_u64_t const aterm_close_phase =
-        sz_utf8_codepoints_fill_right_(m_aterm | carry_aterm_close, gate_close) | carry_aterm_sp;
+    sz_u64_t const aterm_close_phase = sz_utf8_codepoints_fill_right_(m_aterm | carry_aterm_close, gate_close) |
+                                       carry_aterm_sp;
     sz_u64_t const aterm_shadow = sz_utf8_codepoints_fill_right_(aterm_close_phase | carry_aterm_sp, gate_sp);
 
     // SB8 in-window lower-ahead: `fill_left` of Lower through the SB8 neutral set. A multi-byte stop's continuation
@@ -339,10 +336,10 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     sz_u64_t raw_before_cr = sz_utf8_codepoints_fill_right_(m_cr, cont) << 1;
     sz_u64_t raw_before_parasep = sz_utf8_codepoints_fill_right_(m_parasep, cont) << 1;
     raw_before_cr = sz_u64_or_if_(raw_before_cr, 1ull, have_prev && prev_raw == sz_sentence_break_cr_k);
-    raw_before_parasep = sz_u64_or_if_(raw_before_parasep, 1ull,
-                                       have_prev && (prev_raw == sz_sentence_break_sep_k ||
-                                                     prev_raw == sz_sentence_break_cr_k ||
-                                                     prev_raw == sz_sentence_break_lf_k));
+    raw_before_parasep = sz_u64_or_if_(
+        raw_before_parasep, 1ull,
+        have_prev && (prev_raw == sz_sentence_break_sep_k || prev_raw == sz_sentence_break_cr_k ||
+                      prev_raw == sz_sentence_break_lf_k));
 
     sz_u64_t const r_sb3 = raw_before_cr & m_lf;
     sz_u64_t const r_sb4 = raw_before_parasep & sb;
@@ -384,8 +381,7 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     // Trust the window only up to the first SB8-undecided ATerm-shadow boundary; the next, fully-contextual window
     // re-resolves it (effective-window<64 + register carry; no oracle, no scalar). At true end-of-text there is no
     // next block, so a trailing neutral run is decided (no Lower can follow): never clamp then.
-    sz_u64_t const undecided =
-        more_text ? (aterm_shadow_before & in_shadow_before & neutral_to_edge & produced) : 0ull;
+    sz_u64_t const undecided = more_text ? (aterm_shadow_before & in_shadow_before & neutral_to_edge & produced) : 0ull;
     sz_size_t resolved = loaded;
     if (undecided) {
         sz_size_t const lane = sz_u64_ctz(undecided);
@@ -420,9 +416,9 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
 
 #pragma region Sentence_Break forward driver
 
-SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
+SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -444,8 +440,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
     while (position < length) {
         // Decode a 64-byte window in-register (no scalar per-codepoint walk): codepoint-start / continuation /
         // lead-length masks plus the byte-domain `high`/`low` halves, all from the shared substrate helper.
-        sz_utf8_codepoints_window_t const decoded =
-            sz_utf8_codepoints_decode_window_(text_u8 + position, length - position, lane_identity);
+        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_(text_u8 + position,
+                                                                                      length - position, lane_identity);
         sz_size_t const loaded = decoded.loaded;
         // Text may begin mid-codepoint: if byte 0 of the whole input is a continuation, the serial reference still
         // treats it as a lone 1-byte codepoint (blind decode), so force lane 0 to a codepoint start on the first
@@ -464,9 +460,12 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
         __mmask64 const keep1 = sz_u64_mask_until_(loaded >= 1 ? loaded - 1 : 0);
         __mmask64 const keep2 = sz_u64_mask_until_(loaded >= 2 ? loaded - 2 : 0);
         __mmask64 const keep3 = sz_u64_mask_until_(loaded >= 3 ? loaded - 3 : 0);
-        __m512i const next1 = _mm512_maskz_permutexvar_epi8(keep1, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), window);
-        __m512i const next2 = _mm512_maskz_permutexvar_epi8(keep2, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), window);
-        __m512i const next3 = _mm512_maskz_permutexvar_epi8(keep3, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)), window);
+        __m512i const next1 = _mm512_maskz_permutexvar_epi8(keep1, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)),
+                                                            window);
+        __m512i const next2 = _mm512_maskz_permutexvar_epi8(keep2, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)),
+                                                            window);
+        __m512i const next3 = _mm512_maskz_permutexvar_epi8(keep3, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)),
+                                                            window);
 
         // Reconstruct the byte-domain `high`/`low` halves the page-LUT/trie classifier indexes from the 0-padded
         // neighbours: ASCII keeps `high = 0`, `low = raw byte`; 2/3-byte blend their folded halves; 4-byte leads keep
@@ -474,8 +473,9 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
         __m512i const two_high = sz_utf8_codepoints_srl8_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
         __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
                                                 _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
-        __m512i const three_high = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-                                                   sz_utf8_codepoints_srl8_(next1, 2, 0x0F));
+        __m512i const three_high = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
+            sz_utf8_codepoints_srl8_(next1, 2, 0x0F));
         __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
                                                   _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
         // 4-byte: the LOW 16 bits of the reconstructed codepoint, so an overlong / malformed 4-byte lead whose value
@@ -483,8 +483,9 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
         // astral leads (value >= 0x10000) are routed past these halves to the astral sweep by the classifier.
         __m512i const four_low = _mm512_or_si512(_mm512_and_si512(next3, _mm512_set1_epi8(0x3F)),
                                                  _mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6));
-        __m512i const four_high = _mm512_or_si512(sz_utf8_codepoints_srl8_(next2, 2, 0x0F),
-                                                  _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4));
+        __m512i const four_high = _mm512_or_si512(
+            sz_utf8_codepoints_srl8_(next2, 2, 0x0F),
+            _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4));
         __m512i high = _mm512_setzero_si512();
         high = _mm512_mask_mov_epi8(high, decoded.two_byte_starts, two_high);
         high = _mm512_mask_mov_epi8(high, decoded.three_byte_starts, three_high);
@@ -493,7 +494,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake( //
         low = _mm512_mask_mov_epi8(low, decoded.two_byte_starts, two_low);
         low = _mm512_mask_mov_epi8(low, decoded.three_byte_starts, three_low);
         low = _mm512_mask_mov_epi8(low, decoded.four_byte_starts, four_low);
-        __m512i const classes = sz_utf8_sentence_break_classify_window_(
+        __m512i const classes = sz_utf8_sentence_break_classify_window_icelake_(
             window, next1, next2, next3, high, low, decoded.four_byte_starts, codepoint_starts);
 
         sz_bool_t const more_text = (position + loaded < length) ? sz_true_k : sz_false_k;

@@ -417,7 +417,7 @@ SZ_PUBLIC void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64_t non
     }
 }
 
-#pragma region Multi-Seed Hashing
+#pragma region Multi Seed Hashing
 
 /**
  *  @brief Replays prepared text-lanes through the SIMD128 minimal AES state for a single seed.
@@ -463,7 +463,7 @@ SZ_PUBLIC void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,         
     }
 }
 
-#pragma endregion // Multi-Seed Hashing
+#pragma endregion // Multi Seed Hashing
 
 #pragma endregion // Hash with SIMD128 AES
 

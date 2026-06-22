@@ -51,7 +51,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
     return bytesum;
 }
 
-#pragma region RVV AES Round (vector-permute tower field)
+#pragma region RVV AES Round (vector permute tower field)
 
 /*  AES-based hashing on RVV without the optional `Zvkned` AES instructions.
  *

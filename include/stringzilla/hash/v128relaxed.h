@@ -77,7 +77,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-#pragma region Hash with relaxed-SIMD AES
+#pragma region Hash with relaxed SIMD AES
 
 /*  The vpaes tower-field AES emulation is dominated by byte-table lookups, and EVERY index it feeds to
  *  `wasm_i8x16_swizzle` is a nibble or otherwise in `[0, 15]` (the change-of-basis, affine, GF(2^4)
@@ -467,7 +467,7 @@ SZ_PUBLIC void sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length,  
     }
 }
 
-#pragma endregion // Hash with relaxed-SIMD AES
+#pragma endregion // Hash with relaxed SIMD AES
 
 #if defined(__clang__)
 #pragma clang attribute pop

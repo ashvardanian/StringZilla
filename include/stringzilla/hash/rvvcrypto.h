@@ -332,7 +332,7 @@ SZ_PUBLIC void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, sz_u64_
 
 #pragma endregion // RVV Crypto Hash Drivers
 
-#pragma region RVV Crypto SHA-256 (Zvknhb)
+#pragma region RVV Crypto SHA 256 (Zvknhb)
 
 /**
  *  @brief Process a single 512-bit (64-byte) block of data using SHA-256 via `Zvknhb`.
@@ -546,7 +546,7 @@ SZ_PUBLIC void sz_sha256_state_digest_rvvcrypto(sz_sha256_state_t const *state_p
     }
 }
 
-#pragma endregion // RVV Crypto SHA-256
+#pragma endregion // RVV Crypto SHA 256
 
 #if defined(__clang__)
 #pragma clang attribute pop

@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#pragma region UAX-14 Line Boundaries
+#pragma region UAX 14 Line Boundaries
 
 /** @brief Returns the UAX-14 palette descriptor (class in bits 0-5, side flags in bits 6-13) for a codepoint. */
 SZ_PUBLIC sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
@@ -524,7 +524,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
     return lines;
 }
 
-#pragma endregion // UAX-14 Line Boundaries
+#pragma endregion // UAX 14 Line Boundaries
 
 #ifdef __cplusplus
 }

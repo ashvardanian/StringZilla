@@ -90,7 +90,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_unpack_chunk(      //
 
 #pragma endregion
 
-#pragma region Platform-Specific Backends
+#pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);

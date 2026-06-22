@@ -92,6 +92,7 @@ enum sz_line_break_t {
 enum {
     sz_utf8_line_break_palette_count_k = 62,
     sz_utf8_line_break_big_count_k = 50,
+    sz_utf8_line_break_big_bmp_count_k = 18, /**< big-range entries [0,18) are BMP (lo < 0x10000); [18,50) are astral */
     sz_utf8_line_break_trie_block_k = 8,
     sz_utf8_line_break_trie_subblock_k = 8,
     sz_utf8_line_break_astral_count_k = 618,

@@ -49,7 +49,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
     return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
-#pragma region Word boundary left-pack
+#pragma region Word boundary left pack
 
 /** @brief  Ascending `wasm_i8x16_swizzle` permutation that gathers a 4-bit sub-block's set u32 lanes to the front,
  *          preserving low-to-high lane order. The v128 analog of `sz_utf8_word_compact4_permutation_haswell_`. */
@@ -89,7 +89,7 @@ SZ_INTERNAL v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_
     return wasm_i8x16_shuffle(carry, boundaries, 0, 1, 2, 3, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
 }
 
-#pragma endregion // Word boundary left-pack
+#pragma endregion // Word boundary left pack
 
 SZ_PUBLIC sz_size_t sz_utf8_words_v128(              //
     sz_cptr_t text, sz_size_t length,                //

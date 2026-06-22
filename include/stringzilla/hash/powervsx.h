@@ -52,7 +52,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
-#pragma region AES-based hashing
+#pragma region AES based hashing
 
 /*
  *  StringZilla guarantees that every backend produces @b bit-identical hashes for a given input and
@@ -411,7 +411,7 @@ SZ_PUBLIC void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz_u64_t
 
 #endif // SZ_IS_BIG_ENDIAN_
 
-#pragma endregion // AES-based hashing
+#pragma endregion // AES based hashing
 
 #pragma region SHA256
 

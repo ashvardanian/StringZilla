@@ -93,7 +93,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
 
 #pragma endregion
 
-#pragma region Platform-Specific Backends
+#pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_words */
 SZ_PUBLIC sz_size_t sz_utf8_words_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
