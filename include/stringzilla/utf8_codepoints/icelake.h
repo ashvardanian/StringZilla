@@ -399,6 +399,23 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_lut_cascade_icelake_(sz_u8_t const *table
     return result;
 }
 
+/**
+ *  @brief  Indexed read of a 4-bit-per-cell LUT: @p packed holds two output nibbles per byte (cell `i` is the low
+ *          nibble of `packed[i/2]` for even `i`, the high nibble for odd `i`). Halves the table and so HALVES the
+ *          `vpermi2b` cascade depth vs a byte-per-cell layout, for tables whose outputs fit in 4 bits (e.g. the
+ *          grapheme `stage_sub` descriptor index, the word `astral_leaf` class). @p tile_count counts the packed
+ *          tiles; @p index_dwords is the unpacked cell index per 32-bit lane. Reads straight from aligned `.rodata`.
+ */
+SZ_INTERNAL __m512i sz_utf8_codepoints_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
+                                                                   __m512i index_dwords) {
+    __m512i const byte_index = _mm512_srli_epi32(index_dwords, 1);
+    __m512i const packed_byte = sz_utf8_codepoints_lut_cascade_icelake_(packed, tile_count, byte_index);
+    __mmask16 const odd_cell = _mm512_test_epi32_mask(index_dwords, _mm512_set1_epi32(1));
+    __m512i const low_nibble = _mm512_and_si512(packed_byte, _mm512_set1_epi32(0x0F));
+    __m512i const high_nibble = _mm512_and_si512(_mm512_srli_epi32(packed_byte, 4), _mm512_set1_epi32(0x0F));
+    return _mm512_mask_blend_epi32(odd_cell, low_nibble, high_nibble);
+}
+
 #pragma endregion In register two stage trie
 
 #pragma region Drains

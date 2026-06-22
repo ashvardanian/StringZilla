@@ -49,7 +49,8 @@ extern "C" {
 
 enum {
     sz_grapheme_break_mid_tiles_k = sizeof(sz_utf8_grapheme_break_stage_mid_) / 64, /**< ZMM tiles of `stage_mid`. */
-    sz_grapheme_break_sub_tiles_k = sizeof(sz_utf8_grapheme_break_stage_sub_) / 64, /**< ZMM tiles of `stage_sub`. */
+    sz_grapheme_break_sub_packed_tiles_k =
+        sizeof(sz_utf8_grapheme_break_stage_sub_packed_) / 64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
     sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
@@ -72,9 +73,9 @@ SZ_INTERNAL __m512i sz_grapheme_small_page_icelake_(__m512i codepoints) {
                                                    _mm512_and_si512(codepoints, _mm512_set1_epi32(0x7FF)));
 }
 
-/** @brief  Descriptor of a cold BMP codepoint (0x800..0xFFFF) by the three-stage trie: `stage_hi` `vpermb`, then
- *          `stage_mid` and `stage_sub` `vpermi2b` cascades, then the 18-byte `id_to_desc` `vpermb`. All tables read
- *          straight from aligned `.rodata` — no per-call materialization. */
+/** @brief  Descriptor of a cold BMP codepoint (0x800..0xFFFF) by the three-stage trie: `stage_hi` `vpermb`, then the
+ *          `stage_mid` `vpermi2b` cascade and the 4-bit-packed `stage_sub` nibble cascade (half the tiles), then the
+ *          18-byte `id_to_desc` `vpermb`. All tables read straight from aligned `.rodata` — no per-call load. */
 SZ_INTERNAL __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
     __m512i const high_byte = _mm512_and_si512(_mm512_srli_epi32(codepoints, 8), _mm512_set1_epi32(0xFF));
     __m512i const mid = sz_utf8_codepoints_permute256_icelake_(sz_utf8_grapheme_break_stage_hi_, high_byte);
@@ -84,8 +85,10 @@ SZ_INTERNAL __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
                                                                sz_grapheme_break_mid_tiles_k, mid_index);
     __m512i const sub_index = _mm512_add_epi32(_mm512_slli_epi32(sub, 4),
                                                _mm512_and_si512(codepoints, _mm512_set1_epi32(0xF)));
-    __m512i const descriptor_index = sz_utf8_codepoints_lut_cascade_icelake_(
-        sz_utf8_grapheme_break_stage_sub_, sz_grapheme_break_sub_tiles_k, sub_index);
+    // `stage_sub` outputs a 4-bit descriptor index, so it is stored two cells per byte: the nibble cascade walks half
+    // the tiles (25 vs 50), halving this stage's `vpermi2b` port-5 cost — the residual-cascade hot spot for Indic/CJK.
+    __m512i const descriptor_index = sz_utf8_codepoints_lut_cascade_nibble_icelake_(
+        sz_utf8_grapheme_break_stage_sub_packed_, sz_grapheme_break_sub_packed_tiles_k, sub_index);
     __m512i const id_to_desc = _mm512_load_si512((void const *)sz_utf8_grapheme_break_id_to_desc_);
     return _mm512_and_si512(_mm512_permutexvar_epi8(descriptor_index, id_to_desc), _mm512_set1_epi32(0xFF));
 }
