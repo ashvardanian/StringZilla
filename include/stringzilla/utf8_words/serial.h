@@ -21,9 +21,8 @@ extern "C" {
  *  @brief Returns the UAX-29 Word_Break property (0-15) for a codepoint.
  *
  *  Mirrors the gather-free Word_Break classifier: arithmetic big ranges first, then a flat low-plane LUT
- *  for cp < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral range list,
- *  defaulting to Other for everything else. The tier-2 residue pages are a SIMD-only acceleration of the
- *  same data and are intentionally not consulted by this scalar walk.
+ *  for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral range list,
+ *  defaulting to Other for everything else.
  */
 SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_word_break_big_count_k; ++range)
@@ -273,11 +272,19 @@ SZ_INTERNAL sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t code
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
-/** @brief Byte offset of the codepoint start immediately before @p position (which must be > 0). */
+/** @brief Byte offset of the codepoint start immediately before @p position (which must be > 0), using the canonical
+ *         maximal-subpart partition so it agrees with the forward `sz_utf8_decode_` on malformed input: a run of
+ *         continuation bytes is absorbed into the nearest preceding lead ONLY if that lead's sequence actually reaches
+ *         @p position; otherwise the byte just before @p position is a stray continuation (its own U+FFFD). A naive
+ *         continuation-skip would absorb a stray into the previous codepoint and SKIP it during the backward look-back,
+ *         crossing a streamed resume point and forging a WB5/6/7 join the forward pass never sees - that asymmetry is
+ *         the capacity-dependence. Treating every stray as its own non-skippable U+FFFD makes resume reproduce. */
 SZ_INTERNAL sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
-    sz_size_t previous = position - 1;
-    while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
-    return previous;
+    sz_size_t lead = position - 1;
+    while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
+    sz_size_t reach = lead;
+    sz_utf8_decode_(text, position, &reach);
+    return reach == position ? lead : position - 1;
 }
 
 /** @brief The element whose final codepoint ends just before @p position (sot sentinel when @p position == 0). */
@@ -356,9 +363,19 @@ SZ_INTERNAL sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t pos
  *         delegates here), so segmentation is identical in either direction.
  */
 SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
-    if (position == 0) return sz_true_k;                             /* WB1 */
-    if (position >= length) return sz_true_k;                        /* WB2 */
-    if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k; /* never split inside a codepoint */
+    if (position == 0) return sz_true_k;      /* WB1 */
+    if (position >= length) return sz_true_k; /* WB2 */
+    /*  Never split INSIDE a codepoint - but only a continuation byte genuinely covered by a preceding lead's
+     *  maximal-subpart sequence is interior. A stray continuation (the lead stops short of it) is its OWN U+FFFD
+     *  codepoint, so a boundary may fall before it; matching the canonical forward decode keeps streamed segmentation
+     *  capacity-independent on malformed input. */
+    if (((sz_u8_t)text[position] & 0xC0) == 0x80) {
+        sz_size_t lead = position;
+        while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
+        sz_size_t reach = lead;
+        sz_utf8_decode_(text, length, &reach);
+        if (reach > position) return sz_false_k; /* interior byte of a valid multi-byte codepoint */
+    }
 
     sz_size_t after_at = position;
     sz_rune_t next_codepoint = sz_utf8_decode_(text, length, &after_at);
@@ -462,8 +479,13 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
     }
 
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
-    // Position 0 is always a boundary, so the first reportable interior boundary is after the first codepoint.
-    sz_size_t position = sz_utf8_codepoint_length_((sz_u8_t)text[0]);
+    // Position 0 is always a boundary, so the first reportable interior boundary is after the first codepoint. Step by
+    // the continuation-bit partition (next non-continuation byte) - the SAME partition the boundary predicate and its
+    // backward look-back use - so segmentation is identical regardless of where a streamed call resumes. A
+    // declared-length step would land off that grid on a truncated/stray sequence and make the resume point
+    // capacity-dependent on malformed input.
+    sz_size_t position = 0;
+    sz_utf8_decode_(text, length, &position);
 
     while (position < length) {
         if (sz_utf8_is_word_boundary_serial(text, length, position)) {
@@ -476,7 +498,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
             ++words;
             word_start = position;
         }
-        position += sz_utf8_codepoint_length_((sz_u8_t)text[position]);
+        sz_utf8_decode_(text, length, &position);
     }
 
     // The trailing span [word_start, length) is the last word (end of text is always a boundary).
