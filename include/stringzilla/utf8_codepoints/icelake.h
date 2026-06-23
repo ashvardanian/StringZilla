@@ -230,8 +230,20 @@ SZ_INTERNAL sz_utf8_codepoints_window_t sz_utf8_codepoints_decode_window_( //
 SZ_INTERNAL __m512i sz_utf8_codepoints_gather_byte_(sz_u8_t const *table, int count, __m512i indices) {
     __m512i const within = _mm512_and_si512(indices, _mm512_set1_epi16(0x7F));
     __m512i const page = _mm512_srli_epi16(indices, 7);
+    int const page_count = (count + 127) / 128;
+    //  Visit only the distinct 128-byte pages present across the lanes (real text targets ~1-3 of up to ~20), not the
+    //  whole table: the present-page set is a `1 << page` OR-reduction; an absent page is bit-exact to skip (its
+    //  `mask_mov` selects no lane).
+    __m512i const single_bit = _mm512_set1_epi32(1);
+    __m512i const page_low_half = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(page));
+    __m512i const page_high_half = _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64(page, 1));
+    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(
+        _mm512_or_si512(_mm512_sllv_epi32(single_bit, page_low_half), _mm512_sllv_epi32(single_bit, page_high_half)));
+    present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
     __m512i result = _mm512_setzero_si512();
-    for (int page_index = 0; page_index * 128 < count; ++page_index) {
+    while (present_pages) {
+        int const page_index = (int)sz_u64_ctz((sz_u64_t)present_pages);
+        present_pages &= present_pages - 1;
         int const tile_base = page_index * 128;
         int const tile_remaining = count - tile_base;
         __m512i const tile_lo = _mm512_maskz_loadu_epi8(sz_u64_clamp_mask_until_((sz_size_t)tile_remaining),
@@ -256,8 +268,19 @@ SZ_INTERNAL __m512i sz_utf8_codepoints_gather_byte_(sz_u8_t const *table, int co
 SZ_INTERNAL __m512i sz_utf8_codepoints_gather_word_(sz_u16_t const *table, int count, __m512i indices) {
     __m512i const within = _mm512_and_si512(indices, _mm512_set1_epi16(0x3F));
     __m512i const page = _mm512_srli_epi16(indices, 6);
+    int const page_count = (count + 63) / 64;
+    //  Data-dependent page loop (see `sz_utf8_codepoints_gather_byte_`): visit only the distinct 64-word pages
+    //  present across the lanes; bit-exact since an absent page contributes no `hit`.
+    __m512i const single_bit = _mm512_set1_epi32(1);
+    __m512i const page_low_half = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(page));
+    __m512i const page_high_half = _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64(page, 1));
+    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(
+        _mm512_or_si512(_mm512_sllv_epi32(single_bit, page_low_half), _mm512_sllv_epi32(single_bit, page_high_half)));
+    present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
     __m512i result = _mm512_setzero_si512();
-    for (int page_index = 0; page_index * 64 < count; ++page_index) {
+    while (present_pages) {
+        int const page_index = (int)sz_u64_ctz((sz_u64_t)present_pages);
+        present_pages &= present_pages - 1;
         int const tile_base = page_index * 64;
         int const tile_remaining = count - tile_base;
         __m512i const tile_lo = _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)tile_remaining),

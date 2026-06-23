@@ -243,9 +243,10 @@ typedef struct sz_utf8_sentence_break_window_t {
  *  SB8's right context is unbounded; the in-window `fill_left` is exact unless a trailing neutral run reaches the
  *  block edge (the Lower may lie in the next block). `resolved` is clamped before such an undecided lane so the
  *  driver re-anchors the next window with full forward context - a register carry only, never a scalar re-walk or
- *  oracle call.
+ *  oracle call. Force-inlined so the 24-byte window result stays in registers instead of spilling through a hidden
+ *  `sret` pointer.
  */
-SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
+SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
     __m512i classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
 
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);

@@ -391,6 +391,23 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
         __m512i const high = _mm512_loadu_si512((void const *)(sz_utf8_line_break_page_lut_ + 64));
         index = _mm512_permutex2var_epi8(low, raw, high);
     }
+    else if (!three_byte && !four_byte && !replacement) {
+        //  Sub-0x800 fast path (window is ASCII + valid 2-byte only): address the 2048-byte page LUT directly by
+        //  codepoint = (high << 8) | low, so two `gather_byte` cascades replace the three-level BMP trie. Bit-identical
+        //  (the trie leaf folds in this same page LUT below 0x800).
+        __m512i const zero_bytes = _mm512_setzero_si512();
+        __m512i const codepoint_low_half = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_unpacklo_epi8(high_fixed, zero_bytes), 8),
+            _mm512_unpacklo_epi8(low_fixed, zero_bytes));
+        __m512i const codepoint_high_half = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_unpackhi_epi8(high_fixed, zero_bytes), 8),
+            _mm512_unpackhi_epi8(low_fixed, zero_bytes));
+        __m512i const class_low_half = sz_utf8_codepoints_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
+                                                                       codepoint_low_half);
+        __m512i const class_high_half = sz_utf8_codepoints_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
+                                                                        codepoint_high_half);
+        index = _mm512_packus_epi16(class_low_half, class_high_half);
+    }
     else { index = sz_line_break_bmp_full_index_compact_icelake_(high_fixed, low_fixed, starts); }
     if (is_astral) {
         //  Astral is rare: reconstruct the full 32-bit codepoint per sixteen-lane group and resolve through the
@@ -682,10 +699,22 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
                                    (carry_clcp && (class_space & first_base) ? first_base : 0);
         sz_u64_t const b2_seed = class_break_both | (carry_b2 && (class_space & first_base) ? first_base : 0);
         sz_u64_t const zw_seed = class_zero_width_space | (carry_zw && (class_space & first_base) ? first_base : 0);
-        opener_governance = sz_line_break_run_byte_(op_seed, class_space, gate);
-        close_governance = sz_line_break_run_byte_(clcp_seed, class_space, gate);
-        break_both_governance = sz_line_break_run_byte_(b2_seed, class_space, gate);
-        zero_width_governance = sz_line_break_run_byte_(zw_seed, class_space, gate);
+        //  The four "X SP*" floods (LB8/14/16/17) share one transparent reach `gate | spaces`: hoist the Kogge-Stone
+        //  reach recurrence once and step the four seeds together. Equivalent to four `sz_line_break_run_byte_` calls.
+        sz_u64_t const flood_gate = gate | class_space;
+        sz_u64_t opener_bits = op_seed, close_bits = clcp_seed, break_both_bits = b2_seed, zero_width_bits = zw_seed,
+                 reach = flood_gate;
+        for (int shift = 1; shift < 64; shift <<= 1) {
+            opener_bits |= (opener_bits << shift) & reach;
+            close_bits |= (close_bits << shift) & reach;
+            break_both_bits |= (break_both_bits << shift) & reach;
+            zero_width_bits |= (zero_width_bits << shift) & reach;
+            reach &= reach << shift;
+        }
+        opener_governance = opener_bits & (op_seed | class_space);
+        close_governance = close_bits & (clcp_seed | class_space);
+        break_both_governance = break_both_bits & (b2_seed | class_space);
+        zero_width_governance = zero_width_bits & (zw_seed | class_space);
     }
     //  LB15a "(sot|allowed) [QU&Pi] SP* x" governance, seeded by a carried open QU·Pi run when lane 0 continues it.
     sz_u64_t const quote_initial = class_quotation & side_quote_initial;
