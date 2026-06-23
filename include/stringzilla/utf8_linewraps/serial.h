@@ -209,21 +209,29 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
         // `codepoint_byte_starts`.
         sz_size_t local_line_start = line_start;
         sz_bool_t hit_capacity = sz_false_k;
+
+        // Forward-carried run state replacing the per-position backward scans (LB8 nearest-non-space, LB25 numeric
+        // run, LB30a Regional_Indicator parity) so each window is O(count), not O(count^2). All three are window-local:
+        // the window re-anchors at an emitted opportunity, a hard reset past which no rule reads, so seeding from the
+        // window's first cluster reproduces the within-window backward scans exactly. Each is advanced at the loop
+        // tail by the right cluster, so at iteration `codepoint_index` it reflects clusters [0, codepoint_index-1].
+        sz_size_t last_non_space_index = 0; // nearest non-SP cluster at or left of the previous cluster, else 0
+        sz_bool_t numeric_run_open = (sz_bool_t)(effective_classes[0] == sz_line_break_nu_k);
+        sz_bool_t numeric_run_open_before = sz_false_k; // `numeric_run_open` as of two clusters back (LB25 close case)
+        sz_bool_t regional_indicator_parity_odd = (sz_bool_t)(effective_classes[0] == sz_line_break_ri_k &&
+                                                              raw_classes[0] == sz_line_break_ri_k);
+
         for (sz_size_t codepoint_index = 1; codepoint_index < count; ++codepoint_index) {
             sz_u8_t left_class = effective_classes[codepoint_index - 1];
             sz_u8_t right_class = effective_classes[codepoint_index];
             sz_bool_t is_break = sz_false_k;
             sz_bool_t resolved = sz_false_k;
 
-            // last non-space context: nearest non_space_index <= codepoint_index-1 with a non-SP effective class,
-            // plus whether spaces were skipped.
-            sz_size_t non_space_index = codepoint_index - 1;
-            sz_bool_t had_space = sz_false_k;
-            while (non_space_index > 0 && effective_classes[non_space_index] == sz_line_break_sp_k) {
-                had_space = sz_true_k;
-                --non_space_index;
-            }
-            sz_u8_t leftmost_non_space_class = effective_classes[non_space_index];
+            // last non-space context (LB8/14/15a/16/17): the nearest non-SP effective class at or left of
+            // codepoint_index-1, and whether an SP run intervenes. `had_space` matches the old scan: an SP at
+            // codepoint_index-1 with a further-left cluster (the lone leading SP at the window origin skipped none).
+            sz_u8_t leftmost_non_space_class = effective_classes[last_non_space_index];
+            sz_bool_t had_space = (sz_bool_t)(left_class == sz_line_break_sp_k && codepoint_index >= 2);
 
             // cluster base index of the codepoint at codepoint_index-1 (skip attached marks).
             sz_size_t left_base_index = sz_line_break_cluster_base_(raw_classes, effective_classes,
@@ -278,9 +286,9 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
             // LB15a: opening Pi quote after an allowed left context, across spaces.
             if (!resolved && leftmost_non_space_class == sz_line_break_qu_k &&
                 sz_line_break_descriptor_is_pi_(codepoint_descriptors[sz_line_break_cluster_base_(
-                    raw_classes, effective_classes, non_space_index)])) {
+                    raw_classes, effective_classes, last_non_space_index)])) {
                 sz_size_t quote_base_index = sz_line_break_cluster_base_(raw_classes, effective_classes,
-                                                                         non_space_index);
+                                                                         last_non_space_index);
                 sz_bool_t left_ok;
                 if (quote_base_index == 0) left_ok = sz_true_k;
                 else {
@@ -414,24 +422,14 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
             if (!resolved && (left_class == sz_line_break_al_k || left_class == sz_line_break_hl_k) &&
                 (right_class == sz_line_break_pr_k || right_class == sz_line_break_po_k))
                 resolved = sz_true_k;
-            // LB25: numeric clusters.
+            // LB25: numeric clusters. The preceding "NU (SY|IS)*" run (optionally followed by a CL/CP close) is
+            // carried forward in `numeric_run_open` (run open at codepoint_index-1) and `numeric_run_open_before`
+            // (run open at codepoint_index-2, the state just before a CL/CP left context).
             if (!resolved) {
-                sz_bool_t has_preceding_numeric_run = sz_false_k;
-                sz_size_t scan_left = codepoint_index;
-                while (scan_left > 0 && (effective_classes[scan_left - 1] == sz_line_break_sy_k ||
-                                         effective_classes[scan_left - 1] == sz_line_break_is_k))
-                    --scan_left;
-                if (scan_left > 0 && effective_classes[scan_left - 1] == sz_line_break_nu_k)
-                    has_preceding_numeric_run = sz_true_k;
+                sz_bool_t has_preceding_numeric_run = numeric_run_open;
                 sz_bool_t has_preceding_numeric_run_then_close = sz_false_k;
-                if (left_class == sz_line_break_cl_k || left_class == sz_line_break_cp_k) {
-                    sz_size_t close_scan_left = codepoint_index - 1;
-                    while (close_scan_left > 0 && (effective_classes[close_scan_left - 1] == sz_line_break_sy_k ||
-                                                   effective_classes[close_scan_left - 1] == sz_line_break_is_k))
-                        --close_scan_left;
-                    if (close_scan_left > 0 && effective_classes[close_scan_left - 1] == sz_line_break_nu_k)
-                        has_preceding_numeric_run_then_close = sz_true_k;
-                }
+                if (left_class == sz_line_break_cl_k || left_class == sz_line_break_cp_k)
+                    has_preceding_numeric_run_then_close = numeric_run_open_before;
                 if (!resolved && has_preceding_numeric_run_then_close &&
                     (right_class == sz_line_break_po_k || right_class == sz_line_break_pr_k))
                     resolved = sz_true_k;
@@ -531,19 +529,11 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
                  right_class == sz_line_break_nu_k) &&
                 !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[left_base_index]))
                 resolved = sz_true_k;
-            // LB30a: RI RI keep pairs.
-            if (!resolved && left_class == sz_line_break_ri_k && right_class == sz_line_break_ri_k) {
-                sz_size_t regional_indicator_count = 0;
-                sz_size_t scan = left_base_index;
-                sz_bool_t scanning = sz_true_k;
-                while (scanning && effective_classes[scan] == sz_line_break_ri_k &&
-                       raw_classes[scan] == sz_line_break_ri_k) {
-                    ++regional_indicator_count;
-                    if (scan == 0) break;
-                    scan = sz_line_break_cluster_base_(raw_classes, effective_classes, scan - 1);
-                }
-                if (regional_indicator_count % 2 == 1) resolved = sz_true_k;
-            }
+            // LB30a: RI RI keep pairs. The parity of the Regional_Indicator run ending at codepoint_index-1 is
+            // carried in `regional_indicator_parity_odd`; an odd count keeps the pair (LB30a applies).
+            if (!resolved && left_class == sz_line_break_ri_k && right_class == sz_line_break_ri_k &&
+                regional_indicator_parity_odd)
+                resolved = sz_true_k;
             // LB30b.
             if (!resolved && left_class == sz_line_break_eb_k && right_class == sz_line_break_em_k)
                 resolved = sz_true_k;
@@ -567,6 +557,17 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
                 ++lines;
                 local_line_start = codepoint_byte_starts[codepoint_index];
             }
+
+            // Advance the forward-carried run state by the right cluster (codepoint_index) for the next iteration,
+            // reproducing the window-local backward scans these fields replace.
+            if (right_class != sz_line_break_sp_k) last_non_space_index = codepoint_index;
+            numeric_run_open_before = numeric_run_open;
+            if (right_class == sz_line_break_nu_k) numeric_run_open = sz_true_k;
+            else if (!(numeric_run_open && (right_class == sz_line_break_sy_k || right_class == sz_line_break_is_k)))
+                numeric_run_open = sz_false_k;
+            if (right_class == sz_line_break_ri_k && raw_classes[codepoint_index] == sz_line_break_ri_k)
+                regional_indicator_parity_odd = (sz_bool_t)!regional_indicator_parity_odd;
+            else regional_indicator_parity_odd = sz_false_k;
         }
 
         if (hit_capacity) {

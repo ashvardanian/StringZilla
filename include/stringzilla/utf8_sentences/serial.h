@@ -58,6 +58,12 @@ SZ_INTERNAL sz_bool_t sz_sentence_break_is_saterm_(sz_u8_t property) {
 SZ_INTERNAL sz_bool_t sz_sentence_break_is_transparent_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_sentence_break_extend_k || property == sz_sentence_break_format_k);
 }
+/** @brief SB8 stop set excluding Lower: OLetter, Upper, ParaSep, or SATerm — a significant class that ends the
+ *         ATerm neutral run and confirms the deferred SB11 break (a Lower in the run suppresses it instead). */
+SZ_INTERNAL sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
+    return (sz_bool_t)(property == sz_sentence_break_oletter_k || property == sz_sentence_break_upper_k ||
+                       sz_sentence_break_is_parasep_(property) || sz_sentence_break_is_saterm_(property));
+}
 
 /**
  *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
@@ -146,48 +152,63 @@ SZ_INTERNAL void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, 
     state->has_previous = sz_true_k;
 }
 
-/** @brief Boundary decision (SB3..SB998) between @p state's previous codepoint and the @p after codepoint. The only
- *         non-O(1) rule is SB8's bounded forward Lower-lookahead, fired solely inside an open ATerm context. */
-SZ_INTERNAL sz_bool_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state, sz_u8_t after,
-                                                   sz_cptr_t text, sz_size_t length, sz_size_t position) {
+/** @brief A boundary verdict between two codepoints. SB8's Lower-lookahead cannot be resolved against `after` alone, so
+ *         the ATerm-neutral case yields `pending`: the driver carries it forward and resolves it at the next
+ *         significant codepoint (a Lower suppresses, an SB8 stop confirms), settling as a break at end-of-text. */
+typedef enum sz_sentence_decision_t {
+    sz_sentence_decision_no_break_k = 0,
+    sz_sentence_decision_break_k = 1,
+    sz_sentence_decision_pending_k = 2,
+} sz_sentence_decision_t;
+
+/** @brief Boundary decision (SB3..SB998) between @p state's previous codepoint and the @p after codepoint, in O(1) with
+ *         no forward re-scan: SB8's Lower-lookahead is deferred as `pending` and resolved forward by the driver. */
+SZ_INTERNAL sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state,
+                                                                sz_u8_t after) {
     sz_u8_t const before = state->previous_property;
-    if (before == sz_sentence_break_cr_k && after == sz_sentence_break_lf_k) return sz_false_k;        // SB3
-    if (sz_sentence_break_is_parasep_(before)) return sz_true_k;                                       // SB4
-    if (after == sz_sentence_break_extend_k || after == sz_sentence_break_format_k) return sz_false_k; // SB5
+    if (before == sz_sentence_break_cr_k && after == sz_sentence_break_lf_k)
+        return sz_sentence_decision_no_break_k;                                     // SB3
+    if (sz_sentence_break_is_parasep_(before)) return sz_sentence_decision_break_k; // SB4
+    if (after == sz_sentence_break_extend_k || after == sz_sentence_break_format_k)
+        return sz_sentence_decision_no_break_k; // SB5
 
     sz_u8_t const eff_before = state->previous_significant; // Extend/Format-transparent effective preceding class
-    if (eff_before == sz_sentence_break_aterm_k && after == sz_sentence_break_numeric_k) return sz_false_k; // SB6
+    if (eff_before == sz_sentence_break_aterm_k && after == sz_sentence_break_numeric_k)
+        return sz_sentence_decision_no_break_k; // SB6
     if (eff_before == sz_sentence_break_aterm_k && after == sz_sentence_break_upper_k &&
         (state->before_significant == sz_sentence_break_upper_k ||
          state->before_significant == sz_sentence_break_lower_k))
-        return sz_false_k; // SB7
+        return sz_sentence_decision_no_break_k; // SB7
 
     if (sz_sentence_break_is_saterm_(
             state->terminator)) { // an `SATerm Close* Sp*` context ends at the previous codepoint
-        if (state->terminator == sz_sentence_break_aterm_k) {
-            // SB8: ATerm Close* Sp* x (not OLetter|Upper|Lower|Sep|CR|LF|STerm|ATerm)* Lower -> no break.
-            sz_size_t scan = position;
-            while (scan < length) {
-                sz_u8_t const scan_property = sz_sentence_break_property_at_(text, length, scan);
-                if (sz_sentence_break_is_transparent_(scan_property)) {
-                    scan = sz_sentence_break_next_start_(text, length, scan);
-                    continue;
-                }
-                if (scan_property == sz_sentence_break_lower_k) return sz_false_k;
-                if (scan_property == sz_sentence_break_oletter_k || scan_property == sz_sentence_break_upper_k ||
-                    sz_sentence_break_is_parasep_(scan_property) || sz_sentence_break_is_saterm_(scan_property))
-                    break;
-                scan = sz_sentence_break_next_start_(text, length, scan);
-            }
-        }
-        if (after == sz_sentence_break_scontinue_k || sz_sentence_break_is_saterm_(after)) return sz_false_k; // SB8a
+        if (state->terminator == sz_sentence_break_aterm_k && after == sz_sentence_break_lower_k)
+            return sz_sentence_decision_no_break_k; // SB8, Lower immediately after the context: never a boundary
+        if (after == sz_sentence_break_scontinue_k || sz_sentence_break_is_saterm_(after))
+            return sz_sentence_decision_no_break_k; // SB8a
         if (!state->terminator_saw_space && (after == sz_sentence_break_close_k || after == sz_sentence_break_sp_k ||
                                              sz_sentence_break_is_parasep_(after)))
-            return sz_false_k;                                                                          // SB9
-        if (after == sz_sentence_break_sp_k || sz_sentence_break_is_parasep_(after)) return sz_false_k; // SB10
-        return sz_true_k;                                                                               // SB11
+            return sz_sentence_decision_no_break_k; // SB9
+        if (after == sz_sentence_break_sp_k || sz_sentence_break_is_parasep_(after))
+            return sz_sentence_decision_no_break_k; // SB10
+        if (state->terminator == sz_sentence_break_aterm_k && !sz_sentence_break_sb8_stops_(after))
+            return sz_sentence_decision_pending_k; // SB8 undecided: a Lower may still follow through the neutral run
+        return sz_sentence_decision_break_k;       // SB11
     }
-    return sz_false_k; // SB998
+    return sz_sentence_decision_no_break_k; // SB998
+}
+
+/** @brief Append the sentence ending at @p boundary to the output arrays and re-anchor the running start. Returns
+ *         sz_false_k when the capacity is exhausted (no room): the caller stops and reports the emitted prefix. */
+SZ_INTERNAL sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_starts,
+                                               sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                               sz_size_t *sentences, sz_size_t *sentence_start) {
+    if (*sentences == sentences_capacity) return sz_false_k;
+    sentence_starts[*sentences] = *sentence_start;
+    sentence_lengths[*sentences] = boundary - *sentence_start;
+    ++(*sentences);
+    *sentence_start = boundary;
+    return sz_true_k;
 }
 
 /**
@@ -218,29 +239,53 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(                //
 
     sz_size_t sentence_start = 0;
     sz_size_t position = sz_sentence_break_next_start_(text, length, 0);
+    sz_bool_t boundary_pending = sz_false_k; // a deferred SB8 verdict awaits the next significant codepoint
+    sz_size_t boundary_pending_position = 0; // the byte offset that boundary would carry if confirmed
     while (position < length) {
         sz_u8_t const after = sz_sentence_break_property_at_(text, length, position);
-        if (sz_sentence_serial_boundary_(&state, after, text, length, position)) {
-            if (sentences == sentences_capacity) {
+        if (boundary_pending) {
+            if (after == sz_sentence_break_lower_k) { boundary_pending = sz_false_k; } // SB8: Lower → suppress
+            else if (sz_sentence_break_sb8_stops_(after)) { // stop → confirm the deferred break
+                if (!sz_sentence_serial_emit_(boundary_pending_position, sentence_starts, sentence_lengths,
+                                              sentences_capacity, &sentences, &sentence_start)) {
+                    if (bytes_consumed) *bytes_consumed = sentence_start;
+                    return sentences;
+                }
+                boundary_pending = sz_false_k;
+            }
+            else { // a neutral codepoint extends the SB8 run: keep the deferred verdict, no boundary here
+                sz_sentence_serial_advance_(&state, after);
+                position = sz_sentence_break_next_start_(text, length, position);
+                continue;
+            }
+        }
+        sz_sentence_decision_t const decision = sz_sentence_serial_boundary_(&state, after);
+        if (decision == sz_sentence_decision_break_k) {
+            if (!sz_sentence_serial_emit_(position, sentence_starts, sentence_lengths, sentences_capacity, &sentences,
+                                          &sentence_start)) {
                 if (bytes_consumed) *bytes_consumed = sentence_start;
                 return sentences;
             }
-            sentence_starts[sentences] = sentence_start;
-            sentence_lengths[sentences] = position - sentence_start;
-            ++sentences;
-            sentence_start = position;
+        }
+        else if (decision == sz_sentence_decision_pending_k) {
+            boundary_pending = sz_true_k;
+            boundary_pending_position = position;
         }
         sz_sentence_serial_advance_(&state, after);
         position = sz_sentence_break_next_start_(text, length, position);
     }
 
-    if (sentences == sentences_capacity) {
+    // End of text: no Lower can follow, so any deferred SB8 verdict settles as a break before the final sentence.
+    if (boundary_pending && !sz_sentence_serial_emit_(boundary_pending_position, sentence_starts, sentence_lengths,
+                                                      sentences_capacity, &sentences, &sentence_start)) {
         if (bytes_consumed) *bytes_consumed = sentence_start;
         return sentences;
     }
-    sentence_starts[sentences] = sentence_start;
-    sentence_lengths[sentences] = length - sentence_start;
-    ++sentences;
+    if (!sz_sentence_serial_emit_(length, sentence_starts, sentence_lengths, sentences_capacity, &sentences,
+                                  &sentence_start)) {
+        if (bytes_consumed) *bytes_consumed = sentence_start;
+        return sentences;
+    }
     if (bytes_consumed) *bytes_consumed = length;
     return sentences;
 }
