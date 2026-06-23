@@ -43,9 +43,11 @@ enum {
 /** @brief Window state carried across the 64-lane block window_edge: the left context + open runs straddling into
  *         lane 0, so the next window decides its first cluster's break-before with NO byte re-read (no overlap). */
 typedef struct sz_line_break_carry_t {
-    sz_u8_t have_prev;       /**< 0 only at start-of-text (LB2); 1 once a cluster precedes lane 0 */
-    sz_u8_t left_class;      /**< effective LB class of the cluster ending just before lane 0 (post LB9/10 collapse) */
-    sz_u8_t left2_class;     /**< LB class of the cluster two before lane 0 (for 2-left rules LB19/LB20a/LB21a) */
+    sz_u8_t have_prev; /**< 0 only at start-of-text (LB2); 1 once a cluster precedes lane 0 */
+    sz_u64_t
+        previous_class_bit; /**< one-hot effective LB class of the cluster ending just before lane 0 (post LB9/10) */
+    sz_u64_t
+        previous2_class_bit; /**< one-hot LB class of the cluster two before lane 0 (2-left rules LB19/LB20a/LB21a) */
     sz_u8_t left_eaw;        /**< the cluster before lane 0 is East-Asian F/W/H (LB19 side bit) */
     sz_u8_t left2_eaw;       /**< the cluster two before lane 0 is East-Asian F/W/H (LB19 ~prev2EAW) */
     sz_u8_t left_pf;         /**< the cluster before lane 0 carries gc=Pf (LB19 `prev_(QU & ~PF)`) */
@@ -61,6 +63,17 @@ typedef struct sz_line_break_carry_t {
     sz_u8_t qupi_sp_open;    /**< lane 0 continues an open "[QU&Pi] SP*" governed run (LB15a) */
 } sz_line_break_carry_t;
 
+/** @brief Is the carried one-hot class word @p class_bits set for class `cls`? `class_bits` is hoisted once per
+ *         window into a register (0 at start-of-text), so every call is a pure register shift/and the compiler CSEs. */
+SZ_INTERNAL sz_bool_t sz_line_break_class_is_(sz_u64_t class_bits, sz_u8_t cls) {
+    return (sz_bool_t)((class_bits >> cls) & 1ull);
+}
+
+/** @brief Is the carried one-hot class word @p class_bits a member of @p class_set? */
+SZ_INTERNAL sz_bool_t sz_line_break_class_in_(sz_u64_t class_bits, sz_u64_t class_set) {
+    return (sz_bool_t)((class_bits & class_set) != 0);
+}
+
 /** @brief Result of one window decision: break-before bits + the trust horizon (lanes [0,resolved) are committable). */
 typedef struct sz_line_break_window_t {
     sz_u64_t breaks;    /**< break-before bits at cluster-base lanes */
@@ -70,8 +83,8 @@ typedef struct sz_line_break_window_t {
 /** @brief Start-of-text carry: no previous cluster, all runs closed. */
 SZ_INTERNAL sz_line_break_carry_t sz_line_break_carry_sot_(void) {
     sz_line_break_carry_t carry;
-    carry.have_prev = 0, carry.left_class = (sz_u8_t)sz_line_break_xx_k,
-    carry.left2_class = (sz_u8_t)sz_line_break_xx_k;
+    carry.have_prev = 0, carry.previous_class_bit = 1ull << sz_line_break_xx_k,
+    carry.previous2_class_bit = 1ull << sz_line_break_xx_k;
     carry.left_eaw = 0, carry.left2_eaw = 0, carry.left_pf = 0, carry.left_aksara = 0, carry.left2_aksara = 0,
     carry.left_extpict_cn = 0;
     carry.prev_is_zwj = 0, carry.open_sp_opener = 0xFF, carry.in_nu_run = 0, carry.in_nu_close = 0, carry.ri_open = 0,
@@ -478,6 +491,8 @@ typedef struct sz_line_break_byte_frame_t {
     sz_u64_t base;     /**< Cluster-base lanes (every effective start except an attached CM/ZWJ). */
     sz_u64_t gate;     /**< Transparent lanes for neighbour fills: continuations + attached-mark starts. */
     sz_u64_t attached; /**< Attached CM/ZWJ start lanes (LB9). */
+    sz_u64_t
+        lone_mark; /**< LB10 lone marks reclassified to AL; their side bits must be cleared (serial zeros the descriptor). */
 } sz_line_break_byte_frame_t;
 
 SZ_INTERNAL sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
@@ -506,6 +521,7 @@ SZ_INTERNAL sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line
     frame.base = starts & ~attached;
     frame.gate = non_start | attached;
     frame.attached = attached;
+    frame.lone_mark = lone_mark;
     return frame;
 }
 
@@ -564,7 +580,9 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
                                                                         sz_size_t complete_limit, sz_bool_t more_text) {
     sz_line_break_byte_frame_t const frame = sz_line_break_byte_frame_icelake_(classified);
     __m512i const classes = frame.classes;
-    __m512i const side = classified.side;
+    //  LB10 reclassifies a lone CM/ZWJ to AL; its descriptor side bits (EAW/Pi/Pf/...) must go with it, else LB19/LB15
+    //  see a phantom East-Asian / quote cluster. Mirrors the serial path zeroing `codepoint_descriptors` on LB10.
+    __m512i const side = _mm512_maskz_mov_epi8(_cvtu64_mask64(~frame.lone_mark), classified.side);
     sz_u64_t const base = frame.base, gate = frame.gate, non_start = classified.non_start;
     sz_line_break_window_t empty;
     empty.breaks = 0, empty.resolved = complete_limit;
@@ -575,6 +593,10 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     }
     sz_bool_t const is_sot = (sz_bool_t)(!carry.have_prev);
     sz_bool_t const is_eot = (sz_bool_t)(!more_text);
+    //  Hoist the carried one-hot class words into registers once. At start-of-text (`!have_prev`) they read as 0, so
+    //  every `sz_line_break_class_is_/in_` test folds `have_prev` in and the repeated shifts/ands CSE in-register.
+    sz_u64_t const left_bit = carry.have_prev ? carry.previous_class_bit : 0ull;
+    sz_u64_t const left2_bit = carry.have_prev ? carry.previous2_class_bit : 0ull;
     sz_u64_t const first_base = base & (0ull - base);
     sz_u64_t const last_base = 1ull << (63 - sz_u64_clz(base));
     //  When a cluster precedes lane 0 (carried left context), lane 0's break-before is decided by the rules just like
@@ -583,53 +605,20 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     sz_u64_t const edge = carry.have_prev ? first_base : 0;
     sz_u64_t const start_of_text = is_sot ? first_base : 0;
     sz_u64_t const end_of_text = is_eot ? last_base : 0;
-    sz_u64_t const dotted_circle = classified.dotted & base;
+    sz_u64_t const dotted_circle = classified.dotted & base & ~frame.lone_mark;
 
-    //  Carried-left class booleans: the cluster ending just before lane 0 has effective base class X. These let a
-    //  cross-edge `prevc_(SET, ..., Lc_SET, edge)` mark lane 0 when the carried left matches, with no byte re-read.
-    sz_bool_t const left_is_break_mandatory = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_bk_k);
-    sz_bool_t const left_is_carriage_return = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_cr_k);
-    sz_bool_t const left_is_line_feed = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_lf_k);
-    sz_bool_t const left_is_next_line = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_nl_k);
-    sz_bool_t const left_is_word_joiner = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_wj_k);
-    sz_bool_t const left_is_glue = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_gl_k);
-    sz_bool_t const left_is_space = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_sp_k);
-    sz_bool_t const left_is_quotation = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_qu_k);
-    sz_bool_t const left_is_open_punctuation = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_op_k);
-    sz_bool_t const left_is_close_parenthesis = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_cp_k);
-    sz_bool_t const left_is_break_after = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_ba_k);
-    sz_bool_t const left_is_hyphen = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_hy_k);
-    sz_bool_t const left_is_unambiguous_hyphen = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_hh_k);
-    sz_bool_t const left_is_break_before = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_bb_k);
-    sz_bool_t const left_is_contingent_break = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_cb_k);
-    sz_bool_t const left_is_infix_separator = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_is_k);
-    sz_bool_t const left_is_numeric = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_nu_k);
-    sz_bool_t const left_is_symbol = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_sy_k);
-    sz_bool_t const left_is_postfix_numeric = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_po_k);
-    sz_bool_t const left_is_prefix_numeric = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_pr_k);
-    sz_bool_t const left_is_alphabetic = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_al_k);
-    sz_bool_t const left_is_hebrew_letter = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_hl_k);
-    sz_bool_t const left_is_ideographic = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_id_k);
-    sz_bool_t const left_is_emoji_base = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_eb_k);
-    sz_bool_t const left_is_emoji_modifier = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_em_k);
-    sz_bool_t const left_is_hangul_l_jamo = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_jl_k);
-    sz_bool_t const left_is_hangul_v_jamo = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_jv_k);
-    sz_bool_t const left_is_hangul_t_jamo = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_jt_k);
-    sz_bool_t const left_is_hangul_lv_syllable = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_h2_k);
-    sz_bool_t const left_is_hangul_lvt_syllable = (sz_bool_t)(carry.have_prev &&
-                                                              carry.left_class == sz_line_break_h3_k);
-    sz_bool_t const left_is_aksara_prebase = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_ap_k);
-    sz_bool_t const left_is_virama = (sz_bool_t)(carry.have_prev && carry.left_class == sz_line_break_vi_k);
+    //  The carried-left class is now read on demand through `sz_line_break_left_is_` / `sz_line_break_left_in_` (and the
+    //  `left2_` variants) at each rule's call site, so the per-class boolean wall is gone. Only the East-Asian-width
+    //  side bits, which live outside the class field, keep dedicated booleans here.
     sz_bool_t const left_is_east_asian_width = (sz_bool_t)(carry.have_prev && carry.left_eaw != 0);
     sz_bool_t const left2_is_east_asian_width = (sz_bool_t)(carry.have_prev && carry.left2_eaw != 0);
-    //  Two-left class booleans for the HY/HH cluster rules (LB20a/LB21a), read from `left2_class`.
-    sz_bool_t const left2_is_hebrew_letter = (sz_bool_t)(carry.have_prev && carry.left2_class == sz_line_break_hl_k);
-    sz_bool_t const left2_is_lb20a_allowed =
-        (sz_bool_t)(carry.have_prev &&
-                    (carry.left2_class == sz_line_break_bk_k || carry.left2_class == sz_line_break_cr_k ||
-                     carry.left2_class == sz_line_break_lf_k || carry.left2_class == sz_line_break_nl_k ||
-                     carry.left2_class == sz_line_break_sp_k || carry.left2_class == sz_line_break_zw_k ||
-                     carry.left2_class == sz_line_break_cb_k || carry.left2_class == sz_line_break_gl_k));
+    //  Shared class sets for the two-left LB20a allow-list and (below) the one-left LB20a allow-list. Listing the SAME
+    //  classes the original boolean tested: BK, CR, LF, NL, SP, ZW, CB, GL.
+    sz_u64_t const lb20a_allowed_mask = (1ull << sz_line_break_bk_k) | (1ull << sz_line_break_cr_k) |
+                                        (1ull << sz_line_break_lf_k) | (1ull << sz_line_break_nl_k) |
+                                        (1ull << sz_line_break_sp_k) | (1ull << sz_line_break_zw_k) |
+                                        (1ull << sz_line_break_cb_k) | (1ull << sz_line_break_gl_k);
+    sz_bool_t const left2_is_lb20a_allowed = sz_line_break_class_in_(left2_bit, lb20a_allowed_mask);
 
     sz_u64_t const class_break_mandatory = sz_line_break_class_mask_icelake_(classes, sz_line_break_bk_k) & base;
     sz_u64_t const class_carriage_return = sz_line_break_class_mask_icelake_(classes, sz_line_break_cr_k) & base;
@@ -706,10 +695,15 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
                                            class_next_line | class_open_punctuation | class_quotation | class_glue |
                                            class_space | class_zero_width_space;
         //  A QU·Pi opening at lane 0 may have its allowed-left cluster carried across the edge (LB15a left context).
-        sz_bool_t const carry_qupi_left = (sz_bool_t)(left_is_break_mandatory || left_is_carriage_return ||
-                                                      left_is_line_feed || left_is_next_line ||
-                                                      left_is_open_punctuation || left_is_quotation || left_is_glue ||
-                                                      left_is_space || carry.left_class == (sz_u8_t)sz_line_break_zw_k);
+        sz_bool_t const carry_qupi_left = (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_bk_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_cr_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_lf_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_nl_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_op_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_qu_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_gl_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_sp_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_zw_k));
         sz_u64_t qupi_seed = quote_initial &
                              (sz_line_break_prevc_(qupi_allowed_left, gate, carry_qupi_left, edge) | start_of_text);
         if (carry.qupi_sp_open && (class_space & first_base)) qupi_seed |= first_base;
@@ -718,18 +712,22 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
 
     // LB4: BK !
     sz_line_break_force_break_(
-        sz_line_break_prevc_(class_break_mandatory, gate, left_is_break_mandatory, edge) & interior_lanes, base,
-        &settled, &breaks);
-    // LB5: CR x LF ; CR ! ; LF ! ; NL !
-    sz_line_break_force_join_(
-        (sz_line_break_prevc_(class_carriage_return, gate, left_is_carriage_return, edge) & class_line_feed) &
-            interior_lanes,
-        base, &settled);
-    sz_line_break_force_break_(
-        sz_line_break_prevc_(class_carriage_return | class_line_feed | class_next_line, gate,
-                             (sz_bool_t)(left_is_carriage_return || left_is_line_feed || left_is_next_line), edge) &
+        sz_line_break_prevc_(class_break_mandatory, gate, sz_line_break_class_is_(left_bit, sz_line_break_bk_k), edge) &
             interior_lanes,
         base, &settled, &breaks);
+    // LB5: CR x LF ; CR ! ; LF ! ; NL !
+    sz_line_break_force_join_((sz_line_break_prevc_(class_carriage_return, gate,
+                                                    sz_line_break_class_is_(left_bit, sz_line_break_cr_k), edge) &
+                               class_line_feed) &
+                                  interior_lanes,
+                              base, &settled);
+    sz_line_break_force_break_(sz_line_break_prevc_(class_carriage_return | class_line_feed | class_next_line, gate,
+                                                    (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_cr_k) ||
+                                                                sz_line_break_class_is_(left_bit, sz_line_break_lf_k) ||
+                                                                sz_line_break_class_is_(left_bit, sz_line_break_nl_k)),
+                                                    edge) &
+                                   interior_lanes,
+                               base, &settled, &breaks);
     // LB6: x (BK|CR|LF|NL)
     sz_line_break_force_join_(
         (class_break_mandatory | class_carriage_return | class_line_feed | class_next_line) & interior_lanes, base,
@@ -749,15 +747,23 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     // LB9: x (attached CM|ZWJ) -- attached marks are never base lanes, so no break-before exists there (implicit).
     // LB11: x WJ ; WJ x
     sz_line_break_force_join_(
-        (class_word_joiner | sz_line_break_prevc_(class_word_joiner, gate, left_is_word_joiner, edge)) & interior_lanes,
+        (class_word_joiner |
+         sz_line_break_prevc_(class_word_joiner, gate, sz_line_break_class_is_(left_bit, sz_line_break_wj_k), edge)) &
+            interior_lanes,
         base, &settled);
     // LB12: GL x
-    sz_line_break_force_join_(sz_line_break_prevc_(class_glue, gate, left_is_glue, edge) & interior_lanes, base,
-                              &settled);
+    sz_line_break_force_join_(
+        sz_line_break_prevc_(class_glue, gate, sz_line_break_class_is_(left_bit, sz_line_break_gl_k), edge) &
+            interior_lanes,
+        base, &settled);
     // LB12a: [^SP BA HY HH] x GL
     sz_u64_t const space_break_hyphen_prev = sz_line_break_prevc_(
         class_space | class_break_after | class_hyphen | class_unambiguous_hyphen, gate,
-        (sz_bool_t)(left_is_space || left_is_break_after || left_is_hyphen || left_is_unambiguous_hyphen), edge);
+        (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_sp_k) ||
+                    sz_line_break_class_is_(left_bit, sz_line_break_ba_k) ||
+                    sz_line_break_class_is_(left_bit, sz_line_break_hy_k) ||
+                    sz_line_break_class_is_(left_bit, sz_line_break_hh_k)),
+        edge);
     sz_line_break_force_join_((class_glue & ~space_break_hyphen_prev) & interior_lanes, base, &settled);
     // LB13: x CL ; x CP ; x EX ; x SY
     sz_line_break_force_join_(
@@ -782,7 +788,8 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         sz_line_break_force_join_((quote_final & right_ok) & interior_lanes, base, &settled);
     }
     // LB15.3: SP / IS NU
-    sz_u64_t const space_prev = sz_line_break_prevc_(class_space, gate, left_is_space, edge);
+    sz_u64_t const space_prev = sz_line_break_prevc_(class_space, gate,
+                                                     sz_line_break_class_is_(left_bit, sz_line_break_sp_k), edge);
     sz_line_break_force_break_(
         (space_prev & class_infix_separator & sz_line_break_next_(class_numeric, gate)) & interior_lanes, base,
         &settled, &breaks);
@@ -800,7 +807,8 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     sz_line_break_force_break_(space_prev & interior_lanes, base, &settled, &breaks);
     // LB19 group (East-Asian-aware quotation); every term reads a QU cluster, so skip when none is present in the
     // window AND the carried left is neither a QU nor an East-Asian cluster that LB19 reads across the edge.
-    if (class_quotation || left_is_quotation || left_is_east_asian_width || left2_is_east_asian_width) {
+    if (class_quotation || sz_line_break_class_is_(left_bit, sz_line_break_qu_k) || left_is_east_asian_width ||
+        left2_is_east_asian_width) {
         sz_u64_t const previous_east_asian_width = sz_line_break_prevc_(side_east_asian_width, gate,
                                                                         left_is_east_asian_width, edge);
         sz_u64_t const next_east_asian_width = sz_line_break_next_(side_east_asian_width, gate);
@@ -808,12 +816,15 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         if (left2_is_east_asian_width)
             previous2_east_asian_width |= edge; // lane 0's two-left cluster is the carried left2 (East-Asian)
         sz_u64_t const sot_next = is_sot ? (sz_line_break_prev_(first_base, gate) & base) : 0;
-        sz_u64_t const quotation_prev = sz_line_break_prevc_(class_quotation, gate, left_is_quotation, edge);
+        sz_u64_t const quotation_prev = sz_line_break_prevc_(
+            class_quotation, gate, sz_line_break_class_is_(left_bit, sz_line_break_qu_k), edge);
         sz_line_break_force_join_((class_quotation & ~side_quote_initial) & interior_lanes, base, &settled);
-        sz_line_break_force_join_(sz_line_break_prevc_(class_quotation & ~side_quote_final, gate,
-                                                       (sz_bool_t)(left_is_quotation && !carry.left_pf), edge) &
-                                      interior_lanes,
-                                  base, &settled);
+        sz_line_break_force_join_(
+            sz_line_break_prevc_(class_quotation & ~side_quote_final, gate,
+                                 (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_qu_k) && !carry.left_pf),
+                                 edge) &
+                interior_lanes,
+            base, &settled);
         sz_line_break_force_join_((class_quotation & ~previous_east_asian_width) & interior_lanes, base, &settled);
         sz_line_break_force_join_((class_quotation & (~next_east_asian_width | end_of_text)) & interior_lanes, base,
                                   &settled);
@@ -823,26 +834,25 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     }
     // LB20: / CB ; CB /
     sz_line_break_force_break_(
-        (class_contingent_break | sz_line_break_prevc_(class_contingent_break, gate, left_is_contingent_break, edge)) &
+        (class_contingent_break | sz_line_break_prevc_(class_contingent_break, gate,
+                                                       sz_line_break_class_is_(left_bit, sz_line_break_cb_k), edge)) &
             interior_lanes,
         base, &settled, &breaks);
     // LB20a: (sot|allowed) (HY|HH) x (AL|HL); fires when a HY/HH cluster precedes an AL|HL, in-window or carried.
-    if ((class_hyphen | class_unambiguous_hyphen) || left_is_hyphen || left_is_unambiguous_hyphen) {
+    if ((class_hyphen | class_unambiguous_hyphen) || sz_line_break_class_is_(left_bit, sz_line_break_hy_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_hh_k)) {
         sz_u64_t const leftset = class_break_mandatory | class_carriage_return | class_line_feed | class_next_line |
                                  class_space | class_zero_width_space | class_contingent_break | class_glue;
         //  The HY/HH cluster qualifies when preceded by an allowed-left cluster (or sot). At lane 0 the HY/HH is the
         //  carried left, so the allowed-left is the carried left2 (or sot if no left2).
-        sz_bool_t const carry_hy_ok = (sz_bool_t)((left_is_hyphen || left_is_unambiguous_hyphen) &&
+        sz_bool_t const carry_hy_ok = (sz_bool_t)((sz_line_break_class_is_(left_bit, sz_line_break_hy_k) ||
+                                                   sz_line_break_class_is_(left_bit, sz_line_break_hh_k)) &&
                                                   (left2_is_lb20a_allowed ||
-                                                   carry.left2_class == (sz_u8_t)sz_line_break_xx_k));
+                                                   sz_line_break_class_is_(left2_bit, sz_line_break_xx_k)));
         //  When the HY/HH itself is at lane 0, its allowed-left predecessor is the CARRIED left cluster -- the in-window
-        //  prev_ cannot see it, so qualify the lane-0 HY/HH via the carried left class in the allowed set.
-        sz_bool_t const left_is_lb20a_allowed =
-            (sz_bool_t)(carry.have_prev &&
-                        (carry.left_class == sz_line_break_bk_k || carry.left_class == sz_line_break_cr_k ||
-                         carry.left_class == sz_line_break_lf_k || carry.left_class == sz_line_break_nl_k ||
-                         carry.left_class == sz_line_break_sp_k || carry.left_class == sz_line_break_zw_k ||
-                         carry.left_class == sz_line_break_cb_k || carry.left_class == sz_line_break_gl_k));
+        //  prev_ cannot see it, so qualify the lane-0 HY/HH via the carried left class in the allowed set (same classes
+        //  as `lb20a_allowed_mask`: BK, CR, LF, NL, SP, ZW, CB, GL).
+        sz_bool_t const left_is_lb20a_allowed = sz_line_break_class_in_(left_bit, lb20a_allowed_mask);
         sz_u64_t const hy_ok = (class_hyphen | class_unambiguous_hyphen) &
                                (sz_line_break_prevc_(leftset, gate, left_is_lb20a_allowed, edge) | start_of_text);
         sz_line_break_force_join_(
@@ -851,17 +861,25 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             base, &settled);
     }
     // LB21: x BA ; x HY ; x HH ; x NS ; BB x
-    sz_line_break_force_join_((class_break_after | class_hyphen | class_unambiguous_hyphen | class_nonstarter |
-                               sz_line_break_prevc_(class_break_before, gate, left_is_break_before, edge)) &
-                                  interior_lanes,
-                              base, &settled);
+    sz_line_break_force_join_(
+        (class_break_after | class_hyphen | class_unambiguous_hyphen | class_nonstarter |
+         sz_line_break_prevc_(class_break_before, gate, sz_line_break_class_is_(left_bit, sz_line_break_bb_k), edge)) &
+            interior_lanes,
+        base, &settled);
     // LB21a: HL (HY|HH) x [^HL]; fires when an HL-preceded HY/HH cluster precedes a non-HL, in-window or carried.
+    // The HL anchor may itself be the carried left cluster while the HY/HH sits at in-window lane 0, so the gate
+    // must also fire on a carried-left HL (otherwise the block is skipped and LB31 spuriously breaks before the x).
     if ((class_hebrew_letter && (class_hyphen | class_unambiguous_hyphen)) ||
-        ((left_is_hyphen || left_is_unambiguous_hyphen) && left2_is_hebrew_letter)) {
-        sz_bool_t const carry_hl_hy = (sz_bool_t)((left_is_hyphen || left_is_unambiguous_hyphen) &&
-                                                  left2_is_hebrew_letter);
+        sz_line_break_class_is_(left_bit, sz_line_break_hl_k) ||
+        ((sz_line_break_class_is_(left_bit, sz_line_break_hy_k) ||
+          sz_line_break_class_is_(left_bit, sz_line_break_hh_k)) &&
+         sz_line_break_class_is_(left2_bit, sz_line_break_hl_k))) {
+        sz_bool_t const carry_hl_hy = (sz_bool_t)((sz_line_break_class_is_(left_bit, sz_line_break_hy_k) ||
+                                                   sz_line_break_class_is_(left_bit, sz_line_break_hh_k)) &&
+                                                  sz_line_break_class_is_(left2_bit, sz_line_break_hl_k));
         //  A lane-0 HY/HH whose HL predecessor is the carried left cluster: prev_ misses it, so use prevc_ with Lc_HL.
-        sz_u64_t const hl_hy = sz_line_break_prevc_(class_hebrew_letter, gate, left_is_hebrew_letter, edge) &
+        sz_u64_t const hl_hy = sz_line_break_prevc_(class_hebrew_letter, gate,
+                                                    sz_line_break_class_is_(left_bit, sz_line_break_hl_k), edge) &
                                (class_hyphen | class_unambiguous_hyphen);
         sz_line_break_force_join_(
             (sz_line_break_prevc_(hl_hy, gate, carry_hl_hy, edge) & ~class_hebrew_letter) & interior_lanes, base,
@@ -869,28 +887,36 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
     }
     // LB21b: SY x HL
     sz_line_break_force_join_(
-        (sz_line_break_prevc_(class_symbol, gate, left_is_symbol, edge) & class_hebrew_letter) & interior_lanes, base,
-        &settled);
+        (sz_line_break_prevc_(class_symbol, gate, sz_line_break_class_is_(left_bit, sz_line_break_sy_k), edge) &
+         class_hebrew_letter) &
+            interior_lanes,
+        base, &settled);
     // LB22: x IN
     sz_line_break_force_join_(class_inseparable & interior_lanes, base, &settled);
     // LB23 + LB24: alphabetic/numeric adjacency; fires when an AL/HL cluster is present, in-window or carried left.
-    sz_bool_t const alpha_hebrew_active = (sz_bool_t)((class_alphabetic | class_hebrew_letter) || left_is_alphabetic ||
-                                                      left_is_hebrew_letter);
+    sz_bool_t const alpha_hebrew_active = (sz_bool_t)((class_alphabetic | class_hebrew_letter) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_al_k) ||
+                                                      sz_line_break_class_is_(left_bit, sz_line_break_hl_k));
     sz_u64_t const alpha_hebrew_prev = alpha_hebrew_active
                                            ? sz_line_break_prevc_(
                                                  class_alphabetic | class_hebrew_letter, gate,
-                                                 (sz_bool_t)(left_is_alphabetic || left_is_hebrew_letter), edge)
+                                                 (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_al_k) ||
+                                                             sz_line_break_class_is_(left_bit, sz_line_break_hl_k)),
+                                                 edge)
                                            : 0;
     if (alpha_hebrew_active) {
         sz_u64_t const prefix_postfix_prev = sz_line_break_prevc_(
             class_prefix_numeric | class_postfix_numeric, gate,
-            (sz_bool_t)(left_is_prefix_numeric || left_is_postfix_numeric), edge);
+            (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_pr_k) ||
+                        sz_line_break_class_is_(left_bit, sz_line_break_po_k)),
+            edge);
         // LB23: (AL|HL) x NU ; NU x (AL|HL)
         sz_line_break_force_join_((alpha_hebrew_prev & class_numeric) & interior_lanes, base, &settled);
-        sz_line_break_force_join_((sz_line_break_prevc_(class_numeric, gate, left_is_numeric, edge) &
-                                   (class_alphabetic | class_hebrew_letter)) &
-                                      interior_lanes,
-                                  base, &settled);
+        sz_line_break_force_join_(
+            (sz_line_break_prevc_(class_numeric, gate, sz_line_break_class_is_(left_bit, sz_line_break_nu_k), edge) &
+             (class_alphabetic | class_hebrew_letter)) &
+                interior_lanes,
+            base, &settled);
         // LB24: (PR|PO) x (AL|HL) ; (AL|HL) x (PR|PO)
         sz_line_break_force_join_((prefix_postfix_prev & (class_alphabetic | class_hebrew_letter)) & interior_lanes,
                                   base, &settled);
@@ -898,16 +924,19 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
                                   base, &settled);
     }
     // LB23a: PR x (ID|EB|EM) ; (ID|EB|EM) x PO  (fires for CJK ID, kept ungated)
-    sz_u64_t const prefix_numeric_prev = sz_line_break_prevc_(class_prefix_numeric, gate, left_is_prefix_numeric, edge);
+    sz_u64_t const prefix_numeric_prev = sz_line_break_prevc_(
+        class_prefix_numeric, gate, sz_line_break_class_is_(left_bit, sz_line_break_pr_k), edge);
     sz_line_break_force_join_(
         (prefix_numeric_prev & (class_ideographic | class_emoji_base | class_emoji_modifier)) & interior_lanes, base,
         &settled);
-    sz_line_break_force_join_(
-        (sz_line_break_prevc_(class_ideographic | class_emoji_base | class_emoji_modifier, gate,
-                              (sz_bool_t)(left_is_ideographic || left_is_emoji_base || left_is_emoji_modifier), edge) &
-         class_postfix_numeric) &
-            interior_lanes,
-        base, &settled);
+    sz_line_break_force_join_((sz_line_break_prevc_(class_ideographic | class_emoji_base | class_emoji_modifier, gate,
+                                                    (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_id_k) ||
+                                                                sz_line_break_class_is_(left_bit, sz_line_break_eb_k) ||
+                                                                sz_line_break_class_is_(left_bit, sz_line_break_em_k)),
+                                                    edge) &
+                               class_postfix_numeric) &
+                                  interior_lanes,
+                              base, &settled);
     // LB25: numeric clusters
     if (class_numeric || carry.in_nu_run || carry.in_nu_close) {
         sz_u64_t const symbol_or_infix = class_symbol | class_infix_separator;
@@ -923,7 +952,8 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         sz_u64_t const next_numeric = sz_line_break_next_(class_numeric, gate);
         sz_u64_t const next_infix = sz_line_break_next_(class_infix_separator, gate);
         sz_u64_t const numeric_two_ahead = sz_line_break_next_(next_numeric & base, gate);
-        sz_u64_t const postfix_prev = sz_line_break_prevc_(class_postfix_numeric, gate, left_is_postfix_numeric, edge);
+        sz_u64_t const postfix_prev = sz_line_break_prevc_(class_postfix_numeric, gate,
+                                                           sz_line_break_class_is_(left_bit, sz_line_break_po_k), edge);
         sz_u64_t const prefix_prev = prefix_numeric_prev;
         sz_line_break_force_join_((sz_line_break_prevc_(numeric_run_close, gate, (sz_bool_t)carry.in_nu_close, edge) &
                                    (class_postfix_numeric | class_prefix_numeric)) &
@@ -942,12 +972,15 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             (prefix_prev & class_open_punctuation & next_infix & numeric_two_ahead) & interior_lanes, base, &settled);
         sz_line_break_force_join_((prefix_prev & class_numeric) & interior_lanes, base, &settled);
         sz_line_break_force_join_(
-            (sz_line_break_prevc_(class_hyphen, gate, left_is_hyphen, edge) & class_numeric) & interior_lanes, base,
-            &settled);
-        sz_line_break_force_join_(
-            (sz_line_break_prevc_(class_infix_separator, gate, left_is_infix_separator, edge) & class_numeric) &
+            (sz_line_break_prevc_(class_hyphen, gate, sz_line_break_class_is_(left_bit, sz_line_break_hy_k), edge) &
+             class_numeric) &
                 interior_lanes,
             base, &settled);
+        sz_line_break_force_join_((sz_line_break_prevc_(class_infix_separator, gate,
+                                                        sz_line_break_class_is_(left_bit, sz_line_break_is_k), edge) &
+                                   class_numeric) &
+                                      interior_lanes,
+                                  base, &settled);
         sz_line_break_force_join_((numeric_run_prev & class_numeric) & interior_lanes, base, &settled);
     }
     // LB26 + LB27: Hangul. The window-presence half of the gate is a cheap combined range test over the Hangul class
@@ -957,8 +990,12 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         (sz_line_break_class_range_mask_icelake_(classes, sz_line_break_h2_k, sz_line_break_h3_k) |
          sz_line_break_class_range_mask_icelake_(classes, sz_line_break_jl_k, sz_line_break_jt_k)) &
         base;
-    if (class_hangul_present || left_is_hangul_l_jamo || left_is_hangul_v_jamo || left_is_hangul_t_jamo ||
-        left_is_hangul_lv_syllable || left_is_hangul_lvt_syllable || left_is_prefix_numeric) {
+    if (class_hangul_present || sz_line_break_class_is_(left_bit, sz_line_break_jl_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_jv_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_jt_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_h2_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_h3_k) ||
+        sz_line_break_class_is_(left_bit, sz_line_break_pr_k)) {
         sz_u64_t const class_hangul_l_jamo = sz_line_break_class_mask_icelake_(classes, sz_line_break_jl_k) & base;
         sz_u64_t const class_hangul_v_jamo = sz_line_break_class_mask_icelake_(classes, sz_line_break_jv_k) & base;
         sz_u64_t const class_hangul_t_jamo = sz_line_break_class_mask_icelake_(classes, sz_line_break_jt_k) & base;
@@ -966,19 +1003,24 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         sz_u64_t const class_hangul_lvt_syllable = sz_line_break_class_mask_icelake_(classes, sz_line_break_h3_k) &
                                                    base;
         sz_line_break_force_join_(
-            (sz_line_break_prevc_(class_hangul_l_jamo, gate, left_is_hangul_l_jamo, edge) &
+            (sz_line_break_prevc_(class_hangul_l_jamo, gate, sz_line_break_class_is_(left_bit, sz_line_break_jl_k),
+                                  edge) &
              (class_hangul_l_jamo | class_hangul_v_jamo | class_hangul_lv_syllable | class_hangul_lvt_syllable)) &
                 interior_lanes,
             base, &settled);
         sz_line_break_force_join_(
             (sz_line_break_prevc_(class_hangul_v_jamo | class_hangul_lv_syllable, gate,
-                                  (sz_bool_t)(left_is_hangul_v_jamo || left_is_hangul_lv_syllable), edge) &
+                                  (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_jv_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_h2_k)),
+                                  edge) &
              (class_hangul_v_jamo | class_hangul_t_jamo)) &
                 interior_lanes,
             base, &settled);
         sz_line_break_force_join_(
             (sz_line_break_prevc_(class_hangul_t_jamo | class_hangul_lvt_syllable, gate,
-                                  (sz_bool_t)(left_is_hangul_t_jamo || left_is_hangul_lvt_syllable), edge) &
+                                  (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_jt_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_h3_k)),
+                                  edge) &
              class_hangul_t_jamo) &
                 interior_lanes,
             base, &settled);
@@ -986,8 +1028,11 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             (sz_line_break_prevc_(class_hangul_l_jamo | class_hangul_v_jamo | class_hangul_t_jamo |
                                       class_hangul_lv_syllable | class_hangul_lvt_syllable,
                                   gate,
-                                  (sz_bool_t)(left_is_hangul_l_jamo || left_is_hangul_v_jamo || left_is_hangul_t_jamo ||
-                                              left_is_hangul_lv_syllable || left_is_hangul_lvt_syllable),
+                                  (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_jl_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_jv_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_jt_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_h2_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_h3_k)),
                                   edge) &
              class_postfix_numeric) &
                 interior_lanes,
@@ -1012,7 +1057,8 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         sz_u64_t const class_brahmic_present =
             (sz_line_break_class_range_mask_icelake_(classes, sz_line_break_ak_k, sz_line_break_vi_k) & base) |
             dotted_circle;
-        if (class_brahmic_present || left_is_aksara_prebase || left_is_aksara || (left_is_virama && left2_is_aksara)) {
+        if (class_brahmic_present || sz_line_break_class_is_(left_bit, sz_line_break_ap_k) || left_is_aksara ||
+            (sz_line_break_class_is_(left_bit, sz_line_break_vi_k) && left2_is_aksara)) {
             sz_u64_t const class_aksara_prebase = sz_line_break_class_mask_icelake_(classes, sz_line_break_ap_k) & base;
             sz_u64_t const class_virama_final = sz_line_break_class_mask_icelake_(classes, sz_line_break_vf_k) & base;
             sz_u64_t const class_virama = sz_line_break_class_mask_icelake_(classes, sz_line_break_vi_k) & base;
@@ -1020,7 +1066,9 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             sz_u64_t const aksara_dc = class_aksara | dotted_circle;
             sz_u64_t const aksara_prev = sz_line_break_prevc_(aksara, gate, left_is_aksara, edge);
             sz_line_break_force_join_(
-                (sz_line_break_prevc_(class_aksara_prebase, gate, left_is_aksara_prebase, edge) & aksara) &
+                (sz_line_break_prevc_(class_aksara_prebase, gate, sz_line_break_class_is_(left_bit, sz_line_break_ap_k),
+                                      edge) &
+                 aksara) &
                     interior_lanes,
                 base, &settled);
             sz_line_break_force_join_((aksara_prev & (class_virama_final | class_virama)) & interior_lanes, base,
@@ -1028,7 +1076,9 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             {
                 sz_u64_t base_vi = aksara_prev & class_virama;
                 sz_line_break_force_join_(
-                    (sz_line_break_prevc_(base_vi, gate, (sz_bool_t)(left_is_virama && left2_is_aksara), edge) &
+                    (sz_line_break_prevc_(
+                         base_vi, gate,
+                         (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_vi_k) && left2_is_aksara), edge) &
                      aksara_dc) &
                         interior_lanes,
                     base, &settled);
@@ -1039,23 +1089,28 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         }
     }
     // LB29: IS x (AL|HL)
-    if ((class_alphabetic | class_hebrew_letter) || left_is_infix_separator)
-        sz_line_break_force_join_((sz_line_break_prevc_(class_infix_separator, gate, left_is_infix_separator, edge) &
+    if ((class_alphabetic | class_hebrew_letter) || sz_line_break_class_is_(left_bit, sz_line_break_is_k))
+        sz_line_break_force_join_((sz_line_break_prevc_(class_infix_separator, gate,
+                                                        sz_line_break_class_is_(left_bit, sz_line_break_is_k), edge) &
                                    (class_alphabetic | class_hebrew_letter)) &
                                       interior_lanes,
                                   base, &settled);
     // LB30: (AL|HL|NU) x OP[^EAW] ; CP[^EAW] x (AL|HL|NU); requires an OP or CP cluster, in-window or carried CP.
-    if ((class_open_punctuation | class_close_parenthesis) || left_is_close_parenthesis) {
+    if ((class_open_punctuation | class_close_parenthesis) || sz_line_break_class_is_(left_bit, sz_line_break_cp_k)) {
         sz_line_break_force_join_(
             (sz_line_break_prevc_(class_alphabetic | class_hebrew_letter | class_numeric, gate,
-                                  (sz_bool_t)(left_is_alphabetic || left_is_hebrew_letter || left_is_numeric), edge) &
+                                  (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_al_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_hl_k) ||
+                                              sz_line_break_class_is_(left_bit, sz_line_break_nu_k)),
+                                  edge) &
              class_open_punctuation & ~side_east_asian_width) &
                 interior_lanes,
             base, &settled);
         //  CP[^EAW]: a carried left CP qualifies only when it is NOT East-Asian-wide.
         sz_line_break_force_join_(
             (sz_line_break_prevc_(class_close_parenthesis & ~side_east_asian_width, gate,
-                                  (sz_bool_t)(left_is_close_parenthesis && !carry.left_eaw), edge) &
+                                  (sz_bool_t)(sz_line_break_class_is_(left_bit, sz_line_break_cp_k) && !carry.left_eaw),
+                                  edge) &
              (class_alphabetic | class_hebrew_letter | class_numeric)) &
                 interior_lanes,
             base, &settled);
@@ -1076,7 +1131,8 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
         sz_u64_t const side_extended_pictographic = sz_line_break_side_mask_icelake_(side, sz_line_break_side_ext_k) &
                                                     base;
         sz_line_break_force_join_(
-            (sz_line_break_prevc_(class_emoji_base, gate, left_is_emoji_base, edge) & class_emoji_modifier) &
+            (sz_line_break_prevc_(class_emoji_base, gate, sz_line_break_class_is_(left_bit, sz_line_break_eb_k), edge) &
+             class_emoji_modifier) &
                 interior_lanes,
             base, &settled);
         sz_line_break_force_join_((sz_line_break_prevc_(side_extended_pictographic & side_unassigned, gate,
@@ -1158,7 +1214,7 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             sz_u64_t const previous2_cluster_bit = below2 ? (1ull << previous2_cluster_lane) : 0ull;
 
             out.have_prev = 1;
-            out.left_class = sz_line_break_byte_at_icelake_(classes, previous_cluster_lane);
+            out.previous_class_bit = 1ull << sz_line_break_byte_at_icelake_(classes, previous_cluster_lane);
             sz_u8_t const side_pbit = sz_line_break_byte_at_icelake_(side, previous_cluster_lane);
             out.left_eaw = (sz_u8_t)((side_pbit & sz_line_break_side_eaw_k) != 0);
             out.left_pf = (sz_u8_t)((side_pbit & sz_line_break_side_pf_k) != 0);
@@ -1175,14 +1231,14 @@ SZ_INTERNAL sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_
             //  The two-left context is the prior resolved base, or -- when only one cluster resolved here -- the inbound
             //  carry's left cluster (which lay just before that single resolved base).
             if (below2) {
-                out.left2_class = sz_line_break_byte_at_icelake_(classes, previous2_cluster_lane);
+                out.previous2_class_bit = 1ull << sz_line_break_byte_at_icelake_(classes, previous2_cluster_lane);
                 sz_u8_t const side_p2bit = sz_line_break_byte_at_icelake_(side, previous2_cluster_lane);
                 out.left2_eaw = (sz_u8_t)((side_p2bit & sz_line_break_side_eaw_k) != 0);
                 out.left2_aksara = (sz_u8_t)(((class_aksara | class_aksara_start) & previous2_cluster_bit) != 0 ||
                                              (dotted_circle & previous2_cluster_bit) != 0);
             }
             else {
-                out.left2_class = carry.have_prev ? carry.left_class : (sz_u8_t)sz_line_break_xx_k;
+                out.previous2_class_bit = carry.have_prev ? carry.previous_class_bit : (1ull << sz_line_break_xx_k);
                 out.left2_eaw = carry.have_prev ? carry.left_eaw : (sz_u8_t)0;
                 out.left2_aksara = carry.have_prev ? carry.left_aksara : (sz_u8_t)0;
             }

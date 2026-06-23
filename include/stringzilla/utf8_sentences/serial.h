@@ -100,136 +100,26 @@ SZ_INTERNAL sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_size_t len
 }
 
 /**
- *  @brief Walk to the start of the nearest non-(Extend|Format) codepoint at or before `start`, or return the
- *         leftmost codepoint start when the whole prefix is transparent. `*found` reports whether a
- *         significant codepoint was reached.
- */
-SZ_INTERNAL sz_size_t sz_sentence_break_prev_significant_(sz_cptr_t text, sz_size_t length, sz_size_t start,
-                                                          sz_bool_t *found) {
-    sz_size_t position = start;
-    for (;;) {
-        if (!sz_sentence_break_is_transparent_(sz_sentence_break_property_at_(text, length, position))) {
-            *found = sz_true_k;
-            return position;
-        }
-        if (position == 0) {
-            *found = sz_false_k;
-            return position;
-        }
-        position = sz_utf8_previous_codepoint_start_(text, position);
-    }
-}
-
-/**
- *  @brief Check if `position` is a sentence boundary per Unicode TR29 (SB1-SB998). Forward-only.
- */
-SZ_PUBLIC sz_bool_t sz_utf8_is_sentence_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
-    if (position == 0) return sz_true_k;      // SB1
-    if (position >= length) return sz_true_k; // SB2
-    if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
-
-    sz_size_t before_start = sz_utf8_previous_codepoint_start_(text, position);
-    sz_u8_t before = sz_sentence_break_property_at_(text, length, before_start);
-    sz_u8_t after = sz_sentence_break_property_at_(text, length, position);
-
-    if (before == sz_sentence_break_cr_k && after == sz_sentence_break_lf_k) return sz_false_k;        // SB3
-    if (sz_sentence_break_is_parasep_(before)) return sz_true_k;                                       // SB4
-    if (after == sz_sentence_break_extend_k || after == sz_sentence_break_format_k) return sz_false_k; // SB5
-
-    /* Effective preceding class with Extend/Format ignored. */
-    sz_bool_t has_significant = sz_false_k;
-    sz_size_t eff_before_start = sz_sentence_break_prev_significant_(text, length, before_start, &has_significant);
-    sz_u8_t eff_before = has_significant ? sz_sentence_break_property_at_(text, length, eff_before_start)
-                                         : (sz_u8_t)sz_sentence_break_other_k;
-
-    if (eff_before == sz_sentence_break_aterm_k && after == sz_sentence_break_numeric_k) return sz_false_k; // SB6
-
-    if (eff_before == sz_sentence_break_aterm_k && after == sz_sentence_break_upper_k && has_significant &&
-        eff_before_start > 0) { // SB7
-        sz_bool_t found2 = sz_false_k;
-        sz_size_t before2 = sz_sentence_break_prev_significant_(
-            text, length, sz_utf8_previous_codepoint_start_(text, eff_before_start), &found2);
-        sz_u8_t pp = found2 ? sz_sentence_break_property_at_(text, length, before2)
-                            : (sz_u8_t)sz_sentence_break_other_k;
-        if (pp == sz_sentence_break_upper_k || pp == sz_sentence_break_lower_k) return sz_false_k;
-    }
-
-    /* Trailing SATerm Close* Sp* context ending at `before_start`, Extend/Format transparent. */
-    {
-        sz_bool_t walk_found = sz_false_k;
-        sz_size_t walk = sz_sentence_break_prev_significant_(text, length, before_start, &walk_found);
-        sz_bool_t saw_sp = sz_false_k;
-        while (walk_found && sz_sentence_break_property_at_(text, length, walk) == sz_sentence_break_sp_k) {
-            saw_sp = sz_true_k;
-            if (walk == 0) {
-                walk_found = sz_false_k;
-                break;
-            }
-            walk = sz_sentence_break_prev_significant_(text, length, sz_utf8_previous_codepoint_start_(text, walk),
-                                                       &walk_found);
-        }
-        while (walk_found && sz_sentence_break_property_at_(text, length, walk) == sz_sentence_break_close_k) {
-            if (walk == 0) {
-                walk_found = sz_false_k;
-                break;
-            }
-            walk = sz_sentence_break_prev_significant_(text, length, sz_utf8_previous_codepoint_start_(text, walk),
-                                                       &walk_found);
-        }
-        sz_u8_t term = walk_found ? sz_sentence_break_property_at_(text, length, walk)
-                                  : (sz_u8_t)sz_sentence_break_other_k;
-        sz_bool_t has_saterm = sz_sentence_break_is_saterm_(term);
-        sz_bool_t has_aterm = (sz_bool_t)(term == sz_sentence_break_aterm_k);
-
-        if (has_saterm || has_aterm) {
-            if (has_aterm) { // SB8: ATerm Close* Sp* x (not listed)* Lower
-                sz_size_t scan = position;
-                sz_bool_t found_lower = sz_false_k;
-                while (scan < length) {
-                    sz_u8_t scan_prop = sz_sentence_break_property_at_(text, length, scan);
-                    if (sz_sentence_break_is_transparent_(scan_prop)) {
-                        scan = sz_sentence_break_next_start_(text, length, scan);
-                        continue;
-                    }
-                    if (scan_prop == sz_sentence_break_lower_k) {
-                        found_lower = sz_true_k;
-                        break;
-                    }
-                    if (scan_prop == sz_sentence_break_oletter_k || scan_prop == sz_sentence_break_upper_k ||
-                        sz_sentence_break_is_parasep_(scan_prop) || sz_sentence_break_is_saterm_(scan_prop))
-                        break;
-                    scan = sz_sentence_break_next_start_(text, length, scan);
-                }
-                if (found_lower) return sz_false_k;
-            }
-            if (after == sz_sentence_break_scontinue_k || sz_sentence_break_is_saterm_(after))
-                return sz_false_k; // SB8a
-            if (!saw_sp && (after == sz_sentence_break_close_k || after == sz_sentence_break_sp_k ||
-                            sz_sentence_break_is_parasep_(after)))
-                return sz_false_k;                                                                          // SB9
-            if (after == sz_sentence_break_sp_k || sz_sentence_break_is_parasep_(after)) return sz_false_k; // SB10
-            return sz_true_k;                                                                               // SB11
-        }
-    }
-
-    return sz_false_k; // SB998
-}
-
-/**
  *  @brief Forward run-state carried across codepoints by the bulk segmenter so the SB3..SB11 rules resolve in O(1)
  *         per codepoint — the scalar twin of the Ice Lake register carry, mirroring `sz_grapheme_serial_state_t`.
- *         The per-position `sz_utf8_is_sentence_boundary_serial` re-walks the trailing `SATerm Close* Sp*` context
- *         and the Extend/Format-transparent significant chain BACKWARD on every position; here they are tracked
- *         forward, so the bulk driver decodes each codepoint once instead of re-scanning.
+ *         The trailing `SATerm Close* Sp*` context and the Extend/Format-transparent significant chain are tracked
+ *         forward here, so the bulk driver decodes each codepoint once with no backward re-scan.
  */
 typedef struct sz_sentence_serial_state_t {
-    sz_u8_t previous_property;       // raw SB property of the immediately previous codepoint (SB3 CR x LF, SB4)
-    sz_u8_t previous_significant;    // SB property of the last non-Extend/Format codepoint (the SB6/7 `eff_before`)
-    sz_u8_t before_significant;      // the significant codepoint before `previous_significant` (SB7)
-    sz_u8_t terminator;              // open `SATerm Close* Sp*` context terminator (ATerm/STerm), else Other = none
-    sz_bool_t terminator_saw_close;  // a Close followed the terminator (before any Sp)
-    sz_bool_t terminator_saw_space;  // an Sp followed the terminator (and the Close* run)
-    sz_bool_t has_previous;          // a codepoint has been processed
+    /** Raw SB property of the immediately previous codepoint (SB3 CR x LF, SB4). */
+    sz_u8_t previous_property;
+    /** SB property of the last non-Extend/Format codepoint (the SB6 / SB7 `eff_before`). */
+    sz_u8_t previous_significant;
+    /** The significant codepoint before `previous_significant` (SB7). */
+    sz_u8_t before_significant;
+    /** Open `SATerm Close* Sp*` context terminator (ATerm / STerm), else Other = none. */
+    sz_u8_t terminator;
+    /** A Close followed the terminator (before any Sp). */
+    sz_bool_t terminator_saw_close;
+    /** An Sp followed the terminator (and the Close* run). */
+    sz_bool_t terminator_saw_space;
+    /** A codepoint has been processed. */
+    sz_bool_t has_previous;
 } sz_sentence_serial_state_t;
 
 /** @brief Advance @p state by the @p current codepoint property: update the significant chain and the
@@ -246,7 +136,8 @@ SZ_INTERNAL void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, 
         else if (state->terminator != (sz_u8_t)sz_sentence_break_other_k) {
             // The context is `terminator Close* Sp*`: a Close extends it only before any Sp, an Sp extends it, and
             // any other significant codepoint (including a ParaSep) closes it.
-            if (current == sz_sentence_break_close_k && !state->terminator_saw_space) state->terminator_saw_close = sz_true_k;
+            if (current == sz_sentence_break_close_k && !state->terminator_saw_space)
+                state->terminator_saw_close = sz_true_k;
             else if (current == sz_sentence_break_sp_k) state->terminator_saw_space = sz_true_k;
             else state->terminator = (sz_u8_t)sz_sentence_break_other_k;
         }
@@ -271,7 +162,8 @@ SZ_INTERNAL sz_bool_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t co
          state->before_significant == sz_sentence_break_lower_k))
         return sz_false_k; // SB7
 
-    if (sz_sentence_break_is_saterm_(state->terminator)) { // an `SATerm Close* Sp*` context ends at the previous codepoint
+    if (sz_sentence_break_is_saterm_(
+            state->terminator)) { // an `SATerm Close* Sp*` context ends at the previous codepoint
         if (state->terminator == sz_sentence_break_aterm_k) {
             // SB8: ATerm Close* Sp* x (not OLetter|Upper|Lower|Sep|CR|LF|STerm|ATerm)* Lower -> no break.
             sz_size_t scan = position;
@@ -301,7 +193,7 @@ SZ_INTERNAL sz_bool_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t co
 /**
  *  @brief Plural UAX-29 sentence segmentation: ONE forward sweep emits every sentence into parallel
  *         `sentence_starts` / `sentence_lengths`, carrying the SB run-state so each codepoint is decoded once (O(n),
- *         no per-position backward re-walks). Byte-identical to the per-position `sz_utf8_is_sentence_boundary_serial`.
+ *         no backward re-walks).
  */
 SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(                //
     sz_cptr_t text, sz_size_t length,                        //
