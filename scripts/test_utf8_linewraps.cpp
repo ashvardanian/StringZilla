@@ -83,6 +83,12 @@ static sz::string_view const utf8_linewraps_motifs[] = {
     "12345"_sv,             // NU numbers
     "$50"_sv,               // PR prefix
     "3,000"_sv,             // numeric grouping comma
+    // Regression motifs for fuzzer-found icelake-vs-serial divergences (sprinkled at window-edge offsets so the
+    // cross-window carry is exercised):
+    "\xD7\x90-a"_sv,               // LB21a: HL (U+05D0) HY x AL -- no break before the AL, incl. when HL carries
+    "\xD7\x90\xE2\x80\x90" "a"_sv, // LB21a with HH (U+2010) instead of HY
+    "\xE3\x80\xAF\xE2\x80\x98" "a"_sv, // LB10/LB19: lone CM (U+302F, East-Asian) then Pi quote (U+2018) -- side bits cleared
+    "\xCC\x88\xE2\x80\x9C"_sv,         // lone combining diaeresis (U+0308) then QU (U+201C)
 };
 static constexpr std::size_t utf8_linewraps_motifs_count = sizeof(utf8_linewraps_motifs) /
                                                            sizeof(utf8_linewraps_motifs[0]);
@@ -143,6 +149,68 @@ static utf8_segment_corpora_t utf8_linewraps_corpora_() {
 }
 
 #pragma endregion // Equivalence
+
+#pragma region Rule coverage
+
+/** @brief Rule-coverage gate: every LB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+void test_utf8_linewraps_rules() {
+    std::printf("  - testing UTF-8 line-break rule-coverage matrix...\n");
+
+    // One motif per UAX-14 Line_Break rule (break or no-break direction).
+    utf8_rule_case_t const rule_cases[] = {
+        {"LB4", "a\x0C" "b"_sv},                              // BK ! (mandatory break after form feed)
+        {"LB5", "a\r\nb"_sv},                                 // CR x LF, then LF ! (CRLF one unit, mandatory break)
+        {"LB6", "a\x0C"_sv},                                  // x (BK|CR|LF|NL): no break before a hard break
+        {"LB7", "a b"_sv},                                    // x SP / x ZW: no break before space
+        {"LB8", "a\xE2\x80\x8B" "b"_sv},                      // ZW SP* / break after Zero Width Space
+        {"LB8a", "a\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x (no break)
+        {"LB9", "a\xCC\x81"_sv},                              // treat X CM* as X
+        {"LB10", "\xCC\x81" "a"_sv},                          // lone CM -> AL
+        {"LB11", "a\xE2\x81\xA0" "b"_sv},                     // x WJ / WJ x (Word Joiner, no break)
+        {"LB12", "\xC2\xA0" "a"_sv},                          // GL x (no break after non-breaking space)
+        {"LB12a", "a\xC2\xA0"_sv},                            // [^SP BA HY] x GL
+        {"LB13", "a)"_sv},                                    // x CL/CP/EX/SY (no break before close paren)
+        {"LB14", "(a"_sv},                                    // OP SP* x (no break after open punctuation)
+        {"LB15a", "\xE2\x80\x9C" "a"_sv},                     // (sot|...) [QU & Pi] SP* x (no break after open quote)
+        {"LB15b", "a\xE2\x80\x9D"_sv},                        // x [QU & Pf] (no break before close quote)
+        {"LB16", ")\xE3\x82\xA1"_sv},                         // (CL|CP) SP* x NS (no break)
+        {"LB17", "\xE2\x80\x94\xE2\x80\x94"_sv},              // B2 SP* B2 (no break between em dashes)
+        {"LB18", "a b"_sv},                                   // SP / break after space
+        {"LB19", "a\"b"_sv},                                  // x QU / QU x (no break around quotation)
+        {"LB20", "a\xEF\xBF\xBC" "b"_sv},                     // / CB ; CB / (break around Contingent Break U+FFFC)
+        {"LB20a", "-a"_sv},                                   // (sot|...) (HY|HH) x AL (no break)
+        {"LB21", "a-b"_sv},                                   // x BA/HY/HH/NS, BB x (no break before hyphen)
+        {"LB21a", "\xD7\x90-a"_sv},                           // HL (HY|HH) x [^HL] (no break)
+        {"LB21b", "/\xD7\x90"_sv},                            // SY x HL (no break)
+        {"LB22", "a\xE2\x80\xA6"_sv},                         // x IN (no break before ellipsis)
+        {"LB23", "a1"_sv},                                    // (AL|HL) x NU / NU x (AL|HL)
+        {"LB23a", "$\xE4\xB8\xAD"_sv},                        // PR x (ID|EB|EM)
+        {"LB24", "$a"_sv},                                    // (PR|PO) x (AL|HL) / (AL|HL) x (PR|PO)
+        {"LB25", "1,5"_sv},                                   // numeric clusters (no break inside a number)
+        {"LB26", "\xE1\x84\x80\xE1\x85\xA1"_sv},              // Hangul L x V (no break)
+        {"LB27", "\xEA\xB0\x80\xE1\x86\xA8"_sv},              // Hangul (H2 x T) syllable continuation
+        {"LB28", "ab"_sv},                                    // AL x AL (no break)
+        {"LB28a", "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv}, // Brahmic aksara (consonant virama consonant)
+        {"LB29", ".a"_sv},                                    // IS x (AL|HL) (no break)
+        {"LB30", "a("_sv},                                    // (AL|HL|NU) x OP[^EAW] (no break)
+        {"LB30a", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // RI RI (even-parity pair, no break)
+        {"LB30b", "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBB"_sv},     // EB x EM (emoji base + modifier, no break)
+        {"LB31", "\xE4\xB8\xAD\xE4\xB8\xAD"_sv},              // break everywhere else (between ideographs)
+    };
+    // Every Line_Break rule id the gate requires a motif for (spec-derived checklist).
+    char const *const required_rules[] = {
+        "LB4",   "LB5",   "LB6",  "LB7",  "LB8",  "LB8a", "LB9",   "LB10",  "LB11", "LB12",  "LB12a", "LB13", "LB14",
+        "LB15a", "LB15b", "LB16", "LB17", "LB18", "LB19", "LB20",  "LB20a", "LB21", "LB21a", "LB21b", "LB22", "LB23",
+        "LB23a", "LB24",  "LB25", "LB26", "LB27", "LB28", "LB28a", "LB29",  "LB30", "LB30a", "LB30b", "LB31",
+    };
+#if SZ_USE_ICELAKE
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+}
+
+#pragma endregion // Rule coverage
 
 #pragma region Safety
 

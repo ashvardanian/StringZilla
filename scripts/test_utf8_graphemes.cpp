@@ -99,6 +99,11 @@ static sz::string_view const utf8_graphemes_motifs[] = {
     "\r"_sv,                                   // CR alone
     "\n"_sv,                                   // LF alone
     "\r\r\n"_sv,                               // CR CR LF (parity of CR runs)
+    "a\xDF\xBF\xE0\xA0\x80z"_sv,               // ASCII + U+07FF (2-byte) + U+0800 (3-byte cold) + ASCII: every BMP gate
+    "x\xF0\x9F\x98\x80y"_sv,           // ASCII + astral emoji (U+1F600) + ASCII: ASCII and astral gates together
+    "\xD0\x90\xF0\x9F\x98\x80"_sv,     // Cyrillic (2-byte) + astral emoji: page LUT and astral, no cold cascade
+    "\xE0\xA0\x80\xF0\x9F\x98\x80"_sv, // U+0800 (cold 3-byte) + astral emoji: cold cascade and astral together
+    "\xDF\xBF\xE0\xA0\x80"_sv,         // page-LUT edge: last 2-byte U+07FF abutting first 3-byte U+0800
 };
 static constexpr std::size_t utf8_graphemes_motifs_count = sizeof(utf8_graphemes_motifs) /
                                                            sizeof(utf8_graphemes_motifs[0]);
@@ -177,7 +182,14 @@ static std::vector<std::string> utf8_graphemes_straddles_(std::mt19937 &rng, std
     append_codepoint_(zwj_chain, 0x0061); // ASCII break after the chain
     std::string indic_conjunct = utf8_graphemes_dense_indic_conjunct_(gap);
     append_codepoint_(indic_conjunct, 0x0061); // ASCII break after the conjunct
-    return {regional_parity, zwj_chain, indic_conjunct};
+    // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does NOT bridge two RIs (GB11 bridges only
+    // Extended_Pictographic), so this must break after the ZWJ - and the ZWJ resets the GB12/13 RI parity. Straddles
+    // the 64-byte window so the parity carry and the post-ZWJ break are exercised across the edge.
+    std::string regional_zwj = utf8_dense_regional_indicators_(rng, gap);
+    append_codepoint_(regional_zwj, 0x200D);  // ZWJ
+    append_codepoint_(regional_zwj, 0x1F1E6); // Regional_Indicator after the ZWJ
+    append_codepoint_(regional_zwj, 0x0061);  // ASCII tail
+    return {regional_parity, zwj_chain, indic_conjunct, regional_zwj};
 }
 
 /** @brief Assemble the grapheme family's differential corpora (motifs + dense + straddle; no seam regressions). */
@@ -195,6 +207,42 @@ static utf8_segment_corpora_t utf8_graphemes_corpora_() {
 }
 
 #pragma endregion // Equivalence
+
+#pragma region Rule coverage
+
+/** @brief Rule-coverage gate: every GB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+void test_utf8_graphemes_rules() {
+    std::printf("  - testing UTF-8 grapheme rule-coverage matrix...\n");
+
+    // One motif per UAX-29 Grapheme_Cluster_Break rule (break or no-break direction).
+    utf8_rule_case_t const rule_cases[] = {
+        {"GB3", "\r\n"_sv},                                          // CR x LF (no break)
+        {"GB4", "\na"_sv},                                           // (Control|CR|LF) / break after LF
+        {"GB5", "a\n"_sv},                                           // / (Control|CR|LF) break before LF
+        {"GB6", "\xE1\x84\x80\xE1\x85\xA1"_sv},                      // L x (L|V|LV|LVT): Hangul L + V
+        {"GB7", "\xEA\xB0\x80\xE1\x85\xA1"_sv},                      // (LV|V) x (V|T): Hangul LV + V
+        {"GB8", "\xEA\xB0\x81\xE1\x86\xA8"_sv},                      // (LVT|T) x T: Hangul LVT + T
+        {"GB9", "a\xCC\x81"_sv},                                     // x (Extend|ZWJ)
+        {"GB9a", "\xE0\xA4\x95\xE0\xA4\xBE"_sv},                     // x SpacingMark: consonant + dependent vowel
+        {"GB9b", "\xD8\x80" "a"_sv},                                 // Prepend x: U+0600 then letter
+        {"GB9c", "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv},         // Indic conjunct: consonant virama consonant
+        {"GB11", "\xF0\x9F\x98\x80\xE2\x80\x8D\xF0\x9F\x98\x81"_sv}, // ExtPict Extend* ZWJ x ExtPict
+        {"GB12", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},             // sot (RI RI)* RI x RI
+        {"GB13", "a\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},            // [^RI] (RI RI)* RI x RI
+        {"GB999", "ab"_sv},                                          // Any / Any (default break)
+    };
+    // Every Grapheme_Cluster_Break rule id the gate requires a motif for (spec-derived checklist).
+    char const *const required_rules[] = {
+        "GB3", "GB4", "GB5", "GB6", "GB7", "GB8", "GB9", "GB9a", "GB9b", "GB9c", "GB11", "GB12", "GB13", "GB999",
+    };
+#if SZ_USE_ICELAKE
+    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+}
+
+#pragma endregion // Rule coverage
 
 #pragma region Safety
 

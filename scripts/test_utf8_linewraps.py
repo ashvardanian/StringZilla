@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""UAX-14 line-break tests: utf8_linewraps behavior, official LineBreakTest conformance (xfail until the
-kernel is strict-green), and an agreement-gated differential against uniseg. Adds malformed/seam sweeps.
+"""UAX-14 line-break tests: utf8_linewraps behavior, strict official LineBreakTest conformance (bit-exact
+19338/19338), and an agreement-gated differential against uniseg. Adds malformed/seam sweeps.
 
 Mirrors the C++ scripts/test_utf8_linewraps.cpp translation unit.
 """
@@ -65,8 +65,8 @@ def test_utf8_linewraps_skip_empty():
 
 def test_utf8_linewraps_unicode():
     """Test UTF-8 multi-byte / Unicode coverage."""
-    result = [str(seg) for seg in sz.utf8_linewraps("Größe привет")]
-    assert "".join(result) == "Größe привет"
+    result = [str(seg) for seg in sz.utf8_linewraps("Größe\u2028привет")]
+    assert "".join(result) == "Größe\u2028привет"
     # Segments tile the input.
 
     # CRLF is a single break opportunity, not two.
@@ -83,16 +83,15 @@ def test_utf8_linewraps_str_method():
     assert method_result == [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
 
 
-@pytest.mark.xfail(
-    reason="Wave-2 linewraps target: UAX-14 LineBreakTest must reach bit-exact 19338/19338. "
-    "Remove this marker once the kernel is strict-green (XPASS will flag it).",
-    strict=True,
-)
 def test_utf8_linewrap_boundary_official_conformance():
     """Full UAX-14 conformance against every case in the official LineBreakTest.txt.
 
     The iterator emits a segment at every break opportunity (mandatory or soft); their cumulative
     byte lengths must match the official break positions bit-exactly — no tailoring-tolerance gate.
+
+    LB2 (never break at start of text) means LineBreakTest never marks a leading ÷, so the official
+    boundary list has no leading 0 — unlike GraphemeBreakTest/WordBreakTest/SentenceBreakTest, which
+    break at start. The segments always start at offset 0, so drop the shared helper's leading 0 here.
     """
     try:
         test_cases = get_line_break_test_cases()
@@ -103,7 +102,7 @@ def test_utf8_linewrap_boundary_official_conformance():
     for test_str, expected_byte_boundaries in test_cases:
         if not test_str:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(test_str))
+        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(test_str))[1:]
         if sz_boundaries != expected_byte_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
@@ -160,6 +159,12 @@ def test_utf8_linewrap_seam(seed_value: int):
     rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
+        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+    # Phase sweep: shift a fixed corpus by every byte offset 0..63 so its content lands at every alignment
+    # relative to the 64-byte window — exhaustive deterministic complement to the length sweep.
+    body = corpus_of_byte_length(96, rng)
+    for phase in range(64):
+        raw = b"a" * phase + body
         assert_segments_tile(sz.utf8_linewraps(raw), raw)
 
 

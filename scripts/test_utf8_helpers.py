@@ -215,9 +215,7 @@ def apply_mutation_passes(data: bytes, rng) -> bytes:
     return bytes(buffer)
 
 
-def random_segmentation_corpus(
-    min_length: int, flavor: str, motifs: Optional[Sequence[bytes]], rng
-) -> bytes:
+def random_segmentation_corpus(min_length: int, flavor: str, motifs: Optional[Sequence[bytes]], rng) -> bytes:
     """Build a weighted random UTF-8 corpus until at least `min_length` bytes.
 
     `flavor` is ``"valid"`` (well-formed only) or ``"malformed"`` (malformed classes mixed in). `motifs` are
@@ -311,6 +309,21 @@ def icu_segmenter(kind: str) -> Callable[[str], List[str]]:
         return parts
 
     return segments
+
+
+def icu_unicode_at_least(version: str) -> bool:
+    """True when the local PyICU's bundled Unicode version is >= ``version`` (compared on major.minor, e.g. "17").
+
+    A stale PyICU (older Unicode than our 17.0 tables) disagrees with the kernel on codepoints whose break
+    properties changed between releases, so a *bit-exact* ICU differential would log spurious version-induced
+    failures. Callers gate the strict assertion behind this and fall back to an agreement gate when ICU is behind.
+    """
+    icu = pytest.importorskip("icu", reason="PyICU not installed")
+
+    def major_minor(value: str) -> tuple:
+        return tuple(int(piece) for piece in str(value).split(".")[:2] if piece.isdigit())
+
+    return major_minor(icu.UNICODE_VERSION) >= major_minor(version)
 
 
 def icu_normalizer(form: str) -> Callable[[str], str]:

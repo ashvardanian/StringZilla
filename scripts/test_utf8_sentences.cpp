@@ -85,6 +85,12 @@ static sz::string_view const utf8_sentences_motifs[] = {
     "Dr. House"_sv,               // abbreviation-like
     "U.S.A. ok"_sv,               // dotted acronym
     "3.14 value"_sv,              // numeric ATerm (no break)
+    // Dense-decode edge motifs (SB5 Extend/Format transparency + cross-window SB8), sprinkled at window seams:
+    "End.\xCC\x88 next"_sv,      // ATerm + combining mark (Extend, SB5-transparent) before the space
+    "End\xCC\x88. Next"_sv,      // combining mark on the terminator's preceding letter
+    "End.\xE2\x80\x8B Next"_sv,  // ATerm + Format (U+200B ZWSP is Format here) transparency
+    "A.\xCC\x80\xCC\x80 b"_sv,   // ATerm + stacked Extend marks then lowercase (SB8 across transparents)
+    "End. \xE2\x80\x8C Next"_sv, // ATerm Sp then Format then Upper (SB8 neutral chain)
 };
 static constexpr std::size_t utf8_sentences_motifs_count = sizeof(utf8_sentences_motifs) /
                                                            sizeof(utf8_sentences_motifs[0]);
@@ -163,6 +169,39 @@ static utf8_segment_corpora_t utf8_sentences_corpora_() {
 }
 
 #pragma endregion // Equivalence
+
+#pragma region Rule coverage
+
+/** @brief Rule-coverage gate: every SB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+void test_utf8_sentences_rules() {
+    std::printf("  - testing UTF-8 sentence rule-coverage matrix...\n");
+
+    // One motif per UAX-29 Sentence_Break rule (break or no-break direction).
+    utf8_rule_case_t const rule_cases[] = {
+        {"SB3", "\r\n"_sv},      // CR x LF (no break)
+        {"SB4", "a\nb"_sv},      // (Sep|CR|LF) / break after LF
+        {"SB5", "a\xCC\x81"_sv}, // X (Extend|Format)* absorbed (no break)
+        {"SB6", "3.4"_sv},       // ATerm x Numeric (no break)
+        {"SB7", "A.B"_sv},       // (Upper|Lower) ATerm x Upper (no break)
+        {"SB8", "A. a"_sv},      // ATerm Close* Sp* x (not stop)* Lower (no break)
+        {"SB8a", "a.,"_sv},      // (STerm|ATerm) Close* Sp* x (SContinue|STerm|ATerm) (no break)
+        {"SB9", "a.)"_sv},       // (STerm|ATerm) Close* x (Close|Sp|Sep|CR|LF) (no break)
+        {"SB10", "a. "_sv},      // (STerm|ATerm) Close* Sp* x (Sp|Sep|CR|LF) (no break)
+        {"SB11", "A. B"_sv},     // (STerm|ATerm) Close* Sp* / break before the next sentence
+        {"SB998", "ab"_sv},      // Any x Any (no break by default)
+    };
+    // Every Sentence_Break rule id the gate requires a motif for (spec-derived checklist).
+    char const *const required_rules[] = {
+        "SB3", "SB4", "SB5", "SB6", "SB7", "SB8", "SB8a", "SB9", "SB10", "SB11", "SB998",
+    };
+#if SZ_USE_ICELAKE
+    check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, sz_utf8_sentences_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+}
+
+#pragma endregion // Rule coverage
 
 #pragma region Safety
 

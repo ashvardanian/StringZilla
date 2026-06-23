@@ -219,6 +219,52 @@ static utf8_segment_corpora_t utf8_words_corpora_() {
 
 #pragma endregion // Equivalence
 
+#pragma region Rule coverage
+
+/** @brief Rule-coverage gate: every WB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
+void test_utf8_words_rules() {
+    std::printf("  - testing UTF-8 word rule-coverage matrix...\n");
+
+    // One motif per UAX-29 Word_Break rule (break or no-break direction).
+    utf8_rule_case_t const rule_cases[] = {
+        {"WB3", "\r\n"_sv},                                  // CR x LF (no break)
+        {"WB3a", "\rb"_sv},                                  // (Newline|CR|LF) / break after CR
+        {"WB3b", "a\n"_sv},                                  // / (Newline|CR|LF) break before LF
+        {"WB3c", "\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x Extended_Pictographic (no break)
+        {"WB3d", "  "_sv},                                   // WSegSpace x WSegSpace (no break)
+        {"WB4", "a\xCC\x81"_sv},                             // X (Extend|Format|ZWJ)* absorbed
+        {"WB5", "ab"_sv},                                    // AHLetter x AHLetter
+        {"WB6", "a'b"_sv},                                   // AHLetter x (MidLetter|MidNumLetQ) AHLetter
+        {"WB7", "a'b"_sv},                                   // AHLetter (MidLetter|MidNumLetQ) x AHLetter
+        {"WB7a", "\xD7\x90'"_sv},                            // Hebrew_Letter x Single_Quote
+        {"WB7b", "\xD7\x90\"\xD7\x90"_sv},                   // Hebrew_Letter x Double_Quote Hebrew_Letter
+        {"WB7c", "\xD7\x90\"\xD7\x90"_sv},                   // Hebrew_Letter Double_Quote x Hebrew_Letter
+        {"WB8", "12"_sv},                                    // Numeric x Numeric
+        {"WB9", "a1"_sv},                                    // AHLetter x Numeric
+        {"WB10", "1a"_sv},                                   // Numeric x AHLetter
+        {"WB11", "1,2"_sv},                                  // Numeric (MidNum|MidNumLetQ) x Numeric
+        {"WB12", "1,2"_sv},                                  // Numeric x (MidNum|MidNumLetQ) Numeric
+        {"WB13", "\xE3\x82\xA2\xE3\x82\xA2"_sv},             // Katakana x Katakana
+        {"WB13a", "a_"_sv},                                  // (AHLetter|Numeric|Katakana|ExtendNumLet) x ExtendNumLet
+        {"WB13b", "_a"_sv},                                  // ExtendNumLet x (AHLetter|Numeric|Katakana)
+        {"WB15", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // sot (RI RI)* RI x RI (even parity)
+        {"WB16", "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv}, // [^RI] (RI RI)* RI x RI (parity reset)
+        {"WB999", "a b"_sv},                                 // Any / Any (default break at the space)
+    };
+    // Every Word_Break rule id the gate requires a motif for (spec-derived checklist).
+    char const *const required_rules[] = {
+        "WB3", "WB3a", "WB3b", "WB3c", "WB3d", "WB4",  "WB5",   "WB6",   "WB7",  "WB7a", "WB7b",  "WB7c",
+        "WB8", "WB9",  "WB10", "WB11", "WB12", "WB13", "WB13a", "WB13b", "WB15", "WB16", "WB999",
+    };
+#if SZ_USE_ICELAKE
+    check_utf8_rule_coverage_("word", sz_utf8_words_serial, sz_utf8_words_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+}
+
+#pragma endregion // Rule coverage
+
 #pragma region Safety
 
 /** @brief Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */

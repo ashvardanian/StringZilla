@@ -276,6 +276,12 @@ def test_utf8_word_seam(seed_value: int):
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
         assert_segments_tile(sz.utf8_words(raw), raw)
+    # Phase sweep: shift a fixed corpus by every byte offset 0..63 so its content lands at every alignment
+    # relative to the 64-byte window — exhaustive deterministic complement to the length sweep.
+    body = corpus_of_byte_length(96, rng)
+    for phase in range(64):
+        raw = b"a" * phase + body
+        assert_segments_tile(sz.utf8_words(raw), raw)
 
 
 #  endregion Synthetic corner cases (safety / seam)

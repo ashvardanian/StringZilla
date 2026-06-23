@@ -290,6 +290,45 @@ inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t for
 
 #pragma endregion // Unit driver
 
+#pragma region Rule coverage
+
+/** @brief One UAX rule-coverage motif: a short input that exercises a named spec rule (break or no-break direction). */
+struct utf8_rule_case_t {
+    char const *rule_id;  /**< @brief UAX rule id this motif exercises, e.g. "WB6", "GB9c", "SB8", "LB21a". */
+    sz::string_view text; /**< @brief Short input that fires the rule. */
+};
+
+/**
+ *  @brief Per-family rule-coverage gate. Two obligations (CONTRIBUTING-KERNELS.md §6.12):
+ *         (1) every motif segments identically on @p reference and @p candidate, one-shot AND re-anchored at the
+ *             window-edge phases 61/62/63 so a rule firing across the 64-byte boundary is exercised too; and
+ *         (2) every id in @p required_rule_ids is exercised by at least one motif, so no spec rule is left untested.
+ */
+inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t reference, sz_utf8_segmenter_t candidate,
+                                      utf8_rule_case_t const *cases, std::size_t case_count,
+                                      char const *const *required_rule_ids, std::size_t required_count) {
+    static std::size_t const window_phases[] = {0, 61, 62, 63};
+    for (std::size_t case_index = 0; case_index != case_count; ++case_index) {
+        sz::string_view const text = cases[case_index].text;
+        for (std::size_t phase : window_phases) {
+            std::string probe(phase, 'a');
+            probe.append(text.data(), text.size());
+            probe.append(8, 'a');
+            assert(utf8_segments_(reference, sz::string_view(probe.data(), probe.size())) ==
+                       utf8_segments_(candidate, sz::string_view(probe.data(), probe.size())) &&
+                   family && "rule-coverage motif: serial != ISA");
+        }
+    }
+    for (std::size_t required_index = 0; required_index != required_count; ++required_index) {
+        bool covered = false;
+        for (std::size_t case_index = 0; case_index != case_count && !covered; ++case_index)
+            covered = std::strcmp(cases[case_index].rule_id, required_rule_ids[required_index]) == 0;
+        assert(covered && family && "UAX rule id not exercised by any coverage motif");
+    }
+}
+
+#pragma endregion // Rule coverage
+
 #pragma region Safety sweep
 
 /**
@@ -364,6 +403,51 @@ inline void check_utf8_segment_safety_(char const *family, sz_utf8_segmenter_t f
 #pragma region Differential driver
 
 /**
+ *  @brief Deterministic window-edge byte-partition stress: places every byte value of a (possibly multi-byte, possibly
+ *         truncated) lead and its continuation bytes at the TOP lanes of a full 64-byte window — exactly where a
+ *         declared multi-byte span crosses the window edge — and asserts the ISA @p candidate matches the serial
+ *         @p reference. This is the exhaustive complement to the random differential: it guarantees coverage of the
+ *         partition's edge handling, the class of bug where a 3-byte lead at lane 62 (its third byte at lane 64, past
+ *         the window) or a 4-byte lead at lane 61 is mis-resolved on a window-spanning input. Fully deterministic.
+ */
+inline void test_utf8_segment_byte_edge_(char const *family_name, sz_utf8_segmenter_t reference,
+                                         sz_utf8_segmenter_t candidate) {
+    std::printf("  - testing %s window-edge byte partition (exhaustive)...\n", family_name);
+    unsigned char buffer[96];
+    sz_size_t reference_offsets[128], reference_lengths[128], candidate_offsets[128], candidate_lengths[128], consumed;
+    auto assert_agree = [&](sz_size_t length) {
+        sz_size_t const reference_count = reference((sz_cptr_t)buffer, length, reference_offsets, reference_lengths,
+                                                    (sz_size_t)128, &consumed);
+        sz_size_t const candidate_count = candidate((sz_cptr_t)buffer, length, candidate_offsets, candidate_lengths,
+                                                    (sz_size_t)128, &consumed);
+        assert(reference_count == candidate_count && "window-edge segment count mismatch");
+        for (sz_size_t index = 0; index != reference_count; ++index)
+            assert(reference_offsets[index] == candidate_offsets[index] &&
+                   reference_lengths[index] == candidate_lengths[index] && "window-edge segment mismatch");
+    };
+    // Two-byte edge: every (first, second) byte pair occupying the last two lanes, swept across the loaded boundary
+    // (lengths 62..66 straddle the 64-byte window from just-under to just-over).
+    for (sz_size_t length = 62; length <= 66; ++length)
+        for (int first_byte = 0; first_byte != 256; ++first_byte)
+            for (int second_byte = 0; second_byte != 256; ++second_byte) {
+                std::memset(buffer, 'a', length);
+                buffer[length - 2] = (unsigned char)first_byte, buffer[length - 1] = (unsigned char)second_byte;
+                assert_agree(length);
+            }
+    // Three-byte edge: a lead byte at lane 61, its continuation candidate at lane 62, and a representative edge byte at
+    // lane 63 — the declared third byte then falls at lane 64, past the full window.
+    static int const edge_bytes[] = {0x80, 0xBF, 0x41, 0x00, 0xE0};
+    for (int lead_byte = 0xC0; lead_byte != 256; ++lead_byte)
+        for (int continuation_byte = 0; continuation_byte != 256; ++continuation_byte)
+            for (int edge_byte : edge_bytes) {
+                std::memset(buffer, 'a', 64);
+                buffer[61] = (unsigned char)lead_byte, buffer[62] = (unsigned char)continuation_byte,
+                buffer[63] = (unsigned char)edge_byte;
+                assert_agree(64);
+            }
+}
+
+/**
  *  @brief Differential fuzz of any ISA finder against the serial reference, enumerating segments via repeated
  *         streaming calls across the 6 capacities {len+64,65,63,16,3,1}, over random UTF-8 (valid, mutated, and
  *         malformed), the family's high-density runs, its long-range straddles (gap-swept + phase-shifted), and an
@@ -397,7 +481,9 @@ inline void test_utf8_segment_equivalence_(sz_utf8_segmenter_t reference, sz_utf
     std::vector<sz_size_t> reference_offsets, reference_lengths, candidate_offsets, candidate_lengths;
     std::vector<sz_size_t> first_offsets, first_lengths;
     auto check = [&](sz_cptr_t data, sz_size_t length, utf8_corpus_flavor_t flavor) {
-        sz_size_t const capacities[] = {length + 64, 65, 63, 16, 3, 1};
+        // Capacities swept per input: the resume seam lands at a different window phase for each, and the
+        // window-boundary-adjacent values (64, 33, 32) catch resume-seam bugs that {65,63,16,3,1} alone can miss.
+        sz_size_t const capacities[] = {length + 64, 65, 64, 63, 33, 32, 17, 16, 3, 2, 1};
         sz_size_t max_capacity = 1;
         for (sz_size_t capacity : capacities) max_capacity = std::max(max_capacity, capacity);
         if (batch_offsets.size() < max_capacity) batch_offsets.resize(max_capacity), batch_lengths.resize(max_capacity);
@@ -476,6 +562,91 @@ inline void test_utf8_segment_equivalence_(sz_utf8_segmenter_t reference, sz_utf
         std::memcpy(buffer, probe.data(), probe.size());
         check((sz_cptr_t)buffer, probe.size(), utf8_corpus_flavor_t::valid_k);
     });
+
+    // Long homogeneous carry-unit runs (the cross-window register-carry stressor): a single rule-critical unit
+    // repeated far past one 64-byte window, behind a letter/digit prefix and closed by a terminator. This is the shape
+    // that exposed the open-bridge / parity / shadow / pending carry bugs (a letter then a 65-codepoint Mid* run; a
+    // window-spanning Regional_Indicator or emoji-ZWJ or Extend or ATerm run) which random corpora rarely grow long
+    // enough. The units are family-agnostic (each stresses some family's carry); each run is checked at every capacity.
+    static char const *const marathon_units[] = {
+        ".",
+        ":",
+        ",",
+        "'",
+        "\xE2\x80\x99", // Mid / MidNumLetQ (word bridge), ATerm (".")
+        ". ",
+        ") ",
+        "a.",
+        "9,",                           // shadow / numeric-mid contexts
+        "\xF0\x9F\x87\xBA",             // Regional_Indicator (GB12/13, WB15/16 parity)
+        "\xF0\x9F\x98\x80\xE2\x80\x8D", // emoji + ZWJ (GB11 chain)
+        "\xCC\x81",
+        "\xEF\xB8\x8F",             // Extend / VS16 (grapheme, WB4 transparency)
+        "\xE0\xA4\x95\xE0\xA5\x8D", // Indic consonant + linker (GB9c)
+        " ",                        // long SP run (LB7/LB18 SP, WB3d WSegSpace, SB Sp shadow)
+        "1",                        // long NU run (LB25 numeric, WB8)
+        "\xE2\x80\x8B",             // ZWSP / ZW run (LB8 "ZW SP* /")
+        "\"",                       // QU run (LB19 East-Asian quote, LB15)
+        "\xD7\x90\x2D",             // Hebrew_Letter + Hyphen (LB21a "HL (HY|HH) x" carried across windows)
+        "\xEA\xB0\x80",             // Hangul LV syllable run (LB26/LB27, GB6/7)
+    };
+    static char const *const marathon_prefixes[] = {"", "x", "5", "\xD7\x90"}; // none / letter / digit / Hebrew
+    static char const *const marathon_terminators[] = {"", "A", "b", "9", ".", "\n"};
+    for (char const *unit : marathon_units) {
+        std::size_t const unit_length = std::strlen(unit);
+        for (char const *prefix : marathon_prefixes)
+            for (char const *terminator : marathon_terminators) {
+                std::string marathon = prefix;
+                while (marathon.size() + unit_length <= 320) marathon.append(unit, unit_length);
+                marathon += terminator;
+                check(marathon.data(), marathon.size(), utf8_corpus_flavor_t::valid_k);
+            }
+    }
+
+    // Deterministic all-64-phase straddle sweep: place each family motif at every byte offset 0..63 within an ASCII
+    // filler (trailing filler guarantees the motif straddles the 64-byte window edge at some alignments and that
+    // windows tile around it). serial and ISA must agree at every phase. Phase 0 additionally lands the motif at true
+    // start-of-text (e.g. a lone leading combining mark). This turns the probabilistic phase coverage above into an
+    // exhaustive deterministic complement.
+    for (std::size_t motif_index = 0; motif_index != corpora.motif_count; ++motif_index) {
+        sz::string_view const motif = corpora.motifs[motif_index];
+        for (std::size_t phase = 0; phase != 64; ++phase) {
+            std::string probe(phase, 'a');
+            probe.append(motif.data(), motif.size());
+            probe.append(80, 'a');
+            check(probe.data(), probe.size(), utf8_corpus_flavor_t::valid_k);
+        }
+    }
+
+    // Malformed-at-seam injection: drop a malformed UTF-8 fragment exactly at a rule-critical boundary (after a
+    // MidLetter, inside an SP-run, after an ATerm, between a base and a combining mark, ...) rather than as standalone
+    // adversarial noise, at the window-edge phases. Both backends apply the same U+FFFD substitution (§6.2), so they
+    // must still agree (malformed flavor relaxes the codepoint-start alignment invariant).
+    static char const *const malformed_seam_fragments[] = {
+        "\xC0\x80",         // overlong NUL
+        "\xED\xA0\x80",     // surrogate U+D800
+        "\xE2\x80",         // truncated 3-byte lead
+        "\xF0\x9F\x98",     // truncated 4-byte lead
+        "\x80",             // stray continuation
+        "\xF5\x80\x80\x80", // out-of-range lead > U+10FFFF
+    };
+    // (prefix, suffix) hosts placing the fragment at a rule-critical seam across the families.
+    static char const *const malformed_seam_prefixes[] = {"ab'", "a ", "a.", "a", "1,", "\xD7\x90-", "(\xC2\xA0"};
+    static char const *const malformed_seam_suffixes[] = {"cd", " b", " B", "\xCC\x81", "2", "a", ")"};
+    static std::size_t const malformed_seam_phases[] = {0, 60, 61, 62, 63};
+    std::size_t const malformed_seam_host_count = sizeof(malformed_seam_prefixes) / sizeof(malformed_seam_prefixes[0]);
+    for (char const *fragment : malformed_seam_fragments)
+        for (std::size_t host = 0; host != malformed_seam_host_count; ++host)
+            for (std::size_t phase : malformed_seam_phases) {
+                std::string probe(phase, 'a');
+                probe.append(malformed_seam_prefixes[host]);
+                probe.append(fragment);
+                probe.append(malformed_seam_suffixes[host]);
+                check(probe.data(), probe.size(), utf8_corpus_flavor_t::malformed_k);
+            }
+
+    // Exhaustive deterministic window-edge byte partition (complements the random fuzz above).
+    test_utf8_segment_byte_edge_(corpora.family_name, reference, candidate);
 }
 
 #pragma endregion // Differential driver

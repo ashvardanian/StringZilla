@@ -30,6 +30,7 @@ from test_utf8_helpers import (
     class_adjacency_strings,
     corpus_of_byte_length,
     icu_segmenter,
+    icu_unicode_at_least,
     window_seam_lengths,
 )
 
@@ -181,31 +182,54 @@ def test_utf8_grapheme_seam(seed_value: int):
     kernel's 64-byte SIMD window must tile and stay bit-exact against ICU, catching off-by-one seam bugs."""
     rng = Random(seed_value)
     icu_graphemes = icu_segmenter("grapheme")
+    icu_current = icu_unicode_at_least("17")  # ICU-exact only when its Unicode matches our 17.0 tables
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
         assert_segments_tile(sz.utf8_graphemes(raw), raw)
         text = raw.decode("utf-8")
-        assert byte_boundaries(sz.utf8_graphemes(text)) == byte_boundaries(icu_graphemes(text))
+        if icu_current:
+            assert byte_boundaries(sz.utf8_graphemes(text)) == byte_boundaries(icu_graphemes(text))
+    # Phase sweep: shift a fixed corpus by every byte offset 0..63 so its content lands at every alignment
+    # relative to the 64-byte window — exhaustive deterministic complement to the length sweep.
+    body = corpus_of_byte_length(96, rng).decode("utf-8")
+    for phase in range(64):
+        text = "a" * phase + body
+        assert_segments_tile(sz.utf8_graphemes(text), text)
+        if icu_current:
+            assert byte_boundaries(sz.utf8_graphemes(text)) == byte_boundaries(icu_graphemes(text))
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_utf8_grapheme_differential_icu(seed_value: int):
-    """Bit-exact differential against ICU's `createCharacterInstance` (extended grapheme clusters == UAX-29
-    GraphemeBreakTest). Measured 0/4000 divergence on this boundary-rich palette, so an exact match is required."""
+    """Differential against ICU's `createCharacterInstance` (extended grapheme clusters == UAX-29 GraphemeBreakTest).
+
+    Bit-exact when the local PyICU is at our Unicode version (≥17), since the palette measured 0/4000 divergence;
+    when PyICU is older its GCB tables differ from our 17.0 tables on changed codepoints, so the gate loosens to
+    broad agreement (≥99%) to avoid spurious version-induced failures. The strict oracle is the official
+    GraphemeBreakTest (`test_utf8_grapheme_boundary_official_conformance`), version-pinned to UNICODE_VERSION."""
     icu_graphemes = icu_segmenter("grapheme")
+    icu_current = icu_unicode_at_least("17")
     rng = Random(seed_value)
     failures = []
+    cases = 0
     for _ in range(2000):
         text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 32)))
+        cases += 1
         sz_boundaries = byte_boundaries(sz.utf8_graphemes(text))
         icu_boundaries = byte_boundaries(icu_graphemes(text))
         if sz_boundaries != icu_boundaries:
             codepoints = " ".join(f"{ord(c):04X}" for c in text)
             failures.append(f"  {codepoints}\n    sz={sz_boundaries}\n    icu={icu_boundaries}")
 
-    assert not failures, "StringZilla vs ICU grapheme-boundary divergences ({}):\n{}".format(
-        len(failures), "\n".join(failures[:20])
-    )
+    if icu_current:
+        assert not failures, "StringZilla vs ICU grapheme-boundary divergences ({}):\n{}".format(
+            len(failures), "\n".join(failures[:20])
+        )
+    else:
+        agreement = 1.0 - len(failures) / max(1, cases)
+        assert agreement >= 0.99, "StringZilla vs stale-ICU grapheme agreement {:.2%} too low:\n{}".format(
+            agreement, "\n".join(failures[:20])
+        )
 
 
 #  endregion Synthetic corner cases (safety / seam / ICU)
