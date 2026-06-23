@@ -63,18 +63,19 @@ SZ_INTERNAL sz_bool_t sz_line_break_descriptor_is_dotted_circle_(sz_u16_t descri
     return (sz_bool_t)((descriptor >> 13) & 1u);
 }
 /** @brief True for a Line_Break CM or ZWJ class (LB9 attachment candidates). */
-SZ_INTERNAL sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t cls) {
-    return (sz_bool_t)(cls == sz_line_break_cm_k || cls == sz_line_break_zwj_k);
+SZ_INTERNAL sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class) {
+    return (sz_bool_t)(line_break_class == sz_line_break_cm_k || line_break_class == sz_line_break_zwj_k);
 }
 
 /**
  *  @brief Cluster base index of codepoint @p index: walks left over attached CM/ZWJ marks (LB9) to the base.
  */
-SZ_INTERNAL sz_size_t sz_line_break_cluster_base_(sz_u8_t const *raw, sz_u8_t const *eff, sz_size_t index) {
-    while (index > 0 && sz_line_break_is_cm_or_zwj_(raw[index]) &&
-           !(eff[index - 1] == sz_line_break_bk_k || eff[index - 1] == sz_line_break_cr_k ||
-             eff[index - 1] == sz_line_break_lf_k || eff[index - 1] == sz_line_break_nl_k ||
-             eff[index - 1] == sz_line_break_sp_k || eff[index - 1] == sz_line_break_zw_k))
+SZ_INTERNAL sz_size_t sz_line_break_cluster_base_(sz_u8_t const *raw_classes, sz_u8_t const *effective_classes,
+                                                  sz_size_t index) {
+    while (index > 0 && sz_line_break_is_cm_or_zwj_(raw_classes[index]) &&
+           !(effective_classes[index - 1] == sz_line_break_bk_k || effective_classes[index - 1] == sz_line_break_cr_k ||
+             effective_classes[index - 1] == sz_line_break_lf_k || effective_classes[index - 1] == sz_line_break_nl_k ||
+             effective_classes[index - 1] == sz_line_break_sp_k || effective_classes[index - 1] == sz_line_break_zw_k))
         --index;
     return index;
 }
@@ -104,23 +105,23 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
         return 0;
     }
 
-    sz_size_t start_buffer[sz_utf8_line_window_k];
-    sz_u16_t descriptor_buffer[sz_utf8_line_window_k];
-    sz_u8_t raw_buffer[sz_utf8_line_window_k];
-    sz_u8_t eff_buffer[sz_utf8_line_window_k];
+    sz_size_t codepoint_byte_starts_buffer[sz_utf8_line_window_k];
+    sz_u16_t codepoint_descriptors_buffer[sz_utf8_line_window_k];
+    sz_u8_t raw_classes_buffer[sz_utf8_line_window_k];
+    sz_u8_t effective_classes_buffer[sz_utf8_line_window_k];
     sz_u8_t prev_zwj_buffer[sz_utf8_line_window_k];
-    sz_size_t *start = start_buffer;
-    sz_u16_t *descriptor = descriptor_buffer;
-    sz_u8_t *raw = raw_buffer;
-    sz_u8_t *eff = eff_buffer;
+    sz_size_t *codepoint_byte_starts = codepoint_byte_starts_buffer;
+    sz_u16_t *codepoint_descriptors = codepoint_descriptors_buffer;
+    sz_u8_t *raw_classes = raw_classes_buffer;
+    sz_u8_t *effective_classes = effective_classes_buffer;
     sz_u8_t *prev_zwj = prev_zwj_buffer;
 
-    /* `line_start` (absolute byte offset) anchors the current open line; each window decodes from here. */
+    // `line_start` (absolute byte offset) anchors the current open line; each window decodes from here.
     sz_size_t line_start = 0;
     while (line_start < length && lines < lines_capacity) {
 
-        /* Decode this window; resolve LB1: SA -> CM if combining (descriptor mark bit) else AL; AI/SG/XX -> AL;
-         *  CJ -> NS. `window_end` is the absolute byte offset one past the last decoded codepoint. */
+        // Decode this window; resolve LB1: SA -> CM if combining (descriptor mark bit) else AL; AI/SG/XX -> AL;
+        // CJ -> NS. `window_end` is the absolute byte offset one past the last decoded codepoint.
         sz_size_t count = 0;
         sz_size_t position = line_start;
         sz_bool_t window_full = sz_false_k;
@@ -132,369 +133,439 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
             sz_size_t decode = position;
             sz_rune_t rune = sz_utf8_decode_(text, length, &decode);
             sz_u16_t cp_descriptor = sz_rune_line_break_property(rune);
-            sz_u8_t cls = sz_line_break_descriptor_class_(cp_descriptor);
-            if (cls == sz_line_break_sa_k)
-                cls = (cp_descriptor & (1u << 12)) ? (sz_u8_t)sz_line_break_cm_k : (sz_u8_t)sz_line_break_al_k;
-            else if (cls == sz_line_break_ai_k || cls == sz_line_break_sg_k || cls == sz_line_break_xx_k)
-                cls = sz_line_break_al_k;
-            else if (cls == sz_line_break_cj_k) cls = sz_line_break_ns_k;
-            start[count] = position; // absolute byte offset
-            descriptor[count] = cp_descriptor;
-            raw[count] = cls;
-            eff[count] = cls;
+            sz_u8_t line_break_class = sz_line_break_descriptor_class_(cp_descriptor);
+            if (line_break_class == sz_line_break_sa_k)
+                line_break_class = (cp_descriptor & (1u << 12)) ? (sz_u8_t)sz_line_break_cm_k
+                                                                : (sz_u8_t)sz_line_break_al_k;
+            else if (line_break_class == sz_line_break_ai_k || line_break_class == sz_line_break_sg_k ||
+                     line_break_class == sz_line_break_xx_k)
+                line_break_class = sz_line_break_al_k;
+            else if (line_break_class == sz_line_break_cj_k) line_break_class = sz_line_break_ns_k;
+            codepoint_byte_starts[count] = position; // absolute byte offset
+            codepoint_descriptors[count] = cp_descriptor;
+            raw_classes[count] = line_break_class;
+            effective_classes[count] = line_break_class;
             ++count;
             position = decode > position ? decode : position + 1;
         }
         sz_size_t const window_end = position;
-        /* The window is a true text tail (rather than a forced cut) when it reached `length`. Only a true tail
-         *  may emit the trailing span and stop; a forced cut resumes from the open line in the next call. */
+        // The window is a true text tail (rather than a forced cut) when it reached `length`. Only a true tail
+        // may emit the trailing span and stop; a forced cut resumes from the open line in the next call.
         sz_bool_t const window_is_tail = (sz_bool_t)(!window_full && window_end == length);
 
-        /* LB9/LB10 cluster collapse (matches the SIMD path): drop a combining mark that attaches to a preceding
-         *  base so the rule sweep below sees exactly one entry per cluster and no rule's fixed-offset neighbour
-         *  lookup (left or right) can land on a mark. A lone mark (LB10) is kept but reclassified to AL. `prev_zwj`
-         *  records whether the codepoint immediately preceding each survivor was a ZWJ, preserving LB8a ("no break
-         *  after ZWJ") which the collapse would otherwise lose. `start` is compacted to the survivors' byte offsets,
-         *  so the emit naturally folds each cluster's marks into the segment of its base. */
-        {
-            sz_size_t kept = 0;
-            sz_bool_t attachable = sz_false_k, pending_zwj = sz_false_k;
-            for (sz_size_t i = 0; i < count; ++i) {
-                sz_u8_t cls = raw[i];
-                sz_bool_t const is_mark = (sz_bool_t)(cls == sz_line_break_cm_k || cls == sz_line_break_zwj_k);
-                if (is_mark && attachable) {
-                    pending_zwj = (sz_bool_t)(cls == sz_line_break_zwj_k);
-                    continue;
-                }
-                prev_zwj[kept] = (sz_u8_t)pending_zwj;
-                if (is_mark) {
-                    raw[kept] = sz_line_break_al_k, eff[kept] = sz_line_break_al_k, descriptor[kept] = 0;
-                    attachable = sz_true_k;
-                }
-                else {
-                    raw[kept] = cls, eff[kept] = cls, descriptor[kept] = descriptor[i];
-                    attachable = (sz_bool_t)(cls != sz_line_break_bk_k && cls != sz_line_break_cr_k &&
-                                             cls != sz_line_break_lf_k && cls != sz_line_break_nl_k &&
-                                             cls != sz_line_break_sp_k && cls != sz_line_break_zw_k);
-                }
-                start[kept] = start[i];
-                pending_zwj = (sz_bool_t)(cls == sz_line_break_zwj_k);
-                ++kept;
-            }
-            count = kept;
-        }
-
-        /* LB9/LB10 effective class: CM/ZWJ attaches to the prior cluster base, else (LB10) acts as AL. */
-        for (sz_size_t k = 0; k < count; ++k) {
-            if (!sz_line_break_is_cm_or_zwj_(raw[k])) continue;
-            if (k == 0) {
-                eff[k] = sz_line_break_al_k;
+        // LB9/LB10 cluster collapse (matches the SIMD path): drop a combining mark that attaches to a preceding
+        // base so the rule sweep below sees exactly one entry per cluster and no rule's fixed-offset neighbour
+        // lookup (left or right) can land on a mark. A lone mark (LB10) is kept but reclassified to AL. `prev_zwj`
+        // records whether the codepoint immediately preceding each survivor was a ZWJ, preserving LB8a ("no break
+        // after ZWJ") which the collapse would otherwise lose. `codepoint_byte_starts` is compacted to the
+        // survivors' byte offsets, so the emit naturally folds each cluster's marks into the segment of its base.
+        sz_size_t kept_count = 0;
+        sz_bool_t attachable = sz_false_k, pending_zwj = sz_false_k;
+        for (sz_size_t codepoint_index = 0; codepoint_index < count; ++codepoint_index) {
+            sz_u8_t line_break_class = raw_classes[codepoint_index];
+            sz_bool_t const is_mark = (sz_bool_t)(line_break_class == sz_line_break_cm_k ||
+                                                  line_break_class == sz_line_break_zwj_k);
+            if (is_mark && attachable) {
+                pending_zwj = (sz_bool_t)(line_break_class == sz_line_break_zwj_k);
                 continue;
-            } // LB10 (start of text / open line)
-            sz_u8_t base = eff[k - 1];
+            }
+            prev_zwj[kept_count] = (sz_u8_t)pending_zwj;
+            if (is_mark) {
+                raw_classes[kept_count] = sz_line_break_al_k, effective_classes[kept_count] = sz_line_break_al_k,
+                codepoint_descriptors[kept_count] = 0;
+                attachable = sz_true_k;
+            }
+            else {
+                raw_classes[kept_count] = line_break_class, effective_classes[kept_count] = line_break_class,
+                codepoint_descriptors[kept_count] = codepoint_descriptors[codepoint_index];
+                attachable =
+                    (sz_bool_t)(line_break_class != sz_line_break_bk_k && line_break_class != sz_line_break_cr_k &&
+                                line_break_class != sz_line_break_lf_k && line_break_class != sz_line_break_nl_k &&
+                                line_break_class != sz_line_break_sp_k && line_break_class != sz_line_break_zw_k);
+            }
+            codepoint_byte_starts[kept_count] = codepoint_byte_starts[codepoint_index];
+            pending_zwj = (sz_bool_t)(line_break_class == sz_line_break_zwj_k);
+            ++kept_count;
+        }
+        count = kept_count;
+
+        // LB9/LB10 effective class: CM/ZWJ attaches to the prior cluster base, else (LB10) acts as AL.
+        for (sz_size_t codepoint_index = 0; codepoint_index < count; ++codepoint_index) {
+            if (!sz_line_break_is_cm_or_zwj_(raw_classes[codepoint_index])) continue;
+            // LB10 (start of text / open line)
+            if (codepoint_index == 0) {
+                effective_classes[codepoint_index] = sz_line_break_al_k;
+                continue;
+            }
+            sz_u8_t base = effective_classes[codepoint_index - 1];
             if (base != sz_line_break_bk_k && base != sz_line_break_cr_k && base != sz_line_break_lf_k &&
                 base != sz_line_break_nl_k && base != sz_line_break_sp_k && base != sz_line_break_zw_k)
-                eff[k] = base;                // LB9 attach
-            else eff[k] = sz_line_break_al_k; // LB10
+                effective_classes[codepoint_index] = base;                // LB9 attach
+            else effective_classes[codepoint_index] = sz_line_break_al_k; // LB10
         }
 
-        /* `local_line_start` is the open line's start expressed as a byte offset; it begins at the window origin
-         *  and advances with each emitted opportunity. Spans are emitted with absolute byte offsets from `start`. */
+        // `local_line_start` is the open line's start expressed as a byte offset; it begins at the window origin
+        // and advances with each emitted opportunity. Spans are emitted with absolute byte offsets from
+        // `codepoint_byte_starts`.
         sz_size_t local_line_start = line_start;
         sz_bool_t hit_capacity = sz_false_k;
-        for (sz_size_t k = 1; k < count; ++k) {
-            sz_u8_t b = eff[k - 1];
-            sz_u8_t a = eff[k];
+        for (sz_size_t codepoint_index = 1; codepoint_index < count; ++codepoint_index) {
+            sz_u8_t left_class = effective_classes[codepoint_index - 1];
+            sz_u8_t right_class = effective_classes[codepoint_index];
             sz_bool_t is_break = sz_false_k;
+            sz_bool_t resolved = sz_false_k;
 
-            /* last non-space context: nearest j<=k-1 with eff[j] != SP, plus whether spaces were skipped. */
-            sz_size_t j = k - 1;
+            // last non-space context: nearest non_space_index <= codepoint_index-1 with a non-SP effective class,
+            // plus whether spaces were skipped.
+            sz_size_t non_space_index = codepoint_index - 1;
             sz_bool_t had_space = sz_false_k;
-            while (j > 0 && eff[j] == sz_line_break_sp_k) {
+            while (non_space_index > 0 && effective_classes[non_space_index] == sz_line_break_sp_k) {
                 had_space = sz_true_k;
-                --j;
+                --non_space_index;
             }
-            sz_u8_t before_sp = eff[j];
+            sz_u8_t leftmost_non_space_class = effective_classes[non_space_index];
 
-            /* cluster base index of the codepoint at k-1 (skip attached marks). */
-            sz_size_t b_base = sz_line_break_cluster_base_(raw, eff, k - 1);
+            // cluster base index of the codepoint at codepoint_index-1 (skip attached marks).
+            sz_size_t left_base_index = sz_line_break_cluster_base_(raw_classes, effective_classes,
+                                                                    codepoint_index - 1);
 
-            if (b == sz_line_break_bk_k) {
+            // The dispatch below is a first-match-wins precedence chain over LB4-LB31: the first rule whose
+            // condition holds sets the join/break verdict (`is_break`) and latches `resolved` so no later rule
+            // fires. Rule order encodes UAX-14 precedence verbatim, so the latch preserves the exact rule that
+            // fires for each position.
+            if (!resolved && left_class == sz_line_break_bk_k) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             } // LB4
-            if (b == sz_line_break_cr_k && a == sz_line_break_lf_k) { goto decided; } // LB5
-            if (b == sz_line_break_cr_k || b == sz_line_break_lf_k || b == sz_line_break_nl_k) {
+            if (!resolved && left_class == sz_line_break_cr_k && right_class == sz_line_break_lf_k)
+                resolved = sz_true_k; // LB5
+            if (!resolved && (left_class == sz_line_break_cr_k || left_class == sz_line_break_lf_k ||
+                              left_class == sz_line_break_nl_k)) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             }
-            if (a == sz_line_break_bk_k || a == sz_line_break_cr_k || a == sz_line_break_lf_k ||
-                a == sz_line_break_nl_k) {
-                goto decided;
-            } // LB6
-            if (a == sz_line_break_sp_k || a == sz_line_break_zw_k) { goto decided; } // LB7
-            if (before_sp == sz_line_break_zw_k && had_space) {
+            if (!resolved && (right_class == sz_line_break_bk_k || right_class == sz_line_break_cr_k ||
+                              right_class == sz_line_break_lf_k || right_class == sz_line_break_nl_k))
+                resolved = sz_true_k; // LB6
+            if (!resolved && (right_class == sz_line_break_sp_k || right_class == sz_line_break_zw_k))
+                resolved = sz_true_k; // LB7
+            if (!resolved && leftmost_non_space_class == sz_line_break_zw_k && had_space) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             } // LB8
-            if (b == sz_line_break_zw_k) {
+            if (!resolved && left_class == sz_line_break_zw_k) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             }
-            if (prev_zwj[k]) { goto decided; } // LB8a: no break after ZWJ (preserved across the cluster collapse)
-            if (sz_line_break_is_cm_or_zwj_(raw[k]) && b != sz_line_break_bk_k && b != sz_line_break_cr_k &&
-                b != sz_line_break_lf_k && b != sz_line_break_nl_k && b != sz_line_break_sp_k &&
-                b != sz_line_break_zw_k) {
-                goto decided;
-            } // LB9
-            if (a == sz_line_break_wj_k || b == sz_line_break_wj_k) { goto decided; } // LB11
-            if (b == sz_line_break_gl_k) { goto decided; }                            // LB12
-            if (a == sz_line_break_gl_k && !(b == sz_line_break_sp_k || b == sz_line_break_ba_k ||
-                                             b == sz_line_break_hy_k || b == sz_line_break_hh_k)) {
-                goto decided;
-            } // LB12a
-            if (a == sz_line_break_cl_k || a == sz_line_break_cp_k || a == sz_line_break_ex_k ||
-                a == sz_line_break_sy_k) {
-                goto decided;
-            } // LB13
-            if (before_sp == sz_line_break_op_k) { goto decided; } // LB14
-            /* LB15a: opening Pi quote after an allowed left context, across spaces. */
-            if (before_sp == sz_line_break_qu_k &&
-                sz_line_break_descriptor_is_pi_(descriptor[sz_line_break_cluster_base_(raw, eff, j)])) {
-                sz_size_t q_base = sz_line_break_cluster_base_(raw, eff, j);
+            if (!resolved && prev_zwj[codepoint_index])
+                resolved = sz_true_k; // LB8a: no break after ZWJ (preserved across the collapse)
+            if (!resolved && sz_line_break_is_cm_or_zwj_(raw_classes[codepoint_index]) &&
+                left_class != sz_line_break_bk_k && left_class != sz_line_break_cr_k &&
+                left_class != sz_line_break_lf_k && left_class != sz_line_break_nl_k &&
+                left_class != sz_line_break_sp_k && left_class != sz_line_break_zw_k)
+                resolved = sz_true_k; // LB9
+            if (!resolved && (right_class == sz_line_break_wj_k || left_class == sz_line_break_wj_k))
+                resolved = sz_true_k;                                                // LB11
+            if (!resolved && left_class == sz_line_break_gl_k) resolved = sz_true_k; // LB12
+            if (!resolved && right_class == sz_line_break_gl_k &&
+                !(left_class == sz_line_break_sp_k || left_class == sz_line_break_ba_k ||
+                  left_class == sz_line_break_hy_k || left_class == sz_line_break_hh_k))
+                resolved = sz_true_k; // LB12a
+            if (!resolved && (right_class == sz_line_break_cl_k || right_class == sz_line_break_cp_k ||
+                              right_class == sz_line_break_ex_k || right_class == sz_line_break_sy_k))
+                resolved = sz_true_k;                                                              // LB13
+            if (!resolved && leftmost_non_space_class == sz_line_break_op_k) resolved = sz_true_k; // LB14
+            // LB15a: opening Pi quote after an allowed left context, across spaces.
+            if (!resolved && leftmost_non_space_class == sz_line_break_qu_k &&
+                sz_line_break_descriptor_is_pi_(codepoint_descriptors[sz_line_break_cluster_base_(
+                    raw_classes, effective_classes, non_space_index)])) {
+                sz_size_t quote_base_index = sz_line_break_cluster_base_(raw_classes, effective_classes,
+                                                                         non_space_index);
                 sz_bool_t left_ok;
-                if (q_base == 0) left_ok = sz_true_k;
+                if (quote_base_index == 0) left_ok = sz_true_k;
                 else {
-                    sz_u8_t lj = eff[q_base - 1];
-                    left_ok =
-                        (sz_bool_t)(lj == sz_line_break_bk_k || lj == sz_line_break_cr_k || lj == sz_line_break_lf_k ||
-                                    lj == sz_line_break_nl_k || lj == sz_line_break_op_k || lj == sz_line_break_qu_k ||
-                                    lj == sz_line_break_gl_k || lj == sz_line_break_sp_k || lj == sz_line_break_zw_k);
+                    sz_u8_t left_context_class = effective_classes[quote_base_index - 1];
+                    left_ok = (sz_bool_t)(left_context_class == sz_line_break_bk_k ||
+                                          left_context_class == sz_line_break_cr_k ||
+                                          left_context_class == sz_line_break_lf_k ||
+                                          left_context_class == sz_line_break_nl_k ||
+                                          left_context_class == sz_line_break_op_k ||
+                                          left_context_class == sz_line_break_qu_k ||
+                                          left_context_class == sz_line_break_gl_k ||
+                                          left_context_class == sz_line_break_sp_k ||
+                                          left_context_class == sz_line_break_zw_k);
                 }
-                if (left_ok) { goto decided; }
+                if (left_ok) resolved = sz_true_k;
             }
-            /* LB15b: closing Pf quote followed by an allowed class or end-of-text. */
-            if (a == sz_line_break_qu_k && sz_line_break_descriptor_is_pf_(descriptor[k])) {
+            // LB15b: closing Pf quote followed by an allowed class or end-of-text.
+            if (!resolved && right_class == sz_line_break_qu_k &&
+                sz_line_break_descriptor_is_pf_(codepoint_descriptors[codepoint_index])) {
                 sz_bool_t right_ok;
-                if (k + 1 >= count) right_ok = sz_true_k;
+                if (codepoint_index + 1 >= count) right_ok = sz_true_k;
                 else {
-                    sz_u8_t rj = eff[k + 1];
-                    right_ok =
-                        (sz_bool_t)(rj == sz_line_break_sp_k || rj == sz_line_break_gl_k || rj == sz_line_break_wj_k ||
-                                    rj == sz_line_break_cl_k || rj == sz_line_break_qu_k || rj == sz_line_break_cp_k ||
-                                    rj == sz_line_break_ex_k || rj == sz_line_break_is_k || rj == sz_line_break_sy_k ||
-                                    rj == sz_line_break_bk_k || rj == sz_line_break_cr_k || rj == sz_line_break_lf_k ||
-                                    rj == sz_line_break_nl_k || rj == sz_line_break_zw_k);
+                    sz_u8_t right_context_class = effective_classes[codepoint_index + 1];
+                    right_ok = (sz_bool_t)(right_context_class == sz_line_break_sp_k ||
+                                           right_context_class == sz_line_break_gl_k ||
+                                           right_context_class == sz_line_break_wj_k ||
+                                           right_context_class == sz_line_break_cl_k ||
+                                           right_context_class == sz_line_break_qu_k ||
+                                           right_context_class == sz_line_break_cp_k ||
+                                           right_context_class == sz_line_break_ex_k ||
+                                           right_context_class == sz_line_break_is_k ||
+                                           right_context_class == sz_line_break_sy_k ||
+                                           right_context_class == sz_line_break_bk_k ||
+                                           right_context_class == sz_line_break_cr_k ||
+                                           right_context_class == sz_line_break_lf_k ||
+                                           right_context_class == sz_line_break_nl_k ||
+                                           right_context_class == sz_line_break_zw_k);
                 }
-                if (right_ok) { goto decided; }
+                if (right_ok) resolved = sz_true_k;
             }
-            if (b == sz_line_break_sp_k && a == sz_line_break_is_k && k + 1 < count &&
-                eff[k + 1] == sz_line_break_nu_k) {
+            if (!resolved && left_class == sz_line_break_sp_k && right_class == sz_line_break_is_k &&
+                codepoint_index + 1 < count && effective_classes[codepoint_index + 1] == sz_line_break_nu_k) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             } // LB15.3
-            if (a == sz_line_break_is_k) { goto decided; } // LB15.4
-            if ((before_sp == sz_line_break_cl_k || before_sp == sz_line_break_cp_k) && a == sz_line_break_ns_k) {
-                goto decided; // LB16
-            }
-            if (before_sp == sz_line_break_b2_k && a == sz_line_break_b2_k) { goto decided; } // LB17
-            if (b == sz_line_break_sp_k) {
+            if (!resolved && right_class == sz_line_break_is_k) resolved = sz_true_k; // LB15.4
+            if (!resolved &&
+                (leftmost_non_space_class == sz_line_break_cl_k || leftmost_non_space_class == sz_line_break_cp_k) &&
+                right_class == sz_line_break_ns_k)
+                resolved = sz_true_k; // LB16
+            if (!resolved && leftmost_non_space_class == sz_line_break_b2_k && right_class == sz_line_break_b2_k)
+                resolved = sz_true_k; // LB17
+            if (!resolved && left_class == sz_line_break_sp_k) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             } // LB18
-            /* LB19 (East-Asian-aware quotation). */
-            if (a == sz_line_break_qu_k && !sz_line_break_descriptor_is_pi_(descriptor[k])) { goto decided; }
-            if (b == sz_line_break_qu_k && !sz_line_break_descriptor_is_pf_(descriptor[b_base])) { goto decided; }
-            if (a == sz_line_break_qu_k && !sz_line_break_descriptor_is_eaw_(descriptor[b_base])) { goto decided; }
-            if (a == sz_line_break_qu_k && (k + 1 >= count || !sz_line_break_descriptor_is_eaw_(descriptor[k + 1]))) {
-                goto decided;
-            }
-            if (b == sz_line_break_qu_k && !sz_line_break_descriptor_is_eaw_(descriptor[k])) { goto decided; }
-            if (b == sz_line_break_qu_k &&
-                (b_base == 0 ||
-                 !sz_line_break_descriptor_is_eaw_(descriptor[sz_line_break_cluster_base_(raw, eff, b_base - 1)]))) {
-                goto decided;
-            }
-            if (a == sz_line_break_cb_k || b == sz_line_break_cb_k) {
+            // LB19 (East-Asian-aware quotation).
+            if (!resolved && right_class == sz_line_break_qu_k &&
+                !sz_line_break_descriptor_is_pi_(codepoint_descriptors[codepoint_index]))
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_qu_k &&
+                !sz_line_break_descriptor_is_pf_(codepoint_descriptors[left_base_index]))
+                resolved = sz_true_k;
+            if (!resolved && right_class == sz_line_break_qu_k &&
+                !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[left_base_index]))
+                resolved = sz_true_k;
+            if (!resolved && right_class == sz_line_break_qu_k &&
+                (codepoint_index + 1 >= count ||
+                 !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[codepoint_index + 1])))
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_qu_k &&
+                !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[codepoint_index]))
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_qu_k &&
+                (left_base_index == 0 ||
+                 !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[sz_line_break_cluster_base_(
+                     raw_classes, effective_classes, left_base_index - 1)])))
+                resolved = sz_true_k;
+            if (!resolved && (right_class == sz_line_break_cb_k || left_class == sz_line_break_cb_k)) {
                 is_break = sz_true_k;
-                goto decided;
+                resolved = sz_true_k;
             } // LB20
-            /* LB20a: (sot|allowed) (HY|HH) x (AL|HL). */
-            if ((b == sz_line_break_hy_k || b == sz_line_break_hh_k) &&
-                (a == sz_line_break_al_k || a == sz_line_break_hl_k)) {
-                sz_bool_t left_ctx;
-                if (b_base == 0) left_ctx = sz_true_k;
+            // LB20a: (sot|allowed) (HY|HH) x (AL|HL).
+            if (!resolved && (left_class == sz_line_break_hy_k || left_class == sz_line_break_hh_k) &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k)) {
+                sz_bool_t left_context_ok;
+                if (left_base_index == 0) left_context_ok = sz_true_k;
                 else {
-                    sz_u8_t lj = eff[b_base - 1];
-                    left_ctx = (sz_bool_t)(lj == sz_line_break_bk_k || lj == sz_line_break_cr_k ||
-                                           lj == sz_line_break_lf_k || lj == sz_line_break_nl_k ||
-                                           lj == sz_line_break_sp_k || lj == sz_line_break_zw_k ||
-                                           lj == sz_line_break_cb_k || lj == sz_line_break_gl_k);
+                    sz_u8_t left_context_class = effective_classes[left_base_index - 1];
+                    left_context_ok = (sz_bool_t)(left_context_class == sz_line_break_bk_k ||
+                                                  left_context_class == sz_line_break_cr_k ||
+                                                  left_context_class == sz_line_break_lf_k ||
+                                                  left_context_class == sz_line_break_nl_k ||
+                                                  left_context_class == sz_line_break_sp_k ||
+                                                  left_context_class == sz_line_break_zw_k ||
+                                                  left_context_class == sz_line_break_cb_k ||
+                                                  left_context_class == sz_line_break_gl_k);
                 }
-                if (left_ctx) { goto decided; }
+                if (left_context_ok) resolved = sz_true_k;
             }
-            if (a == sz_line_break_ba_k || a == sz_line_break_hy_k || a == sz_line_break_hh_k ||
-                a == sz_line_break_ns_k || b == sz_line_break_bb_k) {
-                goto decided;
-            } // LB21
-            if (b_base > 0) { // LB21a: HL (HY|HH) x [^HL] -- the HL precedes the (HY|HH) cluster (skip its marks)
-                if (eff[b_base - 1] == sz_line_break_hl_k && (b == sz_line_break_hy_k || b == sz_line_break_hh_k) &&
-                    a != sz_line_break_hl_k) {
-                    goto decided;
+            if (!resolved && (right_class == sz_line_break_ba_k || right_class == sz_line_break_hy_k ||
+                              right_class == sz_line_break_hh_k || right_class == sz_line_break_ns_k ||
+                              left_class == sz_line_break_bb_k))
+                resolved = sz_true_k; // LB21
+            // LB21a: HL (HY|HH) x [^HL] -- the HL precedes the (HY|HH) cluster (skip its marks)
+            if (!resolved && left_base_index > 0 && effective_classes[left_base_index - 1] == sz_line_break_hl_k &&
+                (left_class == sz_line_break_hy_k || left_class == sz_line_break_hh_k) &&
+                right_class != sz_line_break_hl_k)
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_sy_k && right_class == sz_line_break_hl_k)
+                resolved = sz_true_k;                                                 // LB21b
+            if (!resolved && right_class == sz_line_break_in_k) resolved = sz_true_k; // LB22
+            if (!resolved && (left_class == sz_line_break_al_k || left_class == sz_line_break_hl_k) &&
+                right_class == sz_line_break_nu_k)
+                resolved = sz_true_k; // LB23
+            if (!resolved && left_class == sz_line_break_nu_k &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k))
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_pr_k &&
+                (right_class == sz_line_break_id_k || right_class == sz_line_break_eb_k ||
+                 right_class == sz_line_break_em_k))
+                resolved = sz_true_k; // LB23a
+            if (!resolved &&
+                (left_class == sz_line_break_id_k || left_class == sz_line_break_eb_k ||
+                 left_class == sz_line_break_em_k) &&
+                right_class == sz_line_break_po_k)
+                resolved = sz_true_k;
+            if (!resolved && (left_class == sz_line_break_pr_k || left_class == sz_line_break_po_k) &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k))
+                resolved = sz_true_k; // LB24
+            if (!resolved && (left_class == sz_line_break_al_k || left_class == sz_line_break_hl_k) &&
+                (right_class == sz_line_break_pr_k || right_class == sz_line_break_po_k))
+                resolved = sz_true_k;
+            // LB25: numeric clusters.
+            if (!resolved) {
+                sz_bool_t has_preceding_numeric_run = sz_false_k;
+                sz_size_t scan_left = codepoint_index;
+                while (scan_left > 0 && (effective_classes[scan_left - 1] == sz_line_break_sy_k ||
+                                         effective_classes[scan_left - 1] == sz_line_break_is_k))
+                    --scan_left;
+                if (scan_left > 0 && effective_classes[scan_left - 1] == sz_line_break_nu_k)
+                    has_preceding_numeric_run = sz_true_k;
+                sz_bool_t has_preceding_numeric_run_then_close = sz_false_k;
+                if (left_class == sz_line_break_cl_k || left_class == sz_line_break_cp_k) {
+                    sz_size_t close_scan_left = codepoint_index - 1;
+                    while (close_scan_left > 0 && (effective_classes[close_scan_left - 1] == sz_line_break_sy_k ||
+                                                   effective_classes[close_scan_left - 1] == sz_line_break_is_k))
+                        --close_scan_left;
+                    if (close_scan_left > 0 && effective_classes[close_scan_left - 1] == sz_line_break_nu_k)
+                        has_preceding_numeric_run_then_close = sz_true_k;
                 }
+                if (!resolved && has_preceding_numeric_run_then_close &&
+                    (right_class == sz_line_break_po_k || right_class == sz_line_break_pr_k))
+                    resolved = sz_true_k;
+                if (!resolved && has_preceding_numeric_run &&
+                    (right_class == sz_line_break_po_k || right_class == sz_line_break_pr_k))
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_po_k && right_class == sz_line_break_op_k &&
+                    codepoint_index + 1 < count && effective_classes[codepoint_index + 1] == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_po_k && right_class == sz_line_break_op_k &&
+                    codepoint_index + 2 < count && effective_classes[codepoint_index + 1] == sz_line_break_is_k &&
+                    effective_classes[codepoint_index + 2] == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_po_k && right_class == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_pr_k && right_class == sz_line_break_op_k &&
+                    codepoint_index + 1 < count && effective_classes[codepoint_index + 1] == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_pr_k && right_class == sz_line_break_op_k &&
+                    codepoint_index + 2 < count && effective_classes[codepoint_index + 1] == sz_line_break_is_k &&
+                    effective_classes[codepoint_index + 2] == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_pr_k && right_class == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_hy_k && right_class == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && left_class == sz_line_break_is_k && right_class == sz_line_break_nu_k)
+                    resolved = sz_true_k;
+                if (!resolved && has_preceding_numeric_run && right_class == sz_line_break_nu_k) resolved = sz_true_k;
             }
-            if (b == sz_line_break_sy_k && a == sz_line_break_hl_k) { goto decided; } // LB21b
-            if (a == sz_line_break_in_k) { goto decided; }                            // LB22
-            if ((b == sz_line_break_al_k || b == sz_line_break_hl_k) && a == sz_line_break_nu_k) {
-                goto decided;
-            } // LB23
-            if (b == sz_line_break_nu_k && (a == sz_line_break_al_k || a == sz_line_break_hl_k)) { goto decided; }
-            if (b == sz_line_break_pr_k &&
-                (a == sz_line_break_id_k || a == sz_line_break_eb_k || a == sz_line_break_em_k)) {
-                goto decided;
-            } // LB23a
-            if ((b == sz_line_break_id_k || b == sz_line_break_eb_k || b == sz_line_break_em_k) &&
-                a == sz_line_break_po_k) {
-                goto decided;
-            }
-            if ((b == sz_line_break_pr_k || b == sz_line_break_po_k) &&
-                (a == sz_line_break_al_k || a == sz_line_break_hl_k)) {
-                goto decided;
-            } // LB24
-            if ((b == sz_line_break_al_k || b == sz_line_break_hl_k) &&
-                (a == sz_line_break_pr_k || a == sz_line_break_po_k)) {
-                goto decided;
-            }
-            /* LB25: numeric clusters. */
-            {
-                sz_bool_t left_nu_run = sz_false_k;
-                sz_size_t m = k;
-                while (m > 0 && (eff[m - 1] == sz_line_break_sy_k || eff[m - 1] == sz_line_break_is_k)) --m;
-                if (m > 0 && eff[m - 1] == sz_line_break_nu_k) left_nu_run = sz_true_k;
-                sz_bool_t left_nu_run_then_close = sz_false_k;
-                if (b == sz_line_break_cl_k || b == sz_line_break_cp_k) {
-                    sz_size_t mm = k - 1;
-                    while (mm > 0 && (eff[mm - 1] == sz_line_break_sy_k || eff[mm - 1] == sz_line_break_is_k)) --mm;
-                    if (mm > 0 && eff[mm - 1] == sz_line_break_nu_k) left_nu_run_then_close = sz_true_k;
+            // LB26 / LB27 Hangul.
+            if (!resolved && left_class == sz_line_break_jl_k &&
+                (right_class == sz_line_break_jl_k || right_class == sz_line_break_jv_k ||
+                 right_class == sz_line_break_h2_k || right_class == sz_line_break_h3_k))
+                resolved = sz_true_k;
+            if (!resolved && (left_class == sz_line_break_jv_k || left_class == sz_line_break_h2_k) &&
+                (right_class == sz_line_break_jv_k || right_class == sz_line_break_jt_k))
+                resolved = sz_true_k;
+            if (!resolved && (left_class == sz_line_break_jt_k || left_class == sz_line_break_h3_k) &&
+                right_class == sz_line_break_jt_k)
+                resolved = sz_true_k;
+            if (!resolved &&
+                (left_class == sz_line_break_jl_k || left_class == sz_line_break_jv_k ||
+                 left_class == sz_line_break_jt_k || left_class == sz_line_break_h2_k ||
+                 left_class == sz_line_break_h3_k) &&
+                right_class == sz_line_break_po_k)
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_pr_k &&
+                (right_class == sz_line_break_jl_k || right_class == sz_line_break_jv_k ||
+                 right_class == sz_line_break_jt_k || right_class == sz_line_break_h2_k ||
+                 right_class == sz_line_break_h3_k))
+                resolved = sz_true_k;
+            if (!resolved && (left_class == sz_line_break_al_k || left_class == sz_line_break_hl_k) &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k))
+                resolved = sz_true_k; // LB28
+            // LB28a: aksara clusters; Dotted_Circle acts as an aksara base.
+            if (!resolved) {
+                sz_bool_t left_is_dotted_circle = sz_line_break_descriptor_is_dotted_circle_(
+                    codepoint_descriptors[left_base_index]);
+                sz_bool_t right_is_dotted_circle = sz_line_break_descriptor_is_dotted_circle_(
+                    codepoint_descriptors[codepoint_index]);
+                sz_bool_t left_is_base = (sz_bool_t)(left_class == sz_line_break_ak_k ||
+                                                     left_class == sz_line_break_as_k || left_is_dotted_circle);
+                sz_bool_t right_is_base = (sz_bool_t)(right_class == sz_line_break_ak_k ||
+                                                      right_class == sz_line_break_as_k || right_is_dotted_circle);
+                sz_bool_t right_base_or_dotted_circle = (sz_bool_t)(right_class == sz_line_break_ak_k ||
+                                                                    right_is_dotted_circle);
+                if (!resolved && left_class == sz_line_break_ap_k && right_is_base) resolved = sz_true_k; // 28.11
+                if (!resolved && left_is_base &&
+                    (right_class == sz_line_break_vf_k || right_class == sz_line_break_vi_k))
+                    resolved = sz_true_k; // 28.12
+                if (!resolved && left_class == sz_line_break_vi_k && right_base_or_dotted_circle &&
+                    left_base_index > 0) { // 28.13
+                    sz_size_t predecessor_index = sz_line_break_cluster_base_(raw_classes, effective_classes,
+                                                                              left_base_index - 1);
+                    sz_u8_t predecessor_class = effective_classes[predecessor_index];
+                    if (predecessor_class == sz_line_break_ak_k || predecessor_class == sz_line_break_as_k ||
+                        sz_line_break_descriptor_is_dotted_circle_(codepoint_descriptors[predecessor_index]))
+                        resolved = sz_true_k;
                 }
-                if (left_nu_run_then_close && (a == sz_line_break_po_k || a == sz_line_break_pr_k)) { goto decided; }
-                if (left_nu_run && (a == sz_line_break_po_k || a == sz_line_break_pr_k)) { goto decided; }
-                if (b == sz_line_break_po_k && a == sz_line_break_op_k && k + 1 < count &&
-                    eff[k + 1] == sz_line_break_nu_k) {
-                    goto decided;
-                }
-                if (b == sz_line_break_po_k && a == sz_line_break_op_k && k + 2 < count &&
-                    eff[k + 1] == sz_line_break_is_k && eff[k + 2] == sz_line_break_nu_k) {
-                    goto decided;
-                }
-                if (b == sz_line_break_po_k && a == sz_line_break_nu_k) { goto decided; }
-                if (b == sz_line_break_pr_k && a == sz_line_break_op_k && k + 1 < count &&
-                    eff[k + 1] == sz_line_break_nu_k) {
-                    goto decided;
-                }
-                if (b == sz_line_break_pr_k && a == sz_line_break_op_k && k + 2 < count &&
-                    eff[k + 1] == sz_line_break_is_k && eff[k + 2] == sz_line_break_nu_k) {
-                    goto decided;
-                }
-                if (b == sz_line_break_pr_k && a == sz_line_break_nu_k) { goto decided; }
-                if (b == sz_line_break_hy_k && a == sz_line_break_nu_k) { goto decided; }
-                if (b == sz_line_break_is_k && a == sz_line_break_nu_k) { goto decided; }
-                if (left_nu_run && a == sz_line_break_nu_k) { goto decided; }
+                if (!resolved && left_is_base && right_is_base && codepoint_index + 1 < count &&
+                    effective_classes[codepoint_index + 1] == sz_line_break_vf_k)
+                    resolved = sz_true_k; // 28.14
             }
-            /* LB26 / LB27 Hangul. */
-            if (b == sz_line_break_jl_k && (a == sz_line_break_jl_k || a == sz_line_break_jv_k ||
-                                            a == sz_line_break_h2_k || a == sz_line_break_h3_k)) {
-                goto decided;
-            }
-            if ((b == sz_line_break_jv_k || b == sz_line_break_h2_k) &&
-                (a == sz_line_break_jv_k || a == sz_line_break_jt_k)) {
-                goto decided;
-            }
-            if ((b == sz_line_break_jt_k || b == sz_line_break_h3_k) && a == sz_line_break_jt_k) { goto decided; }
-            if ((b == sz_line_break_jl_k || b == sz_line_break_jv_k || b == sz_line_break_jt_k ||
-                 b == sz_line_break_h2_k || b == sz_line_break_h3_k) &&
-                a == sz_line_break_po_k) {
-                goto decided;
-            }
-            if (b == sz_line_break_pr_k &&
-                (a == sz_line_break_jl_k || a == sz_line_break_jv_k || a == sz_line_break_jt_k ||
-                 a == sz_line_break_h2_k || a == sz_line_break_h3_k)) {
-                goto decided;
-            }
-            if ((b == sz_line_break_al_k || b == sz_line_break_hl_k) &&
-                (a == sz_line_break_al_k || a == sz_line_break_hl_k)) {
-                goto decided;
-            } // LB28
-            /* LB28a: aksara clusters; Dotted_Circle acts as an aksara base. */
-            {
-                sz_bool_t b_dotted = sz_line_break_descriptor_is_dotted_circle_(descriptor[b_base]);
-                sz_bool_t a_dotted = sz_line_break_descriptor_is_dotted_circle_(descriptor[k]);
-                sz_bool_t b_is_base = (sz_bool_t)(b == sz_line_break_ak_k || b == sz_line_break_as_k || b_dotted);
-                sz_bool_t a_is_base = (sz_bool_t)(a == sz_line_break_ak_k || a == sz_line_break_as_k || a_dotted);
-                sz_bool_t a_base_or_dc = (sz_bool_t)(a == sz_line_break_ak_k || a_dotted);
-                if (b == sz_line_break_ap_k && a_is_base) { goto decided; }                              // 28.11
-                if (b_is_base && (a == sz_line_break_vf_k || a == sz_line_break_vi_k)) { goto decided; } // 28.12
-                if (b == sz_line_break_vi_k && a_base_or_dc) {                                           // 28.13
-                    sz_size_t vi_pos = b_base;
-                    if (vi_pos > 0) {
-                        sz_size_t pre = sz_line_break_cluster_base_(raw, eff, vi_pos - 1);
-                        sz_u8_t pc = eff[pre];
-                        if (pc == sz_line_break_ak_k || pc == sz_line_break_as_k ||
-                            sz_line_break_descriptor_is_dotted_circle_(descriptor[pre])) {
-                            goto decided;
-                        }
-                    }
-                }
-                if (b_is_base && a_is_base && k + 1 < count && eff[k + 1] == sz_line_break_vf_k) {
-                    goto decided;
-                } // 28.14
-            }
-            if (b == sz_line_break_is_k && (a == sz_line_break_al_k || a == sz_line_break_hl_k)) {
-                goto decided;
-            } // LB29
-            /* LB30. */
-            if ((b == sz_line_break_al_k || b == sz_line_break_hl_k || b == sz_line_break_nu_k) &&
-                a == sz_line_break_op_k && !sz_line_break_descriptor_is_eaw_(descriptor[k])) {
-                goto decided;
-            }
-            if (b == sz_line_break_cp_k &&
-                (a == sz_line_break_al_k || a == sz_line_break_hl_k || a == sz_line_break_nu_k) &&
-                !sz_line_break_descriptor_is_eaw_(descriptor[b_base])) {
-                goto decided;
-            }
-            /* LB30a: RI RI keep pairs. */
-            if (b == sz_line_break_ri_k && a == sz_line_break_ri_k) {
-                sz_size_t ri = 0;
-                sz_size_t scan = b_base;
+            if (!resolved && left_class == sz_line_break_is_k &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k))
+                resolved = sz_true_k; // LB29
+            // LB30.
+            if (!resolved &&
+                (left_class == sz_line_break_al_k || left_class == sz_line_break_hl_k ||
+                 left_class == sz_line_break_nu_k) &&
+                right_class == sz_line_break_op_k &&
+                !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[codepoint_index]))
+                resolved = sz_true_k;
+            if (!resolved && left_class == sz_line_break_cp_k &&
+                (right_class == sz_line_break_al_k || right_class == sz_line_break_hl_k ||
+                 right_class == sz_line_break_nu_k) &&
+                !sz_line_break_descriptor_is_eaw_(codepoint_descriptors[left_base_index]))
+                resolved = sz_true_k;
+            // LB30a: RI RI keep pairs.
+            if (!resolved && left_class == sz_line_break_ri_k && right_class == sz_line_break_ri_k) {
+                sz_size_t regional_indicator_count = 0;
+                sz_size_t scan = left_base_index;
                 sz_bool_t scanning = sz_true_k;
-                while (scanning && eff[scan] == sz_line_break_ri_k && raw[scan] == sz_line_break_ri_k) {
-                    ++ri;
+                while (scanning && effective_classes[scan] == sz_line_break_ri_k &&
+                       raw_classes[scan] == sz_line_break_ri_k) {
+                    ++regional_indicator_count;
                     if (scan == 0) break;
-                    scan = sz_line_break_cluster_base_(raw, eff, scan - 1);
+                    scan = sz_line_break_cluster_base_(raw_classes, effective_classes, scan - 1);
                 }
-                if (ri % 2 == 1) { goto decided; }
+                if (regional_indicator_count % 2 == 1) resolved = sz_true_k;
             }
-            /* LB30b. */
-            if (b == sz_line_break_eb_k && a == sz_line_break_em_k) { goto decided; }
-            if (a == sz_line_break_em_k && sz_line_break_descriptor_is_extpict_cn_(descriptor[b_base])) {
-                goto decided;
-            }
+            // LB30b.
+            if (!resolved && left_class == sz_line_break_eb_k && right_class == sz_line_break_em_k)
+                resolved = sz_true_k;
+            if (!resolved && right_class == sz_line_break_em_k &&
+                sz_line_break_descriptor_is_extpict_cn_(codepoint_descriptors[left_base_index]))
+                resolved = sz_true_k;
 
-            is_break = sz_true_k; // LB31
+            if (!resolved) is_break = sz_true_k; // LB31
 
-        decided:
-            /* A forced cut leaves the last two codepoints without real right context (the LB lookahead reaches at most
-         *  k+2), so on such a window only opportunities with two further in-window codepoints are committed; the
-         *  open line resumes in the next call where full context is available. A true tail commits every break. */
-            if (is_break && (window_is_tail || k + 2 < count)) {
+            // A forced cut leaves the last two codepoints without real right context (the LB lookahead reaches at
+            // most codepoint_index+2), so on such a window only opportunities with two further in-window codepoints
+            // are committed; the open line resumes in the next call where full context is available. A true tail
+            // commits every break.
+            if (is_break && (window_is_tail || codepoint_index + 2 < count)) {
                 if (lines == lines_capacity) {
                     hit_capacity = sz_true_k;
                     break;
                 }
                 line_starts[lines] = local_line_start;
-                line_lengths[lines] = start[k] - local_line_start;
+                line_lengths[lines] = codepoint_byte_starts[codepoint_index] - local_line_start;
                 ++lines;
-                local_line_start = start[k];
+                local_line_start = codepoint_byte_starts[codepoint_index];
             }
         }
 
@@ -503,7 +574,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
             return lines;
         }
         if (window_is_tail) {
-            /* The trailing span [local_line_start, length) is the final line; end of text is a boundary (LB3). */
+            // The trailing span [local_line_start, length) is the final line; end of text is a boundary (LB3).
             if (lines == lines_capacity) {
                 if (bytes_consumed) *bytes_consumed = local_line_start;
                 return lines;
@@ -514,9 +585,9 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
             if (bytes_consumed) *bytes_consumed = length;
             return lines;
         }
-        /* Forced cut: the open line is unresolved. Re-anchor the next window at it (guaranteed progress as long as a
-     *  single line fits the window). If no break committed in this window, advance past the window to avoid a
-     *  stall on a pathologically long line, mirroring the resume-offset contract. */
+        // Forced cut: the open line is unresolved. Re-anchor the next window at it (guaranteed progress as long as a
+        // single line fits the window). If no break committed in this window, advance past the window to avoid a
+        // stall on a pathologically long line, mirroring the resume-offset contract.
         line_start = (local_line_start > line_start) ? local_line_start : window_end;
     }
 
