@@ -246,11 +246,16 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_count_regional_indicators_before_(sz_cp
  *  which is all WB3c (`ZWJ x Extended_Pictographic`) needs. `valid` is false for the sot/eot sentinels.
  */
 typedef struct sz_word_element_t {
-    sz_u8_t property;      /**< Word_Break property of the base codepoint. */
-    sz_rune_t codepoint;   /**< Base codepoint (disambiguates Single/Double_Quote, Extended_Pictographic). */
-    sz_size_t start;       /**< Byte offset of the base codepoint. */
-    sz_bool_t ends_in_zwj; /**< The element's final codepoint is U+200D ZERO WIDTH JOINER. */
-    sz_bool_t valid;       /**< False for the sot/eot sentinel. */
+    /** Word_Break property of the base codepoint. */
+    sz_u8_t property;
+    /** Base codepoint (disambiguates Single_Quote / Double_Quote and Extended_Pictographic). */
+    sz_rune_t codepoint;
+    /** Byte offset of the base codepoint. */
+    sz_size_t start;
+    /** The element's final codepoint is U+200D ZERO WIDTH JOINER. */
+    sz_bool_t ends_in_zwj;
+    /** False for the sot/eot sentinel. */
+    sz_bool_t valid;
 } sz_word_element_t;
 
 /** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
@@ -462,9 +467,140 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
     return sz_true_k; // WB999
 }
 
-/*  Plural UAX-29 word segmentation: one left-to-right sweep emits every word into parallel
- *  `word_starts` / `word_lengths` arrays, at exactly the positions where `sz_utf8_is_word_boundary_serial` holds.
- *  On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
+/**
+ *  @brief Forward run-state carried across codepoints by the bulk segmenter so WB3..WB16 resolve without the
+ *         per-position backward re-walks the `sz_utf8_is_word_boundary_serial` oracle performs. The oracle re-derives
+ *         the WB4 effective-previous element, the element two bases back, and the Regional_Indicator run length
+ *         BACKWARD on every position (the run re-count is O(n²) on long Regional_Indicator runs); here they are tracked
+ *         forward. The forward WB6/WB7b/WB12 lookahead keeps reusing `sz_word_next_element_` (the same bounded forward
+ *         fold the oracle uses), so only the backward rescans are removed. Fields mirror `sz_utf8_word_break_carry_t`.
+ */
+typedef struct sz_word_serial_state_t {
+    /** Word_Break class of the WB4 effective-previous element's base codepoint. */
+    sz_u8_t previous_property;
+    /** That base codepoint (disambiguates Single_Quote / Double_Quote and Extended_Pictographic). */
+    sz_rune_t previous_codepoint;
+    /** Class of the element one base further back (the WB7 / WB11 / WB7c left context). */
+    sz_u8_t before_property;
+    /** That base codepoint. */
+    sz_rune_t before_codepoint;
+    /** The previous element's last codepoint is U+200D ZERO WIDTH JOINER (WB3c). */
+    sz_bool_t previous_ends_in_zwj;
+    /** Class of the raw immediately-previous codepoint (WB3 / WB3a / WB3d). */
+    sz_u8_t previous_raw_property;
+    /** That raw codepoint (WB3d WSegSpace x WSegSpace). */
+    sz_rune_t previous_raw_codepoint;
+    /** The Regional_Indicator run ending at the previous element has odd length (WB15 / WB16). */
+    sz_bool_t regional_indicator_run_odd;
+    /** A codepoint has been processed (clears the WB1 start-of-text state). */
+    sz_bool_t has_previous;
+} sz_word_serial_state_t;
+
+/** @brief Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new element base,
+ *         maintaining the two-back base chain, the Regional_Indicator parity, and the raw-previous fields. */
+SZ_INTERNAL void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
+    sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
+                                                sz_word_is_newline_(state->previous_raw_property));
+    sz_bool_t const is_ignorable = sz_utf8_word_break_is_ignorable_(property);
+    // A non-ignorable codepoint, the very first codepoint, or an ignorable directly after a Newline (WB4 de-ignore)
+    // opens a fresh element base; every other ignorable is absorbed into the standing element (its base is unchanged).
+    if (!is_ignorable || after_newline || !state->has_previous) {
+        state->before_property = state->previous_property;
+        state->before_codepoint = state->previous_codepoint;
+        state->previous_property = property;
+        state->previous_codepoint = codepoint;
+        state->regional_indicator_run_odd = (property == sz_utf8_word_break_regional_ind_k)
+                                                ? (sz_bool_t)(!state->regional_indicator_run_odd)
+                                                : sz_false_k;
+    }
+    state->previous_ends_in_zwj = (sz_bool_t)(property == sz_utf8_word_break_zwj_k);
+    state->previous_raw_property = property;
+    state->previous_raw_codepoint = codepoint;
+    state->has_previous = sz_true_k;
+}
+
+/** @brief Boundary decision (WB3..WB999) between @p state's previous codepoint and the @p next codepoint. The only
+ *         right-context rules (WB6 / WB7b / WB12) reuse the bounded `sz_word_next_element_` forward fold; all left
+ *         context comes from @p state. Byte-identical to `sz_utf8_is_word_boundary_serial`. */
+SZ_INTERNAL sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
+                                               sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
+                                               sz_size_t position) {
+    sz_u8_t const immediate_property = state->previous_raw_property;
+    sz_rune_t const immediate_codepoint = state->previous_raw_codepoint;
+    if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
+        return sz_false_k;                                                  // WB3  CR x LF
+    if (sz_word_is_newline_(immediate_property)) return sz_true_k;          // WB3a break after Newline/CR/LF
+    if (sz_word_is_newline_(next_property)) return sz_true_k;               // WB3b break before Newline/CR/LF
+    if (sz_utf8_word_break_is_ignorable_(next_property)) return sz_false_k; // WB4 absorb Extend/Format/ZWJ
+
+    sz_u8_t const previous_property = state->previous_property;
+    sz_rune_t const previous_codepoint = state->previous_codepoint;
+    if (state->previous_ends_in_zwj && sz_rune_is_extended_pictographic(next_codepoint))
+        return sz_false_k; // WB3c ZWJ x Extended_Pictographic
+    if (sz_rune_is_wsegspace(immediate_codepoint) && sz_rune_is_wsegspace(next_codepoint))
+        return sz_false_k; // WB3d WSegSpace x WSegSpace
+
+    sz_bool_t const previous_is_alphabetic_or_hebrew = sz_utf8_word_break_is_aletter_or_hebrew_(previous_property);
+    sz_bool_t const next_is_alphabetic_or_hebrew = sz_utf8_word_break_is_aletter_or_hebrew_(next_property);
+
+    if (previous_is_alphabetic_or_hebrew && next_is_alphabetic_or_hebrew) return sz_false_k; // WB5
+    if (previous_is_alphabetic_or_hebrew &&
+        (next_property == sz_utf8_word_break_midletter_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
+        sz_word_element_t const after = sz_word_next_element_(text, length, position);
+        if (after.valid && sz_utf8_word_break_is_aletter_or_hebrew_(after.property)) return sz_false_k; // WB6
+    }
+    if ((previous_property == sz_utf8_word_break_midletter_k ||
+         sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
+        next_is_alphabetic_or_hebrew) {
+        if (sz_utf8_word_break_is_aletter_or_hebrew_(state->before_property)) return sz_false_k; // WB7
+    }
+    if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
+        sz_word_is_single_quote_(next_property, next_codepoint))
+        return sz_false_k; // WB7a Hebrew x Single_Quote
+    if (previous_property == sz_utf8_word_break_hebrew_letter_k &&
+        sz_word_is_double_quote_(next_property, next_codepoint)) {
+        sz_word_element_t const after = sz_word_next_element_(text, length, position);
+        if (after.valid && after.property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; // WB7b
+    }
+    if (sz_word_is_double_quote_(previous_property, previous_codepoint) &&
+        next_property == sz_utf8_word_break_hebrew_letter_k) {
+        if (state->before_property == sz_utf8_word_break_hebrew_letter_k) return sz_false_k; // WB7c
+    }
+    if (previous_property == sz_utf8_word_break_numeric_k && next_property == sz_utf8_word_break_numeric_k)
+        return sz_false_k;                                                                                    // WB8
+    if (previous_is_alphabetic_or_hebrew && next_property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB9
+    if (previous_property == sz_utf8_word_break_numeric_k && next_is_alphabetic_or_hebrew) return sz_false_k; // WB10
+    if ((previous_property == sz_utf8_word_break_midnum_k ||
+         sz_word_is_mid_num_let_q_(previous_property, previous_codepoint)) &&
+        next_property == sz_utf8_word_break_numeric_k) {
+        if (state->before_property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB11
+    }
+    if (previous_property == sz_utf8_word_break_numeric_k &&
+        (next_property == sz_utf8_word_break_midnum_k || sz_word_is_mid_num_let_q_(next_property, next_codepoint))) {
+        sz_word_element_t const after = sz_word_next_element_(text, length, position);
+        if (after.valid && after.property == sz_utf8_word_break_numeric_k) return sz_false_k; // WB12
+    }
+    if (previous_property == sz_utf8_word_break_katakana_k && next_property == sz_utf8_word_break_katakana_k)
+        return sz_false_k; // WB13
+    if ((previous_is_alphabetic_or_hebrew || previous_property == sz_utf8_word_break_numeric_k ||
+         previous_property == sz_utf8_word_break_katakana_k ||
+         previous_property == sz_utf8_word_break_extendnumlet_k) &&
+        next_property == sz_utf8_word_break_extendnumlet_k)
+        return sz_false_k; // WB13a
+    if (previous_property == sz_utf8_word_break_extendnumlet_k &&
+        (next_is_alphabetic_or_hebrew || next_property == sz_utf8_word_break_numeric_k ||
+         next_property == sz_utf8_word_break_katakana_k))
+        return sz_false_k; // WB13b
+    if (previous_property == sz_utf8_word_break_regional_ind_k && next_property == sz_utf8_word_break_regional_ind_k) {
+        if (state->regional_indicator_run_odd) return sz_false_k; // WB15/WB16
+    }
+    return sz_true_k; // WB999
+}
+
+/*  Plural UAX-29 word segmentation: ONE left-to-right sweep emits every word into parallel `word_starts` /
+ *  `word_lengths`, carrying the WB run-state so each codepoint is decoded once and no boundary re-walks its left
+ *  context (O(n), no per-position backward rescans). Byte-identical to driving `sz_utf8_is_word_boundary_serial` per
+ *  position. On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
  *  boundary - so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
  */
 SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
@@ -478,17 +614,30 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
         return 0;
     }
 
-    sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
-    // Position 0 is always a boundary, so the first reportable interior boundary is after the first codepoint. Step by
-    // the continuation-bit partition (next non-continuation byte) - the SAME partition the boundary predicate and its
-    // backward look-back use - so segmentation is identical regardless of where a streamed call resumes. A
-    // declared-length step would land off that grid on a truncated/stray sequence and make the resume point
-    // capacity-dependent on malformed input.
+    sz_word_serial_state_t state;
+    state.previous_property = (sz_u8_t)sz_utf8_word_break_other_k;
+    state.previous_codepoint = 0;
+    state.before_property = (sz_u8_t)sz_utf8_word_break_other_k;
+    state.before_codepoint = 0;
+    state.previous_ends_in_zwj = sz_false_k;
+    state.previous_raw_property = (sz_u8_t)sz_utf8_word_break_other_k;
+    state.previous_raw_codepoint = 0;
+    state.regional_indicator_run_odd = sz_false_k;
+    state.has_previous = sz_false_k;
+
+    // Position 0 is always a boundary (WB1); seed the state from the first codepoint and report interior boundaries
+    // from the second onward. Step by the maximal-subpart partition (the same `sz_utf8_decode_` grid the predicate and
+    // its forward look-ahead use) so a streamed resume reproduces the identical segmentation on malformed input.
+    sz_size_t word_start = 0;
     sz_size_t position = 0;
-    sz_utf8_decode_(text, length, &position);
+    sz_rune_t const first_codepoint = sz_utf8_decode_(text, length, &position);
+    sz_word_serial_advance_(&state, sz_rune_word_break_property(first_codepoint), first_codepoint);
 
     while (position < length) {
-        if (sz_utf8_is_word_boundary_serial(text, length, position)) {
+        sz_size_t next_position = position;
+        sz_rune_t const next_codepoint = sz_utf8_decode_(text, length, &next_position);
+        sz_u8_t const next_property = sz_rune_word_break_property(next_codepoint);
+        if (sz_word_serial_boundary_(&state, next_property, next_codepoint, text, length, position)) {
             if (words == words_capacity) {
                 if (bytes_consumed) *bytes_consumed = word_start;
                 return words;
@@ -498,7 +647,8 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
             ++words;
             word_start = position;
         }
-        sz_utf8_decode_(text, length, &position);
+        sz_word_serial_advance_(&state, next_property, next_codepoint);
+        position = next_position;
     }
 
     // The trailing span [word_start, length) is the last word (end of text is always a boundary).

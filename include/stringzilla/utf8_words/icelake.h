@@ -312,10 +312,14 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_
 
 /** @brief  The codepoint partition of one window plus the lanes that must be reclassified to U+FFFD (Other). */
 typedef struct sz_utf8_word_break_partition_t {
-    sz_u64_t start_bytes;  /**< Codepoint-start lanes under the canonical maximal-subpart partition. */
-    sz_u64_t continuation; /**< Claimed continuation bytes (the interior of valid multi-byte codepoints). */
-    sz_u64_t forced_other; /**< Lanes whose class must be forced to U+FFFD/Other: strays + short/ill-formed leads. */
-    sz_u64_t length_two;   /**< High-nibble declared-length lead masks, reused by the block resolver's truncation. */
+    /** Codepoint-start lanes under the canonical maximal-subpart partition. */
+    sz_u64_t start_bytes;
+    /** Claimed continuation bytes (the interior of valid multi-byte codepoints). */
+    sz_u64_t continuation;
+    /** Lanes whose class must be forced to U+FFFD/Other: strays + short/ill-formed leads. */
+    sz_u64_t forced_other;
+    /** High-nibble declared-length lead masks (two/three/four bytes), reused by the block resolver's truncation. */
+    sz_u64_t length_two;
     sz_u64_t length_three;
     sz_u64_t length_four;
 } sz_utf8_word_break_partition_t;
@@ -353,8 +357,16 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_
     sz_u64_t const claimed_unmasked = (length_ge_two << 1) | ((length_three | length_four) << 2) | (length_four << 3);
     sz_u64_t const claimed_optimistic = claimed_unmasked & valid;
     // At end-of-text a lead whose declared span runs PAST `valid` is genuinely truncated (a 1-byte U+FFFD), not a
-    // benign straddle; force the malformed path so its in-window continuations become strays.
-    int const end_of_text_truncated_lead = at_end_of_text && claimed_unmasked != claimed_optimistic;
+    // benign straddle; force the malformed path so its in-window continuations become strays. Detect it from the
+    // lead's POSITION — a 2/3/4-byte lead in the top 1/2/3 valid lanes declares a byte beyond `loaded`. The
+    // `claimed_unmasked` shift cannot be reused here: a 3-byte lead at lane `loaded-2` (or a 4-byte at `loaded-3`)
+    // shifts its far continuation claim to bit 64/65, which the 64-bit word drops, hiding the truncation.
+    sz_u64_t const top_one_lane = valid & ~(valid >> 1);
+    sz_u64_t const top_two_lanes = valid & ~(valid >> 2);
+    sz_u64_t const top_three_lanes = valid & ~(valid >> 3);
+    sz_u64_t const declared_past_window = (length_two & top_one_lane) | (length_three & top_two_lanes) |
+                                          (length_four & top_three_lanes);
+    int const end_of_text_truncated_lead = at_end_of_text && declared_past_window != 0;
     // Overlong / surrogate / out-of-range leads (rare) also diverge; detect them only when a multi-byte lead exists.
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
@@ -414,19 +426,28 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_
  *          a straddle, re-derives a carry, or calls the serial oracle.
  */
 typedef struct sz_utf8_word_break_carry_t {
-    sz_u8_t bridge_open;      /**< 1 if a WB6/7/11/12 bridge shadow is open at the previous block's edge. */
-    sz_u8_t bridge_kind;      /**< Which left letter opened the shadow (@ref sz_utf8_word_break_bridge_none_k ...). */
-    sz_u8_t left_property;    /**< Effective `previous_property` at the next window's first emitted lane. */
-    sz_u8_t have_prev;        /**< 0 only at the very start of the text (WB1 sot). */
-    sz_u8_t ri_parity;        /**< Parity of the contiguous RI run open at that lane (0 or 1). */
-    sz_u8_t prev_is_wseg;     /**< The codepoint immediately below lane 0 is a WSegSpace (WB3d across the edge). */
-    sz_u8_t prev_ends_in_zwj; /**< The previous element's LAST codepoint is a bare ZWJ (WB3c across the edge). */
+    /** 1 if a WB6/7/11/12 bridge shadow is open at the previous block's edge. */
+    sz_u8_t bridge_open;
+    /** Which left letter opened the shadow (@ref sz_utf8_word_break_bridge_none_k ...). */
+    sz_u8_t bridge_kind;
+    /** Effective `previous_property` at the next window's first emitted lane. */
+    sz_u8_t left_property;
+    /** 0 only at the very start of the text (WB1 sot). */
+    sz_u8_t have_prev;
+    /** Parity of the contiguous Regional_Indicator run open at that lane (0 or 1). */
+    sz_u8_t ri_parity;
+    /** The codepoint immediately below lane 0 is a WSegSpace (WB3d across the edge). */
+    sz_u8_t prev_is_wseg;
+    /** The previous element's LAST codepoint is a bare ZWJ (WB3c across the edge). */
+    sz_u8_t prev_ends_in_zwj;
 } sz_utf8_word_break_carry_t;
 
 /** @brief  One classified block resolved into per-lane boundary bits plus the byte the driver advances to. */
 typedef struct sz_utf8_word_break_window_t {
-    sz_u64_t breaks;    /**< Bit `i` set => a UAX-29 word boundary begins at codepoint-lead lane `i`. */
-    sz_size_t resolved; /**< Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted. */
+    /** Bit `i` set => a UAX-29 word boundary begins at codepoint-lead lane `i`. */
+    sz_u64_t breaks;
+    /** Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted. */
+    sz_size_t resolved;
 } sz_utf8_word_break_window_t;
 
 /**
@@ -811,19 +832,24 @@ SZ_INTERNAL sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_icelake_
     boundary &= ~lead_ignorable;
     boundary |= force_break & start_bytes_no_bridge; // WB3a/WB3b break around Newline/CR/LF
 
-    // Bridge shadow (the deferred WB6/7/11/12 right context). When an open Mid* (its left letter present, in-window
-    // or carried) is followed only by Mid*/ignorables/continuations up to the block edge with NO matching right
-    // letter yet, the verdict on the break AFTER the Mid (before its right letter, which lies past the edge) depends
-    // on the next block. Flood the open Mid* rightward across the bridge gate; if the flood reaches the top valid
-    // lane the shadow is undecided. Flooding it back left gives the contiguous undecided region, whose LOWEST open
-    // Mid lane is where the trust horizon ends: the next window re-anchors there and sees the right letter. At the
-    // buffer tail (`more_text == 0`) there is no next block, so the shadow is decided: the `letter Mid*`
-    // force-breaks (no clamp), which is what `boundary` already holds.
-    sz_u64_t const bridge_gate = flow_ignorable | mid_any;
+    // Bridge shadow (the deferred WB6/7/11/12 right context). WB6/7/11/12 bridge a SINGLE Mid* between two letters, so
+    // an open Mid* (its left letter present, in-window or carried) is undecided only when nothing but IGNORABLES /
+    // continuation bytes separate it from the block edge — then its matching right letter may sit in the next block.
+    // The gate must NOT span other Mid* lanes: a second Mid already decides the first (its right is not a letter →
+    // break, handled in-window), so flooding through `mid_any` here would defer a whole Mid* run that is in fact fully
+    // decided and merge it across windows. Flood the open Mid* rightward across the gate; reaching the top valid lane
+    // means undecided. Flooding back left gives the contiguous undecided region, whose LOWEST open Mid lane is the
+    // trust horizon: the next window re-anchors there and sees the right letter. At the buffer tail (`more_text == 0`)
+    // there is no next block, so the shadow is decided: the `letter Mid*` force-breaks (no clamp), as `boundary` holds.
+    // Forward reach gate (ignorables/continuations ONLY): an open Mid* reaches the edge only across ignorables — never
+    // across another Mid* lane, which would already have decided it (break). Backward gate adds `mid_any` so the flood
+    // from the edge can return to the open Mid*'s own lead (its continuation bytes are ignorable, but the lead is not).
+    sz_u64_t const reach_gate = flow_ignorable;
+    sz_u64_t const back_gate = flow_ignorable | mid_any;
     sz_u64_t const top_bit = at_tail ? 0ull : (1ull << high_lane);
-    sz_u64_t const open_to_edge = sz_utf8_codepoints_fill_right_(mid_open, bridge_gate) & top_bit;
+    sz_u64_t const open_to_edge = sz_utf8_codepoints_fill_right_(mid_open, reach_gate) & top_bit;
     sz_u64_t const undecided = (!at_tail && open_to_edge)
-                                   ? (mid_open & sz_utf8_codepoints_fill_left_(open_to_edge, bridge_gate))
+                                   ? (mid_open & sz_utf8_codepoints_fill_left_(open_to_edge, back_gate))
                                    : 0ull;
 
     // Boundaries only at codepoint leads; SOT (lane 0) is the open word's start, never an interior boundary, unless
@@ -900,14 +926,14 @@ SZ_INTERNAL sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_icelake_
     }
 
     // Outbound bridge shadow: is a Mid* bridge open and undecided at the trusted edge? A shadow open at
-    // `resolved` floods the open Mid* rightward through `bridge_gate`; if it reaches the resolved edge its left
-    // letter kind is carried so the next window's first matching letter completes the bridge. The shadow's left
-    // letter is the carried `mid_open_*` kind at the highest open Mid* below `resolved`.
-    sz_u64_t const open_at_edge = sz_utf8_codepoints_fill_right_(mid_open, bridge_gate) & resolved_valid;
+    // `resolved` floods the open Mid* rightward through `reach_gate` (ignorables only, never another Mid*); if it
+    // reaches the resolved edge its left letter kind is carried so the next window's first matching letter completes
+    // the bridge. The shadow's left letter is the carried `mid_open_*` kind at the highest open Mid* below `resolved`.
+    sz_u64_t const open_at_edge = sz_utf8_codepoints_fill_right_(mid_open, reach_gate) & resolved_valid;
     sz_u64_t const open_run = open_at_edge & ~sz_u64_mask_until_(resolved > 0 ? resolved - 1 : 0);
     if (open_run) {
         // The bridge is open at the edge. Pick the kind of the highest open Mid* whose shadow reaches the edge.
-        sz_u64_t const reaching = mid_open & sz_utf8_codepoints_fill_left_(open_run, bridge_gate);
+        sz_u64_t const reaching = mid_open & sz_utf8_codepoints_fill_left_(open_run, back_gate);
         if (reaching) {
             sz_size_t const mid_lane = (sz_size_t)(63 - sz_u64_clz(reaching));
             sz_u64_t const mid_bit = 1ull << mid_lane;
