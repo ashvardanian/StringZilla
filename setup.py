@@ -78,12 +78,25 @@ def _parallel_compiler_compile(
     )
     cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
 
+    # `-MMD/-MF` emits a makefile depfile listing the headers each TU pulled in, so an incremental rebuild can skip
+    # a translation unit whose object is newer than every source AND header (distutils' own check tracks sources
+    # only, which is why a header-only edit otherwise needs `--force`). MSVC has no `-MMD`, so it keeps the
+    # source-only behavior. `_sz_force` mirrors `build_ext --force`.
+    use_depfiles = getattr(self, "compiler_type", "") != "msvc"
+    force = getattr(self, "_sz_force", False)
+
     def _compile_one(obj):
         try:
             src, ext = build[obj]
         except KeyError:
             return
-        self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+        if use_depfiles:
+            dep_path = obj + ".d"
+            if not force and _object_is_fresh(obj, dep_path):
+                return
+            self._compile(obj, src, ext, cc_args, extra_postargs + ["-MMD", "-MF", dep_path], pp_opts)
+        else:
+            self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
 
     workers = max(1, min(_max_compile_workers(), len(objects)))
     if workers > 1:
@@ -96,29 +109,21 @@ def _parallel_compiler_compile(
     return objects
 
 
-class NumpyBuildExt(build_ext):
+class ParallelBuildExt(build_ext):
     """
-    Custom build_ext class that defers `numpy` import until build time.
-
-    This is necessary because NumPy may not be available during the initial
-    `setup.py` parsing phase (e.g., when `cibuildwheel` is gathering build requirements),
-    but we need NumPy's include directories during the actual compilation.
-    By deferring the import to `build_extensions()`, we ensure NumPy is only
-    required when actually building the extensions, not when querying metadata.
+    Custom `build_ext` shared by every target: compiles an extension's many C/C++ translation units across cores
+    (distutils compiles them serially) and applies per-language flags. Has no third-party dependency, so the base
+    `stringzilla` CPython module uses it directly; `NumpyBuildExt` extends it for the numpy-dependent targets.
     """
 
     def build_extension(self, ext):
-        import numpy as np
         import types
 
-        # Ensure NumPy headers are available
-        numpy_include = np.get_include()
-        if numpy_include not in ext.include_dirs:
-            ext.include_dirs.append(numpy_include)
-
-        # distutils compiles an extension's sources serially; swap in a parallel `compile` so the many C/C++
-        # translation units (and the CUDA extension's C glue) build across cores like the nvcc step and `make -j`.
+        # Swap in a parallel `compile` so the many C/C++ translation units build across cores like `make -j`; the
+        # hook also carries header-depfile staleness skipping (see `_parallel_compiler_compile`). `_sz_force` lets
+        # it honor `build_ext --force`.
         if self.compiler is not None and not getattr(self.compiler, "_sz_parallelized", False):
+            self.compiler._sz_force = bool(self.force)
             self.compiler.compile = types.MethodType(_parallel_compiler_compile, self.compiler)
             self.compiler._sz_parallelized = True
 
@@ -180,6 +185,23 @@ class NumpyBuildExt(build_ext):
             build_temp=self.build_temp,
             target_lang=self.compiler.detect_language(ext.sources),
         )
+
+
+class NumpyBuildExt(ParallelBuildExt):
+    """
+    Adds the NumPy include directory for the numpy-dependent targets (the `stringzillas` parallel-algorithm
+    modules), deferring the `numpy` import until build time so `cibuildwheel`'s metadata pass — which may run
+    before numpy is installed — does not need it. Everything else (parallel per-language compile + link) comes
+    from `ParallelBuildExt`.
+    """
+
+    def build_extension(self, ext):
+        import numpy as np
+
+        numpy_include = np.get_include()
+        if numpy_include not in ext.include_dirs:
+            ext.include_dirs.append(numpy_include)
+        super().build_extension(ext)
 
 
 class CudaBuildExtension(NumpyBuildExt):
@@ -548,6 +570,9 @@ if sz_target == "stringzilla":
             "sz_wc=cli.wc:main",
         ],
     }
+    # Parallel per-language compile + header-depfile incremental rebuilds for the 17 core C TUs (the base module
+    # has no numpy dependency, so it uses ParallelBuildExt directly rather than NumpyBuildExt).
+    command_class = {"build_ext": ParallelBuildExt}
 elif sz_target == "stringzillas-cpus":
     __lib_name__ = "stringzillas-cpus"
     ext_modules = [
