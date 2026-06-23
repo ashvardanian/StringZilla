@@ -50,27 +50,21 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
     __m512i high, __m512i low,                                                   //
     __mmask64 four_byte_starts, __mmask64 codepoint_starts) {
 
-    // ASCII / 2-byte lanes have `high < 0x08`, so the low 11 bits address the 2048-byte page LUT directly. The
-    // index is `high[2:0]:low[7:0]`; `vpermi2b` selects within a 128-byte segment-pair, masked moves the pair.
-    __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-    __m512i const low_high_bit = sz_utf8_codepoints_srl8_(low, 7, 0x01);
-    __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
-                                         low_high_bit);
-    __m512i small_class = _mm512_setzero_si512();
-    for (int pair = 0; pair < 16; ++pair) {
-        __m512i const seg_lo = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair) * 64);
-        __m512i const seg_hi = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair + 1) * 64);
-        __m512i const permuted = _mm512_permutex2var_epi8(seg_lo, in_seven, seg_hi);
-        __mmask64 const hit = _mm512_cmpeq_epi8_mask(page, _mm512_set1_epi8((char)pair));
-        small_class = _mm512_mask_mov_epi8(small_class, hit, permuted);
-    }
+    // Partition the lanes FIRST so the expensive page LUT and two-stage trie only run for lanes that need them.
+    // Dispatch by codepoint VALUE, not byte-length, so overlong / malformed sequences classify exactly like the
+    // serial reference: an n-byte lead whose blind value lands in a shorter range is resolved by that range's table.
+    // `is_astral` selects 4-byte leads whose value is truly >= 0x10000 (cp bit 16+ set, from `(b0 & 7) | (b1 & 0x30)`);
+    // every other lead is a BMP lane routed to the page LUT (high < 0x08) or the trie (high >= 0x08). For well-formed
+    // UTF-8 the value split is identical to the byte-length split, so this leaves conformance untouched.
+    __mmask64 const is_astral = four_byte_starts & (_mm512_test_epi8_mask(raw_window, _mm512_set1_epi8(0x07)) |
+                                                    _mm512_test_epi8_mask(raw_next1, _mm512_set1_epi8(0x30)));
+    __mmask64 const bmp_starts = codepoint_starts & ~is_astral;
+    __mmask64 const small_lanes = bmp_starts & _mm512_cmplt_epu8_mask(high, _mm512_set1_epi8(0x08));
+    __mmask64 const trie_lanes = bmp_starts & _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
 
-    // 3-byte BMP residue: the shared two-stage trie classifies all 64 lanes at once (no scalar cold loop).
-    __m512i const trie_class = sz_utf8_codepoints_trie_walk_icelake_(
-        high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_, sz_utf8_sentence_break_trie_leaf_,
-        sz_utf8_sentence_break_trie_block_k, sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
-
-    // Big homogeneous OLetter ranges as arithmetic compares (zero data) over the per-lane (high<<8|low).
+    // Big homogeneous OLetter ranges (CJK, Kana, ...) as arithmetic compares (zero data) over the per-lane
+    // (high<<8|low). These resolve the vast majority of CJK / Kana without the trie, so a pure-CJK window skips the
+    // trie walk entirely below.
     __mmask64 oletter = 0;
     for (int range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range) {
         sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
@@ -86,24 +80,40 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
                              (_mm512_cmpeq_epi8_mask(high, hi_hi) & _mm512_cmp_epu8_mask(low, hi_lo, _MM_CMPINT_LE));
         oletter |= ge & le;
     }
-    // Dispatch by codepoint VALUE, not by byte-length, so overlong / malformed sequences classify exactly like the
-    // serial reference: an n-byte lead whose blind value lands in a shorter range is resolved by that range's table.
-    // `is_astral` selects 4-byte leads whose value is truly >= 0x10000 (cp bit 16+ set, from `(b0 & 7) | (b1 & 0x30)`);
-    // every other lead - including a 4-byte lead decoding to a BMP value or a 3-byte lead decoding below 0x800 - is a
-    // BMP lane routed to the page LUT (high < 0x08) or the trie (high >= 0x08). For well-formed UTF-8 the value split
-    // is identical to the byte-length split, so this leaves conformance untouched.
-    __mmask64 const is_astral = four_byte_starts & (_mm512_test_epi8_mask(raw_window, _mm512_set1_epi8(0x07)) |
-                                                    _mm512_test_epi8_mask(raw_next1, _mm512_set1_epi8(0x30)));
-    __mmask64 const bmp_starts = codepoint_starts & ~is_astral;
-    __mmask64 const small_lanes = bmp_starts & _mm512_cmplt_epu8_mask(high, _mm512_set1_epi8(0x08));
-    __mmask64 const trie_lanes = bmp_starts & _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
     oletter &= bmp_starts;
 
-    // Layer the resolutions: default Other, BMP-value lanes from the page LUT (<0x800) or trie (0x800..0xFFFF), then
-    // the big OLetter blocks; the astral sweep below overwrites the true >= 0x10000 lanes.
     __m512i classes = _mm512_set1_epi8((char)sz_sentence_break_other_k);
-    classes = _mm512_mask_mov_epi8(classes, small_lanes, small_class);
-    classes = _mm512_mask_mov_epi8(classes, trie_lanes, trie_class);
+
+    // Page LUT for codepoint < 0x800 (`high[2:0]:low[7:0]` via a `vpermi2b` segment-pair cascade), gated on a small
+    // lane being present so a pure-3-byte (CJK) window pays nothing here.
+    if (small_lanes) {
+        __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
+        __m512i const low_high_bit = sz_utf8_codepoints_srl8_(low, 7, 0x01);
+        __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
+                                             low_high_bit);
+        __m512i small_class = _mm512_setzero_si512();
+        for (int pair = 0; pair < 16; ++pair) {
+            __m512i const seg_lo = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair) * 64);
+            __m512i const seg_hi = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair + 1) * 64);
+            __m512i const permuted = _mm512_permutex2var_epi8(seg_lo, in_seven, seg_hi);
+            __mmask64 const hit = _mm512_cmpeq_epi8_mask(page, _mm512_set1_epi8((char)pair));
+            small_class = _mm512_mask_mov_epi8(small_class, hit, permuted);
+        }
+        classes = _mm512_mask_mov_epi8(classes, small_lanes, small_class);
+    }
+
+    // Two-stage trie for the 0x800..0xFFFF residue, gated on a 3-byte lane the OLetter ranges did NOT already resolve,
+    // so CJK / Kana windows skip the ~36-`vpermi2b` trie walk (the port-5 hot spot). When every 3-byte lane is OLetter
+    // the trie output would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
+    __mmask64 const trie_residual = trie_lanes & ~oletter;
+    if (trie_residual) {
+        __m512i const trie_class = sz_utf8_codepoints_trie_walk_icelake_(
+            high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_,
+            sz_utf8_sentence_break_trie_leaf_, sz_utf8_sentence_break_trie_block_k,
+            sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
+        classes = _mm512_mask_mov_epi8(classes, trie_lanes, trie_class);
+    }
+
     classes = _mm512_mask_mov_epi8(classes, oletter, _mm512_set1_epi8((char)sz_sentence_break_oletter_k));
 
     // Astral (4-byte) lanes: reconstruct the full 21-bit codepoint per lane and resolve through the sorted astral
