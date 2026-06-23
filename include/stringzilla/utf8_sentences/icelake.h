@@ -219,12 +219,15 @@ typedef struct sz_utf8_sentence_break_carry_t {
     sz_u8_t prev_eff;      /**< Class of the last significant codepoint of the previous block. */
     sz_u8_t prev_prev_eff; /**< Class of the second-last significant codepoint. */
     sz_u8_t prev_raw;      /**< Class of the last raw codepoint of the previous block (SB3/SB4 raw-before). */
+    sz_u8_t sb8_pending;   /**< An ATerm SB8 boundary deferred because its neutral right-context (no Close/Sp shadow)
+                                ran past the block edge; the awaited Lower-vs-stop verdict threads here across blocks. */
 } sz_utf8_sentence_break_carry_t;
 
 /** @brief  One classified block resolved into per-byte break bits plus the metadata the driver stitches. */
 typedef struct sz_utf8_sentence_break_window_t {
     sz_u64_t breaks; /**< Bit `i` set => a sentence boundary begins before the codepoint whose lead is byte-lane `i`. */
     sz_size_t resolved; /**< Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted (SB8 edge). */
+    sz_u8_t sb8_resolution; /**< Verdict for an entering `carry->sb8_pending`: 0 still pending, 1 break, 2 no break. */
 } sz_utf8_sentence_break_window_t;
 
 /**
@@ -276,6 +279,7 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     sz_u8_t const prev_prev_eff = carry->prev_prev_eff;
     sz_u8_t const prev_raw = carry->prev_raw;
     int const have_prev = carry->have_prev;
+    int const was_sb8_pending = carry->sb8_pending;
 
     // The leading window-edge region runs from lane 0 up to and including the first significant lead; the
     // cross-window carried class is injected here so lane-0 left context needs no scalar re-walk.
@@ -382,6 +386,7 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
     decided |= r_sb8a & ~decided;
     decided |= r_sb9 & ~decided;
     decided |= r_sb10 & ~decided;
+    sz_u64_t const decided_pre_sb11 = decided; // settled by SB3..SB10, independent of the SB8 right-lookahead
     brk |= r_sb11 & ~decided, decided |= r_sb11 & ~decided;
 
     sz_u64_t const lowbit = have_prev ? 1ull : 0ull;
@@ -390,8 +395,11 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
 
     // Trust the window only up to the first SB8-undecided ATerm-shadow boundary; the next, fully-contextual window
     // re-resolves it (effective-window<64 + register carry; no oracle, no scalar). At true end-of-text there is no
-    // next block, so a trailing neutral run is decided (no Lower can follow): never clamp then.
-    sz_u64_t const undecided = more_text ? (aterm_shadow_before & in_shadow_before & neutral_to_edge & produced) : 0ull;
+    // next block, so a trailing neutral run is decided (no Lower can follow): never clamp then. A lane settled before
+    // SB11 (SB6 Numeric, SB7, the SB8a/9/10 no-breaks) has a verdict the lookahead cannot change, so it is excluded:
+    // only a would-be-SB11 break can flip to an SB8 no-break when a Lower finally arrives.
+    sz_u64_t const undecided =
+        more_text ? (aterm_shadow_before & in_shadow_before & neutral_to_edge & produced & ~decided_pre_sb11) : 0ull;
     sz_size_t resolved = loaded;
     if (undecided) {
         sz_size_t const lane = sz_u64_ctz(undecided);
@@ -416,9 +424,23 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_
         carry->shadow_saw_sp = (sz_u8_t)((saw_sp_upto >> edge) & 1ull);
     }
 
+    // Resolve an SB8 boundary deferred from a previous block (its ATerm neutral right-context outran one window): the
+    // run resumes at lane 0, so read its in-window verdict there. A reachable Lower (here or flooded from the right)
+    // means SB8 fires (no break); a neutral run still reaching the edge with more text stays pending one more block;
+    // anything else - a non-Lower stop, or end-of-text where no Lower can follow - settles the deferred boundary as a
+    // break. The driver, which holds the deferred boundary's byte offset, then emits or drops it.
+    sz_u8_t sb8_resolution = 0;
+    if (was_sb8_pending) {
+        if (((lower_ahead | m_lower) & 1ull) != 0) sb8_resolution = 2;
+        else if (more_text && (neutral_to_edge & 1ull) != 0) sb8_resolution = 0;
+        else sb8_resolution = 1;
+    }
+    carry->sb8_pending = (sz_u8_t)(was_sb8_pending && sb8_resolution == 0);
+
     sz_utf8_sentence_break_window_t result;
     result.breaks = breaks;
     result.resolved = resolved;
+    result.sb8_resolution = sb8_resolution;
     return result;
 }
 
@@ -445,7 +467,13 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
     sz_utf8_sentence_break_carry_t carry;
     carry.in_shadow = carry.shadow_aterm = carry.shadow_saw_sp = 0;
     carry.have_prev = 0;
+    carry.sb8_pending = 0;
     carry.prev_eff = carry.prev_prev_eff = carry.prev_raw = (sz_u8_t)sz_sentence_break_other_k;
+
+    // A multi-block-deferred SB8 boundary (its ATerm neutral right-context outran a window): the byte offset of the
+    // deferred boundary, held here while the carry threads the awaited Lower-vs-stop verdict across blocks.
+    sz_size_t sb8_pending_position = 0;
+    int sb8_pending_active = 0;
 
     while (position < length) {
         // Decode a 64-byte window in-register (no scalar per-codepoint walk): codepoint-start / continuation /
@@ -544,6 +572,23 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
         sz_utf8_sentence_break_window_t const win = sz_utf8_sentence_break_block_breaks_(
             classes, start_bytes, cont_mask, complete_limit, &carry_full, more_text);
 
+        // A previously deferred SB8 boundary (held in `sb8_pending_position`) whose verdict this window settled: emit
+        // it before any of this window's boundaries (it lies strictly to their left), or drop it on a no-break. This
+        // precedes the drain so the deferred boundary keeps its global order.
+        if (sb8_pending_active && win.sb8_resolution != 0) {
+            if (win.sb8_resolution == 1) {
+                if (sentences == sentences_capacity) {
+                    if (bytes_consumed) *bytes_consumed = sentence_start;
+                    return sentences;
+                }
+                sentence_starts[sentences] = sentence_start;
+                sentence_lengths[sentences] = sb8_pending_position - sentence_start;
+                ++sentences;
+                sentence_start = sb8_pending_position;
+            }
+            sb8_pending_active = 0;
+        }
+
         // `win.resolved` is already bounded by `complete_limit`; an SB8 clamp lowers it further. Boundaries strictly
         // before it are fully decided; the boundary at the advance point is re-resolved as the next window's lane 0.
         sz_size_t const adv = win.resolved;
@@ -570,11 +615,29 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
             position += adv;
         }
         else {
-            // The clamp sits at lane 0 (an open shadow / neutral run longer than one window). Step past the whole
-            // complete span with guaranteed progress, keeping the window-end run-state so the open shadow stays exact.
+            // The clamp sits at lane 0: an ATerm SB8 boundary whose neutral right-context outruns this window. Defer
+            // it - record its byte offset once and arm `sb8_pending` so the carry threads the Lower-vs-stop verdict -
+            // then step past the whole complete span with guaranteed progress, keeping the window-end run-state.
+            if (!sb8_pending_active) {
+                sb8_pending_active = 1;
+                sb8_pending_position = position;
+            }
             carry = carry_full;
+            carry.sb8_pending = 1;
             position += complete_limit ? complete_limit : loaded;
         }
+    }
+
+    // End-of-text with a still-deferred SB8 boundary: no Lower can follow, so it settles as a break.
+    if (sb8_pending_active) {
+        if (sentences == sentences_capacity) {
+            if (bytes_consumed) *bytes_consumed = sentence_start;
+            return sentences;
+        }
+        sentence_starts[sentences] = sentence_start;
+        sentence_lengths[sentences] = sb8_pending_position - sentence_start;
+        ++sentences;
+        sentence_start = sb8_pending_position;
     }
 
     if (sentences == sentences_capacity) {
