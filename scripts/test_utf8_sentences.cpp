@@ -95,68 +95,88 @@ static sz::string_view const utf8_sentences_motifs[] = {
 static constexpr std::size_t utf8_sentences_motifs_count = sizeof(utf8_sentences_motifs) /
                                                            sizeof(utf8_sentences_motifs[0]);
 
-/** @brief ATerm + Close* + Sp* run @p link_count wide, then a Lower (SB8 continuation, no break). */
-static std::string utf8_sentences_dense_aterm_sp_lower_(std::size_t link_count) {
-    std::string text;
-    append_codepoint_(text, 0x0055);                                                           // 'U' Upper
-    append_codepoint_(text, 0x002E);                                                           // '.' ATerm
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(text, 0x0020); // Sp run
-    append_codepoint_(text, 0x0061);                                                           // 'a' Lower
-    return text;
+/** @brief ATerm + Close* + Sp* run @p link_count wide, then a Lower (SB8 continuation, no break), into @p out. */
+static void utf8_sentences_dense_aterm_sp_lower_(std::string &out, std::size_t link_count) {
+    out.clear();
+    append_codepoint_(out, 0x0055);                                                           // 'U' Upper
+    append_codepoint_(out, 0x002E);                                                           // '.' ATerm
+    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x0020); // Sp run
+    append_codepoint_(out, 0x0061);                                                           // 'a' Lower
 }
 
-/** @brief Terminator-dense `A. A. A. ...` repeated @p link_count times (one break per terminator). */
-static std::string utf8_sentences_dense_terminators_(std::size_t link_count) {
-    std::string text;
-    for (std::size_t index = 0; index != link_count; ++index) text.append("A. ");
-    return text;
+/** @brief Terminator-dense `A. A. A. ...` repeated @p link_count times (one break per terminator), into @p out. */
+static void utf8_sentences_dense_terminators_(std::string &out, std::size_t link_count) {
+    out.clear();
+    for (std::size_t index = 0; index != link_count; ++index) out.append("A. ");
 }
 
-/** @brief Ideographic full stop (U+3002) + Sp run + CJK, repeated @p link_count times (multibyte STerm). */
-static std::string utf8_sentences_dense_cjk_term_(std::size_t link_count) {
-    std::string text;
+/** @brief Ideographic full stop (U+3002) + Sp run + CJK, repeated @p link_count times (multibyte STerm), into @p out. */
+static void utf8_sentences_dense_cjk_term_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x4E2D); // 中
-        append_codepoint_(text, 0x3002); // 。 ideographic full stop (STerm)
-        append_codepoint_(text, 0x0020); // Sp
+        append_codepoint_(out, 0x4E2D); // 中
+        append_codepoint_(out, 0x3002); // 。 ideographic full stop (STerm)
+        append_codepoint_(out, 0x0020); // Sp
     }
-    return text;
 }
 
-/** @brief The sentence family's high-density homogeneous runs, sized from @p rng to span several 64-byte windows. */
-static std::vector<std::string> utf8_sentences_dense_runs_(std::mt19937 &rng) {
-    std::uniform_int_distribution<std::size_t> wide(60, 220);
-    std::size_t const wide_count = wide(rng);
-    return {utf8_sentences_dense_aterm_sp_lower_(wide_count), utf8_sentences_dense_terminators_(wide_count),
-            utf8_sentences_dense_cjk_term_(wide_count)};
+/** @brief Stream the sentence family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+static void utf8_sentences_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
+    utf8_sentences_dense_aterm_sp_lower_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_sentences_dense_terminators_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_sentences_dense_cjk_term_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief SB8: `Upper ATerm Sp{gap} Lower` — long Sp run before a lowercase keeps one sentence. */
-static std::string utf8_straddle_sb8_lower_(std::size_t gap) {
-    std::string text;
-    append_codepoint_(text, 0x0055);                                                    // 'U'
-    append_codepoint_(text, 0x002E);                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(text, 0x0020); // Sp run across windows
-    append_codepoint_(text, 0x0061);                                                    // 'a' Lower
-    return text;
+/** @brief SB8: `Upper ATerm Sp{gap} Lower` — long Sp run before a lowercase keeps one sentence, into @p out. */
+static void utf8_straddle_sb8_lower_(std::string &out, std::size_t gap) {
+    out.clear();
+    append_codepoint_(out, 0x0055);                                                    // 'U'
+    append_codepoint_(out, 0x002E);                                                    // '.'
+    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(out, 0x0020); // Sp run across windows
+    append_codepoint_(out, 0x0061);                                                    // 'a' Lower
 }
 
-/** @brief SB11: `Upper ATerm Sp{gap} Upper` — same run before an uppercase must break. */
-static std::string utf8_straddle_sb11_upper_(std::size_t gap) {
-    std::string text;
-    append_codepoint_(text, 0x0055);                                                    // 'U'
-    append_codepoint_(text, 0x002E);                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(text, 0x0020); // Sp run across windows
-    append_codepoint_(text, 0x0042);                                                    // 'B' Upper
-    return text;
+/** @brief SB11: `Upper ATerm Sp{gap} Upper` — same run before an uppercase must break, into @p out. */
+static void utf8_straddle_sb11_upper_(std::string &out, std::size_t gap) {
+    out.clear();
+    append_codepoint_(out, 0x0055);                                                    // 'U'
+    append_codepoint_(out, 0x002E);                                                    // '.'
+    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(out, 0x0020); // Sp run across windows
+    append_codepoint_(out, 0x0042);                                                    // 'B' Upper
 }
 
-/** @brief The sentence family's long-range straddling constructions for a given @p gap (rng kept to match the type). */
-static std::vector<std::string> utf8_sentences_straddles_(std::mt19937 & /*rng*/, std::size_t gap) {
-    return {utf8_straddle_sb8_lower_(gap), utf8_straddle_sb11_upper_(gap)};
+/** @brief Stream the sentence family's long-range straddling constructions for a given @p gap to @p sink. */
+static void utf8_sentences_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    utf8_straddle_sb8_lower_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_straddle_sb11_upper_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Assemble the sentence family's differential corpora (motifs + dense + straddle; no seam regressions). */
+/** @brief Sentence-biased random-corpus snippets: ATerm/STerm + space + case, abbreviations, numeric, CJK stop, ParaSep. */
+static char const *const utf8_sentences_snippets[] = {
+    "End. Next ",               // ATerm + space + Upper (SB break)
+    "end. next ",               // SB8: '. ' before Lower does not break
+    "(End.) ",                  // terminator + Close ')' + space
+    "Mr. ",                     // abbreviation-like
+    "U.S.A. ",                  // dotted acronym
+    "3.14 ",                    // numeric ATerm (no break)
+    "Item, ",                   // SContinue ',' continuation
+    "\xE4\xB8\xAD\xE3\x80\x82", // CJK ideograph + ideographic full stop (STerm)
+    "\xE2\x80\xA8",             // ParaSep U+2028
+};
+
+/** @brief Sentence family alphabet: weights bias toward the family snippets and motifs (SB6/7/8/8a/9/10/11). */
+static utf8_corpus_alphabet_t const utf8_sentences_alphabet = {
+    utf8_sentences_snippets,
+    sizeof(utf8_sentences_snippets) / sizeof(utf8_sentences_snippets[0]),
+    utf8_default_boundary_codepoints,
+    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
+    {45, 15, 5, 30, 5}, // snippet, boundary, astral, motif, malformed
+};
+
+/** @brief Assemble the sentence family's differential corpora (motifs + dense + straddle + alphabet; no seam regressions). */
 static utf8_segment_corpora_t utf8_sentences_corpora_() {
     utf8_segment_corpora_t corpora = {"sentence",
                                       utf8_sentences_motifs,
@@ -164,7 +184,8 @@ static utf8_segment_corpora_t utf8_sentences_corpora_() {
                                       &utf8_sentences_dense_runs_,
                                       &utf8_sentences_straddles_,
                                       nullptr,
-                                      0};
+                                      0,
+                                      &utf8_sentences_alphabet};
     return corpora;
 }
 
@@ -176,19 +197,23 @@ static utf8_segment_corpora_t utf8_sentences_corpora_() {
 void test_utf8_sentences_rules() {
     std::printf("  - testing UTF-8 sentence rule-coverage matrix...\n");
 
-    // One motif per UAX-29 Sentence_Break rule (break or no-break direction).
+    // One motif per UAX-29 Sentence_Break rule, tagged with the direction it demonstrates (break or no-break).
     utf8_rule_case_t const rule_cases[] = {
-        {"SB3", "\r\n"_sv},      // CR x LF (no break)
-        {"SB4", "a\nb"_sv},      // (Sep|CR|LF) / break after LF
-        {"SB5", "a\xCC\x81"_sv}, // X (Extend|Format)* absorbed (no break)
-        {"SB6", "3.4"_sv},       // ATerm x Numeric (no break)
-        {"SB7", "A.B"_sv},       // (Upper|Lower) ATerm x Upper (no break)
-        {"SB8", "A. a"_sv},      // ATerm Close* Sp* x (not stop)* Lower (no break)
-        {"SB8a", "a.,"_sv},      // (STerm|ATerm) Close* Sp* x (SContinue|STerm|ATerm) (no break)
-        {"SB9", "a.)"_sv},       // (STerm|ATerm) Close* x (Close|Sp|Sep|CR|LF) (no break)
-        {"SB10", "a. "_sv},      // (STerm|ATerm) Close* Sp* x (Sp|Sep|CR|LF) (no break)
-        {"SB11", "A. B"_sv},     // (STerm|ATerm) Close* Sp* / break before the next sentence
-        {"SB998", "ab"_sv},      // Any x Any (no break by default)
+        {"SB3", utf8_rule_joins_k, "\r\n"_sv},      // CR x LF (no break)
+        {"SB4", utf8_rule_breaks_k, "a\nb"_sv},     // (Sep|CR|LF) / break after LF
+        {"SB5", utf8_rule_joins_k, "a\xCC\x81"_sv}, // X (Extend|Format)* absorbed (no break)
+        {"SB6", utf8_rule_joins_k, "3.4"_sv},       // ATerm x Numeric (no break)
+        {"SB7", utf8_rule_joins_k, "A.B"_sv},       // (Upper|Lower) ATerm x Upper (no break)
+        {"SB8", utf8_rule_joins_k, "A. a"_sv},      // ATerm Close* Sp* x (not stop)* Lower (no break)
+        {"SB8a", utf8_rule_joins_k, "a.,"_sv},      // (STerm|ATerm) Close* Sp* x (SContinue|STerm|ATerm) (no break)
+        {"SB9", utf8_rule_joins_k, "a.)"_sv},       // (STerm|ATerm) Close* x (Close|Sp|Sep|CR|LF) (no break)
+        {"SB10", utf8_rule_joins_k, "a. "_sv},      // (STerm|ATerm) Close* Sp* x (Sp|Sep|CR|LF) (no break)
+        {"SB11", utf8_rule_breaks_k, "A. B"_sv},    // (STerm|ATerm) Close* Sp* / break before the next sentence
+        {"SB998", utf8_rule_joins_k, "ab"_sv},      // Any x Any (no break by default)
+        // Opposite-direction motifs (E1): the same rule firing the other way (the gate compares serial-vs-ISA on each).
+        {"SB998", utf8_rule_breaks_k,
+         "ab cd"_sv}, // default no-break interior, but the terminator-less run still varies
+        {"SB5", utf8_rule_joins_k, "a\xE2\x80\x8B"_sv}, // Format (U+200B ZWSP) transparency absorbed (no break)
     };
     // Every Sentence_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {

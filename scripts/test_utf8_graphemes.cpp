@@ -108,89 +108,113 @@ static sz::string_view const utf8_graphemes_motifs[] = {
 static constexpr std::size_t utf8_graphemes_motifs_count = sizeof(utf8_graphemes_motifs) /
                                                            sizeof(utf8_graphemes_motifs[0]);
 
-/** @brief A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11). */
-static std::string utf8_graphemes_dense_zwj_pictograph_chain_(std::size_t link_count) {
-    std::string text;
+/** @brief A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11), into @p out (cleared). */
+static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::size_t link_count) {
+    out.clear();
     static sz_rune_t const pictographs[] = {0x1F468, 0x1F469, 0x1F467, 0x1F466}; // man, woman, girl, boy
-    append_codepoint_(text, pictographs[0]);
+    append_codepoint_(out, pictographs[0]);
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x200D);                          // ZWJ
-        append_codepoint_(text, pictographs[(index + 1) & 0x3u]); // next pictograph
-        if (index & 1u) append_codepoint_(text, 0xFE0F);          // VS16 on alternating links
+        append_codepoint_(out, 0x200D);                          // ZWJ
+        append_codepoint_(out, pictographs[(index + 1) & 0x3u]); // next pictograph
+        if (index & 1u) append_codepoint_(out, 0xFE0F);          // VS16 on alternating links
     }
-    return text;
 }
 
-/** @brief One base letter followed by @p link_count combining marks (GB9 Extend run). */
-static std::string utf8_graphemes_dense_combining_marks_(std::size_t link_count) {
-    std::string text;
+/** @brief One base letter followed by @p link_count combining marks (GB9 Extend run), into @p out (cleared first). */
+static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t link_count) {
+    out.clear();
     static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323}; // acute, grave, diaeresis, cedilla, dot
-    append_codepoint_(text, 0x0061);                                           // base 'a'
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(text, marks[index % 5u]);
-    return text;
+    append_codepoint_(out, 0x0061);                                            // base 'a'
+    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, marks[index % 5u]);
 }
 
-/** @brief @p link_count emoji each immediately followed by a skin-tone modifier drawn from @p rng (GB9 Extend). */
-static std::string utf8_graphemes_dense_skin_tone_run_(std::mt19937 &rng, std::size_t link_count) {
-    std::string text;
+/** @brief @p link_count emoji each followed by a skin-tone modifier drawn from @p rng (GB9 Extend), into @p out. */
+static void utf8_graphemes_dense_skin_tone_run_(std::string &out, std::mt19937 &rng, std::size_t link_count) {
+    out.clear();
     std::uniform_int_distribution<sz_rune_t> modifier(0x1F3FB, 0x1F3FF); // U+1F3FB..U+1F3FF
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x1F44D); // thumbs up
-        append_codepoint_(text, modifier(rng));
+        append_codepoint_(out, 0x1F44D); // thumbs up
+        append_codepoint_(out, modifier(rng));
     }
-    return text;
 }
 
-/** @brief @p link_count Indic consonant+virama conjunct links (GB9c InCB Consonant Linker chains). */
-static std::string utf8_graphemes_dense_indic_conjunct_(std::size_t link_count) {
-    std::string text;
-    append_codepoint_(text, 0x0915); // Devanagari KA
+/** @brief @p link_count Indic consonant+virama conjunct links (GB9c InCB Consonant Linker chains), into @p out. */
+static void utf8_graphemes_dense_indic_conjunct_(std::string &out, std::size_t link_count) {
+    out.clear();
+    append_codepoint_(out, 0x0915); // Devanagari KA
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x094D); // virama (Linker)
-        append_codepoint_(text, 0x0915); // KA
+        append_codepoint_(out, 0x094D); // virama (Linker)
+        append_codepoint_(out, 0x0915); // KA
     }
-    return text;
 }
 
-/** @brief @p link_count Hangul L/V/T jamo triples (GB6/7/8 jamo composition runs). */
-static std::string utf8_graphemes_dense_hangul_jamo_(std::size_t link_count) {
-    std::string text;
+/** @brief @p link_count Hangul L/V/T jamo triples (GB6/7/8 jamo composition runs), into @p out (cleared first). */
+static void utf8_graphemes_dense_hangul_jamo_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x1100); // L (Choseong Kiyeok)
-        append_codepoint_(text, 0x1161); // V (Jungseong A)
-        append_codepoint_(text, 0x11A8); // T (Jongseong Kiyeok)
+        append_codepoint_(out, 0x1100); // L (Choseong Kiyeok)
+        append_codepoint_(out, 0x1161); // V (Jungseong A)
+        append_codepoint_(out, 0x11A8); // T (Jongseong Kiyeok)
     }
-    return text;
 }
 
-/** @brief The grapheme family's high-density homogeneous runs, sized from @p rng to span several 64-byte windows. */
-static std::vector<std::string> utf8_graphemes_dense_runs_(std::mt19937 &rng) {
+/** @brief Stream the grapheme family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+static void utf8_graphemes_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
     std::uniform_int_distribution<std::size_t> wide(60, 220);
     std::uniform_int_distribution<std::size_t> chain(20, 80);
     std::size_t const wide_count = wide(rng);
     std::size_t const chain_count = chain(rng);
-    return {utf8_dense_regional_indicators_(rng, wide_count),  utf8_graphemes_dense_zwj_pictograph_chain_(chain_count),
-            utf8_graphemes_dense_combining_marks_(wide_count), utf8_graphemes_dense_skin_tone_run_(rng, chain_count),
-            utf8_graphemes_dense_indic_conjunct_(wide_count),  utf8_graphemes_dense_hangul_jamo_(wide_count)};
+    utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_zwj_pictograph_chain_(scratch, chain_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_combining_marks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_skin_tone_run_(scratch, rng, chain_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_indic_conjunct_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_hangul_jamo_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief The grapheme family's long-range straddling constructions for a given @p gap. */
-static std::vector<std::string> utf8_graphemes_straddles_(std::mt19937 &rng, std::size_t gap) {
-    std::string regional_parity = utf8_dense_regional_indicators_(rng, gap);
-    regional_parity.append("a"); // ASCII tail forces the GB12/13 parity decision after the long run
-    std::string zwj_chain = utf8_graphemes_dense_zwj_pictograph_chain_(gap);
-    append_codepoint_(zwj_chain, 0x0061); // ASCII break after the chain
-    std::string indic_conjunct = utf8_graphemes_dense_indic_conjunct_(gap);
-    append_codepoint_(indic_conjunct, 0x0061); // ASCII break after the conjunct
+/** @brief Stream the grapheme family's long-range straddling constructions for a given @p gap to @p sink. */
+static void utf8_graphemes_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    utf8_dense_regional_indicators_(scratch, rng, gap);
+    scratch.append("a"); // ASCII tail forces the GB12/13 parity decision after the long run
+    sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_zwj_pictograph_chain_(scratch, gap);
+    append_codepoint_(scratch, 0x0061); // ASCII break after the chain
+    sink(context, scratch.data(), scratch.size());
+    utf8_graphemes_dense_indic_conjunct_(scratch, gap);
+    append_codepoint_(scratch, 0x0061); // ASCII break after the conjunct
+    sink(context, scratch.data(), scratch.size());
     // A long RI run, then a ZWJ before a final RI: RI...RI ZWJ RI. The ZWJ does NOT bridge two RIs (GB11 bridges only
     // Extended_Pictographic), so this must break after the ZWJ - and the ZWJ resets the GB12/13 RI parity. Straddles
     // the 64-byte window so the parity carry and the post-ZWJ break are exercised across the edge.
-    std::string regional_zwj = utf8_dense_regional_indicators_(rng, gap);
-    append_codepoint_(regional_zwj, 0x200D);  // ZWJ
-    append_codepoint_(regional_zwj, 0x1F1E6); // Regional_Indicator after the ZWJ
-    append_codepoint_(regional_zwj, 0x0061);  // ASCII tail
-    return {regional_parity, zwj_chain, indic_conjunct, regional_zwj};
+    utf8_dense_regional_indicators_(scratch, rng, gap);
+    append_codepoint_(scratch, 0x200D);  // ZWJ
+    append_codepoint_(scratch, 0x1F1E6); // Regional_Indicator after the ZWJ
+    append_codepoint_(scratch, 0x0061);  // ASCII tail
+    sink(context, scratch.data(), scratch.size());
 }
+
+/** @brief Grapheme-biased random-corpus snippets: emoji ZWJ sequences, combining marks, skin-tone, jamo, conjuncts. */
+static char const *const utf8_graphemes_snippets[] = {
+    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9", // woman ZWJ woman (GB11 emoji-ZWJ sequence)
+    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD",             // thumbs-up + skin-tone modifier (GB9 Extend)
+    "e\xCC\x81",                                    // base 'e' + combining acute (GB9)
+    "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8",         // Hangul L+V+T jamo (GB6/7/8)
+    "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7",         // Devanagari consonant + virama + consonant (GB9c)
+    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8",             // regional-indicator pair (GB12/13)
+    "\r\n",                                         // CRLF (GB3)
+    "abc",                                          // plain ASCII (GB999)
+};
+
+/** @brief Grapheme family alphabet: weights bias toward astral/motif clusters (GB9/9c/11/12/13). */
+static utf8_corpus_alphabet_t const utf8_graphemes_alphabet = {
+    utf8_graphemes_snippets,
+    sizeof(utf8_graphemes_snippets) / sizeof(utf8_graphemes_snippets[0]),
+    utf8_default_boundary_codepoints,
+    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
+    {35, 15, 25, 20, 5}, // snippet, boundary, astral, motif, malformed
+};
 
 /** @brief Assemble the grapheme family's differential corpora (motifs + dense + straddle; no seam regressions). */
 static utf8_segment_corpora_t utf8_graphemes_corpora_() {
@@ -202,6 +226,7 @@ static utf8_segment_corpora_t utf8_graphemes_corpora_() {
         &utf8_graphemes_straddles_,
         nullptr, // no fixed seam regressions for graphemes
         0,
+        &utf8_graphemes_alphabet,
     };
     return corpora;
 }
@@ -216,20 +241,25 @@ void test_utf8_graphemes_rules() {
 
     // One motif per UAX-29 Grapheme_Cluster_Break rule (break or no-break direction).
     utf8_rule_case_t const rule_cases[] = {
-        {"GB3", "\r\n"_sv},                                          // CR x LF (no break)
-        {"GB4", "\na"_sv},                                           // (Control|CR|LF) / break after LF
-        {"GB5", "a\n"_sv},                                           // / (Control|CR|LF) break before LF
-        {"GB6", "\xE1\x84\x80\xE1\x85\xA1"_sv},                      // L x (L|V|LV|LVT): Hangul L + V
-        {"GB7", "\xEA\xB0\x80\xE1\x85\xA1"_sv},                      // (LV|V) x (V|T): Hangul LV + V
-        {"GB8", "\xEA\xB0\x81\xE1\x86\xA8"_sv},                      // (LVT|T) x T: Hangul LVT + T
-        {"GB9", "a\xCC\x81"_sv},                                     // x (Extend|ZWJ)
-        {"GB9a", "\xE0\xA4\x95\xE0\xA4\xBE"_sv},                     // x SpacingMark: consonant + dependent vowel
-        {"GB9b", "\xD8\x80" "a"_sv},                                 // Prepend x: U+0600 then letter
-        {"GB9c", "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv},         // Indic conjunct: consonant virama consonant
-        {"GB11", "\xF0\x9F\x98\x80\xE2\x80\x8D\xF0\x9F\x98\x81"_sv}, // ExtPict Extend* ZWJ x ExtPict
-        {"GB12", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},             // sot (RI RI)* RI x RI
-        {"GB13", "a\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},            // [^RI] (RI RI)* RI x RI
-        {"GB999", "ab"_sv},                                          // Any / Any (default break)
+        {"GB3", utf8_rule_joins_k, "\r\n"_sv},                                  // CR x LF (no break)
+        {"GB4", utf8_rule_breaks_k, "\na"_sv},                                  // (Control|CR|LF) / break after LF
+        {"GB5", utf8_rule_breaks_k, "a\n"_sv},                                  // / (Control|CR|LF) break before LF
+        {"GB6", utf8_rule_joins_k, "\xE1\x84\x80\xE1\x85\xA1"_sv},              // L x (L|V|LV|LVT): Hangul L + V
+        {"GB7", utf8_rule_joins_k, "\xEA\xB0\x80\xE1\x85\xA1"_sv},              // (LV|V) x (V|T): Hangul LV + V
+        {"GB8", utf8_rule_joins_k, "\xEA\xB0\x81\xE1\x86\xA8"_sv},              // (LVT|T) x T: Hangul LVT + T
+        {"GB9", utf8_rule_joins_k, "a\xCC\x81"_sv},                             // x (Extend|ZWJ)
+        {"GB9a", utf8_rule_joins_k, "\xE0\xA4\x95\xE0\xA4\xBE"_sv},             // x SpacingMark: consonant + vowel
+        {"GB9b", utf8_rule_joins_k, "\xD8\x80" "a"_sv},                         // Prepend x: U+0600 then letter
+        {"GB9c", utf8_rule_joins_k, "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv}, // Indic conjunct: cons virama cons
+        {"GB11", utf8_rule_joins_k, "\xF0\x9F\x98\x80\xE2\x80\x8D\xF0\x9F\x98\x81"_sv}, // ExtPict Extend* ZWJ x ExtPict
+        {"GB12", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},             // sot (RI RI)* RI x RI
+        {"GB13", utf8_rule_joins_k, "a\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},            // [^RI] (RI RI)* RI x RI
+        {"GB999", utf8_rule_breaks_k, "ab"_sv},                                         // Any / Any (default break)
+        // Opposite-direction motifs (E1): the same rule firing the other way.
+        {"GB11", utf8_rule_breaks_k, "\xF0\x9F\x98\x80z"_sv}, // ExtPict then ASCII: no ZWJ bridge -> break
+        {"GB12", utf8_rule_breaks_k,
+         "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
+        {"GB6", utf8_rule_breaks_k, "\xE1\x84\x80z"_sv},         // Hangul L then ASCII: not L|V|LV|LVT -> break
     };
     // Every Grapheme_Cluster_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {

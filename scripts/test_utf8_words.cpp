@@ -149,63 +149,88 @@ static sz::string_view const utf8_words_seam_regressions[] = {
 static constexpr std::size_t utf8_words_seam_regressions_count = sizeof(utf8_words_seam_regressions) /
                                                                  sizeof(utf8_words_seam_regressions[0]);
 
-/** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana). */
-static std::string utf8_words_dense_katakana_(std::size_t link_count) {
-    std::string text;
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(text, 0x30AB); // カ
-    return text;
+/** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
+static void utf8_words_dense_katakana_(std::string &out, std::size_t link_count) {
+    out.clear();
+    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x30AB); // カ
 }
 
-/** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend). */
-static std::string utf8_words_dense_numeric_(std::size_t link_count) {
-    std::string text;
+/** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), into @p out. */
+static void utf8_words_dense_numeric_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        text.append("12");
-        append_codepoint_(text, 0x0301); // Extend combining mark inside a number
-        text.append(",34 ");             // MidNum comma
+        out.append("12");
+        append_codepoint_(out, 0x0301); // Extend combining mark inside a number
+        out.append(",34 ");             // MidNum comma
     }
-    return text;
 }
 
-/** @brief MidLetter (`'` and U+00B7) between letters, dense across @p link_count groups (WB6/7). */
-static std::string utf8_words_dense_midletter_(std::size_t link_count) {
-    std::string text;
+/** @brief MidLetter (`'` and U+00B7) between letters, dense across @p link_count groups (WB6/7), into @p out. */
+static void utf8_words_dense_midletter_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x0061);                         // 'a'
-        append_codepoint_(text, (index & 1u) ? 0x00B7 : 0x0027); // MIDDLE DOT or apostrophe
-        append_codepoint_(text, 0x0062);                         // 'b'
+        append_codepoint_(out, 0x0061);                         // 'a'
+        append_codepoint_(out, (index & 1u) ? 0x00B7 : 0x0027); // MIDDLE DOT or apostrophe
+        append_codepoint_(out, 0x0062);                         // 'b'
     }
-    return text;
 }
 
-/** @brief Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter). */
-static std::string utf8_words_dense_hebrew_quote_(std::size_t link_count) {
-    std::string text;
+/** @brief Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter), into @p out. */
+static void utf8_words_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x05D0); // א
-        append_codepoint_(text, 0x0027); // single quote
-        append_codepoint_(text, 0x05D1); // ב
+        append_codepoint_(out, 0x05D0); // א
+        append_codepoint_(out, 0x0027); // single quote
+        append_codepoint_(out, 0x05D1); // ב
     }
-    return text;
 }
 
-/** @brief The word family's high-density homogeneous runs, sized from @p rng to span several 64-byte windows. */
-static std::vector<std::string> utf8_words_dense_runs_(std::mt19937 &rng) {
-    std::uniform_int_distribution<std::size_t> wide(60, 220);
-    std::size_t const wide_count = wide(rng);
-    return {utf8_dense_regional_indicators_(rng, wide_count), utf8_words_dense_katakana_(wide_count),
-            utf8_words_dense_numeric_(wide_count), utf8_words_dense_midletter_(wide_count),
-            utf8_words_dense_hebrew_quote_(wide_count)};
+/** @brief Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+static void utf8_words_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
+    utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_words_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_words_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_words_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_words_dense_hebrew_quote_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief The word family's long-range straddling constructions for a given @p gap. */
-static std::vector<std::string> utf8_words_straddles_(std::mt19937 &rng, std::size_t gap) {
-    std::string regional_parity = utf8_dense_regional_indicators_(rng, gap);
-    regional_parity.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
-    return {regional_parity, utf8_words_dense_midletter_(gap)};
+/** @brief Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
+static void utf8_words_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    utf8_dense_regional_indicators_(scratch, rng, gap);
+    scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
+    sink(context, scratch.data(), scratch.size());
+    utf8_words_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Assemble the word family's differential corpora (motifs + dense + straddle + seam regressions). */
+/** @brief Word-biased random-corpus snippets: apostrophe/underscore bridges, numeric groups, CJK/Hangul/Hebrew/Katakana. */
+static char const *const utf8_words_snippets[] = {
+    "don't ",
+    "can't_stop ",
+    "3,14 ",
+    "1,2,3 ",
+    "Hello, world! ",
+    "\xE4\xBD\xA0\xE5\xA5\xBD",         // CJK ideographs
+    "\xEC\x95\x88\xEB\x85\x95",         // Hangul syllables
+    "\xD7\xA9\xD7\x9C\xD7\x95\xD7\x9D", // Hebrew run
+    "\xE3\x82\xAB\xE3\x82\xBF ",        // Katakana
+    "word\xC2\xB7word ",                // MIDDLE DOT MidLetter
+    "a b ",
+    "_a ",
+};
+
+/** @brief Word family alphabet: weights bias toward the family snippets and motifs (WB6/7/11/12/13/15/16). */
+static utf8_corpus_alphabet_t const utf8_words_alphabet = {
+    utf8_words_snippets,
+    sizeof(utf8_words_snippets) / sizeof(utf8_words_snippets[0]),
+    utf8_default_boundary_codepoints,
+    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
+    {40, 15, 10, 30, 5}, // snippet, boundary, astral, motif, malformed
+};
+
+/** @brief Assemble the word family's differential corpora (motifs + dense + straddle + seam regressions + alphabet). */
 static utf8_segment_corpora_t utf8_words_corpora_() {
     utf8_segment_corpora_t corpora = {"word",
                                       utf8_words_motifs,
@@ -213,7 +238,8 @@ static utf8_segment_corpora_t utf8_words_corpora_() {
                                       &utf8_words_dense_runs_,
                                       &utf8_words_straddles_,
                                       utf8_words_seam_regressions,
-                                      utf8_words_seam_regressions_count};
+                                      utf8_words_seam_regressions_count,
+                                      &utf8_words_alphabet};
     return corpora;
 }
 
@@ -225,31 +251,38 @@ static utf8_segment_corpora_t utf8_words_corpora_() {
 void test_utf8_words_rules() {
     std::printf("  - testing UTF-8 word rule-coverage matrix...\n");
 
-    // One motif per UAX-29 Word_Break rule (break or no-break direction).
+    // One motif per UAX-29 Word_Break rule, tagged with the direction it demonstrates; rules with both senses also
+    // carry an opposite-direction motif (the gate compares serial-vs-ISA on every motif).
     utf8_rule_case_t const rule_cases[] = {
-        {"WB3", "\r\n"_sv},                                  // CR x LF (no break)
-        {"WB3a", "\rb"_sv},                                  // (Newline|CR|LF) / break after CR
-        {"WB3b", "a\n"_sv},                                  // / (Newline|CR|LF) break before LF
-        {"WB3c", "\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x Extended_Pictographic (no break)
-        {"WB3d", "  "_sv},                                   // WSegSpace x WSegSpace (no break)
-        {"WB4", "a\xCC\x81"_sv},                             // X (Extend|Format|ZWJ)* absorbed
-        {"WB5", "ab"_sv},                                    // AHLetter x AHLetter
-        {"WB6", "a'b"_sv},                                   // AHLetter x (MidLetter|MidNumLetQ) AHLetter
-        {"WB7", "a'b"_sv},                                   // AHLetter (MidLetter|MidNumLetQ) x AHLetter
-        {"WB7a", "\xD7\x90'"_sv},                            // Hebrew_Letter x Single_Quote
-        {"WB7b", "\xD7\x90\"\xD7\x90"_sv},                   // Hebrew_Letter x Double_Quote Hebrew_Letter
-        {"WB7c", "\xD7\x90\"\xD7\x90"_sv},                   // Hebrew_Letter Double_Quote x Hebrew_Letter
-        {"WB8", "12"_sv},                                    // Numeric x Numeric
-        {"WB9", "a1"_sv},                                    // AHLetter x Numeric
-        {"WB10", "1a"_sv},                                   // Numeric x AHLetter
-        {"WB11", "1,2"_sv},                                  // Numeric (MidNum|MidNumLetQ) x Numeric
-        {"WB12", "1,2"_sv},                                  // Numeric x (MidNum|MidNumLetQ) Numeric
-        {"WB13", "\xE3\x82\xA2\xE3\x82\xA2"_sv},             // Katakana x Katakana
-        {"WB13a", "a_"_sv},                                  // (AHLetter|Numeric|Katakana|ExtendNumLet) x ExtendNumLet
-        {"WB13b", "_a"_sv},                                  // ExtendNumLet x (AHLetter|Numeric|Katakana)
-        {"WB15", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // sot (RI RI)* RI x RI (even parity)
-        {"WB16", "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv}, // [^RI] (RI RI)* RI x RI (parity reset)
-        {"WB999", "a b"_sv},                                 // Any / Any (default break at the space)
+        {"WB3", utf8_rule_joins_k, "\r\n"_sv},                          // CR x LF (no break)
+        {"WB3a", utf8_rule_breaks_k, "\rb"_sv},                         // (Newline|CR|LF) / break after CR
+        {"WB3b", utf8_rule_breaks_k, "a\n"_sv},                         // / (Newline|CR|LF) break before LF
+        {"WB3c", utf8_rule_joins_k, "\xE2\x80\x8D\xF0\x9F\x98\x80"_sv}, // ZWJ x Extended_Pictographic (no break)
+        {"WB3d", utf8_rule_joins_k, "  "_sv},                           // WSegSpace x WSegSpace (no break)
+        {"WB4", utf8_rule_joins_k, "a\xCC\x81"_sv},                     // X (Extend|Format|ZWJ)* absorbed
+        {"WB5", utf8_rule_joins_k, "ab"_sv},                            // AHLetter x AHLetter
+        {"WB6", utf8_rule_joins_k, "a'b"_sv},                           // AHLetter x (MidLetter) AHLetter
+        {"WB7", utf8_rule_joins_k, "a'b"_sv},                           // AHLetter (MidLetter) x AHLetter
+        {"WB7a", utf8_rule_joins_k, "\xD7\x90'"_sv},                    // Hebrew_Letter x Single_Quote
+        {"WB7b", utf8_rule_joins_k, "\xD7\x90\"\xD7\x90"_sv},           // Hebrew_Letter x Double_Quote Hebrew_Letter
+        {"WB7c", utf8_rule_joins_k, "\xD7\x90\"\xD7\x90"_sv},           // Hebrew_Letter Double_Quote x Hebrew_Letter
+        {"WB8", utf8_rule_joins_k, "12"_sv},                            // Numeric x Numeric
+        {"WB9", utf8_rule_joins_k, "a1"_sv},                            // AHLetter x Numeric
+        {"WB10", utf8_rule_joins_k, "1a"_sv},                           // Numeric x AHLetter
+        {"WB11", utf8_rule_joins_k, "1,2"_sv},                          // Numeric (MidNum) x Numeric
+        {"WB12", utf8_rule_joins_k, "1,2"_sv},                          // Numeric x (MidNum) Numeric
+        {"WB13", utf8_rule_joins_k, "\xE3\x82\xA2\xE3\x82\xA2"_sv},     // Katakana x Katakana
+        {"WB13a", utf8_rule_joins_k, "a_"_sv},                          // (AHLetter|Numeric|Katakana) x ExtendNumLet
+        {"WB13b", utf8_rule_joins_k, "_a"_sv},                          // ExtendNumLet x (AHLetter|Numeric|Katakana)
+        {"WB15", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // sot (RI RI)* RI x RI (even parity)
+        {"WB16", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv}, // [^RI] (RI RI)* RI x RI (parity reset)
+        {"WB999", utf8_rule_breaks_k, "a b"_sv}, // Any / Any (default break at the space)
+        // Opposite-direction motifs (E1): the same rule firing the other way.
+        {"WB6", utf8_rule_breaks_k, "a''b"_sv},           // two MidLetters: the bridge fails -> break
+        {"WB11", utf8_rule_breaks_k, "1,,2"_sv},          // two MidNum: numeric bridge fails -> break
+        {"WB13", utf8_rule_breaks_k, "\xE3\x82\xA2z"_sv}, // Katakana then Latin: script change -> break
+        {"WB15", utf8_rule_breaks_k,
+         "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI: break after the pair
     };
     // Every Word_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {

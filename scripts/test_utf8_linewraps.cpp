@@ -93,50 +93,73 @@ static sz::string_view const utf8_linewraps_motifs[] = {
 static constexpr std::size_t utf8_linewraps_motifs_count = sizeof(utf8_linewraps_motifs) /
                                                            sizeof(utf8_linewraps_motifs[0]);
 
-/** @brief Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5). */
-static std::string utf8_linewraps_dense_mandatory_breaks_(std::size_t link_count) {
-    std::string text;
+/** @brief Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5), into @p out. */
+static void utf8_linewraps_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
+    out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(text, 0x0061); // 'a'
+        append_codepoint_(out, 0x0061); // 'a'
         switch (index & 0x3u) {
-        case 0: text.append("\r\n"); break;              // CRLF
-        case 1: append_codepoint_(text, 0x2028); break;  // LINE SEPARATOR
-        case 2: append_codepoint_(text, 0x2029); break;  // PARAGRAPH SEPARATOR
-        default: append_codepoint_(text, 0x000B); break; // vertical tab (BK)
+        case 0: out.append("\r\n"); break;              // CRLF
+        case 1: append_codepoint_(out, 0x2028); break;  // LINE SEPARATOR
+        case 2: append_codepoint_(out, 0x2029); break;  // PARAGRAPH SEPARATOR
+        default: append_codepoint_(out, 0x000B); break; // vertical tab (BK)
         }
     }
-    return text;
 }
 
-/** @brief OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency). */
-static std::string utf8_linewraps_dense_nesting_(std::size_t link_count) {
-    std::string text;
+/** @brief OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency), into @p out. */
+static void utf8_linewraps_dense_nesting_(std::string &out, std::size_t link_count) {
+    out.clear();
     static char const *cycle[] = {"(", "word", ")", "\"", "-", " ", "\xC2\xA0"}; // OP CL QU HY BA SP GL(NBSP)
-    for (std::size_t index = 0; index != link_count; ++index) text.append(cycle[index % 7u]);
-    return text;
+    for (std::size_t index = 0; index != link_count; ++index) out.append(cycle[index % 7u]);
 }
 
-/** @brief Numeric `NU` runs interleaved with IS (`.`) and SY (`/`), @p link_count groups (LB25 numbers). */
-static std::string utf8_linewraps_dense_numeric_(std::size_t link_count) {
-    std::string text;
-    for (std::size_t index = 0; index != link_count; ++index) text.append("1.234/56 ");
-    return text;
+/** @brief Numeric `NU` runs interleaved with IS (`.`) and SY (`/`), @p link_count groups (LB25 numbers), into @p out. */
+static void utf8_linewraps_dense_numeric_(std::string &out, std::size_t link_count) {
+    out.clear();
+    for (std::size_t index = 0; index != link_count; ++index) out.append("1.234/56 ");
 }
 
-/** @brief The linewrap family's high-density homogeneous runs, sized from @p rng to span several 64-byte windows. */
-static std::vector<std::string> utf8_linewraps_dense_runs_(std::mt19937 &rng) {
-    std::uniform_int_distribution<std::size_t> wide(60, 220);
-    std::size_t const wide_count = wide(rng);
-    return {utf8_linewraps_dense_mandatory_breaks_(wide_count), utf8_linewraps_dense_nesting_(wide_count),
-            utf8_linewraps_dense_numeric_(wide_count)};
+/** @brief Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
+static void utf8_linewraps_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
+    utf8_linewraps_dense_mandatory_breaks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_linewraps_dense_nesting_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_linewraps_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief The linewrap family's long-range straddling constructions for a given @p gap. */
-static std::vector<std::string> utf8_linewraps_straddles_(std::mt19937 & /*rng*/, std::size_t gap) {
-    return {utf8_linewraps_dense_mandatory_breaks_(gap), utf8_linewraps_dense_nesting_(gap)};
+/** @brief Stream the linewrap family's long-range straddling constructions for a given @p gap to @p sink. */
+static void utf8_linewraps_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
+    std::string scratch;
+    utf8_linewraps_dense_mandatory_breaks_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_linewraps_dense_nesting_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Assemble the linewrap family's differential corpora (motifs + dense + straddle). */
+/** @brief Linewrap-biased random-corpus snippets: mandatory breaks, separators, NBSP/GL, nesting, hyphen, numeric. */
+static char const *const utf8_linewraps_snippets[] = {
+    "a\r\nb",        // mandatory break (CRLF)
+    "a\x0C" "b",     // mandatory break (form feed, BK)
+    "\xE2\x80\xA8",  // U+2028 LINE SEPARATOR
+    "\xE2\x80\xA9",  // U+2029 PARAGRAPH SEPARATOR
+    "a\xC2\xA0" "b", // GL glue NBSP (U+00A0)
+    "(a)",           // OP/CL nesting
+    "\"x\"",         // QU quotes
+    "a-b",           // HY hyphen
+    "1,234.5 ",      // numeric grouping
+    "\xD7\x90-a",    // Hebrew letter + hyphen (LB21a)
+};
+
+/** @brief Linewrap family alphabet: weights bias toward family snippets and motifs (LB mandatory/GL/HY/NU/nesting). */
+static utf8_corpus_alphabet_t const utf8_linewraps_alphabet = {
+    utf8_linewraps_snippets,
+    sizeof(utf8_linewraps_snippets) / sizeof(utf8_linewraps_snippets[0]),
+    utf8_default_boundary_codepoints,
+    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
+    {45, 15, 5, 30, 5}, // snippet, boundary, astral, motif, malformed
+};
+
+/** @brief Assemble the linewrap family's differential corpora (motifs + dense + straddle + alphabet). */
 static utf8_segment_corpora_t utf8_linewraps_corpora_() {
     utf8_segment_corpora_t corpora = {"linewrap",
                                       utf8_linewraps_motifs,
@@ -144,7 +167,8 @@ static utf8_segment_corpora_t utf8_linewraps_corpora_() {
                                       &utf8_linewraps_dense_runs_,
                                       &utf8_linewraps_straddles_,
                                       nullptr,
-                                      0};
+                                      0,
+                                      &utf8_linewraps_alphabet};
     return corpora;
 }
 
@@ -156,46 +180,51 @@ static utf8_segment_corpora_t utf8_linewraps_corpora_() {
 void test_utf8_linewraps_rules() {
     std::printf("  - testing UTF-8 line-break rule-coverage matrix...\n");
 
-    // One motif per UAX-14 Line_Break rule (break or no-break direction).
+    // One motif per UAX-14 Line_Break rule, tagged with the direction it demonstrates; rules with both senses also
+    // carry an opposite-direction motif (the gate compares serial-vs-ISA on every motif).
     utf8_rule_case_t const rule_cases[] = {
-        {"LB4", "a\x0C" "b"_sv},                              // BK ! (mandatory break after form feed)
-        {"LB5", "a\r\nb"_sv},                                 // CR x LF, then LF ! (CRLF one unit, mandatory break)
-        {"LB6", "a\x0C"_sv},                                  // x (BK|CR|LF|NL): no break before a hard break
-        {"LB7", "a b"_sv},                                    // x SP / x ZW: no break before space
-        {"LB8", "a\xE2\x80\x8B" "b"_sv},                      // ZW SP* / break after Zero Width Space
-        {"LB8a", "a\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x (no break)
-        {"LB9", "a\xCC\x81"_sv},                              // treat X CM* as X
-        {"LB10", "\xCC\x81" "a"_sv},                          // lone CM -> AL
-        {"LB11", "a\xE2\x81\xA0" "b"_sv},                     // x WJ / WJ x (Word Joiner, no break)
-        {"LB12", "\xC2\xA0" "a"_sv},                          // GL x (no break after non-breaking space)
-        {"LB12a", "a\xC2\xA0"_sv},                            // [^SP BA HY] x GL
-        {"LB13", "a)"_sv},                                    // x CL/CP/EX/SY (no break before close paren)
-        {"LB14", "(a"_sv},                                    // OP SP* x (no break after open punctuation)
-        {"LB15a", "\xE2\x80\x9C" "a"_sv},                     // (sot|...) [QU & Pi] SP* x (no break after open quote)
-        {"LB15b", "a\xE2\x80\x9D"_sv},                        // x [QU & Pf] (no break before close quote)
-        {"LB16", ")\xE3\x82\xA1"_sv},                         // (CL|CP) SP* x NS (no break)
-        {"LB17", "\xE2\x80\x94\xE2\x80\x94"_sv},              // B2 SP* B2 (no break between em dashes)
-        {"LB18", "a b"_sv},                                   // SP / break after space
-        {"LB19", "a\"b"_sv},                                  // x QU / QU x (no break around quotation)
-        {"LB20", "a\xEF\xBF\xBC" "b"_sv},                     // / CB ; CB / (break around Contingent Break U+FFFC)
-        {"LB20a", "-a"_sv},                                   // (sot|...) (HY|HH) x AL (no break)
-        {"LB21", "a-b"_sv},                                   // x BA/HY/HH/NS, BB x (no break before hyphen)
-        {"LB21a", "\xD7\x90-a"_sv},                           // HL (HY|HH) x [^HL] (no break)
-        {"LB21b", "/\xD7\x90"_sv},                            // SY x HL (no break)
-        {"LB22", "a\xE2\x80\xA6"_sv},                         // x IN (no break before ellipsis)
-        {"LB23", "a1"_sv},                                    // (AL|HL) x NU / NU x (AL|HL)
-        {"LB23a", "$\xE4\xB8\xAD"_sv},                        // PR x (ID|EB|EM)
-        {"LB24", "$a"_sv},                                    // (PR|PO) x (AL|HL) / (AL|HL) x (PR|PO)
-        {"LB25", "1,5"_sv},                                   // numeric clusters (no break inside a number)
-        {"LB26", "\xE1\x84\x80\xE1\x85\xA1"_sv},              // Hangul L x V (no break)
-        {"LB27", "\xEA\xB0\x80\xE1\x86\xA8"_sv},              // Hangul (H2 x T) syllable continuation
-        {"LB28", "ab"_sv},                                    // AL x AL (no break)
-        {"LB28a", "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv}, // Brahmic aksara (consonant virama consonant)
-        {"LB29", ".a"_sv},                                    // IS x (AL|HL) (no break)
-        {"LB30", "a("_sv},                                    // (AL|HL|NU) x OP[^EAW] (no break)
-        {"LB30a", "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // RI RI (even-parity pair, no break)
-        {"LB30b", "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBB"_sv},     // EB x EM (emoji base + modifier, no break)
-        {"LB31", "\xE4\xB8\xAD\xE4\xB8\xAD"_sv},              // break everywhere else (between ideographs)
+        {"LB4", utf8_rule_breaks_k, "a\x0C" "b"_sv},                             // BK ! (mandatory break after FF)
+        {"LB5", utf8_rule_breaks_k, "a\r\nb"_sv},                                // CR x LF, then LF ! (CRLF, break)
+        {"LB6", utf8_rule_joins_k, "a\x0C"_sv},                                  // x (BK|CR|LF|NL): no break before HB
+        {"LB7", utf8_rule_joins_k, "a b"_sv},                                    // x SP / x ZW: no break before space
+        {"LB8", utf8_rule_breaks_k, "a\xE2\x80\x8B" "b"_sv},                     // ZW SP* / break after ZWSP
+        {"LB8a", utf8_rule_joins_k, "a\xE2\x80\x8D\xF0\x9F\x98\x80"_sv},         // ZWJ x (no break)
+        {"LB9", utf8_rule_joins_k, "a\xCC\x81"_sv},                              // treat X CM* as X
+        {"LB10", utf8_rule_joins_k, "\xCC\x81" "a"_sv},                          // lone CM -> AL
+        {"LB11", utf8_rule_joins_k, "a\xE2\x81\xA0" "b"_sv},                     // x WJ / WJ x (Word Joiner, no break)
+        {"LB12", utf8_rule_joins_k, "\xC2\xA0" "a"_sv},                          // GL x (no break after NBSP)
+        {"LB12a", utf8_rule_joins_k, "a\xC2\xA0"_sv},                            // [^SP BA HY] x GL
+        {"LB13", utf8_rule_joins_k, "a)"_sv},                                    // x CL/CP/EX/SY (no break before `)`)
+        {"LB14", utf8_rule_joins_k, "(a"_sv},                                    // OP SP* x (no break after OP)
+        {"LB15a", utf8_rule_joins_k, "\xE2\x80\x9C" "a"_sv},                     // (sot|...) [QU & Pi] SP* x (no break)
+        {"LB15b", utf8_rule_joins_k, "a\xE2\x80\x9D"_sv},                        // x [QU & Pf] (no break before close)
+        {"LB16", utf8_rule_joins_k, ")\xE3\x82\xA1"_sv},                         // (CL|CP) SP* x NS (no break)
+        {"LB17", utf8_rule_joins_k, "\xE2\x80\x94\xE2\x80\x94"_sv},              // B2 SP* B2 (no break between dashes)
+        {"LB18", utf8_rule_breaks_k, "a b"_sv},                                  // SP / break after space
+        {"LB19", utf8_rule_joins_k, "a\"b"_sv},                                  // x QU / QU x (no break around quote)
+        {"LB20", utf8_rule_breaks_k, "a\xEF\xBF\xBC" "b"_sv},                    // / CB ; CB / (break around U+FFFC)
+        {"LB20a", utf8_rule_joins_k, "-a"_sv},                                   // (sot|...) (HY|HH) x AL (no break)
+        {"LB21", utf8_rule_joins_k, "a-b"_sv},                                   // x BA/HY/HH/NS, BB x (no break)
+        {"LB21a", utf8_rule_joins_k, "\xD7\x90-a"_sv},                           // HL (HY|HH) x [^HL] (no break)
+        {"LB21b", utf8_rule_joins_k, "/\xD7\x90"_sv},                            // SY x HL (no break)
+        {"LB22", utf8_rule_joins_k, "a\xE2\x80\xA6"_sv},                         // x IN (no break before ellipsis)
+        {"LB23", utf8_rule_joins_k, "a1"_sv},                                    // (AL|HL) x NU / NU x (AL|HL)
+        {"LB23a", utf8_rule_joins_k, "$\xE4\xB8\xAD"_sv},                        // PR x (ID|EB|EM)
+        {"LB24", utf8_rule_joins_k, "$a"_sv},                                    // (PR|PO) x (AL|HL) / (AL|HL) x ...
+        {"LB25", utf8_rule_joins_k, "1,5"_sv},                                   // numeric clusters (no break inside)
+        {"LB26", utf8_rule_joins_k, "\xE1\x84\x80\xE1\x85\xA1"_sv},              // Hangul L x V (no break)
+        {"LB27", utf8_rule_joins_k, "\xEA\xB0\x80\xE1\x86\xA8"_sv},              // Hangul (H2 x T) continuation
+        {"LB28", utf8_rule_joins_k, "ab"_sv},                                    // AL x AL (no break)
+        {"LB28a", utf8_rule_joins_k, "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\x95"_sv}, // Brahmic aksara (C virama C)
+        {"LB29", utf8_rule_joins_k, ".a"_sv},                                    // IS x (AL|HL) (no break)
+        {"LB30", utf8_rule_joins_k, "a("_sv},                                    // (AL|HL|NU) x OP[^EAW] (no break)
+        {"LB30a", utf8_rule_joins_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8"_sv},     // RI RI (even-parity pair, no break)
+        {"LB30b", utf8_rule_joins_k, "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBB"_sv},     // EB x EM (base + modifier, no break)
+        {"LB31", utf8_rule_breaks_k, "\xE4\xB8\xAD\xE4\xB8\xAD"_sv},             // break everywhere else (ideographs)
+        // Opposite-direction motifs (E1): the same rule firing the other way.
+        {"LB28", utf8_rule_breaks_k, "a b"_sv}, // AL SP AL -> break at the space
+        {"LB25", utf8_rule_breaks_k, "1 2"_sv}, // numerals split by space -> break
+        {"LB30a", utf8_rule_breaks_k, "\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA\xF0\x9F\x87\xBA"_sv}, // 3 RI -> break
     };
     // Every Line_Break rule id the gate requires a motif for (spec-derived checklist).
     char const *const required_rules[] = {
