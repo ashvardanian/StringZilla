@@ -2280,7 +2280,7 @@ static char const doc_reset_capabilities[] =                                    
     "\n"                                                                                //
     "Examples:\n"                                                                       //
     "  >>> import stringzillas as szs\n"                                                //
-    "  >>> szs.reset_capabilities('serial')  # restrict dispatch to the scalar backend";
+    "  >>> szs.reset_capabilities(('serial',))  # restrict dispatch to the scalar backend";
 
 static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
     PyObject *caps_obj = NULL;
