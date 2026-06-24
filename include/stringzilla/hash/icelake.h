@@ -287,6 +287,12 @@ SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_
     sz_hash_state_aligned_t_ state = sz_hash_state_load_icelake_(state_ptr);
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
+    //  Per-lane identity {0, 1, ..., 63} used to slide incoming bytes to the buffer offset entirely in-register.
+    sz_align_(64) static sz_u8_t const lane_iota[64] = {
+        0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+        22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+        44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+    __m512i const lane_iota_vec = _mm512_load_si512((__m512i const *)lane_iota);
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_icelake_(&state);
@@ -294,8 +300,16 @@ SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_
             buffered = 0;
         }
         sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        for (sz_size_t byte_index = 0; byte_index < to_copy; ++byte_index)
-            state.ins.u8s[buffered + byte_index] = (sz_u8_t)text[byte_index];
+        //  Merge `to_copy` incoming bytes into `ins` at lane offset `buffered` WITHOUT a stack round-trip: poking
+        //  individual bytes into the just-written `ins` ZMM stalls on store-forwarding (~12 cy) every cross-call
+        //  merge - the dominant cost for short streamed tokens. `vpermb` slides the masked-loaded bytes to the
+        //  offset and `vpblendmb` drops them into place; bit-identical digest to the per-byte copy.
+        __mmask64 const copy_mask = _cvtu64_mask64(sz_u64_mask_until_(to_copy));
+        __m512i const incoming = _mm512_maskz_loadu_epi8(copy_mask, text);
+        __m512i const slide = _mm512_sub_epi8(lane_iota_vec, _mm512_set1_epi8((char)buffered));
+        __m512i const shifted = _mm512_permutexvar_epi8(slide, incoming);
+        state.ins.zmm =
+            _mm512_mask_blend_epi8(_cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered), state.ins.zmm, shifted);
         buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
     sz_hash_state_store_icelake_(state_ptr, &state);
