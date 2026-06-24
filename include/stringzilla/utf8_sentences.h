@@ -48,6 +48,20 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, s
                                              sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
                                              sz_size_t *bytes_consumed);
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_sentences */
+SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                              sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                              sz_size_t *bytes_consumed);
+#endif
+
+#if SZ_USE_NEON
+/** @copydoc sz_utf8_sentences */
+SZ_PUBLIC sz_size_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                           sz_size_t *bytes_consumed);
+#endif
+
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_sentences */
 SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
@@ -59,6 +73,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, 
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
 #include "stringzilla/utf8_sentences/serial.h"
+#include "stringzilla/utf8_sentences/haswell.h"
+#include "stringzilla/utf8_sentences/neon.h"
 #include "stringzilla/utf8_sentences/icelake.h"
 
 #pragma region Dynamic Dispatch
@@ -71,6 +87,11 @@ SZ_DYNAMIC sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size
 #if SZ_USE_ICELAKE
     return sz_utf8_sentences_icelake(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                      bytes_consumed);
+#elif SZ_USE_HASWELL
+    return sz_utf8_sentences_haswell(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                     bytes_consumed);
+#elif SZ_USE_NEON
+    return sz_utf8_sentences_neon(text, length, sentence_starts, sentence_lengths, sentences_capacity, bytes_consumed);
 #else
     return sz_utf8_sentences_serial(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                     bytes_consumed);

@@ -32,13 +32,6 @@ extern "C" {
  *  break property. Every routine treats all 64 lanes uniformly with no scalar per-lane loop, no gather, and
  *  no spill-to-stack-then-reload round-trip. */
 
-/** @brief  Largest index `<= index` at which @p text begins a codepoint (skips trailing continuation bytes
- *          `0x80..0xBF`). Used by the reverse driver to snap an anchor to a codepoint start. */
-SZ_INTERNAL sz_size_t sz_utf8_codepoints_start_at_or_before_(sz_u8_t const *text, sz_size_t index) {
-    while (index > 0 && (text[index] & 0xC0) == 0x80) --index;
-    return index;
-}
-
 /** @brief  Descending byte lane identity {63,62,...,1,0} for `vpcompressb`-based drains and permute waves. */
 SZ_INTERNAL __m512i sz_utf8_codepoints_lane_identity_icelake_(void) {
     return _mm512_set_epi8(                                             //
@@ -79,69 +72,6 @@ SZ_INTERNAL void sz_utf8_codepoints_peel_icelake_(                              
         compressed_lengths = _mm512_alignr_epi64(zero, compressed_lengths, 1);
     }
 }
-
-#pragma region Bit mask boundary algebra
-
-/** @brief  Smear set bits rightward (toward higher lanes) for @p steps, gated by the @p reach mask each step. */
-SZ_INTERNAL sz_u64_t sz_utf8_codepoints_smear_right_(sz_u64_t bits, sz_u64_t reach, int steps) {
-    for (int step = 0; step < steps; ++step) bits |= (bits << 1) & reach;
-    return bits;
-}
-
-/** @brief  Smear set bits leftward (toward lower lanes) for @p steps, gated by the @p reach mask each step. */
-SZ_INTERNAL sz_u64_t sz_utf8_codepoints_smear_left_(sz_u64_t bits, sz_u64_t reach, int steps) {
-    for (int step = 0; step < steps; ++step) bits |= (bits >> 1) & reach;
-    return bits;
-}
-
-/**
- *  @brief  Unbounded segmented flood of @p seed bits rightward (toward higher lanes) through every lane where
- *          @p gate is set, in log-depth Kogge-Stone doubling steps. Reaches the full 64-lane span without a
- *          per-lane loop, so runs of arbitrary length resolve in six iterations (sentence SB8 / line SP-runs).
- *  @note   A bit at lane `i` ends up set when `seed[i]` or there is a contiguous `gate`-true run from some
- *          seeded lane up to and including `i`. The gate is contracted alongside the flood so each doubling
- *          step still only crosses lanes that are themselves gated.
- */
-SZ_INTERNAL sz_u64_t sz_utf8_codepoints_fill_right_(sz_u64_t seed, sz_u64_t gate) {
-    sz_u64_t bits = seed;
-    sz_u64_t reach = gate;
-    for (int shift = 1; shift < 64; shift <<= 1) {
-        bits |= (bits << shift) & reach;
-        reach &= reach << shift;
-    }
-    return bits;
-}
-
-/**
- *  @brief  Unbounded segmented flood of @p seed bits leftward (toward lower lanes) through every lane where
- *          @p gate is set, in log-depth Kogge-Stone doubling steps. Mirror of @ref sz_utf8_codepoints_fill_right_.
- */
-SZ_INTERNAL sz_u64_t sz_utf8_codepoints_fill_left_(sz_u64_t seed, sz_u64_t gate) {
-    sz_u64_t bits = seed;
-    sz_u64_t reach = gate;
-    for (int shift = 1; shift < 64; shift <<= 1) {
-        bits |= (bits >> shift) & reach;
-        reach &= reach >> shift;
-    }
-    return bits;
-}
-
-/**
- *  @brief  Segmented exclusive prefix-XOR parity over each maximal @p gate run: lane i carries the XOR of @p seed
- *          across the contiguous run of @p gate ending at i. The dual of @ref sz_utf8_codepoints_fill_right_ (OR ->
- *          XOR), in log-depth Kogge-Stone doubling. Used by the grapheme GB12/13 Regional_Indicator parity scan.
- */
-SZ_INTERNAL sz_u64_t sz_utf8_codepoints_segmented_parity_icelake_(sz_u64_t seed, sz_u64_t gate) {
-    sz_u64_t parity = seed;
-    sz_u64_t reach = gate;
-    for (int shift = 1; shift < 64; shift <<= 1) {
-        parity ^= (parity << shift) & reach;
-        reach &= reach << shift;
-    }
-    return parity;
-}
-
-#pragma endregion Bit mask boundary algebra
 
 #pragma region Decode window
 

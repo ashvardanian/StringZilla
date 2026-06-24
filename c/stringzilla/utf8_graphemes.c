@@ -12,6 +12,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t cap
 
     impl->utf8_graphemes = sz_utf8_graphemes_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) { impl->utf8_graphemes = sz_utf8_graphemes_haswell; }
+#endif
+#if SZ_USE_NEON
+    if (caps & sz_cap_neon_k) { impl->utf8_graphemes = sz_utf8_graphemes_neon; }
+#endif
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_graphemes = sz_utf8_graphemes_icelake; }
 #endif

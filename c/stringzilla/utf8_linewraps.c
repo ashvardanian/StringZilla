@@ -12,6 +12,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_lines_update_(sz_capability_t caps) {
 
     impl->utf8_linewraps = sz_utf8_linewraps_serial;
 
+#if SZ_USE_HASWELL
+    if (caps & sz_cap_haswell_k) { impl->utf8_linewraps = sz_utf8_linewraps_haswell; }
+#endif
+#if SZ_USE_NEON
+    if (caps & sz_cap_neon_k) { impl->utf8_linewraps = sz_utf8_linewraps_neon; }
+#endif
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_linewraps = sz_utf8_linewraps_icelake; }
 #endif

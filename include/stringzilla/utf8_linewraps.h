@@ -52,6 +52,20 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(sz_cptr_t text, sz_size_t length, s
                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
                                              sz_size_t *bytes_consumed);
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_linewraps_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                              sz_size_t *bytes_consumed);
+#endif
+
+#if SZ_USE_NEON
+/** @copydoc sz_utf8_linewraps */
+SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                           sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                           sz_size_t *bytes_consumed);
+#endif
+
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_linewraps */
 SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
@@ -63,6 +77,8 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake(sz_cptr_t text, sz_size_t length, 
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
 #include "stringzilla/utf8_linewraps/serial.h"
+#include "stringzilla/utf8_linewraps/haswell.h"
+#include "stringzilla/utf8_linewraps/neon.h"
 #include "stringzilla/utf8_linewraps/icelake.h"
 
 #pragma region Dynamic Dispatch
@@ -73,6 +89,10 @@ SZ_DYNAMIC sz_size_t sz_utf8_linewraps(sz_cptr_t text, sz_size_t length, sz_size
                                        sz_size_t *line_lengths, sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_linewraps_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+#elif SZ_USE_HASWELL
+    return sz_utf8_linewraps_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+#elif SZ_USE_NEON
+    return sz_utf8_linewraps_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
     return sz_utf8_linewraps_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #endif

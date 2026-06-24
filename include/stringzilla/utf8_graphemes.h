@@ -48,6 +48,20 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, s
                                              sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
                                              sz_size_t *bytes_consumed);
 
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_graphemes */
+SZ_PUBLIC sz_size_t sz_utf8_graphemes_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                              sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                              sz_size_t *bytes_consumed);
+#endif
+
+#if SZ_USE_NEON
+/** @copydoc sz_utf8_graphemes */
+SZ_PUBLIC sz_size_t sz_utf8_graphemes_neon(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                           sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                           sz_size_t *bytes_consumed);
+#endif
+
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_graphemes */
 SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
@@ -59,6 +73,8 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, 
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
 #include "stringzilla/utf8_graphemes/serial.h"
+#include "stringzilla/utf8_graphemes/haswell.h"
+#include "stringzilla/utf8_graphemes/neon.h"
 #include "stringzilla/utf8_graphemes/icelake.h"
 
 #pragma region Dynamic Dispatch
@@ -70,6 +86,10 @@ SZ_DYNAMIC sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size
                                        sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_graphemes_icelake(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
+#elif SZ_USE_HASWELL
+    return sz_utf8_graphemes_haswell(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
+#elif SZ_USE_NEON
+    return sz_utf8_graphemes_neon(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #else
     return sz_utf8_graphemes_serial(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #endif

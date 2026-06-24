@@ -49,8 +49,8 @@ extern "C" {
 
 enum {
     sz_grapheme_break_mid_tiles_k = sizeof(sz_utf8_grapheme_break_stage_mid_) / 64, /**< ZMM tiles of `stage_mid`. */
-    sz_grapheme_break_sub_packed_tiles_k =
-        sizeof(sz_utf8_grapheme_break_stage_sub_packed_) / 64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
+    sz_grapheme_break_sub_packed_tiles_k = sizeof(sz_utf8_grapheme_break_stage_sub_packed_) /
+        64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
     sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
@@ -82,7 +82,7 @@ SZ_INTERNAL __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
     __m512i const mid_index = _mm512_add_epi32(
         _mm512_slli_epi32(mid, 4), _mm512_and_si512(_mm512_srli_epi32(codepoints, 4), _mm512_set1_epi32(0xF)));
     __m512i const sub = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_stage_mid_,
-                                                               sz_grapheme_break_mid_tiles_k, mid_index);
+                                                                sz_grapheme_break_mid_tiles_k, mid_index);
     __m512i const sub_index = _mm512_add_epi32(_mm512_slli_epi32(sub, 4),
                                                _mm512_and_si512(codepoints, _mm512_set1_epi32(0xF)));
     // `stage_sub` outputs a 4-bit descriptor index, so it is stored two cells per byte: the nibble cascade walks half
@@ -106,8 +106,8 @@ SZ_INTERNAL __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints) {
         sz_utf8_grapheme_break_astral_s1_, sz_grapheme_break_astral_stage1_tiles_k, stage2_index);
     __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
                                                 _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_codepoints_lut_cascade_icelake_(
-        sz_utf8_grapheme_break_astral_s2_, sz_grapheme_break_astral_stage2_tiles_k, leaf_index);
+    __m512i const leaf = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s2_,
+                                                                 sz_grapheme_break_astral_stage2_tiles_k, leaf_index);
     __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
                                                  _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
     return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_leaf_,
@@ -125,15 +125,15 @@ SZ_INTERNAL __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints) {
                                          _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xA66E)));
     __mmask16 const run_b = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0xD7FC)),
                                          _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xFB1D)));
-    __mmask16 const exception_run =
-        _kor_mask16(_kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x302A)),
-                                 _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x3030))),
-                    _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3099)),
-                                 _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x309A))));
-    __mmask16 const exception_point =
-        _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x303D)),
-                    _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3297)),
-                                _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3299))));
+    __mmask16 const exception_run = _kor_mask16(
+        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x302A)),
+                     _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x3030))),
+        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3099)),
+                     _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x309A))));
+    __mmask16 const exception_point = _kor_mask16(
+        _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x303D)),
+        _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3297)),
+                    _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3299))));
     return _kandn_mask16(_kor_mask16(exception_run, exception_point), _kor_mask16(run_a, run_b));
 }
 
@@ -161,7 +161,7 @@ SZ_INTERNAL __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     __mmask16 const is_ascii = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x80));
     __mmask16 const below_0800 = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x800));
     __mmask16 const is_bmp = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x10000));
-    __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                       // 0x80..0x7FF
+    __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                         // 0x80..0x7FF
     __mmask16 const cold_raw = _kandn_mask16(is_hangul, _kandn_mask16(below_0800, is_bmp)); // 0x800..0xFFFF, non-Hangul
     // CJK / Kana arithmetic fast-path, gated behind any-cold-lane so ASCII / Hangul windows pay nothing: the carved
     // lanes resolve to GCB=Other (descriptor 0, the zero-init value), so a pure-CJK window skips the 50-tile cascade.
@@ -182,14 +182,12 @@ SZ_INTERNAL __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     }
     else {
         if (is_ascii)
-            descriptor = _mm512_mask_mov_epi32(descriptor, is_ascii,
-                                               sz_grapheme_ascii_descriptor_icelake_(codepoints));
+            descriptor = _mm512_mask_mov_epi32(descriptor, is_ascii, sz_grapheme_ascii_descriptor_icelake_(codepoints));
         if (is_small)
             descriptor = _mm512_mask_mov_epi32(descriptor, is_small, sz_grapheme_small_page_icelake_(codepoints));
     }
     if (is_astral)
-        descriptor = _mm512_mask_mov_epi32(descriptor, is_astral,
-                                           sz_grapheme_classify_astral16_icelake_(codepoints));
+        descriptor = _mm512_mask_mov_epi32(descriptor, is_astral, sz_grapheme_classify_astral16_icelake_(codepoints));
     return _mm512_mask_blend_epi32(is_hangul, descriptor, hangul_descriptor);
 }
 
@@ -256,8 +254,7 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
 
     __m512i const quarter0 = sz_grapheme_classify_quarter_icelake_(
         _mm512_extracti32x4_epi32(high, 0), _mm512_extracti32x4_epi32(low, 0), _mm512_extracti32x4_epi32(plane, 0),
-        _mm512_extracti32x4_epi32(mid_byte, 0), _mm512_extracti32x4_epi32(lo_byte, 0),
-        (__mmask16)(four_byte & 0xFFFF));
+        _mm512_extracti32x4_epi32(mid_byte, 0), _mm512_extracti32x4_epi32(lo_byte, 0), (__mmask16)(four_byte & 0xFFFF));
     __m512i const quarter1 = sz_grapheme_classify_quarter_icelake_(
         _mm512_extracti32x4_epi32(high, 1), _mm512_extracti32x4_epi32(low, 1), _mm512_extracti32x4_epi32(plane, 1),
         _mm512_extracti32x4_epi32(mid_byte, 1), _mm512_extracti32x4_epi32(lo_byte, 1),
@@ -292,39 +289,9 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
 
 #pragma region Grapheme boundary algebra
 
-/**
- *  @brief  Cross-window left-context carry: the situation just AFTER the previous window's last codepoint, so this
- *          window's codepoint 0 sees an exact (i-1) context for all of GB3..GB13.
- */
-typedef struct sz_grapheme_carry_t {
-    int has_previous;                /**< Stream has emitted at least one codepoint already. */
-    sz_u64_t previous_class_bit[14]; /**< Bit 0 set => the previous codepoint had that gcb class. */
-    int regional_indicator_run_odd;  /**< RI run ending at the previous codepoint has odd inclusive length. */
-    int extended_pictographic_run;   /**< Previous codepoint tails an (ExtPict Extend*) chain. */
-    int zero_width_joiner_connector; /**< Previous codepoint is a ZWJ closing an (ExtPict Extend*) run. */
-    int indic_conjunct_open;         /**< An InCB run rooted at a Consonant is open at the previous cp. */
-    int indic_conjunct_seen_linker;  /**< ... and a Linker has appeared in that open run. */
-} sz_grapheme_carry_t;
-
-/** @brief  A zero-initialized cross-window carry (stream start: no previous codepoint, no open runs). */
-SZ_INTERNAL sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
-    sz_grapheme_carry_t carry;
-    carry.has_previous = 0;
-    for (int class_index = 0; class_index < 14; ++class_index) carry.previous_class_bit[class_index] = 0;
-    carry.regional_indicator_run_odd = 0;
-    carry.extended_pictographic_run = 0;
-    carry.zero_width_joiner_connector = 0;
-    carry.indic_conjunct_open = 0;
-    carry.indic_conjunct_seen_linker = 0;
-    return carry;
-}
-
-/** @brief  Per-window class membership masks derived once from the codepoint-dense packed descriptor bytes. */
-typedef struct sz_grapheme_window_masks_t {
-    sz_u64_t class_bit[14]; /**< `class_bit[c]` bit i set => dense codepoint i is grapheme class c. */
-    sz_u64_t extended_pictographic;
-    sz_u64_t indic_consonant, indic_extend, indic_linker;
-} sz_grapheme_window_masks_t;
+/*  The `sz_grapheme_carry_t`, `sz_grapheme_window_masks_t`, `sz_grapheme_carry_empty_`, `sz_grapheme_stateful_joins_`,
+ *  `sz_grapheme_previous_` and the portable `sz_grapheme_window_boundaries_` engine live in `serial.h`; only the
+ *  `__m512i`->`sz_u64_t` mask extractor and the thin wrapper that feeds the portable engine are ISA-specific here. */
 
 /**
  *  @brief  Reduce the codepoint-dense packed descriptor bytes (in a ZMM) into per-class membership masks for the
@@ -349,149 +316,15 @@ SZ_INTERNAL sz_grapheme_window_masks_t sz_grapheme_build_masks_icelake_(__m512i 
 }
 
 /**
- *  @brief  The three unbounded run-carries (GB12/13 RI parity, GB11 ExtPict-ZWJ, GB9c InCB), computed once from this
- *          window's masks and the inbound carry. Returns their join-mask contribution and updates @p next for the
- *          following window. Bit i of the result set → a no-break suppression sits before dense codepoint i.
- */
-SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window, int codepoint_count,
-                                                 sz_grapheme_carry_t const *previous, sz_grapheme_carry_t *next) {
-    sz_u64_t const regional = window->class_bit[sz_grapheme_break_regional_indicator_k];
-    sz_u64_t const extend = window->class_bit[sz_grapheme_break_extend_k];
-    sz_u64_t const zero_width_joiner = window->class_bit[sz_grapheme_break_zwj_k];
-    int const last = codepoint_count - 1;
-    sz_u64_t const last_bit = (codepoint_count > 0) ? (1ull << last) : 0;
-    sz_u64_t join = 0;
-
-    // GB12/13: no-break before a Regional_Indicator that is an EVEN member of its maximal run. A segmented XOR parity
-    // scan over the run computes membership; the run is seeded from the inbound carry's RI parity. Skipped wholesale
-    // when the window holds no Regional_Indicator (the overwhelmingly common case).
-    if (regional) {
-        sz_u64_t const previous_ri = (regional << 1) |
-                                     (previous->previous_class_bit[sz_grapheme_break_regional_indicator_k] & 1ull);
-        sz_u64_t const starts = regional & ~previous_ri;
-        // Seed lane 0 from the inbound run parity, branchless: a lane-0 RI that is NOT a fresh run start continues a
-        // previous-window run, so XOR in the carried odd-parity bit. Then a segmented XOR-parity scan over the run.
-        sz_u64_t const seed = regional ^
-                              (regional & ~starts & 1ull & (sz_u64_t)(previous->regional_indicator_run_odd & 1));
-        sz_u64_t const parity = sz_utf8_codepoints_segmented_parity_icelake_(seed, regional & ~starts);
-        join |= regional & previous_ri & ~parity; // parity[i]==0 -> even member -> pairs with i-1 -> no break
-        next->regional_indicator_run_odd = (regional & last_bit) ? ((parity & last_bit) != 0) : 0;
-    }
-    else { next->regional_indicator_run_odd = 0; }
-
-    // GB11: Extended_Pictographic Extend* ZWJ x Extended_Pictographic, via a right-smear of the ExtPict run through
-    // Extend, a ZWJ whose left lane sits inside that run, and a no-break before the following ExtPict. Skipped when no
-    // ExtPict / ZWJ lane is present and no chain is open from the previous window.
-    if (window->extended_pictographic | zero_width_joiner | (previous->extended_pictographic_run ? 1ull : 0ull)) {
-        sz_u64_t run = window->extended_pictographic;
-        run |= (extend & 1ull) & (sz_u64_t)(previous->extended_pictographic_run); // branchless lane-0 chain seed
-        run = sz_utf8_codepoints_fill_right_(run, extend);
-        sz_u64_t const previous_run = (run << 1) | (previous->extended_pictographic_run ? 1ull : 0ull);
-        sz_u64_t const connector = zero_width_joiner & previous_run;
-        sz_u64_t const previous_connector = (connector << 1) | (previous->zero_width_joiner_connector ? 1ull : 0ull);
-        join |= previous_connector & window->extended_pictographic;
-        next->extended_pictographic_run = (run & last_bit) != 0;
-        next->zero_width_joiner_connector = (connector & last_bit) != 0;
-    }
-    else {
-        next->extended_pictographic_run = 0;
-        next->zero_width_joiner_connector = 0;
-    }
-
-    // GB9c: Consonant [Extend|Linker]* Linker [Extend|Linker]* x Consonant. The open run and the seen-linker run both
-    // flood rightward through the continuation lanes (Extend|Linker), seeded from the inbound carry. Skipped when no
-    // Indic_Conjunct_Break lane is present and no conjunct is open from the previous window.
-    if (window->indic_consonant | window->indic_extend | window->indic_linker |
-        (previous->indic_conjunct_open ? 1ull : 0ull)) {
-        sz_u64_t const continuation = window->indic_extend | window->indic_linker;
-        sz_u64_t open = window->indic_consonant;
-        open |= (continuation & 1ull) & (sz_u64_t)(previous->indic_conjunct_open); // branchless lane-0 open seed
-        open = sz_utf8_codepoints_fill_right_(open, continuation);
-        sz_u64_t seen = window->indic_linker & open;
-        seen |= (continuation & 1ull) &
-                (sz_u64_t)(previous->indic_conjunct_open & previous->indic_conjunct_seen_linker);
-        seen = sz_utf8_codepoints_fill_right_(seen, continuation & open);
-        sz_u64_t previous_open_seen = ((open & seen) << 1);
-        previous_open_seen |= (sz_u64_t)(previous->indic_conjunct_open & previous->indic_conjunct_seen_linker);
-        join |= previous_open_seen & window->indic_consonant;
-        int const last_in_run = ((window->indic_consonant | continuation) & last_bit) != 0 && (open & last_bit) != 0;
-        next->indic_conjunct_open = last_in_run;
-        next->indic_conjunct_seen_linker = last_in_run && ((seen & last_bit) != 0);
-    }
-    else {
-        next->indic_conjunct_open = 0;
-        next->indic_conjunct_seen_linker = 0;
-    }
-    return join;
-}
-
-/**
- *  @brief  Per-class shift of @p current into the (i-1) position, seeding lane 0 from the inbound carry's last class.
- */
-SZ_INTERNAL sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous, int class_index) {
-    return (current << 1) | (previous->previous_class_bit[class_index] & 1ull);
-}
-
-/**
- *  @brief  Boundary bitmask for one codepoint-dense window. Bit i set → a grapheme break sits before dense
- *          codepoint i. The carry-update is produced exactly once here and threaded out through @p carry.
+ *  @brief  Boundary bitmask for one codepoint-dense window. Bit i set → a grapheme break sits before dense codepoint
+ *          i. Builds the per-class masks in-register (the only `__m512i`->`sz_u64_t` contact), then delegates every
+ *          GB1-GB13 decision to the shared portable @ref sz_grapheme_window_boundaries_ engine.
  */
 SZ_INTERNAL sz_u64_t sz_grapheme_window_boundaries_icelake_(__m512i descriptors, int codepoint_count,
                                                             sz_grapheme_carry_t *carry) {
     sz_u64_t const valid = (codepoint_count >= 64) ? ~0ull : ((1ull << codepoint_count) - 1);
     sz_grapheme_window_masks_t const window = sz_grapheme_build_masks_icelake_(descriptors, valid);
-    sz_grapheme_carry_t const previous = *carry;
-
-    sz_u64_t const carriage_return = window.class_bit[sz_grapheme_break_cr_k];
-    sz_u64_t const line_feed = window.class_bit[sz_grapheme_break_lf_k];
-    sz_u64_t const control = window.class_bit[sz_grapheme_break_control_k];
-    sz_u64_t const extend = window.class_bit[sz_grapheme_break_extend_k];
-    sz_u64_t const zero_width_joiner = window.class_bit[sz_grapheme_break_zwj_k];
-    sz_u64_t const prepend = window.class_bit[sz_grapheme_break_prepend_k];
-    sz_u64_t const spacing_mark = window.class_bit[sz_grapheme_break_spacingmark_k];
-    sz_u64_t const hangul_lead = window.class_bit[sz_grapheme_break_hangul_l_k];
-    sz_u64_t const hangul_vowel = window.class_bit[sz_grapheme_break_hangul_v_k];
-    sz_u64_t const hangul_trailing = window.class_bit[sz_grapheme_break_hangul_t_k];
-    sz_u64_t const hangul_lead_vowel = window.class_bit[sz_grapheme_break_hangul_lv_k];
-    sz_u64_t const hangul_lead_vowel_trailing = window.class_bit[sz_grapheme_break_hangul_lvt_k];
-
-    sz_u64_t const previous_cr = sz_grapheme_previous_(carriage_return, &previous, sz_grapheme_break_cr_k);
-    sz_u64_t const previous_lf = sz_grapheme_previous_(line_feed, &previous, sz_grapheme_break_lf_k);
-    sz_u64_t const previous_control = sz_grapheme_previous_(control, &previous, sz_grapheme_break_control_k);
-    sz_u64_t const previous_prepend = sz_grapheme_previous_(prepend, &previous, sz_grapheme_break_prepend_k);
-    sz_u64_t const previous_lead = sz_grapheme_previous_(hangul_lead, &previous, sz_grapheme_break_hangul_l_k);
-    sz_u64_t const previous_vowel = sz_grapheme_previous_(hangul_vowel, &previous, sz_grapheme_break_hangul_v_k);
-    sz_u64_t const previous_trailing = sz_grapheme_previous_(hangul_trailing, &previous, sz_grapheme_break_hangul_t_k);
-    sz_u64_t const previous_lead_vowel = sz_grapheme_previous_(hangul_lead_vowel, &previous,
-                                                               sz_grapheme_break_hangul_lv_k);
-    sz_u64_t const previous_lead_vowel_trailing = sz_grapheme_previous_(hangul_lead_vowel_trailing, &previous,
-                                                                        sz_grapheme_break_hangul_lvt_k);
-
-    sz_u64_t join = 0;
-    join |= previous_cr & line_feed; // GB3  CR x LF
-    join |= previous_lead & (hangul_lead | hangul_vowel | hangul_lead_vowel | hangul_lead_vowel_trailing); // GB6
-    join |= (previous_lead_vowel | previous_vowel) & (hangul_vowel | hangul_trailing);                     // GB7
-    join |= (previous_lead_vowel_trailing | previous_trailing) & hangul_trailing;                          // GB8
-    join |= (extend | zero_width_joiner); // GB9  x (Extend|ZWJ)
-    join |= spacing_mark;                 // GB9a x SpacingMark
-    join |= previous_prepend;             // GB9b Prepend x
-
-    join |= sz_grapheme_stateful_joins_(&window, codepoint_count, &previous, carry); // GB9c, GB11, GB12/13
-
-    // GB4/GB5 force a break around Control/CR/LF (except CR x LF kept by GB3).
-    sz_u64_t const force = ((previous_control | previous_cr | previous_lf) | (control | carriage_return | line_feed)) &
-                           ~(previous_cr & line_feed);
-
-    sz_u64_t boundary = (~join | force) & valid;
-    if (!previous.has_previous) boundary |= (valid & 1ull); // GB1 at stream start
-
-    if (codepoint_count > 0) {
-        sz_u64_t const last_bit = 1ull << (codepoint_count - 1);
-        for (int class_index = 0; class_index < 14; ++class_index)
-            carry->previous_class_bit[class_index] = (window.class_bit[class_index] & last_bit) ? 1ull : 0ull;
-        carry->has_previous = 1;
-    }
-    return boundary;
+    return sz_grapheme_window_boundaries_(&window, codepoint_count, valid, carry);
 }
 
 #pragma endregion Grapheme boundary algebra
@@ -599,8 +432,8 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(             //
     sz_size_t base = 0;
 
     while (base < length) {
-        sz_grapheme_window_t const window =
-            sz_grapheme_classify_window_full_icelake_(text_u8, length, base, lane_identity, &carry);
+        sz_grapheme_window_t const window = sz_grapheme_classify_window_full_icelake_(text_u8, length, base,
+                                                                                      lane_identity, &carry);
         if (window.codepoint_count == 0) break; // defensive: no resolvable start (cannot happen for valid input)
 
         // The GB1 anchor at byte 0 of the first window is the open cluster's own start, not a new break: clear it so

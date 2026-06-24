@@ -292,6 +292,271 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(                //
 
 #pragma endregion // UAX 29 Sentence Boundaries
 
+#pragma region Portable dense rule engine
+
+/**
+ *  @brief  Cross-window register carry: the open `SATerm Close* Sp*` shadow run-state, the trailing significant /
+ *          raw classes the bounded-lookback rules (SB3/SB4/SB6/SB7) need at the next block head, plus the SB8
+ *          "neutral chain awaiting a Lower verdict" pending state that threads an unbounded right context across
+ *          windows without any serial re-walk or oracle call. The portable engine carry, shared verbatim by every
+ *          ISA backend (the icelake and haswell extractors only build the dense class stream that feeds it).
+ */
+typedef struct sz_utf8_sentence_break_carry_t {
+    /** A SATerm has opened a shadow that is still open at the previous block's edge. */
+    sz_u8_t in_shadow;
+    /** The opening terminator was ATerm (matters for SB8). */
+    sz_u8_t shadow_aterm;
+    /** At least one Sp seen since the terminator (SB9 vs SB10). */
+    sz_u8_t shadow_saw_sp;
+    /** False only at the very start of the text (SB1). */
+    sz_u8_t have_prev;
+    /** Class of the last significant codepoint of the previous block. */
+    sz_u8_t prev_eff;
+    /** Class of the second-last significant codepoint. */
+    sz_u8_t prev_prev_eff;
+    /** Class of the last raw codepoint of the previous block (SB3/SB4 raw-before). */
+    sz_u8_t prev_raw;
+    /** An ATerm SB8 boundary deferred because its neutral right-context (no Close/Sp shadow) ran past the block edge;
+     *  the awaited Lower-vs-stop verdict threads here across blocks. */
+    sz_u8_t sb8_pending;
+} sz_utf8_sentence_break_carry_t;
+
+/** @brief  One classified block resolved into per-dense-codepoint break bits plus the metadata the driver stitches. */
+typedef struct sz_utf8_sentence_break_window_t {
+    /** Bit `i` set => a boundary begins before dense codepoint `i` (scattered to byte lanes by the driver). */
+    sz_u64_t breaks;
+    /** Exclusive upper bound, in dense codepoints, on lanes whose break bit is fully trusted (SB8 edge). */
+    sz_size_t resolved;
+    /** Verdict for an entering `carry->sb8_pending`: 0 still pending, 1 break, 2 no break. */
+    sz_u8_t sb8_resolution;
+} sz_utf8_sentence_break_window_t;
+
+/** @brief  Per-class membership masks of the dense codepoint stream: bit `i` of `by_class[c]` set when dense lane `i`
+ *          (in @p valid) carries Sentence_Break class `c`. The ISA-independent dense frame the rule engine consumes;
+ *          built in ONE pass over @p dense_classes (a backend may instead fill it with vector compares - the engine
+ *          only reads `by_class[...]`). 15 Sentence_Break classes (0..14). */
+typedef struct sz_utf8_sentence_break_frame_t {
+    sz_u64_t by_class[15]; /**< by_class[c] = lanes whose class == c, restricted to valid. */
+} sz_utf8_sentence_break_frame_t;
+
+/** @brief  Build @ref sz_utf8_sentence_break_frame_t from the dense class byte stream in one forward pass. */
+SZ_INTERNAL sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_from_dense_(sz_u8_t const *dense_classes,
+                                                                                    sz_u64_t valid) {
+    sz_utf8_sentence_break_frame_t frame;
+    for (int cls = 0; cls < 15; ++cls) frame.by_class[cls] = 0;
+    sz_u64_t remaining = valid;
+    while (remaining) {
+        int const lane = sz_u64_ctz(remaining);
+        remaining &= remaining - 1;
+        frame.by_class[dense_classes[lane]] |= (sz_u64_t)1 << lane;
+    }
+    return frame;
+}
+
+/**
+ *  @brief  Resolve a block of @p count dense classified codepoints (lanes `0..count-1` in @p dense_classes, the open
+ *          shadow and left context arriving in @p carry) into dense per-codepoint sentence-break bits. The ISA driver
+ *          compacts the byte-lane classes to this dense stream and scatters the result back to byte lanes.
+ *
+ *  All of SB3-SB998 are pure 64-bit bit algebra over the per-class lane masks: the two-phase `SATerm Close* Sp*`
+ *  shadow (`close_phase` then `shadow`), the SB8 in-window lower-ahead (`fill_left` of Lower through neutral via
+ *  the shared substrate), the SB6/SB7 effective-previous chains across Extend/Format (the `flow` gate hops only the
+ *  remaining ignorable codepoints, no continuation bytes), and the SB3/SB4 raw-before (a single `<< 1` on the dense
+ *  stream). @p carry is updated with the trailing run-state. `breaks` bit 0 is the inter-block boundary (only
+ *  meaningful when `have_prev`).
+ *
+ *  SB8's right context is unbounded; the in-window `fill_left` is exact unless a trailing neutral run reaches the
+ *  block edge (the Lower may lie in the next block). `resolved` is clamped before such an undecided lane so the
+ *  driver re-anchors the next window with full forward context - a register carry only, never a scalar re-walk or
+ *  oracle call. Intrinsic-free: the only ISA-specific work (decode, classify, dense compaction, byte-lane scatter)
+ *  lives in the backend extractor; this engine is shared by serial / icelake / haswell verbatim.
+ */
+SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_( //
+    sz_utf8_sentence_break_frame_t const *frame, sz_u8_t const *dense_classes, sz_size_t count,
+    sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
+
+    sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
+    sz_u64_t const m_extend = frame->by_class[sz_sentence_break_extend_k];
+    sz_u64_t const m_format = frame->by_class[sz_sentence_break_format_k];
+    sz_u64_t const m_ignorable = m_extend | m_format;
+    sz_u64_t const m_cr = frame->by_class[sz_sentence_break_cr_k];
+    sz_u64_t const m_lf = frame->by_class[sz_sentence_break_lf_k];
+    sz_u64_t const m_sep = frame->by_class[sz_sentence_break_sep_k];
+    sz_u64_t const m_sp = frame->by_class[sz_sentence_break_sp_k];
+    sz_u64_t const m_lower = frame->by_class[sz_sentence_break_lower_k];
+    sz_u64_t const m_upper = frame->by_class[sz_sentence_break_upper_k];
+    sz_u64_t const m_oletter = frame->by_class[sz_sentence_break_oletter_k];
+    sz_u64_t const m_numeric = frame->by_class[sz_sentence_break_numeric_k];
+    sz_u64_t const m_aterm = frame->by_class[sz_sentence_break_aterm_k];
+    sz_u64_t const m_scont = frame->by_class[sz_sentence_break_scontinue_k];
+    sz_u64_t const m_sterm = frame->by_class[sz_sentence_break_sterm_k];
+    sz_u64_t const m_close = frame->by_class[sz_sentence_break_close_k];
+    sz_u64_t const m_parasep = m_sep | m_cr | m_lf;
+    sz_u64_t const m_saterm = m_aterm | m_sterm;
+    sz_u64_t const significant = valid & ~m_ignorable;
+
+    // Dense adjacency rides a `flow` gate that hops only over Extend/Format codepoints (SB5 transparency); the
+    // continuation-byte half of the byte-lane `flow` is gone because the stream is already codepoint-dense.
+    sz_u64_t const flow = m_ignorable;
+    int const have_prev = carry->have_prev;
+    sz_u8_t const prev_eff = carry->prev_eff;
+    sz_u8_t const prev_prev_eff = carry->prev_prev_eff;
+    sz_u8_t const prev_raw = carry->prev_raw;
+    int const was_sb8_pending = carry->sb8_pending;
+
+    // Leading edge region: lane 0 up to and including the first significant lead, where the cross-window carried
+    // class is injected so lane-0 left context arrives as a register carry (no scalar re-walk).
+    int const first_sig = significant ? sz_u64_ctz(significant) : -1;
+    sz_u64_t const edge_region = (first_sig < 0) ? valid : sz_utf8_codepoints_mask_until_((sz_size_t)first_sig + 1);
+
+    // Effective-previous significant codepoint (SB6 ATerm, SB7 Upper/Lower two-back seeds).
+    sz_u64_t const eb_aterm = (sz_utf8_codepoints_fill_right_(m_aterm & significant, flow) << 1) |
+                              sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_aterm_k);
+    sz_u64_t const eb_upper = (sz_utf8_codepoints_fill_right_(m_upper & significant, flow) << 1) |
+                              sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_upper_k);
+    sz_u64_t const eb_lower = (sz_utf8_codepoints_fill_right_(m_lower & significant, flow) << 1) |
+                              sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_lower_k);
+
+    sz_u64_t const eb2_upper = (sz_utf8_codepoints_fill_right_(eb_upper & significant, flow) << 1) |
+                               sz_u64_or_if_(0ull, edge_region,
+                                             have_prev && prev_prev_eff == sz_sentence_break_upper_k);
+    sz_u64_t const eb2_lower = (sz_utf8_codepoints_fill_right_(eb_lower & significant, flow) << 1) |
+                               sz_u64_or_if_(0ull, edge_region,
+                                             have_prev && prev_prev_eff == sz_sentence_break_lower_k);
+
+    // Two-phase monotone `SATerm Close* Sp*` shadow. `flow` spans ignorables; only Close / Sp lead classes widen
+    // each phase's gate. The carried open-run state seeds lane 0.
+    sz_u64_t const gate_close = flow | m_close;
+    sz_u64_t const gate_sp = flow | m_sp;
+    sz_u64_t const in_shadow_carry = (sz_u64_t)(carry->in_shadow != 0);
+    sz_u64_t const saw_sp_carry = (sz_u64_t)(carry->shadow_saw_sp != 0);
+    sz_u64_t const aterm_carry = (sz_u64_t)(carry->shadow_aterm != 0);
+    sz_u64_t const lane0_close = (m_ignorable | m_close) & 1ull;
+    sz_u64_t const lane0_sp = (m_ignorable | m_sp) & 1ull;
+    sz_u64_t const lane0_sp_only = m_sp & 1ull;
+    sz_u64_t const open_no_sp = in_shadow_carry & ~saw_sp_carry;
+    sz_u64_t const open_with_sp = in_shadow_carry & saw_sp_carry;
+    sz_u64_t const carry_close_seed = sz_u64_or_if_(0ull, lane0_close, (int)open_no_sp);
+    sz_u64_t const carry_sp_seed = sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)open_no_sp), lane0_sp,
+                                                 (int)open_with_sp);
+    sz_u64_t const carry_aterm_close = sz_u64_or_if_(0ull, lane0_close, (int)(open_no_sp & aterm_carry));
+    sz_u64_t const carry_aterm_sp = sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)(open_no_sp & aterm_carry)),
+                                                  lane0_sp, (int)(open_with_sp & aterm_carry));
+
+    sz_u64_t const close_phase = sz_utf8_codepoints_fill_right_(m_saterm | carry_close_seed, gate_close) |
+                                 carry_sp_seed;
+    sz_u64_t const shadow = sz_utf8_codepoints_fill_right_(close_phase | carry_sp_seed, gate_sp);
+    sz_u64_t const sp_in_shadow = (m_sp & shadow) | carry_sp_seed;
+    sz_u64_t const saw_sp_upto = sz_utf8_codepoints_fill_right_(sp_in_shadow, gate_sp) & shadow;
+    sz_u64_t const aterm_close_phase = sz_utf8_codepoints_fill_right_(m_aterm | carry_aterm_close, gate_close) |
+                                       carry_aterm_sp;
+    sz_u64_t const aterm_shadow = sz_utf8_codepoints_fill_right_(aterm_close_phase | carry_aterm_sp, gate_sp);
+
+    // SB8 in-window lower-ahead: `fill_left` of Lower through the SB8 neutral set. In dense space a stop is one
+    // lane, so no continuation-byte exclusion is needed; the neutral gate is just every non-stop codepoint.
+    sz_u64_t const sb8_stop = m_lower | m_upper | m_oletter | m_parasep | m_saterm;
+    sz_u64_t const neutral = valid & ~sb8_stop;
+    sz_u64_t const lower_ahead = sz_utf8_codepoints_fill_left_(m_lower, neutral);
+    sz_u64_t const top_bit = (count >= 64) ? (1ull << 63) : (1ull << (count - 1));
+    sz_u64_t const neutral_to_edge = sz_utf8_codepoints_fill_left_(top_bit & neutral, neutral) & ~lower_ahead;
+
+    // Raw immediately-preceding codepoint for SB3/SB4: dense `<<1` reads the previous codepoint regardless of
+    // Extend/Format (raw, not SB5-skipped). Lane 0 seeds from the carried raw class.
+    sz_u64_t raw_before_cr = (m_cr << 1);
+    sz_u64_t raw_before_parasep = (m_parasep << 1);
+    raw_before_cr = sz_u64_or_if_(raw_before_cr, 1ull, have_prev && prev_raw == sz_sentence_break_cr_k);
+    raw_before_parasep = sz_u64_or_if_(
+        raw_before_parasep, 1ull,
+        have_prev && (prev_raw == sz_sentence_break_sep_k || prev_raw == sz_sentence_break_cr_k ||
+                      prev_raw == sz_sentence_break_lf_k));
+
+    sz_u64_t const r_sb3 = raw_before_cr & m_lf;
+    sz_u64_t const r_sb4 = raw_before_parasep & valid;
+    sz_u64_t const r_sb5 = m_ignorable;
+    sz_u64_t const r_sb6 = eb_aterm & m_numeric;
+    sz_u64_t const r_sb7 = (eb2_upper | eb2_lower) & eb_aterm & m_upper;
+
+    sz_u64_t in_shadow_before = shadow << 1;
+    sz_u64_t aterm_shadow_before = aterm_shadow << 1;
+    sz_u64_t saw_sp_before = saw_sp_upto << 1;
+    in_shadow_before = sz_u64_or_if_(in_shadow_before, 1ull, (int)in_shadow_carry);
+    aterm_shadow_before = sz_u64_or_if_(aterm_shadow_before, 1ull, (int)(in_shadow_carry & aterm_carry));
+    saw_sp_before = sz_u64_or_if_(saw_sp_before, 1ull, (int)(in_shadow_carry & saw_sp_carry));
+
+    sz_u64_t const r_sb8 = aterm_shadow_before & in_shadow_before & lower_ahead;
+    sz_u64_t const r_sb8a = in_shadow_before & (m_scont | m_saterm);
+    sz_u64_t const r_sb9 = in_shadow_before & ~saw_sp_before & (m_close | m_sp | m_parasep);
+    sz_u64_t const r_sb10 = in_shadow_before & (m_sp | m_parasep);
+    sz_u64_t const r_sb11 = in_shadow_before & valid;
+
+    sz_u64_t decided = 0, brk = 0;
+    decided |= r_sb3 & ~decided;
+    brk |= r_sb4 & ~decided, decided |= r_sb4 & ~decided;
+    decided |= r_sb5 & ~decided;
+    decided |= r_sb6 & ~decided;
+    decided |= r_sb7 & ~decided;
+    decided |= r_sb8 & ~decided;
+    decided |= r_sb8a & ~decided;
+    decided |= r_sb9 & ~decided;
+    decided |= r_sb10 & ~decided;
+    sz_u64_t const decided_pre_sb11 = decided;
+    brk |= r_sb11 & ~decided, decided |= r_sb11 & ~decided;
+
+    sz_u64_t const lowbit = have_prev ? 1ull : 0ull;
+    sz_u64_t const produced = valid & (~1ull | lowbit);
+    sz_u64_t breaks = brk & produced;
+
+    sz_u64_t const undecided =
+        more_text ? (aterm_shadow_before & in_shadow_before & neutral_to_edge & produced & ~decided_pre_sb11) : 0ull;
+    sz_size_t resolved = count;
+    if (undecided) {
+        sz_size_t const lane = sz_u64_ctz(undecided);
+        resolved = lane;
+        breaks &= sz_utf8_codepoints_mask_until_(lane);
+    }
+
+    // Update the carry from this window's high edge: trailing shadow run-state and the trailing class context.
+    {
+        int const edge = (int)count - 1;
+        if (valid) carry->prev_raw = dense_classes[edge];
+        if (significant) {
+            int const last = 63 - sz_u64_clz(significant);
+            carry->prev_eff = dense_classes[last];
+            sz_u64_t const sig2 = significant & ~(1ull << last);
+            if (sig2) carry->prev_prev_eff = dense_classes[63 - sz_u64_clz(sig2)];
+        }
+        carry->have_prev = 1;
+        carry->in_shadow = (sz_u8_t)((shadow >> edge) & 1ull);
+        carry->shadow_aterm = (sz_u8_t)((aterm_shadow >> edge) & 1ull);
+        carry->shadow_saw_sp = (sz_u8_t)((saw_sp_upto >> edge) & 1ull);
+    }
+
+    sz_u8_t sb8_resolution = 0;
+    if (was_sb8_pending) {
+        if (((lower_ahead | m_lower) & 1ull) != 0) sb8_resolution = 2;
+        else if (more_text && (neutral_to_edge & 1ull) != 0) sb8_resolution = 0;
+        else sb8_resolution = 1;
+    }
+    carry->sb8_pending = (sz_u8_t)(was_sb8_pending && sb8_resolution == 0);
+
+    sz_utf8_sentence_break_window_t result;
+    result.breaks = breaks;
+    result.resolved = resolved;
+    result.sb8_resolution = sb8_resolution;
+    return result;
+}
+
+/** @brief  Convenience entry for backends without vector class compares: build the dense frame in one pass, then run
+ *          @ref sz_utf8_sentence_break_decide_block_. The vector backends build the frame with `vpcmpeqb` instead. */
+SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_( //
+    sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
+    sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
+    sz_utf8_sentence_break_frame_t const frame = sz_utf8_sentence_break_frame_from_dense_(dense_classes, valid);
+    return sz_utf8_sentence_break_decide_block_(&frame, dense_classes, count, carry, more_text);
+}
+
+#pragma endregion Portable dense rule engine
+
 #ifdef __cplusplus
 }
 #endif
