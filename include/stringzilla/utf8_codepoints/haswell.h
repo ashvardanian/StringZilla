@@ -29,25 +29,20 @@ SZ_INTERNAL __m256i sz_mm256_store_mask_epi64_(sz_size_t count) {
 }
 
 SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
-    sz_u256_vec_t continuation_mask_vec, continuation_pattern_vec;
-    continuation_mask_vec.ymm = _mm256_set1_epi8((char)0xC0);
-    continuation_pattern_vec.ymm = _mm256_set1_epi8((char)0x80);
+    // Continuation bytes are `0x80..0xBF` = signed `-128..-65`, so a signed `vpcmpgtb` against `-65` selects
+    // character starts directly in one op, replacing the `AND(0xC0)`, `cmpeq(0x80)`, and mask-negate trio.
+    sz_u256_vec_t start_threshold_vec;
+    start_threshold_vec.ymm = _mm256_set1_epi8((char)-65);
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
     // Process 32 bytes at a time
-    sz_u256_vec_t text_vec, headers_vec;
+    sz_u256_vec_t text_vec;
     while (length >= 32) {
         text_vec.ymm = _mm256_loadu_si256((__m256i const *)text_u8);
-
-        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
-        headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
-
-        // Compare with 0x80 (0b10000000) to find continuation bytes
-        sz_u32_t start_byte_mask = ~(sz_u32_t)_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
-
+        sz_u32_t start_byte_mask = (sz_u32_t)_mm256_movemask_epi8(
+            _mm256_cmpgt_epi8(text_vec.ymm, start_threshold_vec.ymm));
         char_count += _mm_popcnt_u32(start_byte_mask);
         text_u8 += 32;
         length -= 32;
@@ -62,23 +57,17 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
     // The logic of this function is similar to `sz_utf8_count_haswell`, but uses PDEP
     // instruction in the inner loop to locate Nth character start byte efficiently
     // without one more loop.
-    sz_u256_vec_t continuation_mask_vec, continuation_pattern_vec;
-    continuation_mask_vec.ymm = _mm256_set1_epi8((char)0xC0);
-    continuation_pattern_vec.ymm = _mm256_set1_epi8((char)0x80);
+    sz_u256_vec_t start_threshold_vec;
+    start_threshold_vec.ymm = _mm256_set1_epi8((char)-65); // signed boundary: starts are bytes > -65
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     // Process 32 bytes at a time
-    sz_u256_vec_t text_vec, headers_vec;
+    sz_u256_vec_t text_vec;
     while (length >= 32) {
         text_vec.ymm = _mm256_loadu_si256((__m256i const *)text_u8);
-
-        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
-        headers_vec.ymm = _mm256_and_si256(text_vec.ymm, continuation_mask_vec.ymm);
-
-        // Compare with 0x80 (0b10000000) to find continuation bytes
-        sz_u32_t start_byte_mask = ~(sz_u32_t)_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(headers_vec.ymm, continuation_pattern_vec.ymm));
+        sz_u32_t start_byte_mask = (sz_u32_t)_mm256_movemask_epi8(
+            _mm256_cmpgt_epi8(text_vec.ymm, start_threshold_vec.ymm));
         sz_size_t start_byte_count = _mm_popcnt_u32(start_byte_mask);
 
         // The Nth start byte is not in this window: advance to the next block.

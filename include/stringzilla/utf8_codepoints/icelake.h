@@ -441,39 +441,31 @@ SZ_INTERNAL sz_size_t sz_utf8_codepoints_drain_backward_( //
 #pragma endregion Shared SIMD leaf substrate
 
 SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length) {
-    // Count every byte that is NOT a continuation byte: `(byte & 0xC0) != 0x80` selects character starts.
-    sz_u512_vec_t continuation_mask_vec, continuation_pattern_vec;
-    continuation_mask_vec.zmm = _mm512_set1_epi8((char)0xC0);    // 0xC0 = 0b11000000 - mask top 2 bits
-    continuation_pattern_vec.zmm = _mm512_set1_epi8((char)0x80); // 0x80 = 0b10000000 - continuation pattern
+    // Count every byte that is NOT a continuation byte. Continuation bytes are `0x80..0xBF`, which as signed
+    // 8-bit values span `-128..-65`; every character-start byte is therefore strictly greater than `-65`. A
+    // single signed `vpcmpgtb` against `-65` selects starts in one port-5 op, replacing the `AND(0xC0)` plus
+    // `cmpneq(0x80)` pair.
+    sz_u512_vec_t start_threshold_vec;
+    start_threshold_vec.zmm = _mm512_set1_epi8((char)-65); // 0xBF = 0b10111111 - highest continuation byte
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
     // Process 64 bytes at a time
-    sz_u512_vec_t text_vec, headers_vec;
+    sz_u512_vec_t text_vec;
     while (length >= 64) {
         text_vec.zmm = _mm512_loadu_epi8(text_u8);
-
-        // Apply mask (byte & 0xC0) to extract top 2 bits of each byte
-        headers_vec.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
-
-        // Compare with 0x80 (0b10000000) to find continuation bytes
-        sz_u64_t start_byte_mask = _cvtmask64_u64(
-            _mm512_cmpneq_epi8_mask(headers_vec.zmm, continuation_pattern_vec.zmm));
-
-        // Count non-continuation bytes (i.e., character starts)
+        sz_u64_t start_byte_mask = _cvtmask64_u64(_mm512_cmpgt_epi8_mask(text_vec.zmm, start_threshold_vec.zmm));
         char_count += _mm_popcnt_u64(start_byte_mask);
         text_u8 += 64;
         length -= 64;
     }
 
-    // Process remaining bytes with a masked variant
+    // Process remaining bytes with a masked variant - lanes outside `load_mask` stay clear in the result.
     if (length) {
         __mmask64 load_mask = sz_u64_mask_until_(length);
         text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, text_u8);
-        headers_vec.zmm = _mm512_and_si512(text_vec.zmm, continuation_mask_vec.zmm);
-        __mmask64 start_byte_mask = _mm512_mask_cmpneq_epi8_mask(load_mask, headers_vec.zmm,
-                                                                 continuation_pattern_vec.zmm);
+        __mmask64 start_byte_mask = _mm512_mask_cmpgt_epi8_mask(load_mask, text_vec.zmm, start_threshold_vec.zmm);
         char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask));
     }
     return char_count;
