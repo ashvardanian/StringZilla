@@ -108,6 +108,56 @@ SZ_INTERNAL __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
     return _mm256_blendv_epi8(low_half, high_half, high_bit);
 }
 
+/** @brief  Start-compacting BMP classify: the BMP `vpshufb` nibble cascade is bit-exact but expensive (a 16-group
+ *          leaf scan), and its output is consumed only on 2-/3-byte codepoint-START lanes (ASCII lanes are overwritten
+ *          by the property-table blend, 4-byte lanes by the astral blend, continuation lanes are don't-cares). A
+ *          64-byte window holds at most 32 such BMP starts, so this gathers their `(high, low)` bytes into ONE dense
+ *          `__m256i` pair via the substrate `ctz` index loop (no `vpgather`), runs the cascade a SINGLE time instead
+ *          of twice over the full halves, then scatters the dense class bytes back to their original byte lanes. The
+ *          gather/scatter touch only set bits of @p bmp_starts. Bit-identical to two full
+ *          @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start lane; every other lane is a
+ *          don't-care left at its incoming value. */
+SZ_INTERNAL void sz_utf8_word_break_bmp_compact_haswell_( //
+    sz_u64_t bmp_starts, __m256i high_lo, __m256i high_hi, __m256i low_lo, __m256i low_hi, __m256i *out_lo,
+    __m256i *out_hi) {
+    sz_u8_t high_bytes[64], low_bytes[64];
+    _mm256_storeu_si256((__m256i *)(high_bytes + 0), high_lo);
+    _mm256_storeu_si256((__m256i *)(high_bytes + 32), high_hi);
+    _mm256_storeu_si256((__m256i *)(low_bytes + 0), low_lo);
+    _mm256_storeu_si256((__m256i *)(low_bytes + 32), low_hi);
+
+    sz_u8_t dense_high[32] = {0}, dense_low[32] = {0};
+    sz_u64_t remaining = bmp_starts;
+    sz_size_t dense_index = 0;
+    while (remaining) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        remaining = _blsr_u64(remaining);
+        dense_high[dense_index] = high_bytes[lane];
+        dense_low[dense_index] = low_bytes[lane];
+        ++dense_index;
+    }
+
+    __m256i const dense_class = sz_utf8_word_break_bmp_class_haswell_(_mm256_loadu_si256((__m256i const *)dense_high),
+                                                                      _mm256_loadu_si256((__m256i const *)dense_low));
+    sz_u8_t class_bytes[32];
+    _mm256_storeu_si256((__m256i *)class_bytes, dense_class);
+
+    sz_u8_t scatter_lo[32], scatter_hi[32];
+    _mm256_storeu_si256((__m256i *)scatter_lo, *out_lo);
+    _mm256_storeu_si256((__m256i *)scatter_hi, *out_hi);
+    remaining = bmp_starts;
+    dense_index = 0;
+    while (remaining) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        remaining = _blsr_u64(remaining);
+        sz_u8_t const value = class_bytes[dense_index++];
+        if (lane < 32) scatter_lo[lane] = value;
+        else scatter_hi[lane - 32] = value;
+    }
+    *out_lo = _mm256_loadu_si256((__m256i const *)scatter_lo);
+    *out_hi = _mm256_loadu_si256((__m256i const *)scatter_hi);
+}
+
 /** @brief  Per-window byte-lane classification (AVX2): the Word_Break class byte per lane as two `__m256i` halves,
  *          valid only on codepoint-start lanes (the engine reads classes only at starts). The Haswell twin of
  *          @ref sz_utf8_word_break_classify_window_icelake_, bit-identical on every start lane. ASCII through the
@@ -124,10 +174,14 @@ SZ_INTERNAL void sz_utf8_word_break_classify_window_haswell_( //
     __m256i const ascii_select_lo = sz_utf8_codepoints_byte_mask_from_bits_haswell_((sz_u32_t)ascii_starts);
     __m256i const ascii_select_hi = sz_utf8_codepoints_byte_mask_from_bits_haswell_((sz_u32_t)(ascii_starts >> 32));
 
-    // BMP class via the cascade over the decoder's reconstructed (high, low). An ASCII lane has high == 0 and
-    // low == the raw byte; a 4-byte lane's BMP class is discarded by the astral blend below.
-    __m256i out_lo = sz_utf8_word_break_bmp_class_haswell_(window.high_lo, window.low_lo);
-    __m256i out_hi = sz_utf8_word_break_bmp_class_haswell_(window.high_hi, window.low_hi);
+    // BMP class via the cascade over the decoder's reconstructed (high, low), run once over the compacted 2-/3-byte
+    // START lanes. ASCII / 4-byte / continuation lanes are don't-cares here (overwritten or unread below).
+    __m256i out_lo = _mm256_setzero_si256();
+    __m256i out_hi = _mm256_setzero_si256();
+    sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
+    if (bmp_starts)
+        sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_lo, window.high_hi, window.low_lo,
+                                                window.low_hi, &out_lo, &out_hi);
 
     // ASCII lanes: read the 128-entry property table directly off the raw byte.
     out_lo = _mm256_blendv_epi8(out_lo, sz_utf8_word_break_ascii_class_haswell_(raw_lo), ascii_select_lo);

@@ -126,6 +126,53 @@ SZ_INTERNAL uint8x16_t sz_utf8_word_break_ascii_class_neon_(uint8x16_t bytes) {
     return vbslq_u8(high_bit, high_half, low_half);
 }
 
+/** @brief  Start-compacting BMP classify: the BMP `vqtbl` nibble cascade is bit-exact but expensive (a 16-group leaf
+ *          scan per quarter), and its output is consumed only on 2-/3-byte codepoint-START lanes (ASCII lanes are
+ *          overwritten by the property-table blend, 4-byte lanes by the astral blend, continuation lanes are
+ *          don't-cares). A 64-byte window holds at most 32 such BMP starts, so this gathers their `(high, low)` bytes
+ *          into a dense buffer via the substrate `ctz` index loop (NEON has no `vpcompressb` / BMI2 `pext`), runs the
+ *          cascade only over the populated quarters (one or two `uint8x16_t`) instead of all four, then scatters the
+ *          dense class bytes back to their original byte lanes in @p bmp_out (zeroed elsewhere). Bit-identical to four
+ *          full @ref sz_utf8_word_break_bmp_class_neon_ quarters on every BMP-start lane; every other lane is a
+ *          don't-care left at zero. */
+SZ_INTERNAL void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, uint8x16_t const *high,
+                                                      uint8x16_t const *low, uint8x16_t *bmp_out) {
+    sz_u8_t high_bytes[64], low_bytes[64];
+    for (int quarter = 0; quarter < 4; ++quarter) {
+        vst1q_u8(high_bytes + quarter * 16, high[quarter]);
+        vst1q_u8(low_bytes + quarter * 16, low[quarter]);
+    }
+
+    sz_u8_t dense_high[64] = {0}, dense_low[64] = {0};
+    sz_u64_t remaining = bmp_starts;
+    sz_size_t dense_index = 0;
+    while (remaining) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        remaining &= remaining - 1;
+        dense_high[dense_index] = high_bytes[lane];
+        dense_low[dense_index] = low_bytes[lane];
+        ++dense_index;
+    }
+
+    sz_u8_t class_bytes[64];
+    int const populated_quarters = (int)((dense_index + 15) / 16);
+    for (int quarter = 0; quarter < populated_quarters; ++quarter) {
+        uint8x16_t const dense_class = sz_utf8_word_break_bmp_class_neon_(vld1q_u8(dense_high + quarter * 16),
+                                                                          vld1q_u8(dense_low + quarter * 16));
+        vst1q_u8(class_bytes + quarter * 16, dense_class);
+    }
+
+    sz_u8_t scatter[64] = {0};
+    remaining = bmp_starts;
+    dense_index = 0;
+    while (remaining) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        remaining &= remaining - 1;
+        scatter[lane] = class_bytes[dense_index++];
+    }
+    for (int quarter = 0; quarter < 4; ++quarter) bmp_out[quarter] = vld1q_u8(scatter + quarter * 16);
+}
+
 /** @brief  Per-window byte-lane classification (NEON): the Word_Break class byte per lane as four `uint8x16_t`
  *          quarters, valid only on codepoint-start lanes (the engine reads classes only at starts). The NEON twin of
  *          @ref sz_utf8_word_break_classify_window_haswell_, bit-identical on every start lane. ASCII through the
@@ -143,13 +190,17 @@ SZ_INTERNAL void sz_utf8_word_break_classify_window_neon_( //
     uint8x16_t const c03 = vdupq_n_u8(0x03), c07 = vdupq_n_u8(0x07), c0f = vdupq_n_u8(0x0F), c1c = vdupq_n_u8(0x1C),
                      c3f = vdupq_n_u8(0x3F), cc0 = vdupq_n_u8(0xC0), cf0 = vdupq_n_u8(0xF0);
 
+    // BMP class via the cascade over the compacted 2-/3-byte START lanes; ASCII / 4-byte / continuation lanes are
+    // don't-cares (overwritten or unread below), so the dense walk leaves them at zero.
+    uint8x16_t bmp_out[4] = {vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0), vdupq_n_u8(0)};
+    sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
+    if (bmp_starts) sz_utf8_word_break_bmp_compact_neon_(bmp_starts, window.high, window.low, bmp_out);
+
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const raw_q = raw[quarter];
         int const lane_base = quarter * 16;
 
-        // BMP class via the cascade over the decoder's reconstructed (high, low). An ASCII lane has high == 0 and
-        // low == the raw byte; a 4-byte lane's BMP class is discarded by the astral blend below.
-        uint8x16_t out_q = sz_utf8_word_break_bmp_class_neon_(window.high[quarter], window.low[quarter]);
+        uint8x16_t out_q = bmp_out[quarter];
 
         // ASCII lanes: read the 128-entry property table directly off the raw byte.
         uint8x16_t const ascii_select = sz_utf8_word_break_byte_mask_from_bits_neon_(ascii_starts, lane_base);
