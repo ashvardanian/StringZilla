@@ -216,9 +216,17 @@ void test_find_unit() {
     assert(sz_find_byteset(hello, hello_length, &digits) == SZ_NULL_CHAR);        // No digit present
     assert(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present, serial kernel
 
-    // NOTE: `sz_find_delimiter_utf8` (dispatched) and `sz_find_delimiters_utf8_serial` are declared in
-    // `find.h` but defined nowhere - a dead/unfinished public API. They are intentionally NOT exercised
-    // here; calling them is a link error. Re-add coverage once the implementation lands.
+    // `sz_find_delimiter_utf8`: first UTF-8 delimiter (whitespace/punctuation/symbol/separator) codepoint.
+    sz_size_t delimiter_length = 0;
+    char const *ascii_with_space = "word here"; // first delimiter is the ASCII space at offset 4
+    assert(sz_find_delimiter_utf8(ascii_with_space, 9, &delimiter_length) == ascii_with_space + 4);
+    assert(delimiter_length == 1);
+    char const *letters_only = "wordsonly"; // no delimiter present
+    assert(sz_find_delimiter_utf8(letters_only, 9, &delimiter_length) == SZ_NULL_CHAR);
+    char const *with_ideographic_stop = "ab\xE3\x80\x82"; // U+3002 IDEOGRAPHIC FULL STOP (Po), 3 bytes at offset 2
+    assert(sz_find_delimiter_utf8(with_ideographic_stop, 5, &delimiter_length) == with_ideographic_stop + 2);
+    assert(delimiter_length == 3);
+    assert(sz_find_delimiters_utf8_serial(ascii_with_space, 9, &delimiter_length) == ascii_with_space + 4);
 
     // `sz_order` / `sz_equal`: lexicographic ordering and byte-equality on hand-verifiable pairs.
     assert(sz_order("abc", 3, "abc", 3) == sz_equal_k);       // Equal strings

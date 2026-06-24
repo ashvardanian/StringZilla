@@ -63,6 +63,7 @@ typedef struct sz_implementations_t {
     sz_utf8_find_nth_t utf8_find_nth;
     sz_utf8_segmenter_t utf8_newlines;
     sz_utf8_segmenter_t utf8_whitespaces;
+    sz_find_delimiter_utf8_t find_delimiter_utf8;
     sz_utf8_unpack_chunk_t utf8_unpack_chunk;
 
     sz_utf8_norm_t utf8_norm;

@@ -217,40 +217,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, s
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-/**
- *  @brief Finds the first occurrence of a UTF-8 whitespace or punctuation character in a string.
- *
- *  Delimiters include all of the above, plus common "punctuation" characters, "symbols", and "separators",
- *  as defined by the "Unicode UAX #29" word segmentation standard and implemented in the ICU.
- *  - around 30 ASCII characters
- *  - around 130 2-byte characters
- *  - around 4.3k 3-byte characters
- *  - around 4.1k 4-byte characters
- *
- *  @param text String to be scanned.
- *  @param length Number of bytes in the string.
- *  @param matched_length Number of bytes in the matched newline delimiter.
- *  @return Pointer to the first matching newline character from @p text.
- */
-SZ_DYNAMIC sz_cptr_t sz_find_delimiter_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-
-/** @copydoc sz_find_delimiters_utf8 */
-SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_serial(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-
-#if SZ_USE_HASWELL
-/** @copydoc sz_find_delimiters_utf8 */
-SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-#endif
-
-#if SZ_USE_ICELAKE
-/** @copydoc sz_find_delimiters_utf8 */
-SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-#endif
-
-#if SZ_USE_NEON
-/** @copydoc sz_find_delimiters_utf8 */
-SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length);
-#endif
+/*  `sz_find_delimiter_utf8` (UTF-8 punctuation/symbol/separator/whitespace scan) now lives in
+ *  "stringzilla/utf8_delimiters.h" alongside its per-ISA backends and property tables. */
 
 #pragma endregion // Core API
 
