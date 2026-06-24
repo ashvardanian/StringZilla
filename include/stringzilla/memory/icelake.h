@@ -30,7 +30,13 @@ SZ_PUBLIC void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t so
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     // But if at least 3 cache lines are touched, the AVX-512 implementation should be faster.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        // Inline the serial scalar tail (one indexed byte-LUT copy) rather than paying a separate call hop on the
+        // short path - the dispatched entry already cost one indirect call, and this loop is trivial.
+        sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
+        sz_u8_t const *source_u8 = (sz_u8_t const *)source;
+        sz_u8_t *target_u8 = (sz_u8_t *)target;
+        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
+            target_u8[byte_index] = lut_u8[source_u8[byte_index]];
         return;
     }
 
