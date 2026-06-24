@@ -203,6 +203,73 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i windo
     return astral_class;
 }
 
+/** @brief  Start-compacting two-stage BMP-trie classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali,
+ *          Thai, Tamil, ...). The rule engine reads classes only at codepoint-START lanes, and a 3-byte script packs
+ *          at most 21 starts into a 64-byte window, so the cold-start lanes' `high`/`low` bytes are `vpcompressb`-
+ *          compacted into the low <=32 lanes, widened to ONE 32x16-bit codepoint register, walked through the words
+ *          two-stage trie a SINGLE time (the L1/L2/leaf gathers run once, not the lo+hi twice of
+ *          @ref sz_utf8_codepoints_trie_walk_icelake_), then the per-start class bytes are `vpexpandb`-scattered onto
+ *          @p classes at their original byte-lane positions. Windows whose cold-start count exceeds 32 (which cannot
+ *          fit one 16-bit register) fall back to the unconditional two-pass walk masked onto @p classes over the FULL
+ *          @p cold mask, byte-identical to today. The offset bakes in the same `-0x800` base as the substrate trie
+ *          walk. Bit-identical to the legacy `mask_mov(classes, cold, trie_walk)` on every cold START lane; cold
+ *          continuation lanes are don't-cares (`decide` reads only start lanes) and are left at their prior value on
+ *          the compact path. */
+SZ_INTERNAL __m512i sz_utf8_word_break_cold_compact_icelake_( //
+    __m512i classes, __m512i high, __m512i low, sz_u64_t cold, sz_u64_t cold_starts) {
+    if (_mm_popcnt_u64(cold_starts) > 32)
+        return _mm512_mask_mov_epi8(
+            classes, _cvtu64_mask64(cold),
+            sz_utf8_codepoints_trie_walk_icelake_(
+                high, low, sz_utf8_word_break_trie_l1_, sz_utf8_word_break_trie_l2_, sz_utf8_word_break_trie_leaf_,
+                sz_utf8_word_break_trie_block_k, sz_utf8_word_break_trie_subblock_k,
+                (int)(sizeof(sz_utf8_word_break_trie_l1_) / sizeof(sz_utf8_word_break_trie_l1_[0])),
+                (int)(sizeof(sz_utf8_word_break_trie_l2_) / sizeof(sz_utf8_word_break_trie_l2_[0])),
+                (int)(sizeof(sz_utf8_word_break_trie_leaf_) / sizeof(sz_utf8_word_break_trie_leaf_[0]))));
+
+    __mmask64 const cold_start_mask = _cvtu64_mask64(cold_starts);
+    __m512i const high_packed = _mm512_maskz_compress_epi8(cold_start_mask, high);
+    __m512i const low_packed = _mm512_maskz_compress_epi8(cold_start_mask, low);
+
+    int const block = sz_utf8_word_break_trie_block_k;
+    int const superblock = sz_utf8_word_break_trie_subblock_k;
+    __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)block));
+    __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)superblock));
+    __m512i const within_mask = _mm512_set1_epi16((short)(block - 1));
+    __m512i const super_off_mask = _mm512_set1_epi16((short)(superblock - 1));
+    __m512i const super_v16 = _mm512_set1_epi16((short)superblock);
+    __m512i const block_v16 = _mm512_set1_epi16((short)block);
+
+    //  The <=32 compacted cold starts sit in the low 32 bytes; widen them to a single 32x16-bit codepoint register
+    //  with the same `-0x800` base the substrate trie walk bakes in.
+    __m512i const offset = _mm512_sub_epi16(
+        _mm512_or_si512(_mm512_slli_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(high_packed)), 8),
+                        _mm512_cvtepu8_epi16(_mm512_castsi512_si256(low_packed))),
+        _mm512_set1_epi16(0x800));
+
+    __m512i const within = _mm512_and_si512(offset, within_mask);
+    __m512i const block_idx = _mm512_srl_epi16(offset, block_log2);
+    __m512i const super_off = _mm512_and_si512(block_idx, super_off_mask);
+    __m512i const super = _mm512_srl_epi16(block_idx, super_log2);
+
+    __m512i const level1 = sz_utf8_codepoints_gather_byte_(
+        sz_utf8_word_break_trie_l1_,
+        (int)(sizeof(sz_utf8_word_break_trie_l1_) / sizeof(sz_utf8_word_break_trie_l1_[0])), super);
+    __m512i const l2_index = _mm512_add_epi16(_mm512_mullo_epi16(level1, super_v16), super_off);
+    __m512i const leaf_idx = sz_utf8_codepoints_gather_word_(
+        sz_utf8_word_break_trie_l2_,
+        (int)(sizeof(sz_utf8_word_break_trie_l2_) / sizeof(sz_utf8_word_break_trie_l2_[0])), l2_index);
+    __m512i const leaf_byte = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx, block_v16), within);
+    __m512i const class_word = sz_utf8_codepoints_gather_byte_(
+        sz_utf8_word_break_trie_leaf_,
+        (int)(sizeof(sz_utf8_word_break_trie_leaf_) / sizeof(sz_utf8_word_break_trie_leaf_[0])), leaf_byte);
+
+    //  Narrow the 32 class words back to 32 contiguous bytes (low half) and scatter onto the original cold-start
+    //  lanes, leaving every other lane (including cold continuations) at its prior value.
+    __m512i const class_packed = _mm512_castsi256_si512(_mm512_cvtepi16_epi8(class_word));
+    return _mm512_mask_expand_epi8(classes, cold_start_mask, class_packed);
+}
+
 /**
  *  @brief  Classify a 64-byte window to per-lane Word_Break properties. ASCII through the ASCII permute, BMP through
  *          arithmetic big ranges (Latin / Hangul / CJK) + the codepoint < 0x800 page LUT + the shared two-stage BMP trie for
@@ -240,15 +307,12 @@ SZ_INTERNAL __m512i sz_utf8_word_break_classify_window_icelake_( //
 
     __mmask64 const is_bmp_three = _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
     __mmask64 const cold = is_bmp_three & ~(cjk_combined | fast_aletter | is_four_byte);
-    if (cold)
-        classes = _mm512_mask_mov_epi8(
-            classes, cold,
-            sz_utf8_codepoints_trie_walk_icelake_(
-                high, low, sz_utf8_word_break_trie_l1_, sz_utf8_word_break_trie_l2_, sz_utf8_word_break_trie_leaf_,
-                sz_utf8_word_break_trie_block_k, sz_utf8_word_break_trie_subblock_k,
-                (int)(sizeof(sz_utf8_word_break_trie_l1_) / sizeof(sz_utf8_word_break_trie_l1_[0])),
-                (int)(sizeof(sz_utf8_word_break_trie_l2_) / sizeof(sz_utf8_word_break_trie_l2_[0])),
-                (int)(sizeof(sz_utf8_word_break_trie_leaf_) / sizeof(sz_utf8_word_break_trie_leaf_[0]))));
+    if (cold) {
+        __mmask64 const continuation = _mm512_cmpeq_epi8_mask(_mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)),
+                                                              _mm512_set1_epi8((char)0x80));
+        classes = sz_utf8_word_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold),
+                                                           _cvtmask64_u64(cold & ~continuation));
+    }
     return classes;
 }
 
