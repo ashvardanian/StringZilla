@@ -148,10 +148,14 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             // Now let's load the first bytes of each string.
             sz_u256_vec_t batch_hashes;
             sz_u512_vec_t batch_prefixes;
-            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start);
-            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start);
-            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start);
-            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
+            batch_prefixes.zmm = _mm512_castsi128_si512(
+                _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start));
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start), 1);
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start), 2);
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start), 3);
 
             // Reuse the already computed state for hashes
             sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
@@ -250,10 +254,14 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                            
             // Now let's load the first bytes of each string.
             sz_u256_vec_t batch_hashes;
             sz_u512_vec_t batch_prefixes;
-            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start);
-            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start);
-            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start);
-            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
+            batch_prefixes.zmm = _mm512_castsi128_si512(
+                _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start));
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start), 1);
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start), 2);
+            batch_prefixes.zmm = _mm512_inserti64x2(
+                batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start), 3);
 
             // Reuse the already computed state for hashes
             sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
