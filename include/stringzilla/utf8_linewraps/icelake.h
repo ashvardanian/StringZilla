@@ -294,7 +294,7 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
     __m512i const high_four = _mm512_or_si512(
         _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
                          _mm512_set1_epi8((char)0xF0)),
-        sz_utf8_codepoints_srl8_(next2, 2, 0x0F));
+        sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F));
     __m512i low_fixed = _mm512_mask_mov_epi8(window.low, _cvtu64_mask64(true_ascii), raw);
     low_fixed = _mm512_mask_mov_epi8(low_fixed, _cvtu64_mask64(four_byte), low_four);
     __m512i high_fixed = _mm512_maskz_mov_epi8(_cvtu64_mask64(~true_ascii), window.high);
@@ -310,7 +310,7 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
     //  4-byte plane bits (bits 16..20 of the codepoint); zero on every non-4-byte lane so cp = (high<<8)|low there.
     __m512i const plane_all = _mm512_or_si512(
         _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(raw, _mm512_set1_epi8(0x07)), 2), _mm512_set1_epi8(0x1C)),
-        sz_utf8_codepoints_srl8_(next1, 4, 0x03));
+        sz_utf8_codepoints_srl8_icelake_(next1, 4, 0x03));
     __m512i const previous_cluster_lane = _mm512_maskz_mov_epi8(_cvtu64_mask64(four_byte), plane_all);
 
     //  Build the 64-lane palette-index byte vector in ONE pass. The whole BMP (cp < 0x10000) resolves through ONE
@@ -591,8 +591,8 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake_bytes_( //
     sz_line_break_carry_t carry = sz_line_break_carry_sot_(); // LB2: start-of-text has no left context
 
     while (position < length) {
-        sz_utf8_codepoints_window_t const window = sz_utf8_codepoints_decode_window_(bytes + position,
-                                                                                     length - position, lane_identity);
+        sz_utf8_codepoints_window_t const window = sz_utf8_codepoints_decode_window_icelake_(
+            bytes + position, length - position, lane_identity);
         sz_bool_t const more_text = (sz_bool_t)(position + window.loaded < length);
         sz_size_t const complete_limit = sz_line_break_complete_limit_(window, more_text);
         sz_line_break_classified_t const classified = sz_line_break_classify_window_icelake_(window, lane_identity);

@@ -148,7 +148,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
  *          network (faster than a trie for the dense 2-byte scripts). */
 SZ_INTERNAL __m512i sz_utf8_word_break_small_page_icelake_(__m512i high, __m512i low) {
     __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-    __m512i const low_high_bit = sz_utf8_codepoints_srl8_(low, 7, 0x01);
+    __m512i const low_high_bit = sz_utf8_codepoints_srl8_icelake_(low, 7, 0x01);
     __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
                                          low_high_bit);
     __m512i segment[32];
@@ -334,7 +334,7 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_
                                            _mm512_set1_epi8((char)0x80))) &
                                        valid;
     // Declared length keyed purely on the HIGH NIBBLE (serial `codepoint_length_`): 0xC/0xD → 2, 0xE → 3, 0xF → 4.
-    __m512i const high_nibble = sz_utf8_codepoints_srl8_(window, 4, 0x0F);
+    __m512i const high_nibble = sz_utf8_codepoints_srl8_icelake_(window, 4, 0x0F);
     sz_u64_t const length_two = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0C)) |
                                                _mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0D))) &
                                 valid;
@@ -433,13 +433,13 @@ SZ_FORCE_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icelak
     if (want_pictographic) {
         sz_u64_t const four_byte = _cvtmask64_u64(four_byte_starts) & valid;
         __m512i const plane = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x07)), 2),
-                                              sz_utf8_codepoints_srl8_(next1, 4, 0x03));
+                                              sz_utf8_codepoints_srl8_icelake_(next1, 4, 0x03));
         sz_u64_t const plane_one = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(plane, _mm512_set1_epi8(0x01)));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_icelake_( //
             high, low, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
             sz_utf8_word_break_pict_bmp_count_k);
         __m512i const smp_mid = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
-                                                sz_utf8_codepoints_srl8_(next2, 2, 0x0F));
+                                                sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F));
         __m512i const smp_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6),
                                                 _mm512_and_si512(next3, _mm512_set1_epi8(0x3F)));
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_icelake_( //
@@ -510,8 +510,8 @@ SZ_PUBLIC sz_size_t sz_utf8_words_icelake(           //
     carry.prev_ends_in_zwj = 0;
 
     while (position < length) {
-        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_(text_u8 + position,
-                                                                                      length - position, lane_identity);
+        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(
+            text_u8 + position, length - position, lane_identity);
         sz_size_t const loaded = decoded.loaded;
         __m512i const window = decoded.window;
         sz_u64_t const valid = sz_u64_mask_until_(loaded);

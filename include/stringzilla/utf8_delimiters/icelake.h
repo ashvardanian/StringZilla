@@ -220,8 +220,8 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_icelake(sz_cptr_t text, sz_size_t le
 
     sz_size_t base = 0;
     while (base < length) {
-        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_(text_u8 + base, length - base,
-                                                                                      lane_identity);
+        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(
+            text_u8 + base, length - base, lane_identity);
         sz_size_t const loaded = decoded.loaded;
         __m512i const window = decoded.window;
         __m512i const next1 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), window);

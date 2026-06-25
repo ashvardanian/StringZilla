@@ -88,7 +88,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
     // lane being present so a pure-3-byte (CJK) window pays nothing here.
     if (small_lanes) {
         __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-        __m512i const low_high_bit = sz_utf8_codepoints_srl8_(low, 7, 0x01);
+        __m512i const low_high_bit = sz_utf8_codepoints_srl8_icelake_(low, 7, 0x01);
         __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
                                              low_high_bit);
         __m512i small_class = _mm512_setzero_si512();
@@ -230,8 +230,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
     int sb8_pending_active = 0;
 
     while (position < length) {
-        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_(text_u8 + position,
-                                                                                      length - position, lane_identity);
+        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(
+            text_u8 + position, length - position, lane_identity);
         sz_size_t const loaded = decoded.loaded;
         __mmask64 const lead_continuation = (position == 0) ? (__mmask64)1 : (__mmask64)0;
         __mmask64 const codepoint_starts = decoded.codepoint_starts | lead_continuation;
@@ -248,18 +248,19 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
         __m512i const next3 = _mm512_maskz_permutexvar_epi8(keep3, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)),
                                                             window);
 
-        __m512i const two_high = sz_utf8_codepoints_srl8_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
+        __m512i const two_high = sz_utf8_codepoints_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2,
+                                                                  0x07);
         __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
                                                 _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
         __m512i const three_high = _mm512_or_si512(
             _mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-            sz_utf8_codepoints_srl8_(next1, 2, 0x0F));
+            sz_utf8_codepoints_srl8_icelake_(next1, 2, 0x0F));
         __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
                                                   _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
         __m512i const four_low = _mm512_or_si512(_mm512_and_si512(next3, _mm512_set1_epi8(0x3F)),
                                                  _mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6));
         __m512i const four_high = _mm512_or_si512(
-            sz_utf8_codepoints_srl8_(next2, 2, 0x0F),
+            sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F),
             _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4));
         __m512i high = _mm512_setzero_si512();
         high = _mm512_mask_mov_epi8(high, decoded.two_byte_starts, two_high);

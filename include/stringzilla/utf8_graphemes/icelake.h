@@ -50,7 +50,7 @@ extern "C" {
 enum {
     sz_grapheme_break_mid_tiles_k = sizeof(sz_utf8_grapheme_break_stage_mid_) / 64, /**< ZMM tiles of `stage_mid`. */
     sz_grapheme_break_sub_packed_tiles_k = sizeof(sz_utf8_grapheme_break_stage_sub_packed_) /
-        64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
+                                           64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
     sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
@@ -231,13 +231,14 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
     __mmask64 const ascii = _mm512_cmplt_epu8_mask(window, _mm512_set1_epi8((char)0x80));
     __mmask64 const three_byte = decoded->three_byte_starts;
     // 2-byte lead `110xxxxx`: high = ((lead & 0x1F) >> 2) & 0x07; low = ((lead & 0x03) << 6) | (next1 & 0x3F).
-    __m512i const two_high = sz_utf8_codepoints_srl8_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
+    __m512i const two_high = sz_utf8_codepoints_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2,
+                                                              0x07);
     __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
                                             _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
     // 3-byte lead `1110xxxx`: high = ((lead & 0x0F) << 4) | ((next1 >> 2) & 0x0F); low = ((next1 & 0x03) << 6) |
     // (next2 & 0x3F).
     __m512i const three_high = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-                                               sz_utf8_codepoints_srl8_(next1, 2, 0x0F));
+                                               sz_utf8_codepoints_srl8_icelake_(next1, 2, 0x0F));
     __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
                                               _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
     __m512i const non_ascii_high = _mm512_mask_blend_epi8(three_byte, two_high, three_high);
@@ -245,9 +246,9 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
     __m512i const high = _mm512_maskz_mov_epi8(_knot_mask64(ascii), non_ascii_high);
     __m512i const low = _mm512_mask_blend_epi8(ascii, non_ascii_low, window);
     __m512i const plane = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x07)), 2),
-                                          sz_utf8_codepoints_srl8_(next1, 4, 0x03));
+                                          sz_utf8_codepoints_srl8_icelake_(next1, 4, 0x03));
     __m512i const mid_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
-                                             sz_utf8_codepoints_srl8_(next2, 2, 0x0F));
+                                             sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F));
     __m512i const lo_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6),
                                             _mm512_and_si512(next3, _mm512_set1_epi8(0x3F)));
     sz_u64_t const four_byte = _cvtmask64_u64(decoded->four_byte_starts);
@@ -353,8 +354,8 @@ typedef struct sz_grapheme_window_t {
 SZ_INTERNAL sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base, __m512i lane_identity, sz_grapheme_carry_t *carry) {
 
-    sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_(text + base, length - base,
-                                                                                  lane_identity);
+    sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(text + base, length - base,
+                                                                                          lane_identity);
     sz_size_t const loaded = decoded.loaded;
     sz_u64_t start_lanes = _cvtmask64_u64(decoded.codepoint_starts);
 
