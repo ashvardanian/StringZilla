@@ -14,7 +14,7 @@
 #include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #endif
 
-#include "bench.hpp"
+#include "shared.hpp"
 
 namespace ashvardanian {
 namespace stringzilla {

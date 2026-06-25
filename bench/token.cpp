@@ -49,7 +49,7 @@
 #include <numeric> // `std::accumulate`
 #include <array>   // `std::array`
 
-#include "bench.hpp"
+#include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
 using namespace ashvardanian::stringzilla::scripts;

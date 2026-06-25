@@ -35,7 +35,7 @@ For minimal test coverage, check the following scripts:
 - `test/*.py` - tests the Python API against native strings, split per kernel family
   (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`)
   mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
-- `test/test.js`.
+- `test/stringzilla.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
@@ -728,7 +728,7 @@ cd golang
 CGO_CFLAGS="-I$(pwd)/../include" \
 CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
 LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
-go run ../bench/bench.go --input ../leipzig1M.txt
+go run ../bench/stringzilla.go --input ../leipzig1M.txt
 ```
 
 Alternatively:
@@ -736,7 +736,7 @@ Alternatively:
 ```bash
 export GO111MODULE="off"
 go run scripts/test.go
-go run bench/bench.go
+go run bench/stringzilla.go
 ```
 
 ## General Recommendations

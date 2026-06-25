@@ -39,7 +39,7 @@
  */
 #include <vector>
 
-#include "bench.hpp"
+#include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
 #include "stringzilla/utf8_runes.h"     // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_decode`

@@ -56,7 +56,7 @@
 #endif
 
 #define SZ_USE_MISALIGNED_LOADS (1)
-#include "bench.hpp"
+#include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 #include "stringzilla.hpp" // `global_random_generator`
 

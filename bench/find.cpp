@@ -55,7 +55,7 @@
 #include <functional> // `std::boyer_moore_searcher`
 
 #define SZ_USE_MISALIGNED_LOADS (1)
-#include "bench.hpp"
+#include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
 using namespace ashvardanian::stringzilla::scripts;
