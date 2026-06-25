@@ -356,10 +356,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_lasx_( //
     __m256i window, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length, int has_three, int has_four,
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
-    /* The branchless width-blend gathers all four bytes unconditionally, so the `has_three`/`has_four` width hints are
-     * no longer needed to skip inert work; they remain in the signature for parity with the Ice Lake sibling. */
-    sz_unused_(has_three);
-    sz_unused_(has_four);
+    /* The width-blend gathers the lead, 2nd byte, and 2-byte form unconditionally; the 3-byte and 4-byte forms are
+     * gathered and assembled only when `has_three`/`has_four` say a 3- or 4-byte start exists in this window, so a
+     * 3-byte CJK window pays for the 3rd byte yet skips the 4th-byte gather/assembly (perf-neutral, Ice Lake parity). */
 
     /* Left-pack the emitted-start byte-offsets via the shuffle-LUT (one `xvshuf.b` per 8-bit mask half). */
     sz_u8_t start_offsets[32];
@@ -395,27 +394,17 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_lasx_( //
             gather_index_vec.u8s[lane] = start_offsets[block_start + lane];
         __m256i const gather_index_u8x32 = gather_index_vec.lasx;
 
-        /* Gather lead + up to three trailing bytes per codepoint at the packed start offsets (one `xvshuf.b` each over
-         * the broadcast window). For a decodable well-formed sequence the trailing slots are in-window. A branchless
-         * width-blend below means a missing 3rd/4th byte is harmless (its lane is never selected), so all four are
-         * gathered unconditionally. */
+        /* Gather the lead and 2nd byte per codepoint at the packed start offsets (one `xvshuf.b` each over the broadcast
+         * window). The 3rd/4th bytes are gathered only inside the `has_three`/`has_four` siblings below. */
         __m256i const lead_byte_u8x32 = __lasx_xvshuf_b(window_high_u8x32, window_low_u8x32, gather_index_u8x32);
         __m256i const continuation_byte_1_u8x32 =
             __lasx_xvshuf_b(window_high_u8x32, window_low_u8x32, __lasx_xvadd_b(gather_index_u8x32, __lasx_xvreplgr2vr_b(1)));
-        __m256i const continuation_byte_2_u8x32 =
-            __lasx_xvshuf_b(window_high_u8x32, window_low_u8x32, __lasx_xvadd_b(gather_index_u8x32, __lasx_xvreplgr2vr_b(2)));
-        __m256i const continuation_byte_3_u8x32 =
-            __lasx_xvshuf_b(window_high_u8x32, window_low_u8x32, __lasx_xvadd_b(gather_index_u8x32, __lasx_xvreplgr2vr_b(3)));
 
         /* Widen the low 8 byte lanes (this block's gathered bytes) to 8x 32-bit words in the low 128-bit half via the
          * byte→half→word ladder; only the low half is consumed so no cross-128-bit shuffle is needed. */
         __m256i const lead_u32x8 = __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(lead_byte_u8x32, 0), 0);
         __m256i const continuation_byte_1_u32x8 =
             __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(continuation_byte_1_u8x32, 0), 0);
-        __m256i const continuation_byte_2_u32x8 =
-            __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(continuation_byte_2_u8x32, 0), 0);
-        __m256i const continuation_byte_3_u32x8 =
-            __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(continuation_byte_3_u8x32, 0), 0);
 
         __m256i decoded_codepoint_u32x8 = lead_u32x8; /* ASCII keeps the lead. */
         /* 2-byte: lead in [C0,E0): ((b0 & 0x1F) << 6) | (b1 & 0x3F). */
@@ -425,25 +414,38 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_lasx_( //
         __m256i const two_byte_mask_u32x8 =
             __lasx_xvandn_v(__lasx_xvsle_wu(mask_word_e0_u32x8, lead_u32x8), __lasx_xvsle_wu(mask_word_c0_u32x8, lead_u32x8));
         decoded_codepoint_u32x8 = __lasx_xvbitsel_v(decoded_codepoint_u32x8, two_byte_codepoint_u32x8, two_byte_mask_u32x8);
-        /* 3-byte: lead in [E0,F0): ((b0&0x0F)<<12)|((b1&0x3F)<<6)|(b2&0x3F). A lane is selected only when its lead is a
-         * 3-byte lead, so an absent 3rd byte (when no 3-byte starts exist in the window) is never read. */
-        __m256i const three_byte_codepoint_u32x8 =
-            __lasx_xvor_v(__lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(lead_u32x8, mask_word_0f_u32x8), 12),
-                                        __lasx_xvslli_w(__lasx_xvand_v(continuation_byte_1_u32x8, mask_word_3f_u32x8), 6)),
-                          __lasx_xvand_v(continuation_byte_2_u32x8, mask_word_3f_u32x8));
-        __m256i const three_byte_mask_u32x8 =
-            __lasx_xvandn_v(__lasx_xvsle_wu(mask_word_f0_u32x8, lead_u32x8), __lasx_xvsle_wu(mask_word_e0_u32x8, lead_u32x8));
-        decoded_codepoint_u32x8 =
-            __lasx_xvbitsel_v(decoded_codepoint_u32x8, three_byte_codepoint_u32x8, three_byte_mask_u32x8);
-        /* 4-byte: lead >= F0: ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F). */
-        __m256i const four_byte_codepoint_u32x8 = __lasx_xvor_v(
-            __lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(lead_u32x8, mask_word_07_u32x8), 18),
-                          __lasx_xvslli_w(__lasx_xvand_v(continuation_byte_1_u32x8, mask_word_3f_u32x8), 12)),
-            __lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(continuation_byte_2_u32x8, mask_word_3f_u32x8), 6),
-                          __lasx_xvand_v(continuation_byte_3_u32x8, mask_word_3f_u32x8)));
-        __m256i const four_byte_mask_u32x8 = __lasx_xvsle_wu(mask_word_f0_u32x8, lead_u32x8);
-        decoded_codepoint_u32x8 =
-            __lasx_xvbitsel_v(decoded_codepoint_u32x8, four_byte_codepoint_u32x8, four_byte_mask_u32x8);
+
+        /* The 3rd byte is hoisted so the 4-byte sibling reuses it; `has_four` implies `has_three`, so it is set there. */
+        __m256i continuation_byte_2_u32x8 = __lasx_xvreplgr2vr_w(0);
+        if (has_three) {
+            /* 3-byte: lead in [E0,F0): ((b0&0x0F)<<12)|((b1&0x3F)<<6)|(b2&0x3F). Gather the 3rd byte only here. */
+            __m256i const continuation_byte_2_u8x32 = __lasx_xvshuf_b(
+                window_high_u8x32, window_low_u8x32, __lasx_xvadd_b(gather_index_u8x32, __lasx_xvreplgr2vr_b(2)));
+            continuation_byte_2_u32x8 = __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(continuation_byte_2_u8x32, 0), 0);
+            __m256i const three_byte_codepoint_u32x8 =
+                __lasx_xvor_v(__lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(lead_u32x8, mask_word_0f_u32x8), 12),
+                                            __lasx_xvslli_w(__lasx_xvand_v(continuation_byte_1_u32x8, mask_word_3f_u32x8), 6)),
+                              __lasx_xvand_v(continuation_byte_2_u32x8, mask_word_3f_u32x8));
+            __m256i const three_byte_mask_u32x8 = __lasx_xvandn_v(__lasx_xvsle_wu(mask_word_f0_u32x8, lead_u32x8),
+                                                                  __lasx_xvsle_wu(mask_word_e0_u32x8, lead_u32x8));
+            decoded_codepoint_u32x8 =
+                __lasx_xvbitsel_v(decoded_codepoint_u32x8, three_byte_codepoint_u32x8, three_byte_mask_u32x8);
+        }
+        if (has_four) { /* SIBLING; `has_four` ⟹ `has_three`, so `continuation_byte_2_u32x8` is set above. */
+            /* 4-byte: lead >= F0: ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F). Gather the 4th byte only here. */
+            __m256i const continuation_byte_3_u8x32 = __lasx_xvshuf_b(
+                window_high_u8x32, window_low_u8x32, __lasx_xvadd_b(gather_index_u8x32, __lasx_xvreplgr2vr_b(3)));
+            __m256i const continuation_byte_3_u32x8 =
+                __lasx_xvsllwil_wu_hu(__lasx_xvsllwil_hu_bu(continuation_byte_3_u8x32, 0), 0);
+            __m256i const four_byte_codepoint_u32x8 = __lasx_xvor_v(
+                __lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(lead_u32x8, mask_word_07_u32x8), 18),
+                              __lasx_xvslli_w(__lasx_xvand_v(continuation_byte_1_u32x8, mask_word_3f_u32x8), 12)),
+                __lasx_xvor_v(__lasx_xvslli_w(__lasx_xvand_v(continuation_byte_2_u32x8, mask_word_3f_u32x8), 6),
+                              __lasx_xvand_v(continuation_byte_3_u32x8, mask_word_3f_u32x8)));
+            __m256i const four_byte_mask_u32x8 = __lasx_xvsle_wu(mask_word_f0_u32x8, lead_u32x8);
+            decoded_codepoint_u32x8 =
+                __lasx_xvbitsel_v(decoded_codepoint_u32x8, four_byte_codepoint_u32x8, four_byte_mask_u32x8);
+        }
 
         /* Overwrite every ill-formed lane in this block with U+FFFD. Build the per-word ill-formed selector from the
          * compacted `ill_formed` mask bits for this block (word j set ⟺ the (block_start+j)-th emitted start is ill). */
