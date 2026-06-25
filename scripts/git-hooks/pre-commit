@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Rejects the `&*iterator` antipattern (iterator -> reference -> pointer laundering) in staged C/C++/CUDA.
+# Use the container's `.data()`, `std::to_address(it)`, or a raw pointer directly instead.
+set -u
+violations=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '&\*' || true)
+if [ -n "$violations" ]; then
+  echo "pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):" >&2
+  echo "$violations" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Rejects dashes in `#pragma region` / `#pragma endregion` names: clang-format parses the trailing text as an
+# expression and rewrites `X-Y` into `X - Y`, desyncing region/endregion pairs. Use spaces in region names instead.
+pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '#pragma[[:space:]]+(region|endregion)' | grep -E '[A-Za-z0-9] *- *[A-Za-z0-9]' || true)
+if [ -n "$pragma_dashes" ]; then
+  echo "pre-commit: dash in a #pragma region/endregion name (clang-format rewrites 'X-Y' to 'X - Y'); use spaces:" >&2
+  echo "$pragma_dashes" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Rejects LibC string/memory symbols under include/stringzilla/**: StringZilla supersedes LibC and cannot share a
+# translation unit with the compiler `__builtin_*` it emits. Use the project wrappers (`sz_copy`, `sz_fill`,
+# `sz_move`, `sz_equal`) or a `sz_u(128|256|512)_vec_t` union `.u8s[]` buffer for staging. The default allocator
+# and assert live in `types.h` (the sanctioned LibC touch-points) and are excluded; the `alloc->`/`allocator->`
+# callbacks are not LibC.
+libc=$(git diff --cached --no-color -U0 -- 'include/stringzilla' ':(exclude)include/stringzilla/types.h' \
+  | grep -nE '^\+' \
+  | grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' \
+  | grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
+if [ -n "$libc" ]; then
+  echo "pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC)." >&2
+  echo "Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:" >&2
+  echo "$libc" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+exit 0
