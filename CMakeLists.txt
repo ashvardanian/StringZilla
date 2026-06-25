@@ -213,7 +213,7 @@ endif ()
 function (set_compiler_flags target cpp_standard target_arch compiler_id)
     get_target_property(target_type ${target} TYPE)
 
-    target_include_directories(${target} PRIVATE scripts)
+    target_include_directories(${target} PRIVATE test bench)
     target_include_directories(${target} PRIVATE fork_union/include)
 
     # Set output directory for single-configuration generators (like Make)
@@ -869,20 +869,20 @@ endif ()
 # (which carry the engine instantiations and export SZ_DYNAMIC_DISPATCH=1 on their interface) instead of recompiling the
 # engines header-only.
 if (STRINGZILLA_BUILD_BENCHMARK)
-    define_launcher(stringzilla_bench_find_cpp20 scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_sequence_cpp20 scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_token_cpp20 scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_uncased_cpp20 scripts/bench_utf8_uncased.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_iterate_cpp20 scripts/bench_utf8_iterate.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_container_cpp20 scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_memory_cpp20 scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_find_cpp20 bench/find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_sequence_cpp20 bench/sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_token_cpp20 bench/token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_uncased_cpp20 bench/utf8_uncased.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_iterate_cpp20 bench/utf8_iterate.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_container_cpp20 bench/container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_memory_cpp20 bench/memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Parallel benchmarks link the precompiled static libraries when those are built.
     define_launcher(
-        stringzillas_bench_similarities_cpp20 scripts/bench_similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
+        stringzillas_bench_similarities_cpp20 bench/similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
     )
     define_launcher(
-        stringzillas_bench_fingerprints_cpp20 scripts/bench_fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
+        stringzillas_bench_fingerprints_cpp20 bench/fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
     )
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_bench_similarities_cpp20 PRIVATE stringzillas_cpus_static)
@@ -890,10 +890,10 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     endif ()
     if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(
-            stringzillas_bench_similarities_cu20 scripts/bench_similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+            stringzillas_bench_similarities_cu20 bench/similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
         define_gpu_launcher(
-            stringzillas_bench_fingerprints_cu20 scripts/bench_fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+            stringzillas_bench_fingerprints_cu20 bench/fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzillas_cuda_static)
@@ -907,19 +907,19 @@ if (STRINGZILLA_BUILD_TEST)
     # so the standards-matrix builds below parallelize and rebuild incrementally instead of recompiling one
     # 5K-line file. `define_launcher`'s `target_sources` accepts this list verbatim.
     set(STRINGZILLA_TEST_SOURCES
-        scripts/test_stringzilla.cpp
-        scripts/test_hash.cpp
-        scripts/test_utf8_runes.cpp
-        scripts/test_utf8_tokens.cpp
-        scripts/test_utf8_words.cpp
-        scripts/test_utf8_graphemes.cpp
-        scripts/test_utf8_sentences.cpp
-        scripts/test_utf8_linewraps.cpp
-        scripts/test_utf8_norm.cpp
-        scripts/test_uncased.cpp
-        scripts/test_string.cpp
-        scripts/test_find.cpp
-        scripts/test_sort.cpp
+        test/stringzilla.cpp
+        test/hash.cpp
+        test/utf8_runes.cpp
+        test/utf8_tokens.cpp
+        test/utf8_words.cpp
+        test/utf8_graphemes.cpp
+        test/utf8_sentences.cpp
+        test/utf8_linewraps.cpp
+        test/utf8_norm.cpp
+        test/uncased.cpp
+        test/string.cpp
+        test/find.cpp
+        test/sort.cpp
     )
 
     # Make sure compilation passes for different C++ standards; MSVC only supports C++11 and newer.
@@ -929,8 +929,8 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Test parallel algorithms separately; link the static archive when the libraries are built.
-    define_launcher(stringzillas_test_cpp17 scripts/test_stringzillas.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzillas_test_cpp20 scripts/test_stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_test_cpp17 test/stringzillas.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_test_cpp20 test/stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_test_cpp17 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
@@ -939,8 +939,8 @@ if (STRINGZILLA_BUILD_TEST)
     # We only target C++14 and newer so `constexpr` functions compile on both host and device without `__device__`
     # annotations, and C++17 and newer so the `if constexpr` compile-time SIMD dispatch works.
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzillas_test_cu17 scripts/test_stringzillas.cu 17 "${STRINGZILLA_TARGET_ARCH}")
-        define_gpu_launcher(stringzillas_test_cu20 scripts/test_stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringzillas_test_cu17 test/stringzillas.cu 17 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringzillas_test_cu20 test/stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_test_cu17 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)

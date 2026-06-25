@@ -26,32 +26,32 @@ The project is split into the following parts:
 - `swift/*` - [Swift](#swift) package sources and tests.
 - `javascript/*` - [JavaScript](#javascript) bindings.
 - `golang/*` - [Go](#golang) bindings.
-- `scripts/*` - Scripts for benchmarking and testing.
+- `test/*` and `bench/*` - per-kernel test and benchmark sources.
 - `cli/*` - SIMD-accelerated CLI utilities.
 
 For minimal test coverage, check the following scripts:
 
-- `scripts/test_stringzilla.cpp` - tests C++ API (not underlying C) against STL.
-- `scripts/test_*.py` - tests the Python API against native strings, split per kernel family
+- `test/stringzilla.cpp` - tests C++ API (not underlying C) against STL.
+- `test/*.py` - tests the Python API against native strings, split per kernel family
   (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`)
   mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
-- `scripts/test.js`.
+- `test/test.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
 
-- `scripts/bench_token.cpp` - token-level ops, like hashing, ordering, equality checks.
-- `scripts/bench_find.cpp` - bidirectional substring search, both exact and fuzzy.
-- `scripts/bench_sequence.cpp` - sorting, partitioning, merging.
-- `scripts/bench_container.cpp` - STL containers with different string keys.
-- `scripts/bench_similarities.cpp` - benchmark all edit distance backends.
-- `scripts/bench_fingerprints.cpp` - benchmark all Min-Hash fingerprinting backends.
+- `bench/token.cpp` - token-level ops, like hashing, ordering, equality checks.
+- `bench/find.cpp` - bidirectional substring search, both exact and fuzzy.
+- `bench/sequence.cpp` - sorting, partitioning, merging.
+- `bench/container.cpp` - STL containers with different string keys.
+- `bench/similarities.cpp` - benchmark all edit distance backends.
+- `bench/fingerprints.cpp` - benchmark all Min-Hash fingerprinting backends.
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 
-- `scripts/bench_find.(py|ipynb)` - compares against native Python `str`.
-- `scripts/bench_sequence.(py|ipynb)` - compares against `pandas`.
-- `scripts/bench_similarities.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
+- `bench/find.(py|ipynb)` - compares against native Python `str`.
+- `bench/sequence.(py|ipynb)` - compares against `pandas`.
+- `bench/similarities.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
 ## Benchmarking Datasets
 
@@ -211,7 +211,7 @@ SZ_TESTS_MULTIPLIER=10 build_debug/stringzilla_test_cpp20
 SZ_TESTS_SEED=12345 SZ_TESTS_MULTIPLIER=5 build_debug/stringzilla_test_cpp20
 
 # Python tests also respect SZ_TESTS_SEED
-SZ_TESTS_SEED=42 pytest scripts/ --ignore=scripts/test_stringzillas.py -v
+SZ_TESTS_SEED=42 pytest test/ --ignore=test/stringzillas.py -v
 ```
 
 When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
@@ -303,13 +303,13 @@ Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a lo
 Compare A/B within one run; raise `STRINGWARS_DURATION` and use a quiet machine when you need stable absolute numbers.
 The work itself is deterministic at seed 0.
 
-Each benchmark originates from an identically named single-source file in the `scripts/` directory.
+Each benchmark originates from an identically named single-source file in the `bench/` directory.
 All of them feature file-level documentation, and are designed to be self-explanatory.
 You can easily log their descriptions until the first `*/` with the following `sed` and `awk` commands:
 
 ```sh
-sed '/\*\//q' scripts/bench_memory.cpp
-awk '/\*\// { exit } { print }' scripts/bench_memory.cpp
+sed '/\*\//q' bench/memory.cpp
+awk '/\*\// { exit } { print }' bench/memory.cpp
 ```
 
 ### Benchmarking Hardware-Specific Optimizations
@@ -537,10 +537,10 @@ To clean up code before pushing:
 
 ```bash
 uv pip install ruff mypy bandit flake8
-uv run --no-project ruff check scripts/test_*.py --fix
-uv run --no-project mypy scripts/test_*.py --ignore-missing-imports
-uv run --no-project bandit scripts/test_*.py -s B101
-uv run --no-project flake8 scripts/test_*.py --max-line-length=120
+uv run --no-project ruff check test/*.py --fix
+uv run --no-project mypy test/*.py --ignore-missing-imports
+uv run --no-project bandit test/*.py -s B101
+uv run --no-project flake8 test/*.py --max-line-length=120
 ```
 
 ### Testing
@@ -549,9 +549,9 @@ For testing we use PyTest, which may not be installed on your system.
 
 ```bash
 uv pip install pytest pytest-repeat numpy pyarrow                                       # for repeated fuzzy tests
-uv run --no-project python -m pytest scripts/ --ignore=scripts/test_stringzillas.py                      # default settings
-uv run --no-project python -m pytest scripts/ --ignore=scripts/test_stringzillas.py -s -x -p no:warnings # custom settings
-uv run --no-project python -m pytest scripts/test_doctests.py                           # to run the docstring examples
+uv run --no-project python -m pytest test/ --ignore=test/stringzillas.py                      # default settings
+uv run --no-project python -m pytest test/ --ignore=test/stringzillas.py -s -x -p no:warnings # custom settings
+uv run --no-project python -m pytest test/doctests.py                           # to run the docstring examples
 uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```
 
@@ -728,7 +728,7 @@ cd golang
 CGO_CFLAGS="-I$(pwd)/../include" \
 CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
 LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
-go run ../scripts/bench.go --input ../leipzig1M.txt
+go run ../bench/bench.go --input ../leipzig1M.txt
 ```
 
 Alternatively:
@@ -736,7 +736,7 @@ Alternatively:
 ```bash
 export GO111MODULE="off"
 go run scripts/test.go
-go run scripts/bench.go
+go run bench/bench.go
 ```
 
 ## General Recommendations
@@ -790,7 +790,7 @@ Instead, use inline assembly to check feature flags and dispatch them to the pro
 ### Working on Faster Edit Distances
 
 When dealing with non-trivial algorithms, like edit distances, it's advisory to provide pseudo-code or a reference implementation in addition to the optimized one.
-Ideally, include it in `scripts/` as a Python Jupyter Notebook with explanations and visualizations.
+Ideally, include it in `bench/` as a Python Jupyter Notebook with explanations and visualizations.
 
 ### Working on Sequence Processing and Sorting
 

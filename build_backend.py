@@ -13,8 +13,8 @@ CLI Commands
     -   pull-deps [PROJECT_DIR]: when testing parallel targets, installs
         the serial stringzilla into the test venv, and ensures test-only
         deps (NumPy, affine-gaps) are present.
-    -   run-tests [PROJECT_DIR]: runs scripts/test_stringzilla.py and,
-        for parallel targets, also runs scripts/test_stringzillas.py.
+    -   run-tests [PROJECT_DIR]: runs test/stringzilla.py and,
+        for parallel targets, also runs test/stringzillas.py.
 """
 
 import os
@@ -159,7 +159,7 @@ def cli_prepare_tests(project_dir: Optional[str] = None) -> None:
         env = os.environ.copy()
         env["SZ_TARGET"] = "stringzilla"
         subprocess.check_call([sys.executable, "-m", "pip", "install", project_dir], env=env)
-        # Install test-only deps required by scripts/test_stringzillas.py
+        # Install test-only deps required by test/stringzillas.py
         subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy", "affine-gaps"])  # noqa: S603
 
 

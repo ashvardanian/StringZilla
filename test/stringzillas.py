@@ -1,0 +1,934 @@
+#!/usr/bin/env python3
+"""
+Test suite for StringZillas parallel algorithms module.
+Tests with Python lists, NumPy arrays, Apache Arrow columns, and StringZilla Strs types.
+To run for the CPU backend:
+
+    uv pip install numpy pyarrow pytest pytest-repeat affine-gaps
+    SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
+    uv run --no-project python -m pytest test/stringzillas.py -s -x
+
+To run for the CUDA backend:
+
+    uv pip install numpy pyarrow pytest pytest-repeat affine-gaps
+    SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
+    uv run --no-project python -m pytest test/stringzillas.py -s -x
+
+Recommended flags for better diagnostics:
+
+    -s                  show test output (no capture)
+    -vv                 verbose output
+    --maxfail=1         stop at first failure
+    --full-trace        full Python tracebacks
+    -k <pattern>        filter tests by substring
+    -X faulthandler     to dump on fatal signals
+    --verbose           enable verbose output
+
+Example:
+
+    SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation --verbose
+    uv run --no-project python -X faulthandler -m pytest test/stringzillas.py -s -vv --maxfail=1 --full-trace
+"""
+
+import os
+import sys
+import platform
+from random import choice, randint, seed
+from string import ascii_lowercase
+from typing import Optional, Literal
+
+import pytest
+import numpy as np  # ! Unlike StringZilla, NumPy is mandatory for StringZillas
+import affine_gaps as ag  # ? Provides baseline implementation for NW & SW scoring
+
+import stringzilla as sz
+import stringzillas as szs
+from stringzilla import Strs
+
+
+@pytest.fixture(scope="session", autouse=True)
+def log_test_environment():
+    """Automatically log environment info before running any tests."""
+
+    print()  # New line for better readability
+    print("=== StringZillas Test Environment ===")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.machine()}")
+    print(f"Processor: {platform.processor()}")
+    print(f"Python: {platform.python_version()}")
+    print(f"StringZilla version: {sz.__version__}")
+    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print(f"StringZillas version: {szs.__version__}")
+    print(f"StringZillas capabilities: {sorted(szs.__capabilities__)}")
+    print(f"NumPy version: {np.__version__}")
+    print(f"Affine Gaps version: {ag.__version__}")
+    print(f"Test seeds: {SEED_VALUES}")
+    if _random_seed_for_run in SEED_VALUES:
+        print(f"  (random seed for this run: {_random_seed_for_run})")
+
+    # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
+    is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
+    if is_qemu:
+        sve_like = {"sve", "sve2", "sve2aes"}
+        for module in (sz, szs):
+            current = list(getattr(module, "__capabilities__", ()))
+            desired = tuple(c for c in current if c.lower() not in sve_like)
+            if len(desired) != len(current):
+                print(f"QEMU env detected; disabling {sve_like} in {module.__name__} for stability")
+                module.reset_capabilities(desired)
+
+    print("=" * 40)
+    print()  # New line for better readability
+
+
+def test_library_properties():
+    assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
+    assert "serial" in sz.__capabilities__, "Serial backend must be present"
+    assert isinstance(sz.__capabilities_str__, str) and len(sz.__capabilities_str__) > 0
+    sz.reset_capabilities(sz.__capabilities__)  # Should not raise
+
+    # Test StringZillas properties
+    assert len(szs.__version__.split(".")) == 3, "Semantic versioning must be preserved"
+    assert "serial" in szs.__capabilities__, "Serial backend must be present"
+    assert isinstance(szs.__capabilities_str__, str) and len(szs.__capabilities_str__) > 0
+    sz.reset_capabilities(szs.__capabilities__)  # Should not raise
+
+
+DeviceName = Literal["default", "cpu_cores", "gpu_device"]
+DEVICE_NAMES = ["default", "cpu_cores", "gpu_device"] if "cuda" in szs.__capabilities__ else ["default", "cpu_cores"]
+
+
+def device_scope_and_capabilities(device: DeviceName):
+    """Create a DeviceScope based on the specified device type."""
+    if device == "default":
+        return szs.DeviceScope(), ("serial",)
+    elif device == "cpu_cores":
+        return szs.DeviceScope(cpu_cores=2), ("serial", "parallel")
+    elif device == "gpu_device":
+        return szs.DeviceScope(gpu_device=0), ("cuda",)
+    else:
+        raise ValueError(f"Unknown device type: {device}")
+
+
+InputSizeConfig = Literal["one-large", "few-big", "many-small"]
+INPUT_SIZE_CONFIGS = ["one-large", "few-big", "many-small"]
+
+# Generate a random seed at module load time for this test run (keep in sync with test_stringzilla.py)
+# Use os.urandom for true randomness independent of the seeded RNG state
+_random_seed_for_run = int.from_bytes(os.urandom(4), "little")
+
+# Reproducible test seeds for consistent CI runs
+SEED_VALUES = [
+    42,  # Classic test seed
+    0,  # Edge case: zero seed
+    1,  # Minimal positive seed
+    314159,  # Pi digits
+    _random_seed_for_run,  # Random seed for this run (logged at startup)
+]
+
+# Override SEED_VALUES with environment variable if set (for reproducible CI fuzzing)
+_env_seed = os.environ.get("SZ_TESTS_SEED")
+if _env_seed:
+    try:
+        _parsed_seed = int(_env_seed)
+        SEED_VALUES = [_parsed_seed]
+        print(f"SZ_TESTS_SEED={_parsed_seed} (from environment, overriding default seeds)")
+    except ValueError:
+        pass  # Keep default SEED_VALUES if parsing fails
+
+
+def generate_string_batches(config: InputSizeConfig):
+    """Generate string batches based on the specified configuration.
+
+    Returns:
+        tuple: (batch_size, min_length, max_length) parameters for generating test strings
+    """
+    if config == "one-large":
+        return 1, 50, 1024  # Single pair of long strings
+    elif config == "few-big":
+        return 7, 30, 128  # Few pairs of medium strings
+    elif config == "many-small":
+        return 1000, 10, 30  # Many pairs of short strings
+    else:
+        raise ValueError(f"Unknown input size config: {config}")
+
+
+def seed_random_generators(seed_value: Optional[int] = None):
+    """Seed the random number generators for reproducibility."""
+    if seed_value is None:
+        return
+    seed(seed_value)
+    # Try to seed NumPy's random number generator
+    # This handles both NumPy 1.x and 2.x, and any import issues
+    try:
+        np.random.seed(seed_value)
+    except (ImportError, AttributeError, Exception):
+        pass
+
+
+def test_device_scope():
+    """Test DeviceScope for execution context control."""
+
+    default_scope = szs.DeviceScope()
+    assert default_scope is not None
+
+    scope_multi = szs.DeviceScope(cpu_cores=4)
+    assert scope_multi is not None
+
+    if "cuda" in szs.__capabilities__:
+        try:
+            scope_gpu = szs.DeviceScope(gpu_device=0)
+            assert scope_gpu is not None
+        except RuntimeError:
+            # GPU capability is reported but device initialization failed
+            pass
+    else:
+        with pytest.raises(RuntimeError):
+            szs.DeviceScope(gpu_device=0)
+
+    # Test cpu_cores=1 redirects to default scope
+    scope_single = szs.DeviceScope(cpu_cores=1)
+    assert scope_single is not None
+
+    # Test cpu_cores=0 uses all available cores
+    scope_all = szs.DeviceScope(cpu_cores=0)
+    assert scope_all is not None
+
+    with pytest.raises(ValueError):
+        szs.DeviceScope(cpu_cores=4, gpu_device=0)  # Can't specify both
+
+    with pytest.raises(TypeError):
+        szs.DeviceScope(cpu_cores="invalid")
+
+    with pytest.raises(TypeError):
+        szs.DeviceScope(gpu_device="invalid")
+
+
+def test_to_device():
+    """Test to_device function with various Strs layouts, especially slices."""
+
+    # Skip test if CUDA is not available
+    if "cuda" not in szs.__capabilities__:
+        pytest.skip("CUDA not available, skipping to_device test")
+
+    # Create a Strs object with multiple strings, including edge cases
+    original_strs = sz.Strs(["hello", "world", "test", "slice", "data", "", "café"])
+
+    # Test full object conversion
+    result = szs.to_device(original_strs)
+    assert result is original_strs  # Returns same object
+    assert len(result) == 7
+    assert list(result) == ["hello", "world", "test", "slice", "data", "", "café"]
+
+    # Test with slices (non-owning views)
+    slice_strs = original_strs[1:4]  # Creates a view
+    result_slice = szs.to_device(slice_strs)
+    assert result_slice is slice_strs  # Returns same object
+    assert len(result_slice) == 3
+    assert list(result_slice) == ["world", "test", "slice"]
+
+    # Test with single element slice
+    single_strs = original_strs[2:3]
+    result_single = szs.to_device(single_strs)
+    assert result_single is single_strs
+    assert len(result_single) == 1
+    assert list(result_single) == ["test"]
+
+    # Test with empty slice
+    empty_strs = original_strs[3:3]
+    result_empty = szs.to_device(empty_strs)
+    assert result_empty is empty_strs
+    assert len(result_empty) == 0
+    assert list(result_empty) == []
+
+
+def test_to_device_unicode_complex():
+    """Test to_device with complex Unicode bytes including RTL, emoji, and normalization forms."""
+
+    # Skip test if CUDA is not available
+    if "cuda" not in szs.__capabilities__:
+        pytest.skip("CUDA not available, skipping to_device test")
+
+    # Complex Unicode test cases as raw byte literals
+    unicode_bytes = [
+        b"Hello, \xe4\xb8\x96\xe7\x95\x8c!",  # Mixed ASCII + CJK (世界)
+        b"\xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd8\xa7 \xd8\xa8\xd8\xa7\xd9\x84\xd8\xb9\xd8\xa7\xd9\x84\xd9\x85",  # Arabic RTL
+        b"\xf0\x9f\xa6\x96\xf0\x9f\x94\xa5\xf0\x9f\x9a\x80\xf0\x9f\x92\xbb",  # Emoji sequence 🦖🔥🚀💻
+        b"caf\xc3\xa9",  # NFC normalized café
+        b"cafe\xcc\x81",  # NFD normalized café (e + combining acute)
+        b"\xf0\x9d\x95\xb3\xf0\x9d\x96\x8a\xf0\x9d\x96\x91\xf0\x9d\x96\x91\xf0\x9d\x96\x94",  # Mathematical script 𝕳𝖊𝖑𝖑𝖔
+        b"\xe2\x80\x8d\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x92\xbb\xf0\x9f\x91\xa9\xe2\x80\x8d\xf0\x9f\x94\xac",  # ZWJ sequences
+        b"\xe1\xbc\x88\xcf\x81\xcf\x87\xce\xb9\xce\xbc\xce\xae\xce\xb4\xce\xb7\xcf\x82",  # Ancient Greek Ἀρχιμήδης
+        b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8\xf0\x9f\x87\xab\xf0\x9f\x87\xb7\xf0\x9f\x87\xaf\xf0\x9f\x87\xb5",  # Flag sequences 🇺🇸🇫🇷🇯🇵
+        b"",  # Empty bytes
+        b"\xe0\xa4\xa8\xe0\xa4\xae\xe0\xa4\xb8\xe0\xa5\x8d\xe0\xa4\xa4\xe0\xa5\x87",  # Devanagari नमस्ते
+        b"\xf0\x9f\xa7\xac\xe2\x9a\x9b\xef\xb8\x8f\xf0\x9f\x94\xac",  # Science emoji 🧬⚛️🔬
+    ]
+
+    original_strs = sz.Strs(unicode_bytes)
+
+    # Test full Unicode collection
+    result = szs.to_device(original_strs)
+    assert result is original_strs
+    assert len(result) == len(unicode_bytes)
+    assert list(result) == unicode_bytes
+
+    # Test Unicode slice containing various scripts
+    slice_strs = original_strs[1:6]  # Arabic, emoji, café forms, mathematical script
+    expected_slice = unicode_bytes[1:6]
+
+    result_slice = szs.to_device(slice_strs)
+    assert result_slice is slice_strs
+    assert len(result_slice) == 5
+    assert list(result_slice) == expected_slice
+
+    # Verify byte-level integrity of complex Unicode
+    for original, converted in zip(expected_slice, result_slice):
+        assert bytes(converted) == original
+
+    # Test edge cases: first element, last element, middle elements
+    assert list(szs.to_device(original_strs[0:1])) == [unicode_bytes[0]]  # First element
+    assert list(szs.to_device(original_strs[-1:])) == [unicode_bytes[-1]]  # Last element
+    assert list(szs.to_device(original_strs[9:10])) == [unicode_bytes[9]]  # Empty bytes
+
+    # Test that NFC and NFD forms are preserved as different byte sequences
+    nfc_nfd_slice = original_strs[3:5]  # Both café forms
+    result_forms = szs.to_device(nfc_nfd_slice)
+    assert len(result_forms) == 2
+    assert bytes(result_forms[0]) == unicode_bytes[3]  # NFC form preserved
+    assert bytes(result_forms[1]) == unicode_bytes[4]  # NFD form preserved
+
+    # Test nested slice (slice of slice)
+    nested_slice = slice_strs[1:3]  # Take middle 2 elements from existing slice
+    result_nested = szs.to_device(nested_slice)
+    assert len(result_nested) == 2
+    # slice_strs is [1:6], so slice_strs[1:3] is elements [2:4] from original
+    assert bytes(result_nested[0]) == unicode_bytes[2]  # Emoji sequence
+    assert bytes(result_nested[1]) == unicode_bytes[3]  # NFC café
+
+
+def test_parameter_validation():
+    """Test parameter validation and error handling for all engine types."""
+
+    # Test constructor parameter type validation
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(open="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(extend="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.LevenshteinDistances(mismatch="invalid")  # wrong type
+
+    with pytest.raises(TypeError):
+        szs.Fingerprints(ndim="invalid")  # wrong type
+
+    # Test computation input validation
+    engine = szs.LevenshteinDistances()
+
+    # Test None queries - expect either `TypeError` or `RuntimeError` (GPU memory issues).
+    # Note: `candidates=None` is now valid and requests symmetric self-similarity, so it is not an error.
+    with pytest.raises((TypeError, RuntimeError)):
+        engine(None, Strs(["test"]))
+
+    # Mismatched query/candidate counts are valid in the cross-product API: they yield a rectangular matrix.
+    rectangular = engine(Strs(["a", "b"]), Strs(["c"]))
+    assert rectangular.shape == (2, 1)
+
+    # Test with non-Strs inputs
+    with pytest.raises((TypeError, RuntimeError)):
+        engine(["test"], Strs(["test"]))  # list instead of Strs
+
+    with pytest.raises((TypeError, RuntimeError)):
+        engine(Strs(["test"]), ["test"])  # list instead of Strs
+
+    # Test Fingerprints computation validation
+    fp_engine = szs.Fingerprints(ndim=5)
+    with pytest.raises((TypeError, RuntimeError)):
+        fp_engine(None)  # None input
+
+    with pytest.raises((TypeError, RuntimeError)):
+        fp_engine(["test"])  # list instead of Strs
+
+
+def get_random_string(
+    length: Optional[int] = None,
+    variability: Optional[int] = None,
+    alphabet: Optional[str] = None,
+) -> str:
+    if length is None:
+        length = randint(3, 300)
+    if alphabet is None:
+        alphabet = ascii_lowercase
+    if variability is None:
+        variability = len(alphabet)
+    return "".join(choice(alphabet[:variability]) for _ in range(length))
+
+
+def is_equal_strings(native_strings, big_strings):
+    for native_slice, big_slice in zip(native_strings, big_strings):
+        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
+
+
+def baseline_levenshtein_distance(s1, s2) -> int:
+    """
+    Compute the Levenshtein distance between two strings.
+    """
+
+    # Create a matrix of size (len(s1)+1) x (len(s2)+1)
+    matrix = np.zeros((len(s1) + 1, len(s2) + 1), dtype=int)
+
+    # Initialize the first column and first row of the matrix
+    for i in range(len(s1) + 1):
+        matrix[i, 0] = i
+    for j in range(len(s2) + 1):
+        matrix[0, j] = j
+
+    # Compute Levenshtein distance
+    for i in range(1, len(s1) + 1):
+        for j in range(1, len(s2) + 1):
+            if s1[i - 1] == s2[j - 1]:
+                cost = 0
+            else:
+                cost = 1
+            matrix[i, j] = min(
+                matrix[i - 1, j] + 1,  # Deletion
+                matrix[i, j - 1] + 1,  # Insertion
+                matrix[i - 1, j - 1] + cost,  # Substitution
+            )
+
+    # Return the Levenshtein distance
+    return matrix[len(s1), len(s2)]
+
+
+@pytest.mark.parametrize("max_edit_distance", [150])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_levenshtein_distance_insertions(max_edit_distance: int, seed_value: int):
+    """Test Levenshtein distance with sequential insertions using deterministic seeds."""
+
+    # Create a new string by slicing and concatenating
+    def insert_char_at(s, char_to_insert, index):
+        return s[:index] + char_to_insert + s[index:]
+
+    seed_random_generators(seed_value)
+    binary_engine = szs.LevenshteinDistances()
+
+    a = get_random_string(length=20)
+    b = a
+    for i in range(max_edit_distance):
+        source_offset = randint(0, len(ascii_lowercase) - 1)
+        target_offset = randint(0, len(b) - 1)
+        b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs)
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix for single query and candidate"
+        assert results[0, 0] == i + 1, f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_with_simple_cases(capabilities_mode: str, device_name: DeviceName):
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    binary_engine = szs.LevenshteinDistances(capabilities=base_caps if capabilities_mode == "base" else device_scope)
+
+    def binary_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs, device=device_scope)
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix"
+        return int(results[0, 0])
+
+    assert binary_distance("hello", "hello") == 0
+    assert binary_distance("hello", "hell") == 1
+    assert binary_distance("", "") == 0
+    assert binary_distance("", "abc") == 3
+    assert binary_distance("abc", "") == 3
+    assert binary_distance("abc", "ac") == 1, "one deletion"
+    assert binary_distance("abc", "a_bc") == 1, "one insertion"
+    assert binary_distance("abc", "adc") == 1, "one substitution"
+    assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1, "one insertion (prepended)"
+    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_utf8_with_simple_cases(capabilities_mode: str, device_name: DeviceName):
+
+    if device_name == "gpu_device":
+        pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+        return
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    unicode_engine = szs.LevenshteinDistancesUTF8(
+        capabilities=base_caps if capabilities_mode == "base" else device_scope
+    )
+
+    def unicode_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = unicode_engine(a_strs, b_strs, device=device_scope)
+        assert results.shape == (1, 1), "Unicode engine should return a 1x1 matrix"
+        return int(results[0, 0])
+
+    assert unicode_distance("hello", "hell") == 1, "no unicode symbols, just ASCII"
+    assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3, "add 3 whitespaces in Chinese"
+    assert unicode_distance("💖", "💗") == 1
+
+    assert unicode_distance("αβγδ", "αγδ") == 1, "insert Beta"
+    assert unicode_distance("école", "école") == 2, "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance("façade", "facade") == 1, "'ç' with cedilla vs. plain"
+    assert unicode_distance("Schön", "Scho\u0308n") == 2, "'ö' represented as 'o' + '¨'"
+    assert unicode_distance("München", "Muenchen") == 2, "German with umlaut vs. transcription"
+    assert unicode_distance("こんにちは世界", "こんばんは世界") == 2, "Japanese greetings"
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_with_custom_gaps(capabilities_mode: str, device_name: DeviceName):
+
+    mismatch: int = 4
+    opening: int = 3
+    extension: int = 2
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    binary_engine = szs.LevenshteinDistances(
+        open=opening,
+        extend=extension,
+        mismatch=mismatch,
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+    )
+
+    def binary_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs, device=device_scope)
+        assert results.shape == (1, 1), "Binary engine should return a 1x1 matrix"
+        return int(results[0, 0])
+
+    assert binary_distance("hello", "hello") == 0
+    assert binary_distance("hello", "hell") == opening
+    assert binary_distance("", "") == 0
+    assert binary_distance("", "abc") == opening + 2 * extension
+    assert binary_distance("abc", "") == opening + 2 * extension
+    assert binary_distance("abc", "ac") == opening, "one deletion"
+    assert binary_distance("abc", "a_bc") == opening, "one insertion"
+    assert binary_distance("abc", "adc") == mismatch, "one substitution"
+    assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == opening, "one insertion (prepended)"
+    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == min(14 * mismatch, 2 * opening + 12 * extension)
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_utf8_with_custom_gaps(capabilities_mode: str, device_name: DeviceName):
+
+    if device_name == "gpu_device":
+        pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+        return
+
+    mismatch: int = 4
+    opening: int = 3
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    unicode_engine = szs.LevenshteinDistancesUTF8(
+        open=opening,
+        extend=opening,
+        mismatch=mismatch,
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+    )
+
+    def unicode_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = unicode_engine(a_strs, b_strs, device=device_scope)
+        assert results.shape == (1, 1), "Unicode engine should return a 1x1 matrix"
+        return int(results[0, 0])
+
+    assert unicode_distance("hello", "hell") == opening, "no unicode symbols, just ASCII"
+    assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3 * opening, "add 3 whitespaces in Chinese"
+    assert unicode_distance("💖", "💗") == 1 * mismatch
+
+    assert unicode_distance("αβγδ", "αγδ") == opening, "insert Beta"
+    assert unicode_distance("école", "école") == mismatch + opening, "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance("façade", "facade") == mismatch, "'ç' with cedilla vs. plain"
+    assert unicode_distance("Schön", "Scho\u0308n") == mismatch + opening, "'ö' represented as 'o' + '¨'"
+    assert unicode_distance("München", "Muenchen") == mismatch + opening, "German with umlaut vs. transcription"
+    assert unicode_distance("こんにちは世界", "こんばんは世界") == min(2 * mismatch, 4 * opening), "Japanese greetings"
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_levenshtein_distance_random(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    config: InputSizeConfig,
+    seed_value: int,
+):
+    """Test Levenshtein distances with deterministic seeds for reproducibility."""
+
+    seed_random_generators(seed_value)
+    batch_size, min_len, max_len = generate_string_batches(config)
+    a_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
+
+    baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)])
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.LevenshteinDistances(capabilities=base_caps if capabilities_mode == "base" else device_scope)
+
+    # The cross-product engine returns a (queries x candidates) matrix; the original pairwise
+    # baseline corresponds to the matrix diagonal where query_index == candidate_index.
+    queries, candidates = Strs(a_batch), Strs(b_batch)
+    matrix = engine(queries, candidates)
+    assert matrix.shape == (batch_size, batch_size)
+    np.testing.assert_array_equal(np.diagonal(matrix), baselines, "Edit distances do not match")
+
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("queries_count", [1, 3, 5])
+@pytest.mark.parametrize("candidates_count", [1, 4, 6])
+def test_levenshtein_cross_product_matrix(device_name: DeviceName, queries_count: int, candidates_count: int):
+    """Verify the full (queries x candidates) Levenshtein matrix against the pure-Python reference.
+
+    Covers rectangular grids including the 1xN and Nx1 degenerate shapes.
+    """
+
+    seed_random_generators(42)
+    query_strings = [get_random_string(length=randint(4, 20)) for _ in range(queries_count)]
+    candidate_strings = [get_random_string(length=randint(4, 20)) for _ in range(candidates_count)]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.LevenshteinDistances(capabilities=base_caps)
+
+    matrix = engine(Strs(query_strings), Strs(candidate_strings), device=device_scope)
+    assert matrix.shape == (queries_count, candidates_count)
+    assert matrix.dtype == np.uint64
+
+    reference = np.array(
+        [[baseline_levenshtein_distance(q, c) for c in candidate_strings] for q in query_strings],
+        dtype=np.uint64,
+    )
+    for query_index in range(queries_count):
+        for candidate_index in range(candidates_count):
+            assert (
+                matrix[query_index, candidate_index] == reference[query_index, candidate_index]
+            ), f"Cross-product mismatch at ({query_index}, {candidate_index})"
+
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("queries_count", [1, 4, 8])
+def test_levenshtein_symmetric_self_similarity(device_name: DeviceName, queries_count: int):
+    """Passing `candidates=None` requests symmetric self-similarity of the queries."""
+
+    seed_random_generators(7)
+    query_strings = [get_random_string(length=randint(4, 20)) for _ in range(queries_count)]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.LevenshteinDistances(capabilities=base_caps)
+
+    matrix = engine(Strs(query_strings), device=device_scope)
+    assert matrix.shape == (queries_count, queries_count)
+    assert matrix.dtype == np.uint64
+
+    # The self-similarity matrix must be symmetric with a zero diagonal.
+    assert np.array_equal(np.diagonal(matrix), np.zeros(queries_count, dtype=np.uint64)), "Diagonal must be zero"
+    for first_index in range(queries_count):
+        for second_index in range(queries_count):
+            assert (
+                matrix[first_index, second_index] == matrix[second_index, first_index]
+            ), f"Matrix must be symmetric at ({first_index}, {second_index})"
+
+    # The off-diagonal cells must match the pure-Python pairwise reference.
+    for first_index in range(queries_count):
+        for second_index in range(queries_count):
+            expected = baseline_levenshtein_distance(query_strings[first_index], query_strings[second_index])
+            assert matrix[first_index, second_index] == expected
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_needleman_wunsch_vs_levenshtein_random(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    config: InputSizeConfig,
+    seed_value: int,
+):
+    """Test Needleman-Wunsch global alignment scores against Levenshtein distances with random strings."""
+
+    seed_random_generators(seed_value)
+    batch_size, min_len, max_len = generate_string_batches(config)
+    a_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(min_len, max_len)) for _ in range(batch_size)]
+
+    # Map each lowercase ASCII letter to its own class (codes 97..122 -> classes 1..26 modulo 32),
+    # then make matches free and mismatches cost 1 to recover the negative Levenshtein distance.
+    byte_to_class = (np.arange(256) % 32).astype(np.uint8)
+    class_costs = np.full((32, 32), -1, dtype=np.int8)
+    np.fill_diagonal(class_costs, 0)
+
+    baselines = np.array([-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)])
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.NeedlemanWunschScores(
+        byte_to_class,
+        class_costs,
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+        open=-1,
+        extend=-1,
+    )
+
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    queries, candidates = Strs(a_batch), Strs(b_batch)
+    matrix = engine(queries, candidates)
+    assert matrix.shape == (batch_size, batch_size)
+    np.testing.assert_array_equal(np.diagonal(matrix), baselines, "Edit distances do not match")
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("batch_size", [1, 7, 33])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_needleman_wunsch_against_affine_gaps(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    batch_size: int,
+    seed_value: int,
+):
+    """Compare Needleman-Wunsch global alignment scores against affine_gaps baseline."""
+
+    seed_random_generators(seed_value)
+    alphabet = ag.default_proteins_alphabet
+    a_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+
+    # Baseline with affine_gaps (Gotoh)
+    baseline = np.array(
+        [
+            int(
+                ag.needleman_wunsch_gotoh_score(
+                    a,
+                    b,
+                    substitution_alphabet=alphabet,
+                    substitution_matrix=ag.default_proteins_matrix,
+                    gap_opening=ag.default_gap_opening,
+                    gap_extension=ag.default_gap_extension,
+                )
+            )
+            for a, b in zip(a_batch, b_batch)
+        ],
+        dtype=np.int64,
+    )
+
+    # For StringZillas, fold the substitution matrix into the compact class representation,
+    # assigning class i+1 to residue i (class 0 is the catch-all bucket).
+    residue_count = len(alphabet)
+    byte_to_class = np.zeros(256, dtype=np.uint8)
+    byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
+    class_costs = np.zeros((32, 32), dtype=np.int8)
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix[
+        :residue_count, :residue_count
+    ]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.NeedlemanWunschScores(
+        byte_to_class,
+        class_costs,
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+        open=ag.default_gap_opening,
+        extend=ag.default_gap_extension,
+    )
+
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    matrix = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    assert matrix.shape == (batch_size, batch_size)
+    scores = np.diagonal(matrix)
+    if not np.array_equal(scores, baseline):
+        idx = int(np.where(scores != baseline)[0][0])
+        a, b = a_batch[idx], b_batch[idx]
+        aligned_a, aligned_b = ag.needleman_wunsch_gotoh(
+            a,
+            b,
+            substitution_alphabet=alphabet,
+            substitution_matrix=ag.default_proteins_matrix,
+            gap_open=ag.default_gap_opening,
+            gap_extend=ag.default_gap_extension,
+        )
+        guide_line = "".join("|" if ca == cb else " " for ca, cb in zip(aligned_a, aligned_b))
+        pytest.fail(
+            "\n".join(
+                [
+                    f"Needleman-Wunsch mismatch at index {idx}:",
+                    f"  a: {a}",
+                    f"  b: {b}",
+                    f"  szs score:     {int(scores[idx])}",
+                    f"  affine_gaps:   {int(baseline[idx])}",
+                    "  Alignment (affine_gaps):",
+                    f"    {aligned_a}",
+                    f"    {guide_line}",
+                    f"    {aligned_b}",
+                ]
+            )
+        )
+    np.testing.assert_array_equal(scores, baseline)
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("batch_size", [1, 7, 33])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_smith_waterman_against_affine_gaps(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    batch_size: int,
+    seed_value: int,
+):
+    """Compare Smith-Waterman local alignment scores against affine_gaps baseline."""
+
+    seed_random_generators(seed_value)
+    alphabet = ag.default_proteins_alphabet
+    a_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+
+    # Baseline with affine_gaps (Gotoh)
+    baseline = np.array(
+        [
+            int(
+                ag.smith_waterman_gotoh_score(
+                    a,
+                    b,
+                    substitution_alphabet=alphabet,
+                    substitution_matrix=ag.default_proteins_matrix,
+                    gap_opening=ag.default_gap_opening,
+                    gap_extension=ag.default_gap_extension,
+                )
+            )
+            for a, b in zip(a_batch, b_batch)
+        ],
+        dtype=np.int64,
+    )
+
+    # For StringZillas, fold the substitution matrix into the compact class representation,
+    # assigning class i+1 to residue i (class 0 is the catch-all bucket).
+    residue_count = len(alphabet)
+    byte_to_class = np.zeros(256, dtype=np.uint8)
+    byte_to_class[np.frombuffer(alphabet.encode(), dtype=np.uint8)] = np.arange(1, residue_count + 1, dtype=np.uint8)
+    class_costs = np.zeros((32, 32), dtype=np.int8)
+    class_costs[1 : residue_count + 1, 1 : residue_count + 1] = ag.default_proteins_matrix[
+        :residue_count, :residue_count
+    ]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.SmithWatermanScores(
+        byte_to_class,
+        class_costs,
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+        open=ag.default_gap_opening,
+        extend=ag.default_gap_extension,
+    )
+
+    # The cross-product engine returns a (queries x candidates) matrix; the pairwise baseline
+    # corresponds to the matrix diagonal where query_index == candidate_index.
+    matrix = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    assert matrix.shape == (batch_size, batch_size)
+    scores = np.diagonal(matrix)
+    if not np.array_equal(scores, baseline):
+        idx = int(np.where(scores != baseline)[0][0])
+        a, b = a_batch[idx], b_batch[idx]
+        aligned_a, aligned_b = ag.smith_waterman_gotoh(
+            a,
+            b,
+            substitution_alphabet=alphabet,
+            substitution_matrix=ag.default_proteins_matrix,
+            gap_open=ag.default_gap_opening,
+            gap_extend=ag.default_gap_extension,
+        )
+        guide_line = "".join("|" if ca == cb else " " for ca, cb in zip(aligned_a, aligned_b))
+        pytest.fail(
+            "\n".join(
+                [
+                    f"Smith-Waterman mismatch at index {idx}:",
+                    f"  a: {a}",
+                    f"  b: {b}",
+                    f"  szs score:     {int(scores[idx])}",
+                    f"  affine_gaps:   {int(baseline[idx])}",
+                    "  Alignment (affine_gaps):",
+                    f"    {aligned_a}",
+                    f"    {guide_line}",
+                    f"    {aligned_b}",
+                ]
+            )
+        )
+    np.testing.assert_array_equal(scores, baseline)
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("ndim", [1, 7, 64, 1024])
+def test_fingerprints(capabilities_mode: str, device_name: str, ndim: int):
+    """Test Fingerprints basic functionality."""
+
+    # Create engine with smaller dimensions to avoid memory issues
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.Fingerprints(ndim=ndim, capabilities=base_caps if capabilities_mode == "base" else device_scope)
+
+    # Basic functionality - empty input should return empty arrays
+    hashes, counts = engine(Strs([]), device=device_scope)
+    assert hashes.shape == (0, ndim)
+    assert counts.shape == (0, ndim)
+    assert hashes.dtype == np.uint32
+    assert counts.dtype == np.uint32
+
+    test_strings = Strs(["hello", "world", "hello"])
+    hashes, counts = engine(test_strings, device=device_scope)
+
+    # Check output shape and types
+    assert hashes.shape == (3, ndim), f"Expected (3, {ndim}), got {hashes.shape}"
+    assert counts.shape == (3, ndim), f"Expected (3, {ndim}), got {counts.shape}"
+    assert hashes.dtype == np.uint32
+    assert counts.dtype == np.uint32
+
+    # Identical strings should produce identical fingerprints
+    assert np.array_equal(hashes[0], hashes[2]), "Identical strings should produce identical hashes"
+    assert np.array_equal(counts[0], counts[2]), "Identical strings should produce identical counts"
+
+    # Different strings should produce different fingerprints, but we can't always expect
+    # different counts on very short inputs
+    assert not np.array_equal(hashes[0], hashes[1]), "Different strings should produce different hashes"
+
+
+@pytest.mark.parametrize("batch_size", [1, 10, 100])
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("ndim", [1, 7, 64, 1024])
+@pytest.mark.parametrize("seed_value", [42, 123, 1337, 12345, 98765])  # Subset of seeds for this test
+def test_fingerprints_random(batch_size: int, capabilities_mode: str, device_name: str, ndim: int, seed_value: int):
+    """Test Fingerprints with random strings using deterministic seeds."""
+
+    seed_random_generators(seed_value)
+    batch = [get_random_string(length=randint(5, 50)) for _ in range(batch_size)]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.Fingerprints(ndim=ndim, capabilities=base_caps if capabilities_mode == "base" else device_scope)
+
+    strs = Strs(batch)
+    hashes, counts = engine(strs, device=device_scope)
+    assert hashes.shape == (batch_size, ndim)
+    assert counts.shape == (batch_size, ndim)
+
+    # Verify consistency
+    hashes_repeated, counts_repeated = engine(strs, device=device_scope)
+    assert np.array_equal(hashes, hashes_repeated), "Same input should produce same hashes"
+    assert np.array_equal(counts, counts_repeated), "Same input should produce same counts"
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main(["-x", "-s", __file__]))
