@@ -162,9 +162,9 @@ SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     // SVE vector length in bytes
     sz_size_t const vector_length = svcntb();
 
-    /*  Hold the 256-entry table as sixteen 16-byte rows: the high nibble of a source byte picks the row, the
-     *  low nibble indexes within it. `svtbl_u8` only ever sees indices in [0, 16), so each lookup stays inside
-     *  one 16-lane row and is correct at every vector length. */
+    // Hold the 256-entry table as sixteen 16-byte rows: the high nibble of a source byte picks the row, the
+    // low nibble indexes within it. `svtbl_u8` only ever sees indices in [0, 16), so each lookup stays inside
+    // one 16-lane row and is correct at every vector length.
     svbool_t const row_predicate = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)16);
     svuint8_t const row_0_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x00));
     svuint8_t const row_1_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x10));
@@ -183,8 +183,8 @@ SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     svuint8_t const row_14_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xE0));
     svuint8_t const row_15_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xF0));
 
-    /*  Single predicated stream: `svwhilelt` yields all-true for whole vectors and a partial mask for the final
-     *  stretch, so the tail folds into the loop with no separate peeled epilogue. */
+    // Single predicated stream: `svwhilelt` yields all-true for whole vectors and a partial mask for the final
+    // stretch, so the tail folds into the loop with no separate peeled epilogue.
     for (sz_size_t byte_index = 0; byte_index < length; byte_index += vector_length) {
         svbool_t const active = svwhilelt_b8_u64(byte_index, length);
         svuint8_t const source_u8x = svld1_u8(active, (sz_u8_t const *)(source + byte_index));

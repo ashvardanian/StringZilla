@@ -431,9 +431,9 @@ SZ_PUBLIC void sz_hash_state_update_rvv(sz_hash_state_t *packed, sz_cptr_t text,
     sz_hash_state_aligned_t_ state = sz_hash_state_load_rvv_(packed);
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
-    /*  Keep the 64-byte `ins` window resident in one `e8m8` register: `vslideup` places each incoming run at
-     *  its buffer offset and a masked `vmerge` folds it in. The register window is written to memory only when a
-     *  block is absorbed (the absorb reads `ins` as four 128-bit lanes) and once at the end. */
+    // Keep the 64-byte `ins` window resident in one `e8m8` register: `vslideup` places each incoming run at
+    // its buffer offset and a masked `vmerge` folds it in. The register window is written to memory only when a
+    // block is absorbed (the absorb reads `ins` as four 128-bit lanes) and once at the end.
     sz_size_t const window_length = __riscv_vsetvl_e8m8(sizeof(state.ins.u8s));
     vuint8m8_t const lane_index_u8m8 = __riscv_vid_v_u8m8(window_length);
     vuint8m8_t ins_u8m8 = __riscv_vle8_v_u8m8(state.ins.u8s, window_length);
@@ -447,11 +447,11 @@ SZ_PUBLIC void sz_hash_state_update_rvv(sz_hash_state_t *packed, sz_cptr_t text,
         sz_size_t const take_length = sz_min_of_two(length, (sz_size_t)64 - buffered);
         sz_size_t const take_vector_length = __riscv_vsetvl_e8m8(take_length); // VL is the mask over the incoming run
         vuint8m8_t const incoming_u8m8 = __riscv_vle8_v_u8m8((sz_u8_t const *)text, take_vector_length);
-        vuint8m8_t const slid_u8m8 =
-            __riscv_vslideup_vx_u8m8(__riscv_vundefined_u8m8(), incoming_u8m8, buffered, window_length);
+        vuint8m8_t const slid_u8m8 = __riscv_vslideup_vx_u8m8(__riscv_vundefined_u8m8(), incoming_u8m8, buffered,
+                                                              window_length);
         vbool1_t const at_or_after_b1 = __riscv_vmsgeu_vx_u8m8_b1(lane_index_u8m8, (sz_u8_t)buffered, window_length);
-        vbool1_t const before_end_b1 =
-            __riscv_vmsltu_vx_u8m8_b1(lane_index_u8m8, (sz_u8_t)(buffered + take_length), window_length);
+        vbool1_t const before_end_b1 = __riscv_vmsltu_vx_u8m8_b1(lane_index_u8m8, (sz_u8_t)(buffered + take_length),
+                                                                 window_length);
         vbool1_t const place_b1 = __riscv_vmand_mm_b1(at_or_after_b1, before_end_b1, window_length);
         ins_u8m8 = __riscv_vmerge_vvm_u8m8(ins_u8m8, slid_u8m8, place_b1, window_length);
         buffered += take_length, text += take_length, length -= take_length, state.ins_length += take_length;

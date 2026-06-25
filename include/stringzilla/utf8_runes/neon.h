@@ -208,7 +208,7 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(result.loaded);
 
-    /* Lead-class detection over loaded lanes: (byte & mask) == pattern, AND-clamped to loaded lanes. */
+    // Lead-class detection over loaded lanes: (byte & mask) == pattern, AND-clamped to loaded lanes.
     uint8x16_t continuation_bool_u8x16[4], two_byte_bool_u8x16[4], three_byte_bool_u8x16[4], four_byte_bool_u8x16[4];
     uint8x16_t const mask_continuation_u8x16 = vdupq_n_u8(0xC0), pattern_continuation_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t const mask_two_u8x16 = vdupq_n_u8(0xE0), pattern_two_u8x16 = vdupq_n_u8(0xC0);
@@ -216,7 +216,8 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     uint8x16_t const mask_four_u8x16 = vdupq_n_u8(0xF8), pattern_four_u8x16 = vdupq_n_u8(0xF0);
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const here_u8x16 = window_u8x16[quarter];
-        continuation_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_continuation_u8x16), pattern_continuation_u8x16);
+        continuation_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_continuation_u8x16),
+                                                    pattern_continuation_u8x16);
         two_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_two_u8x16), pattern_two_u8x16);
         three_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_three_u8x16), pattern_three_u8x16);
         four_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_four_u8x16), pattern_four_u8x16);
@@ -245,18 +246,18 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
         uint8x16_t const next_byte_u8x16 = next1[quarter];
         uint8x16_t const next_byte2_u8x16 = next2[quarter];
 
-        /* 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF. */
+        // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF.
         uint8x16_t const high_two_u8x16 = sz_utf8_srl8_neon_(vandq_u8(here_u8x16, low_five_bits_u8x16), 2, 0x07);
-        uint8x16_t const low_two_u8x16 =
-            vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_two_bits_u8x16), 6), vandq_u8(next_byte_u8x16, low_six_bits_u8x16));
+        uint8x16_t const low_two_u8x16 = vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_two_bits_u8x16), 6),
+                                                  vandq_u8(next_byte_u8x16, low_six_bits_u8x16));
 
-        /* 3-byte: codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F). */
-        uint8x16_t const high_three_u8x16 =
-            vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_four_bits_u8x16), 4), sz_utf8_srl8_neon_(next_byte_u8x16, 2, 0x0F));
-        uint8x16_t const low_three_u8x16 =
-            vorrq_u8(vshlq_n_u8(vandq_u8(next_byte_u8x16, low_two_bits_u8x16), 6), vandq_u8(next_byte2_u8x16, low_six_bits_u8x16));
+        // 3-byte: codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F).
+        uint8x16_t const high_three_u8x16 = vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_four_bits_u8x16), 4),
+                                                     sz_utf8_srl8_neon_(next_byte_u8x16, 2, 0x0F));
+        uint8x16_t const low_three_u8x16 = vorrq_u8(vshlq_n_u8(vandq_u8(next_byte_u8x16, low_two_bits_u8x16), 6),
+                                                    vandq_u8(next_byte2_u8x16, low_six_bits_u8x16));
 
-        /* Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead. */
+        // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
         uint8x16_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
         result.high[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
         result.low[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
@@ -684,9 +685,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
  *  @return Number of runes emitted (<= min(emit_count, capacity)).
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                                                 //
-    uint8x16_t const *window, sz_u64_t emit_starts, uint8x16_t const *ill_byte,                                 //
-    int has_three, int has_four, sz_u8_t const *consumed_length,                                                //
+SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 //
+    uint8x16_t const *window, sz_u64_t emit_starts, uint8x16_t const *ill_byte, //
+    int has_three, int has_four, sz_u8_t const *consumed_length,                //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     // Build the 64-byte tables once: `vqtbl4q_u8` addresses all four quarters as one `uint8x16x4_t`.
@@ -723,31 +724,42 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 
         uint8x16_t const ill_u8x16 = vqtbl4q_u8(ill_table_u8x16x4, index_u8x16);
 
         // Widen the lead, 2nd byte, and ill flag to 32-bit lanes via the two-step u8->u16->u32 ladder (four sub-blocks).
-        uint16x8_t const lead_lo_u16x8 = vmovl_u8(vget_low_u8(lead_u8x16)), lead_hi_u16x8 = vmovl_u8(vget_high_u8(lead_u8x16));
-        uint16x8_t const b1_lo_u16x8 = vmovl_u8(vget_low_u8(byte1_u8x16)), b1_hi_u16x8 = vmovl_u8(vget_high_u8(byte1_u8x16));
-        uint16x8_t const ill_lo_u16x8 = vmovl_u8(vget_low_u8(ill_u8x16)), ill_hi_u16x8 = vmovl_u8(vget_high_u8(ill_u8x16));
-        uint32x4_t const lead32_u32x4[4] = {vmovl_u16(vget_low_u16(lead_lo_u16x8)), vmovl_u16(vget_high_u16(lead_lo_u16x8)),
-                                            vmovl_u16(vget_low_u16(lead_hi_u16x8)), vmovl_u16(vget_high_u16(lead_hi_u16x8))};
+        uint16x8_t const lead_lo_u16x8 = vmovl_u8(vget_low_u8(lead_u8x16)),
+                         lead_hi_u16x8 = vmovl_u8(vget_high_u8(lead_u8x16));
+        uint16x8_t const b1_lo_u16x8 = vmovl_u8(vget_low_u8(byte1_u8x16)),
+                         b1_hi_u16x8 = vmovl_u8(vget_high_u8(byte1_u8x16));
+        uint16x8_t const ill_lo_u16x8 = vmovl_u8(vget_low_u8(ill_u8x16)),
+                         ill_hi_u16x8 = vmovl_u8(vget_high_u8(ill_u8x16));
+        uint32x4_t const lead32_u32x4[4] = {
+            vmovl_u16(vget_low_u16(lead_lo_u16x8)), vmovl_u16(vget_high_u16(lead_lo_u16x8)),
+            vmovl_u16(vget_low_u16(lead_hi_u16x8)), vmovl_u16(vget_high_u16(lead_hi_u16x8))};
         uint32x4_t const b1_32_u32x4[4] = {vmovl_u16(vget_low_u16(b1_lo_u16x8)), vmovl_u16(vget_high_u16(b1_lo_u16x8)),
                                            vmovl_u16(vget_low_u16(b1_hi_u16x8)), vmovl_u16(vget_high_u16(b1_hi_u16x8))};
-        uint32x4_t const ill32_u32x4[4] = {vmovl_u16(vget_low_u16(ill_lo_u16x8)), vmovl_u16(vget_high_u16(ill_lo_u16x8)),
-                                           vmovl_u16(vget_low_u16(ill_hi_u16x8)), vmovl_u16(vget_high_u16(ill_hi_u16x8))};
+        uint32x4_t const ill32_u32x4[4] = {
+            vmovl_u16(vget_low_u16(ill_lo_u16x8)), vmovl_u16(vget_high_u16(ill_lo_u16x8)),
+            vmovl_u16(vget_low_u16(ill_hi_u16x8)), vmovl_u16(vget_high_u16(ill_hi_u16x8))};
 
         // 3rd byte (index+2), hoisted so the 4-byte sibling reuses it; gathered+widened only when `has_three`.
         uint32x4_t b2_32_u32x4[4] = {vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0)};
         if (has_three) {
             uint8x16_t const byte2_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v2_u8x16));
-            uint16x8_t const b2_lo_u16x8 = vmovl_u8(vget_low_u8(byte2_u8x16)), b2_hi_u16x8 = vmovl_u8(vget_high_u8(byte2_u8x16));
-            b2_32_u32x4[0] = vmovl_u16(vget_low_u16(b2_lo_u16x8)), b2_32_u32x4[1] = vmovl_u16(vget_high_u16(b2_lo_u16x8));
-            b2_32_u32x4[2] = vmovl_u16(vget_low_u16(b2_hi_u16x8)), b2_32_u32x4[3] = vmovl_u16(vget_high_u16(b2_hi_u16x8));
+            uint16x8_t const b2_lo_u16x8 = vmovl_u8(vget_low_u8(byte2_u8x16)),
+                             b2_hi_u16x8 = vmovl_u8(vget_high_u8(byte2_u8x16));
+            b2_32_u32x4[0] = vmovl_u16(vget_low_u16(b2_lo_u16x8)),
+            b2_32_u32x4[1] = vmovl_u16(vget_high_u16(b2_lo_u16x8));
+            b2_32_u32x4[2] = vmovl_u16(vget_low_u16(b2_hi_u16x8)),
+            b2_32_u32x4[3] = vmovl_u16(vget_high_u16(b2_hi_u16x8));
         }
         // 4th byte (index+3); gathered+widened only when `has_four`. `has_four ⟹ has_three`, so the 3rd byte is set.
         uint32x4_t b3_32_u32x4[4] = {vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0), vdupq_n_u32(0)};
         if (has_four) {
             uint8x16_t const byte3_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v3_u8x16));
-            uint16x8_t const b3_lo_u16x8 = vmovl_u8(vget_low_u8(byte3_u8x16)), b3_hi_u16x8 = vmovl_u8(vget_high_u8(byte3_u8x16));
-            b3_32_u32x4[0] = vmovl_u16(vget_low_u16(b3_lo_u16x8)), b3_32_u32x4[1] = vmovl_u16(vget_high_u16(b3_lo_u16x8));
-            b3_32_u32x4[2] = vmovl_u16(vget_low_u16(b3_hi_u16x8)), b3_32_u32x4[3] = vmovl_u16(vget_high_u16(b3_hi_u16x8));
+            uint16x8_t const b3_lo_u16x8 = vmovl_u8(vget_low_u8(byte3_u8x16)),
+                             b3_hi_u16x8 = vmovl_u8(vget_high_u8(byte3_u8x16));
+            b3_32_u32x4[0] = vmovl_u16(vget_low_u16(b3_lo_u16x8)),
+            b3_32_u32x4[1] = vmovl_u16(vget_high_u16(b3_lo_u16x8));
+            b3_32_u32x4[2] = vmovl_u16(vget_low_u16(b3_hi_u16x8)),
+            b3_32_u32x4[3] = vmovl_u16(vget_high_u16(b3_hi_u16x8));
         }
 
         for (int sub = 0; sub < 4 && (block_start + (sz_size_t)sub * 4) < want; ++sub) {
@@ -755,34 +767,35 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 
             uint32x4_t const lead_v_u32x4 = lead32_u32x4[sub], b1_v_u32x4 = b1_32_u32x4[sub];
             uint32x4_t const mask_0x3f_u32x4 = vdupq_n_u32(0x3F);
 
-            /*  Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte
-             *  alone), so they stay unconditional; the 2-byte form needs only the second byte, also already gathered.
-             *  The wider 3-/4-byte forms are assembled and blended CONDITIONALLY via two sibling `if`s so a CJK
-             *  (3-byte-only) window never pays for the 4-byte assembly, and ASCII/2-byte windows skip both. */
-            uint32x4_t const two_byte_u32x4 =
-                vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x1F)), 6), vandq_u32(b1_v_u32x4, mask_0x3f_u32x4));
+            // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte
+            // alone), so they stay unconditional; the 2-byte form needs only the second byte, also already gathered.
+            // The wider 3-/4-byte forms are assembled and blended CONDITIONALLY via two sibling `if`s so a CJK
+            // (3-byte-only) window never pays for the 4-byte assembly, and ASCII/2-byte windows skip both.
+            uint32x4_t const two_byte_u32x4 = vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x1F)), 6),
+                                                        vandq_u32(b1_v_u32x4, mask_0x3f_u32x4));
 
-            uint32x4_t const is_two_u32x4 =
-                vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xC0)), vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)));
+            uint32x4_t const is_two_u32x4 = vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xC0)),
+                                                      vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)));
             // ASCII / orphan-byte default kept by the lead byte; 2-byte blends in next (lead + second only).
             uint32x4_t codepoints_u32x4 = vbslq_u32(is_two_u32x4, two_byte_u32x4, lead_v_u32x4);
 
             if (has_three) {
                 uint32x4_t const b2_v_u32x4 = b2_32_u32x4[sub];
-                uint32x4_t const three_byte_u32x4 =
-                    vorrq_u32(vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x0F)), 12),
-                                        vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 6)),
-                              vandq_u32(b2_v_u32x4, mask_0x3f_u32x4));
-                uint32x4_t const is_three_u32x4 =
-                    vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)), vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xF0)));
+                uint32x4_t const three_byte_u32x4 = vorrq_u32(
+                    vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x0F)), 12),
+                              vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 6)),
+                    vandq_u32(b2_v_u32x4, mask_0x3f_u32x4));
+                uint32x4_t const is_three_u32x4 = vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)),
+                                                            vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xF0)));
                 codepoints_u32x4 = vbslq_u32(is_three_u32x4, three_byte_u32x4, codepoints_u32x4);
             }
             if (has_four) { // SIBLING, not nested; has_four ⟹ has_three so b2_32_u32x4[sub] is already set.
                 uint32x4_t const b2_v_u32x4 = b2_32_u32x4[sub], b3_v_u32x4 = b3_32_u32x4[sub];
-                uint32x4_t const four_byte_u32x4 =
-                    vorrq_u32(vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x07)), 18),
-                                        vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 12)),
-                              vorrq_u32(vshlq_n_u32(vandq_u32(b2_v_u32x4, mask_0x3f_u32x4), 6), vandq_u32(b3_v_u32x4, mask_0x3f_u32x4)));
+                uint32x4_t const four_byte_u32x4 = vorrq_u32(
+                    vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x07)), 18),
+                              vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 12)),
+                    vorrq_u32(vshlq_n_u32(vandq_u32(b2_v_u32x4, mask_0x3f_u32x4), 6),
+                              vandq_u32(b3_v_u32x4, mask_0x3f_u32x4)));
                 uint32x4_t const is_four_u32x4 = vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xF0));
                 codepoints_u32x4 = vbslq_u32(is_four_u32x4, four_byte_u32x4, codepoints_u32x4);
             }
@@ -991,16 +1004,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
         ill_quarter[quarter] = sz_utf8_expand16_neon_((sz_u32_t)((ill_formed >> shift) & 0xFFFFu));
         uint8x16_t const one_u8x16 = vdupq_n_u8(1);
         uint8x16_t length_q_u8x16 = one_u8x16;
-        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step2 >> shift) & 0xFFFFu)), one_u8x16));
-        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step3 >> shift) & 0xFFFFu)), one_u8x16));
-        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step4 >> shift) & 0xFFFFu)), one_u8x16));
+        length_q_u8x16 = vaddq_u8(length_q_u8x16,
+                                  vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step2 >> shift) & 0xFFFFu)), one_u8x16));
+        length_q_u8x16 = vaddq_u8(length_q_u8x16,
+                                  vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step3 >> shift) & 0xFFFFu)), one_u8x16));
+        length_q_u8x16 = vaddq_u8(length_q_u8x16,
+                                  vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step4 >> shift) & 0xFFFFu)), one_u8x16));
         vst1q_u8(consumed_length + quarter * 16, length_q_u8x16);
     }
 
     sz_size_t consumed = 0;
-    sz_size_t const produced =
-        sz_utf8_rune_drain_neon_(window_u8x16, emit_starts, ill_quarter, has_three, has_four, consumed_length,
-                                 emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_neon_(window_u8x16, emit_starts, ill_quarter, has_three, has_four,
+                                                        consumed_length, emit_count, runes, runes_capacity, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }

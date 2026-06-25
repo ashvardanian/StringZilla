@@ -142,17 +142,17 @@ SZ_INTERNAL void sz_utf8_load_window_haswell_( //
  *          `next2[62]==window[0]`, `next2[63]==window[1]`). AVX2 has no 32-byte byte permute, so each 128-bit lane is
  *          fed its following bytes via `_mm256_permute2x128_si256` (to rotate in the successor 128-bit block, the
  *          window head wrapping in after `window_hi`) then `_mm256_alignr_epi8` to shift across the lane boundary. */
-SZ_INTERNAL void sz_utf8_forward_neighbours_haswell_(           //
-    __m256i window_low_u8x32, __m256i window_high_u8x32,        //
+SZ_INTERNAL void sz_utf8_forward_neighbours_haswell_(    //
+    __m256i window_low_u8x32, __m256i window_high_u8x32, //
     __m256i *next_byte_1_low_u8x32, __m256i *next_byte_1_high_u8x32, __m256i *next_byte_2_low_u8x32,
     __m256i *next_byte_2_high_u8x32) {
-    /*  The 128-bit block following each 128-bit lane of window_low: its high lane (bytes 16..31) is followed by
-     *  window_high's low lane (bytes 32..47), assembled by permute2x128 selector 0x21. */
+    // The 128-bit block following each 128-bit lane of window_low: its high lane (bytes 16..31) is followed by
+    // window_high's low lane (bytes 32..47), assembled by permute2x128 selector 0x21.
     __m256i const successor_low_u8x32 = _mm256_permute2x128_si256(window_low_u8x32, window_high_u8x32, 0x21);
     *next_byte_1_low_u8x32 = _mm256_alignr_epi8(successor_low_u8x32, window_low_u8x32, 1);
     *next_byte_2_low_u8x32 = _mm256_alignr_epi8(successor_low_u8x32, window_low_u8x32, 2);
-    /*  The block following window_high's high lane (bytes 48..63) wraps to the window head (bytes 0..15 of
-     *  window_low), so window_high's successor is window_low (byte 64 aliases byte 0). */
+    // The block following window_high's high lane (bytes 48..63) wraps to the window head (bytes 0..15 of
+    // window_low), so window_high's successor is window_low (byte 64 aliases byte 0).
     __m256i const successor_high_u8x32 = _mm256_permute2x128_si256(window_high_u8x32, window_low_u8x32, 0x21);
     *next_byte_1_high_u8x32 = _mm256_alignr_epi8(successor_high_u8x32, window_high_u8x32, 1);
     *next_byte_2_high_u8x32 = _mm256_alignr_epi8(successor_high_u8x32, window_high_u8x32, 2);
@@ -164,7 +164,7 @@ SZ_INTERNAL void sz_utf8_forward_neighbours_haswell_(           //
 SZ_INTERNAL __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
     __m256i const mask_broadcast_u32x8 = _mm256_set1_epi32((int)bits);
     __m256i const byte_router_shuffle_u8x32 = _mm256_setr_epi8( //
-        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,        //
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,         //
         2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3);
     __m256i const mask_spread_u8x32 = _mm256_shuffle_epi8(mask_broadcast_u32x8, byte_router_shuffle_u8x32);
     __m256i const bit_select_isolation_u8x32 = _mm256_setr_epi8(              //
@@ -202,13 +202,12 @@ SZ_INTERNAL sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( /
     result.codepoint_starts = loaded_mask & ~result.continuation;
 
     __m256i const two_byte_lead_mask_u8x32 = _mm256_set1_epi8((char)0xE0);
-    result.two_byte_starts =
-        sz_utf8_mask_combine_haswell_(
-            _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_low_u8x32, two_byte_lead_mask_u8x32),
-                              _mm256_set1_epi8((char)0xC0)),
-            _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_high_u8x32, two_byte_lead_mask_u8x32),
-                              _mm256_set1_epi8((char)0xC0))) &
-        loaded_mask;
+    result.two_byte_starts = sz_utf8_mask_combine_haswell_(
+                                 _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_low_u8x32, two_byte_lead_mask_u8x32),
+                                                   _mm256_set1_epi8((char)0xC0)),
+                                 _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_high_u8x32, two_byte_lead_mask_u8x32),
+                                                   _mm256_set1_epi8((char)0xC0))) &
+                             loaded_mask;
     __m256i const three_byte_lead_mask_u8x32 = _mm256_set1_epi8((char)0xF0);
     result.three_byte_starts =
         sz_utf8_mask_combine_haswell_(
@@ -218,13 +217,13 @@ SZ_INTERNAL sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( /
                               _mm256_set1_epi8((char)0xE0))) &
         loaded_mask;
     __m256i const four_byte_lead_mask_u8x32 = _mm256_set1_epi8((char)0xF8);
-    result.four_byte_starts =
-        sz_utf8_mask_combine_haswell_(
-            _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_low_u8x32, four_byte_lead_mask_u8x32),
-                              _mm256_set1_epi8((char)0xF0)),
-            _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_high_u8x32, four_byte_lead_mask_u8x32),
-                              _mm256_set1_epi8((char)0xF0))) &
-        loaded_mask;
+    result.four_byte_starts = sz_utf8_mask_combine_haswell_(
+                                  _mm256_cmpeq_epi8(_mm256_and_si256(window_bytes_low_u8x32, four_byte_lead_mask_u8x32),
+                                                    _mm256_set1_epi8((char)0xF0)),
+                                  _mm256_cmpeq_epi8(
+                                      _mm256_and_si256(window_bytes_high_u8x32, four_byte_lead_mask_u8x32),
+                                      _mm256_set1_epi8((char)0xF0))) &
+                              loaded_mask;
 
     __m256i const mask_five_low_bits_u8x32 = _mm256_set1_epi8(0x1F);
     __m256i const mask_six_low_bits_u8x32 = _mm256_set1_epi8(0x3F);
@@ -232,30 +231,30 @@ SZ_INTERNAL sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_( /
     __m256i const mask_four_low_bits_u8x32 = _mm256_set1_epi8(0x0F);
 
     // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF.
-    __m256i const high_two_byte_low_u8x32 =
-        sz_utf8_srl8_haswell_(_mm256_and_si256(window_bytes_low_u8x32, mask_five_low_bits_u8x32), 2, 0x07);
-    __m256i const high_two_byte_high_u8x32 =
-        sz_utf8_srl8_haswell_(_mm256_and_si256(window_bytes_high_u8x32, mask_five_low_bits_u8x32), 2, 0x07);
-    __m256i const low_two_byte_low_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(window_bytes_low_u8x32, mask_two_low_bits_u8x32), 6),
-                        _mm256_and_si256(next_byte_1_low_u8x32, mask_six_low_bits_u8x32));
-    __m256i const low_two_byte_high_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(window_bytes_high_u8x32, mask_two_low_bits_u8x32), 6),
-                        _mm256_and_si256(next_byte_1_high_u8x32, mask_six_low_bits_u8x32));
+    __m256i const high_two_byte_low_u8x32 = sz_utf8_srl8_haswell_(
+        _mm256_and_si256(window_bytes_low_u8x32, mask_five_low_bits_u8x32), 2, 0x07);
+    __m256i const high_two_byte_high_u8x32 = sz_utf8_srl8_haswell_(
+        _mm256_and_si256(window_bytes_high_u8x32, mask_five_low_bits_u8x32), 2, 0x07);
+    __m256i const low_two_byte_low_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(window_bytes_low_u8x32, mask_two_low_bits_u8x32), 6),
+        _mm256_and_si256(next_byte_1_low_u8x32, mask_six_low_bits_u8x32));
+    __m256i const low_two_byte_high_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(window_bytes_high_u8x32, mask_two_low_bits_u8x32), 6),
+        _mm256_and_si256(next_byte_1_high_u8x32, mask_six_low_bits_u8x32));
 
     // 3-byte: codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F).
-    __m256i const high_three_byte_low_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(window_bytes_low_u8x32, mask_four_low_bits_u8x32), 4),
-                        sz_utf8_srl8_haswell_(next_byte_1_low_u8x32, 2, 0x0F));
-    __m256i const high_three_byte_high_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(window_bytes_high_u8x32, mask_four_low_bits_u8x32), 4),
-                        sz_utf8_srl8_haswell_(next_byte_1_high_u8x32, 2, 0x0F));
-    __m256i const low_three_byte_low_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(next_byte_1_low_u8x32, mask_two_low_bits_u8x32), 6),
-                        _mm256_and_si256(next_byte_2_low_u8x32, mask_six_low_bits_u8x32));
-    __m256i const low_three_byte_high_u8x32 =
-        _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(next_byte_1_high_u8x32, mask_two_low_bits_u8x32), 6),
-                        _mm256_and_si256(next_byte_2_high_u8x32, mask_six_low_bits_u8x32));
+    __m256i const high_three_byte_low_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(window_bytes_low_u8x32, mask_four_low_bits_u8x32), 4),
+        sz_utf8_srl8_haswell_(next_byte_1_low_u8x32, 2, 0x0F));
+    __m256i const high_three_byte_high_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(window_bytes_high_u8x32, mask_four_low_bits_u8x32), 4),
+        sz_utf8_srl8_haswell_(next_byte_1_high_u8x32, 2, 0x0F));
+    __m256i const low_three_byte_low_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(next_byte_1_low_u8x32, mask_two_low_bits_u8x32), 6),
+        _mm256_and_si256(next_byte_2_low_u8x32, mask_six_low_bits_u8x32));
+    __m256i const low_three_byte_high_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(next_byte_1_high_u8x32, mask_two_low_bits_u8x32), 6),
+        _mm256_and_si256(next_byte_2_high_u8x32, mask_six_low_bits_u8x32));
 
     // Blend 2-byte vs 3-byte per lane (AVX2 `blendv` selects on the byte MSB, so expand the 3-byte lane mask).
     __m256i const is_three_byte_low_select_u8x32 = sz_utf8_byte_mask_from_bits_haswell_(
@@ -282,8 +281,8 @@ SZ_INTERNAL __m256i sz_utf8_rune_cascade_stage_haswell_( //
     sz_u8_t const *table, int tile_count, __m256i selector, __m256i within) {
     __m256i result_u8x32 = _mm256_setzero_si256();
     for (int tile = 0; tile < tile_count; ++tile) {
-        __m256i const lut_row_broadcast_u8x32 =
-            _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(table + tile * 16)));
+        __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(
+            _mm_loadu_si128((__m128i const *)(table + tile * 16)));
         __m256i const lut_row_picked_u8x32 = _mm256_shuffle_epi8(lut_row_broadcast_u8x32, within);
         __m256i const selector_match_u8x32 = _mm256_cmpeq_epi8(selector, _mm256_set1_epi8((char)tile));
         result_u8x32 = _mm256_blendv_epi8(result_u8x32, lut_row_picked_u8x32, selector_match_u8x32);
@@ -340,8 +339,7 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_forward_haswell_( //
         sz_size_t const wave = sz_min_of_three(boundary_count - emitted, capacity - produced, 4);
         // Widen four lane indices to u64 positions: position[k] = base + indices[emitted + k].
         __m128i const indices_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(indices.u8s + emitted));
-        __m256i const positions_u64x4 = _mm256_add_epi64(_mm256_cvtepu8_epi64(indices_bytes_u8x16),
-                                                         base_address_u64x4);
+        __m256i const positions_u64x4 = _mm256_add_epi64(_mm256_cvtepu8_epi64(indices_bytes_u8x16), base_address_u64x4);
         // segment_starts = [previous, p0, p1, p2]: shift positions up one u64, seat the carry in lane 0.
         __m256i const previous_start_u64x4 = _mm256_set1_epi64x((long long)previous);
         __m256i const positions_shifted_u64x4 = _mm256_permute4x64_epi64(positions_u64x4, _MM_SHUFFLE(2, 1, 0, 0));
@@ -388,8 +386,8 @@ SZ_INTERNAL __m256i sz_utf8_rune_gather8_window_haswell_( //
     __m256i const shuffle_control_u8x32 = _mm256_or_si256(offset_within_u32x8, _mm256_set1_epi32((int)0x80808000u));
     __m256i const window_low_picked_u8x32 = _mm256_shuffle_epi8(window_dup_lo, shuffle_control_u8x32);
     __m256i const window_high_picked_u8x32 = _mm256_shuffle_epi8(window_dup_hi, shuffle_control_u8x32);
-    __m256i const offset_high_bit_select_u32x8 = _mm256_cmpeq_epi32(
-        _mm256_and_si256(offsets, _mm256_set1_epi32(0x10)), _mm256_set1_epi32(0x10));
+    __m256i const offset_high_bit_select_u32x8 = _mm256_cmpeq_epi32(_mm256_and_si256(offsets, _mm256_set1_epi32(0x10)),
+                                                                    _mm256_set1_epi32(0x10));
     return _mm256_blendv_epi8(window_low_picked_u8x32, window_high_picked_u8x32, offset_high_bit_select_u32x8);
 }
 
@@ -678,16 +676,14 @@ SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *
         __m128i const packed_offsets_low_u8x16 = _mm_loadl_epi64((__m128i const *)(leftpack8 + low8 * 8));
         __m128i const packed_offsets_high_raw_u8x16 = _mm_loadl_epi64((__m128i const *)(leftpack8 + high8 * 8));
         __m128i const packed_offsets_high_adjusted_u8x16 = _mm_add_epi8(packed_offsets_high_raw_u8x16,
-                                                                       _mm_set1_epi8(8));
+                                                                        _mm_set1_epi8(8));
         __m128i const packed_halves_u8x16 = _mm_unpacklo_epi64(packed_offsets_low_u8x16,
                                                                packed_offsets_high_adjusted_u8x16);
 
         // Stitch: output lane j reads source j for j < count_low, else j + (8 - count_low) (skip the low gap).
-        __m128i const greater_equal_count_u8x16 = _mm_cmpgt_epi8(lane_iota_u8x16,
-                                                                _mm_set1_epi8((char)(count_low - 1)));
-        __m128i const gap_adjustment_u8x16 = _mm_and_si128(greater_equal_count_u8x16,
-                                                          _mm_sub_epi8(constant_eight_u8x16,
-                                                                       _mm_set1_epi8((char)count_low)));
+        __m128i const greater_equal_count_u8x16 = _mm_cmpgt_epi8(lane_iota_u8x16, _mm_set1_epi8((char)(count_low - 1)));
+        __m128i const gap_adjustment_u8x16 = _mm_and_si128(
+            greater_equal_count_u8x16, _mm_sub_epi8(constant_eight_u8x16, _mm_set1_epi8((char)count_low)));
         __m128i const stitch_source_u8x16 = _mm_add_epi8(lane_iota_u8x16, gap_adjustment_u8x16);
         __m128i const stitched_offsets_u8x16 = _mm_shuffle_epi8(packed_halves_u8x16, stitch_source_u8x16);
 
@@ -717,9 +713,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
     int has_three, int has_four, int has_ill,                       //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_u8_t *last_off_out) {
 
-    /*  Left-pack the emitted-start byte-offsets (ascending) into a dense array. On Intel Haswell single-uop
-     *  `tzcnt`/`blsr` (@ref sz_utf8_unpack_indices_haswell_) beat the `vpshufb` stitch LUT; the LUT only wins where
-     *  `blsr` is microcoded. */
+    // Left-pack the emitted-start byte-offsets (ascending) into a dense array. On Intel Haswell single-uop
+    // `tzcnt`/`blsr` (@ref sz_utf8_unpack_indices_haswell_) beat the `vpshufb` stitch LUT; the LUT only wins where
+    // `blsr` is microcoded.
     sz_u512_vec_t offsets;
     sz_utf8_unpack_indices_haswell_(emit_starts, offsets.u8s);
 
@@ -731,21 +727,20 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
     for (sz_size_t block_start = 0; block_start < want; block_start += 8) {
         __m128i const offsets_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(offsets.u8s + block_start));
         __m256i const offsets_u32x8 = _mm256_cvtepu8_epi32(offsets_bytes_u8x16);
-        __m256i const lead_byte_u32x8 =
-            sz_utf8_rune_gather8_window_haswell_(window_low_broadcast_u8x32, window_high_broadcast_u8x32, offsets_u32x8);
+        __m256i const lead_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
+            window_low_broadcast_u8x32, window_high_broadcast_u8x32, offsets_u32x8);
         __m256i const second_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
             window_low_broadcast_u8x32, window_high_broadcast_u8x32,
             _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(1)));
 
-        /*  Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte alone),
-         *  so they stay unconditional; the 2-byte form needs only the second byte, also already gathered. The wider
-         *  trailing bytes are gathered CONDITIONALLY via two sibling `if`s so a CJK (3-byte-only) window never pays
-         *  for the 4th-byte gather + 4-byte assembly, and ASCII/2-byte windows skip both. */
+        // Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte alone),
+        // so they stay unconditional; the 2-byte form needs only the second byte, also already gathered. The wider
+        // trailing bytes are gathered CONDITIONALLY via two sibling `if`s so a CJK (3-byte-only) window never pays
+        // for the 4th-byte gather + 4-byte assembly, and ASCII/2-byte windows skip both.
         __m256i const is_greater_equal_0xc0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xC0 - 1));
         __m256i const is_greater_equal_0xe0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xE0 - 1));
         __m256i const is_greater_equal_0xf0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xF0 - 1));
-        __m256i const is_two_byte_u32x8 = _mm256_andnot_si256(is_greater_equal_0xe0_u32x8,
-                                                              is_greater_equal_0xc0_u32x8);
+        __m256i const is_two_byte_u32x8 = _mm256_andnot_si256(is_greater_equal_0xe0_u32x8, is_greater_equal_0xc0_u32x8);
         __m256i const is_three_byte_u32x8 = _mm256_andnot_si256(is_greater_equal_0xf0_u32x8,
                                                                 is_greater_equal_0xe0_u32x8);
         __m256i const two_byte_codepoints_u32x8 = _mm256_or_si256(
@@ -780,10 +775,10 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
 
         // Ill-formed lanes collapse to U+FFFD; well-formed-only windows (the overwhelming common case) skip the gather.
         if (has_ill) {
-            __m256i const ill_formed_low_broadcast_u8x32 =
-                _mm256_broadcastsi128_si256(_mm256_castsi256_si128(ill_formed_lanes));
-            __m256i const ill_formed_high_broadcast_u8x32 =
-                _mm256_broadcastsi128_si256(_mm256_extracti128_si256(ill_formed_lanes, 1));
+            __m256i const ill_formed_low_broadcast_u8x32 = _mm256_broadcastsi128_si256(
+                _mm256_castsi256_si128(ill_formed_lanes));
+            __m256i const ill_formed_high_broadcast_u8x32 = _mm256_broadcastsi128_si256(
+                _mm256_extracti128_si256(ill_formed_lanes, 1));
             __m256i const ill_formed_flags_u32x8 = sz_utf8_rune_gather8_window_haswell_(
                 ill_formed_low_broadcast_u8x32, ill_formed_high_broadcast_u8x32, offsets_u32x8);
             __m256i const ill_formed_detected_u32x8 = _mm256_cmpgt_epi32(ill_formed_flags_u32x8,
@@ -857,8 +852,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_haswell_( //
     sz_u32_t const starts_bits =
         (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(window_u8x32, _mm256_set1_epi8((char)-65))) & load_mask;
     sz_u32_t const continuation_bits = load_mask & ~starts_bits;
-    __m256i const byte_high_nibble_u8x32 =
-        _mm256_and_si256(_mm256_srli_epi16(window_u8x32, 4), _mm256_set1_epi8(0x0F));
+    __m256i const byte_high_nibble_u8x32 = _mm256_and_si256(_mm256_srli_epi16(window_u8x32, 4), _mm256_set1_epi8(0x0F));
     __m256i const sequence_lengths_u8x32 = _mm256_shuffle_epi8(length_lut_u8x32, byte_high_nibble_u8x32);
     sz_u32_t const len_ge_two =
         (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(sequence_lengths_u8x32, _mm256_set1_epi8(1))) & starts_bits;
@@ -890,35 +884,33 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_haswell_( //
     __m256i const is_greater_than_0xf4_u8x32 = _mm256_cmpgt_epi8(
         _mm256_add_epi8(window_u8x32, signed_bias_u8x32),
         _mm256_add_epi8(_mm256_set1_epi8((char)0xF4), signed_bias_u8x32));
-    sz_u32_t const bad_lead_bits =
-        (sz_u32_t)_mm256_movemask_epi8(_mm256_or_si256(_mm256_and_si256(is_length_two_u8x32, is_less_than_0xc2_u8x32),
-                                                       _mm256_and_si256(is_length_four_u8x32,
-                                                                        is_greater_than_0xf4_u8x32))) &
-        starts_bits;
+    sz_u32_t const bad_lead_bits = (sz_u32_t)_mm256_movemask_epi8(_mm256_or_si256(
+                                       _mm256_and_si256(is_length_two_u8x32, is_less_than_0xc2_u8x32),
+                                       _mm256_and_si256(is_length_four_u8x32, is_greater_than_0xf4_u8x32))) &
+                                   starts_bits;
 
-    /*  First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF). Such leads are
-     *  rare in real CJK/emoji text (which lives in E1..EC / F1..F3), so a single cmpeq-any gate on their presence skips
-     *  the neighbour build and range compares for the common window. */
+    // First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF). Such leads are
+    // rare in real CJK/emoji text (which lives in E1..EC / F1..F3), so a single cmpeq-any gate on their presence skips
+    // the neighbour build and range compares for the common window.
     sz_u32_t overlong_or_surrogate_or_range_bits = 0;
     __m256i const is_lead_0xe0_u8x32 = _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xE0));
     __m256i const is_lead_0xed_u8x32 = _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xED));
     __m256i const is_lead_0xf0_u8x32 = _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xF0));
     __m256i const is_lead_0xf4_u8x32 = _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xF4));
-    __m256i const is_special_lead_u8x32 =
-        _mm256_or_si256(_mm256_or_si256(is_lead_0xe0_u8x32, is_lead_0xed_u8x32),
-                        _mm256_or_si256(is_lead_0xf0_u8x32, is_lead_0xf4_u8x32));
+    __m256i const is_special_lead_u8x32 = _mm256_or_si256(_mm256_or_si256(is_lead_0xe0_u8x32, is_lead_0xed_u8x32),
+                                                          _mm256_or_si256(is_lead_0xf0_u8x32, is_lead_0xf4_u8x32));
     if (_mm256_movemask_epi8(is_special_lead_u8x32)) {
         __m256i const window_successor_u8x32 = _mm256_permute2x128_si256(window_u8x32, window_u8x32, 0x01);
         __m256i const next_byte_u8x32 = _mm256_alignr_epi8(window_successor_u8x32, window_u8x32, 1);
         __m256i const next_byte_biased_u8x32 = _mm256_add_epi8(next_byte_u8x32, signed_bias_u8x32);
-        __m256i const is_next_byte_lt_0xa0_u8x32 =
-            _mm256_cmpgt_epi8(_mm256_add_epi8(_mm256_set1_epi8((char)0xA0), signed_bias_u8x32), next_byte_biased_u8x32);
-        __m256i const is_next_byte_ge_0xa0_u8x32 =
-            _mm256_cmpgt_epi8(next_byte_biased_u8x32, _mm256_add_epi8(_mm256_set1_epi8((char)0x9F), signed_bias_u8x32));
-        __m256i const is_next_byte_lt_0x90_u8x32 =
-            _mm256_cmpgt_epi8(_mm256_add_epi8(_mm256_set1_epi8((char)0x90), signed_bias_u8x32), next_byte_biased_u8x32);
-        __m256i const is_next_byte_ge_0x90_u8x32 =
-            _mm256_cmpgt_epi8(next_byte_biased_u8x32, _mm256_add_epi8(_mm256_set1_epi8((char)0x8F), signed_bias_u8x32));
+        __m256i const is_next_byte_lt_0xa0_u8x32 = _mm256_cmpgt_epi8(
+            _mm256_add_epi8(_mm256_set1_epi8((char)0xA0), signed_bias_u8x32), next_byte_biased_u8x32);
+        __m256i const is_next_byte_ge_0xa0_u8x32 = _mm256_cmpgt_epi8(
+            next_byte_biased_u8x32, _mm256_add_epi8(_mm256_set1_epi8((char)0x9F), signed_bias_u8x32));
+        __m256i const is_next_byte_lt_0x90_u8x32 = _mm256_cmpgt_epi8(
+            _mm256_add_epi8(_mm256_set1_epi8((char)0x90), signed_bias_u8x32), next_byte_biased_u8x32);
+        __m256i const is_next_byte_ge_0x90_u8x32 = _mm256_cmpgt_epi8(
+            next_byte_biased_u8x32, _mm256_add_epi8(_mm256_set1_epi8((char)0x8F), signed_bias_u8x32));
         __m256i const range_violation_u8x32 = _mm256_or_si256(
             _mm256_or_si256(_mm256_and_si256(is_lead_0xe0_u8x32, is_next_byte_lt_0xa0_u8x32),
                             _mm256_and_si256(is_lead_0xed_u8x32, is_next_byte_ge_0xa0_u8x32)),
@@ -972,9 +964,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_haswell_( //
     int const has_four = len_ge_four != 0;
 
     sz_u8_t last_off = 0;
-    sz_size_t const produced =
-        sz_utf8_rune_drain_haswell_(window_u8x32, ill_formed_lanes_u8x32, emit_starts, has_three, has_four, has_ill,
-                                    emit_count, runes, runes_capacity, &last_off);
+    sz_size_t const produced = sz_utf8_rune_drain_haswell_(window_u8x32, ill_formed_lanes_u8x32, emit_starts, has_three,
+                                                           has_four, has_ill, emit_count, runes, runes_capacity,
+                                                           &last_off);
 
     // Resume cursor delta = last emitted start's offset + its maximal-subpart length (1 + the step slots it reached),
     // read scalar-ly from the bitmasks at that one lane - no per-lane length vector materialize/store/reload.

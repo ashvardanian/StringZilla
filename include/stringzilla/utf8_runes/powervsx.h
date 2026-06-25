@@ -29,11 +29,11 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
     __vector unsigned char const continuation_pattern_u8x16 = vec_splats((unsigned char)0x80);
     __vector unsigned char const one_byte_u8x16 = vec_splats((unsigned char)1);
 
-    /*  `vec_msum(starts, ones, acc)` is the in-lane accumulator: each `starts` byte is 0 or 1, so each
-     *  step adds at most 4 to any 32-bit lane. A lane can absorb `UINT_MAX / 4 ≈ 1.07B` iterations
-     *  before overflowing. We process the input in blocks of that many 16-byte windows so the only
-     *  horizontal reduction happens once per block — out of the hot inner loop — and the inner loop
-     *  carries no per-iteration counter or branch. Results stay identical to `sz_utf8_count_serial`. */
+    // `vec_msum(starts, ones, acc)` is the in-lane accumulator: each `starts` byte is 0 or 1, so each
+    // step adds at most 4 to any 32-bit lane. A lane can absorb `UINT_MAX / 4 ≈ 1.07B` iterations
+    // before overflowing. We process the input in blocks of that many 16-byte windows so the only
+    // horizontal reduction happens once per block — out of the hot inner loop — and the inner loop
+    // carries no per-iteration counter or branch. Results stay identical to `sz_utf8_count_serial`.
     sz_size_t const block_windows = (sz_size_t)1000000000; // 1B * 4 < UINT_MAX.
     while (length >= 16) {
         sz_size_t windows = length / 16;
@@ -43,14 +43,14 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
             __vector unsigned char text_window_u8x16 = vec_xl(0, text_u8);
             __vector unsigned char header_result_u8x16 = vec_and(text_window_u8x16, header_mask_u8x16);
             // Continuation bytes → 0xFF, starts → 0x00; invert so each start contributes 0x01.
-            __vector unsigned char continuation_mask_u8x16 =
-                (__vector unsigned char)vec_cmpeq(header_result_u8x16, continuation_pattern_u8x16);
+            __vector unsigned char continuation_mask_u8x16 = (__vector unsigned char)vec_cmpeq(
+                header_result_u8x16, continuation_pattern_u8x16);
             __vector unsigned char start_mask_u8x16 = vec_andc(one_byte_u8x16, continuation_mask_u8x16);
             start_count_u32x4 = vec_msum(start_mask_u8x16, one_byte_u8x16,
                                          start_count_u32x4); // Sum the start flags into the 32-bit lanes.
         }
-        char_count +=
-            (sz_size_t)start_count_u32x4[0] + start_count_u32x4[1] + start_count_u32x4[2] + start_count_u32x4[3];
+        char_count += (sz_size_t)start_count_u32x4[0] + start_count_u32x4[1] + start_count_u32x4[2] +
+                      start_count_u32x4[3];
         length -= windows * 16;
     }
 
@@ -87,8 +87,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_powervsx(sz_cptr_t text, sz_size_t length, 
     while (length >= 16) {
         __vector unsigned char text_window_u8x16 = vec_xl(0, text_u8);
         __vector unsigned char header_result_u8x16 = vec_and(text_window_u8x16, header_mask_u8x16);
-        __vector unsigned char continuation_mask_u8x16 =
-            (__vector unsigned char)vec_cmpeq(header_result_u8x16, continuation_pattern_u8x16);
+        __vector unsigned char continuation_mask_u8x16 = (__vector unsigned char)vec_cmpeq(header_result_u8x16,
+                                                                                           continuation_pattern_u8x16);
         sz_u32_t start_bits = (~sz_utf8_iterate_movemask_powervsx_(continuation_mask_u8x16)) & 0xFFFFu;
         sz_size_t const start_count = (sz_size_t)sz_u32_popcount(start_bits);
 
@@ -403,8 +403,8 @@ SZ_INTERNAL __vector unsigned char sz_utf8_gather16_powervsx_( //
     __vector unsigned char const *regs, __vector unsigned char index) {
     __vector unsigned char const half_select_threshold_u8x16 = vec_splats((unsigned char)32);
     __vector unsigned char const gathered_low_u8x16 = vec_perm(regs[0], regs[1], index);
-    __vector unsigned char const gathered_high_u8x16 =
-        vec_perm(regs[2], regs[3], vec_sub(index, half_select_threshold_u8x16));
+    __vector unsigned char const gathered_high_u8x16 = vec_perm(regs[2], regs[3],
+                                                                vec_sub(index, half_select_threshold_u8x16));
     __vector bool char const select_high_mask = vec_cmpge(index, half_select_threshold_u8x16);
     return vec_sel(gathered_low_u8x16, gathered_high_u8x16, select_high_mask);
 }
@@ -425,8 +425,8 @@ SZ_INTERNAL sz_size_t sz_utf8_compress_starts_powervsx_( //
 
     // Low byte: indices 0..7 select packed local offsets; the LUT's 0xFF rows select garbage lanes we never store.
     __vector unsigned char const low_byte_shuffle_lut_u8x16 = vec_xl(0, sz_utf8_compress8_powervsx_[low8]);
-    __vector unsigned char const low_byte_packed_u8x16 =
-        vec_add(vec_perm(byte_iota_u8x16, byte_iota_u8x16, low_byte_shuffle_lut_u8x16), register_base_u8x16);
+    __vector unsigned char const low_byte_packed_u8x16 = vec_add(
+        vec_perm(byte_iota_u8x16, byte_iota_u8x16, low_byte_shuffle_lut_u8x16), register_base_u8x16);
     // High byte: indices 0..7 are local offsets in [8,16); add 8 before the base.
     __vector unsigned char const high_byte_shuffle_lut_u8x16 = vec_xl(0, sz_utf8_compress8_powervsx_[high8]);
     __vector unsigned char const high_byte_packed_u8x16 = vec_add(
@@ -439,8 +439,7 @@ SZ_INTERNAL sz_size_t sz_utf8_compress_starts_powervsx_( //
     int const low_count = sz_u32_popcount(low8);
     int const high_count = sz_u32_popcount(high8);
     for (int i = 0; i < low_count; ++i) packed[produced + (sz_size_t)i] = low_bytes_vec.u8s[i];
-    for (int i = 0; i < high_count; ++i)
-        packed[produced + (sz_size_t)low_count + (sz_size_t)i] = high_bytes_vec.u8s[i];
+    for (int i = 0; i < high_count; ++i) packed[produced + (sz_size_t)low_count + (sz_size_t)i] = high_bytes_vec.u8s[i];
     return produced + (sz_size_t)low_count + (sz_size_t)high_count;
 }
 
@@ -482,8 +481,8 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
         }
         __vector unsigned char const gather_index_u8x16 = index_lanes_vec.vsx_u8;
         __vector unsigned char const lead_byte_u8x16 = sz_utf8_gather16_powervsx_(regs, gather_index_u8x16);
-        __vector unsigned char const continuation_byte_1_u8x16 =
-            sz_utf8_gather16_powervsx_(regs, vec_add(gather_index_u8x16, one_byte_u8x16));
+        __vector unsigned char const continuation_byte_1_u8x16 = sz_utf8_gather16_powervsx_(
+            regs, vec_add(gather_index_u8x16, one_byte_u8x16));
         __vector unsigned char const continuation_byte_2_u8x16 =
             has_three ? sz_utf8_gather16_powervsx_(regs, vec_add(gather_index_u8x16, two_byte_u8x16))
                       : vec_splats((unsigned char)0);
@@ -502,34 +501,34 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
             sz_size_t const out_base = block_start + (sz_size_t)quarter * 4;
             if (out_base >= want) break;
             __vector unsigned char const selector_u8x16 = selector_quarter_u8x16[quarter];
-            __vector unsigned int const lead_u32x4 =
-                (__vector unsigned int)vec_perm(lead_byte_u8x16, zero_u8x16, selector_u8x16);
-            __vector unsigned int const continuation_byte_1_u32x4 =
-                (__vector unsigned int)vec_perm(continuation_byte_1_u8x16, zero_u8x16, selector_u8x16);
-            __vector unsigned int const continuation_byte_2_u32x4 =
-                (__vector unsigned int)vec_perm(continuation_byte_2_u8x16, zero_u8x16, selector_u8x16);
-            __vector unsigned int const continuation_byte_3_u32x4 =
-                (__vector unsigned int)vec_perm(continuation_byte_3_u8x16, zero_u8x16, selector_u8x16);
+            __vector unsigned int const lead_u32x4 = (__vector unsigned int)vec_perm(lead_byte_u8x16, zero_u8x16,
+                                                                                     selector_u8x16);
+            __vector unsigned int const continuation_byte_1_u32x4 = (__vector unsigned int)vec_perm(
+                continuation_byte_1_u8x16, zero_u8x16, selector_u8x16);
+            __vector unsigned int const continuation_byte_2_u32x4 = (__vector unsigned int)vec_perm(
+                continuation_byte_2_u8x16, zero_u8x16, selector_u8x16);
+            __vector unsigned int const continuation_byte_3_u32x4 = (__vector unsigned int)vec_perm(
+                continuation_byte_3_u8x16, zero_u8x16, selector_u8x16);
 
             __vector unsigned int const mask_word_3f_u32x4 = vec_splats((unsigned int)0x3F);
             __vector unsigned int const mask_word_c0_u32x4 = vec_splats((unsigned int)0xC0);
             __vector unsigned int const mask_word_e0_u32x4 = vec_splats((unsigned int)0xE0);
             __vector unsigned int const mask_word_f0_u32x4 = vec_splats((unsigned int)0xF0);
-            __vector bool int const two_byte_mask_u32x4 =
-                vec_and(vec_cmpge(lead_u32x4, mask_word_c0_u32x4), vec_cmplt(lead_u32x4, mask_word_e0_u32x4));
-            __vector unsigned int const two_byte_codepoint_u32x4 =
-                vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x1F)), vec_splats((unsigned int)6)),
-                       vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4));
+            __vector bool int const two_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_c0_u32x4),
+                                                                  vec_cmplt(lead_u32x4, mask_word_e0_u32x4));
+            __vector unsigned int const two_byte_codepoint_u32x4 = vec_or(
+                vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x1F)), vec_splats((unsigned int)6)),
+                vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4));
             __vector unsigned int decoded_codepoint_u32x4 = vec_sel(lead_u32x4, two_byte_codepoint_u32x4,
                                                                     two_byte_mask_u32x4);
-            /*  The 3-/4-byte width blends run CONDITIONALLY via two sibling (depth-1, NOT nested) `if`s gated by
-             *  `has_three` / `has_four`, mirroring the AVX2 sibling-if drain: the block-level gather of the 3rd byte
-             *  is skipped for ASCII/2-byte windows and the 4th-byte gather + 4-byte assembly is skipped for CJK
-             *  (3-byte-only) windows. `has_four ⟹ has_three`, so the 4-byte sibling always sees a populated 3rd byte.
-             *  Bit-exact with the gated form: a window with no 3-/4-byte lead carries an all-false width mask. */
+            // The 3-/4-byte width blends run CONDITIONALLY via two sibling (depth-1, NOT nested) `if`s gated by
+            // `has_three` / `has_four`, mirroring the AVX2 sibling-if drain: the block-level gather of the 3rd byte
+            // is skipped for ASCII/2-byte windows and the 4th-byte gather + 4-byte assembly is skipped for CJK
+            // (3-byte-only) windows. `has_four ⟹ has_three`, so the 4-byte sibling always sees a populated 3rd byte.
+            // Bit-exact with the gated form: a window with no 3-/4-byte lead carries an all-false width mask.
             if (has_three) {
-                __vector bool int const three_byte_mask_u32x4 =
-                    vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4), vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
+                __vector bool int const three_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4),
+                                                                        vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
                 __vector unsigned int const three_byte_codepoint_u32x4 = vec_or(
                     vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x0F)), vec_splats((unsigned int)12)),
                            vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6))),
@@ -540,8 +539,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
             if (has_four) { // SIBLING, not nested; has_four ⟹ has_three so the 3rd byte is already gathered.
                 __vector bool int const four_byte_mask_u32x4 = vec_cmpge(lead_u32x4, mask_word_f0_u32x4);
                 __vector unsigned int const four_byte_codepoint_u32x4 = vec_or(
-                    vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x07)), vec_splats((unsigned int)18)),
-                           vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)12))),
+                    vec_or(
+                        vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x07)), vec_splats((unsigned int)18)),
+                        vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)12))),
                     vec_or(vec_sl(vec_and(continuation_byte_2_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6)),
                            vec_and(continuation_byte_3_u32x4, mask_word_3f_u32x4)));
                 decoded_codepoint_u32x4 = vec_sel(decoded_codepoint_u32x4, four_byte_codepoint_u32x4,
@@ -586,11 +586,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
 
     sz_size_t const chunk = length < 64 ? length : 64;
 
-    /*  Stage the window into a zero-padded 64-byte buffer so tail lanes read as 0x00 (a 1-byte start of value 0 that
-     *  never overruns and gates clean); decodable starts never read past `chunk` by construction. */
+    // Stage the window into a zero-padded 64-byte buffer so tail lanes read as 0x00 (a 1-byte start of value 0 that
+    // never overruns and gates clean); decodable starts never read past `chunk` by construction.
     sz_u512_vec_t staging_vec;
-    for (sz_size_t index = 0; index < 64; ++index)
-        staging_vec.u8s[index] = index < chunk ? (sz_u8_t)text[index] : 0;
+    for (sz_size_t index = 0; index < 64; ++index) staging_vec.u8s[index] = index < chunk ? (sz_u8_t)text[index] : 0;
     __vector unsigned char input_register_u8x16[4];
     input_register_u8x16[0] = vec_xl(0, staging_vec.u8s + 0);
     input_register_u8x16[1] = vec_xl(0, staging_vec.u8s + 16);
@@ -611,8 +610,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
         return text + want;
     }
 
-    /*  Single-source classification via the high-nibble length LUT (the SAME table the serial reference uses), so a
-     *  lead and its declared length can never disagree. The per-register movemasks assemble the 64-bit lane masks. */
+    // Single-source classification via the high-nibble length LUT (the SAME table the serial reference uses), so a
+    // lead and its declared length can never disagree. The per-register movemasks assemble the 64-bit lane masks.
     __vector unsigned char const length_lookup_table_u8x16 = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
     __vector unsigned char const continuation_mask_u8x16 = vec_splats((unsigned char)0xC0);
     __vector unsigned char const continuation_pattern_u8x16 = vec_splats((unsigned char)0x80);
@@ -624,14 +623,17 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
         __vector unsigned char const register_value_u8x16 = input_register_u8x16[reg];
         continuation_mask_per_register_u8x16[reg] = (__vector unsigned char)vec_cmpeq(
             vec_and(register_value_u8x16, continuation_mask_u8x16), continuation_pattern_u8x16);
-        __vector unsigned char const high_nibble_u8x16 =
-            vec_and(vec_sr(register_value_u8x16, vec_splats((unsigned char)4)), low_nibble_mask_u8x16);
-        __vector unsigned char const sequence_length_u8x16 =
-            vec_perm(length_lookup_table_u8x16, length_lookup_table_u8x16, high_nibble_u8x16);
+        __vector unsigned char const high_nibble_u8x16 = vec_and(
+            vec_sr(register_value_u8x16, vec_splats((unsigned char)4)), low_nibble_mask_u8x16);
+        __vector unsigned char const sequence_length_u8x16 = vec_perm(length_lookup_table_u8x16,
+                                                                      length_lookup_table_u8x16, high_nibble_u8x16);
         sequence_length_per_register_u8x16[reg] = sequence_length_u8x16;
-        length_2_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16, vec_splats((unsigned char)2));
-        length_3_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16, vec_splats((unsigned char)3));
-        length_4_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16, vec_splats((unsigned char)4));
+        length_2_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16,
+                                                                     vec_splats((unsigned char)2));
+        length_3_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16,
+                                                                     vec_splats((unsigned char)3));
+        length_4_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(sequence_length_u8x16,
+                                                                     vec_splats((unsigned char)4));
     }
     sz_u64_t const continuation_bits = sz_utf8_mask_combine_powervsx_(continuation_mask_per_register_u8x16) &
                                        loaded_mask;
@@ -646,26 +648,26 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
     sz_u64_t const length_ge_three_starts = length_ge_three & starts_bits;
     sz_u64_t const length_ge_four_starts = length_ge_four & starts_bits;
 
-    /*  Branchless overrun defer: per lane `index + length`, compared against `chunk`; the FIRST overrunning start
-     *  bounds the decodable prefix (well-formed text overruns only at the trailing truncation; a malformed `E0 C0`
-     *  overruns earlier). A `vec_vbpermq` movemask + one `ctz` finds that first lane (no scalar per-lane loop). */
+    // Branchless overrun defer: per lane `index + length`, compared against `chunk`; the FIRST overrunning start
+    // bounds the decodable prefix (well-formed text overruns only at the trailing truncation; a malformed `E0 C0`
+    // overruns earlier). A `vec_vbpermq` movemask + one `ctz` finds that first lane (no scalar per-lane loop).
     __vector unsigned char const byte_iota_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
     __vector unsigned char const chunk_size_u8x16 = vec_splats((unsigned char)chunk);
     __vector unsigned char overrun_mask_u8x16[4];
     for (int reg = 0; reg < 4; ++reg) {
-        __vector unsigned char const global_lane_offset_u8x16 =
-            vec_add(byte_iota_u8x16, vec_splats((unsigned char)(reg * 16)));
-        __vector unsigned char const sequence_end_offset_u8x16 =
-            vec_add(global_lane_offset_u8x16, sequence_length_per_register_u8x16[reg]);
+        __vector unsigned char const global_lane_offset_u8x16 = vec_add(byte_iota_u8x16,
+                                                                        vec_splats((unsigned char)(reg * 16)));
+        __vector unsigned char const sequence_end_offset_u8x16 = vec_add(global_lane_offset_u8x16,
+                                                                         sequence_length_per_register_u8x16[reg]);
         overrun_mask_u8x16[reg] = (__vector unsigned char)vec_cmpgt(sequence_end_offset_u8x16, chunk_size_u8x16);
     }
     sz_u64_t const overruns = sz_utf8_mask_combine_powervsx_(overrun_mask_u8x16) & starts_bits;
     sz_size_t const decodable_end = overruns ? (sz_size_t)sz_u64_ctz(overruns) : chunk;
     sz_u64_t const decodable_mask = sz_u64_mask_until_serial_(decodable_end);
 
-    /*  First-continuation availability + range checks for E0/ED/F0/F4 (overlong / surrogate / out-of-range), and the
-     *  bad-lead test (C0/C1 length-2 by the LUT, F5..FF length-4 by the LUT), all as `sz_u64_t` mask algebra. The first
-     *  continuation of a lead in register `reg` is the next byte, gathered by a +1 `vec_perm` over `(reg, reg+1)`. */
+    // First-continuation availability + range checks for E0/ED/F0/F4 (overlong / surrogate / out-of-range), and the
+    // bad-lead test (C0/C1 length-2 by the LUT, F5..FF length-4 by the LUT), all as `sz_u64_t` mask algebra. The first
+    // continuation of a lead in register `reg` is the next byte, gathered by a +1 `vec_perm` over `(reg, reg+1)`.
     __vector unsigned char const successor_iota_u8x16 = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     sz_u64_t bad_lead_bits = 0, overlong_or_surrogate_or_range_bits = 0;
     int const has_three = (length_ge_three_starts) != 0;
@@ -682,38 +684,38 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
         __vector unsigned char const byte_f0_u8x16 = vec_splats((unsigned char)0xF0);
         for (int reg = 0; reg < 4; ++reg) {
             __vector unsigned char const register_value_u8x16 = input_register_u8x16[reg];
-            __vector unsigned char const successor_register_u8x16 =
-                (reg < 3) ? input_register_u8x16[reg + 1] : input_register_u8x16[3];
-            __vector unsigned char const next_byte_u8x16 =
-                vec_perm(register_value_u8x16, successor_register_u8x16, successor_iota_u8x16);
-            __vector bool char const length_2_mask =
-                vec_cmpeq(sequence_length_per_register_u8x16[reg], vec_splats((unsigned char)2));
-            __vector bool char const length_4_mask =
-                vec_cmpeq(sequence_length_per_register_u8x16[reg], vec_splats((unsigned char)4));
-            __vector unsigned char const lead_lt_c2_mask_u8x16 =
-                (__vector unsigned char)vec_cmplt(register_value_u8x16, byte_c2_u8x16);
-            __vector unsigned char const lead_gt_f4_mask_u8x16 =
-                (__vector unsigned char)vec_cmpgt(register_value_u8x16, byte_f4_u8x16);
+            __vector unsigned char const successor_register_u8x16 = (reg < 3) ? input_register_u8x16[reg + 1]
+                                                                              : input_register_u8x16[3];
+            __vector unsigned char const next_byte_u8x16 = vec_perm(register_value_u8x16, successor_register_u8x16,
+                                                                    successor_iota_u8x16);
+            __vector bool char const length_2_mask = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                               vec_splats((unsigned char)2));
+            __vector bool char const length_4_mask = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                               vec_splats((unsigned char)4));
+            __vector unsigned char const lead_lt_c2_mask_u8x16 = (__vector unsigned char)vec_cmplt(register_value_u8x16,
+                                                                                                   byte_c2_u8x16);
+            __vector unsigned char const lead_gt_f4_mask_u8x16 = (__vector unsigned char)vec_cmpgt(register_value_u8x16,
+                                                                                                   byte_f4_u8x16);
             bad_lead_mask_u8x16[reg] = vec_or(vec_and((__vector unsigned char)length_2_mask, lead_lt_c2_mask_u8x16),
                                               vec_and((__vector unsigned char)length_4_mask, lead_gt_f4_mask_u8x16));
-            __vector unsigned char const e0_bad_mask_u8x16 =
-                vec_and((__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_e0_u8x16),
-                        (__vector unsigned char)vec_cmplt(next_byte_u8x16, byte_a0_u8x16));
-            __vector unsigned char const ed_bad_mask_u8x16 =
-                vec_and((__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_ed_u8x16),
-                        (__vector unsigned char)vec_cmpge(next_byte_u8x16, byte_a0_u8x16));
-            __vector unsigned char const f0_bad_mask_u8x16 =
-                vec_and((__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_f0_u8x16),
-                        (__vector unsigned char)vec_cmplt(next_byte_u8x16, byte_90_u8x16));
-            __vector unsigned char const f4_bad_mask_u8x16 =
-                vec_and((__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_f4_u8x16),
-                        (__vector unsigned char)vec_cmpge(next_byte_u8x16, byte_90_u8x16));
-            overlong_surrogate_range_mask_u8x16[reg] =
-                vec_or(vec_or(e0_bad_mask_u8x16, ed_bad_mask_u8x16), vec_or(f0_bad_mask_u8x16, f4_bad_mask_u8x16));
+            __vector unsigned char const e0_bad_mask_u8x16 = vec_and(
+                (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_e0_u8x16),
+                (__vector unsigned char)vec_cmplt(next_byte_u8x16, byte_a0_u8x16));
+            __vector unsigned char const ed_bad_mask_u8x16 = vec_and(
+                (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_ed_u8x16),
+                (__vector unsigned char)vec_cmpge(next_byte_u8x16, byte_a0_u8x16));
+            __vector unsigned char const f0_bad_mask_u8x16 = vec_and(
+                (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_f0_u8x16),
+                (__vector unsigned char)vec_cmplt(next_byte_u8x16, byte_90_u8x16));
+            __vector unsigned char const f4_bad_mask_u8x16 = vec_and(
+                (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_f4_u8x16),
+                (__vector unsigned char)vec_cmpge(next_byte_u8x16, byte_90_u8x16));
+            overlong_surrogate_range_mask_u8x16[reg] = vec_or(vec_or(e0_bad_mask_u8x16, ed_bad_mask_u8x16),
+                                                              vec_or(f0_bad_mask_u8x16, f4_bad_mask_u8x16));
         }
         bad_lead_bits = sz_utf8_mask_combine_powervsx_(bad_lead_mask_u8x16) & starts_bits;
-        overlong_or_surrogate_or_range_bits =
-            sz_utf8_mask_combine_powervsx_(overlong_surrogate_range_mask_u8x16) & starts_bits;
+        overlong_or_surrogate_or_range_bits = sz_utf8_mask_combine_powervsx_(overlong_surrogate_range_mask_u8x16) &
+                                              starts_bits;
     }
 
     // Per-lane continuation availability at the declared trailing slots, evaluated at the lead lane (mirror icelake).
@@ -756,9 +758,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
     }
 
     sz_size_t consumed = 0;
-    sz_size_t const produced =
-        sz_utf8_rune_drain_powervsx_(input_register_u8x16, emit_starts, ill_formed, consumed_length_vec.u8s, has_three,
-                                     has_four, emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_powervsx_(input_register_u8x16, emit_starts, ill_formed,
+                                                            consumed_length_vec.u8s, has_three, has_four, emit_count,
+                                                            runes, runes_capacity, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }
@@ -782,10 +784,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_powervsx(    //
             cursor = next;
             continue;
         }
-        /*  The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-         *  declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
-         *  awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-         *  ill-formed subpart — a bounded <=3-byte finalize, never a serial window re-decode. */
+        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
+        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
+        // awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
+        // ill-formed subpart — a bounded <=3-byte finalize, never a serial window re-decode.
         if (sz_utf8_incomplete_tail_(cursor, end)) break;
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);

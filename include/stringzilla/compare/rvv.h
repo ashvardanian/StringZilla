@@ -40,8 +40,8 @@ SZ_PUBLIC sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 SZ_PUBLIC sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
-    /*  Scan the common prefix in `e8m8` strips; `vmsne` + `vfirst` locate the first differing byte natively, and
-     *  `vsetvl` folds the tail with no scalar remainder (mirrors `sz_equal_rvv` and the Skylake order). */
+    // Scan the common prefix in `e8m8` strips; `vmsne` + `vfirst` locate the first differing byte natively, and
+    // `vsetvl` folds the tail with no scalar remainder (mirrors `sz_equal_rvv` and the Skylake order).
     sz_size_t remaining = a_length < b_length ? a_length : b_length;
     while (remaining) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);

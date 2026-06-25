@@ -61,10 +61,10 @@ SZ_INTERNAL void sz_utf8_rune_peel_icelake_(                                    
     __mmask64 const compress_mask = _cvtu64_mask64(start_bits);
 
     __m512i length_per_lane_u8x64 = _mm512_set1_epi8(1);
-    length_per_lane_u8x64 =
-        _mm512_mask_add_epi8(length_per_lane_u8x64, two_byte_starts, length_per_lane_u8x64, _mm512_set1_epi8(1));
-    length_per_lane_u8x64 =
-        _mm512_mask_add_epi8(length_per_lane_u8x64, three_byte_starts, length_per_lane_u8x64, _mm512_set1_epi8(2));
+    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, two_byte_starts, length_per_lane_u8x64,
+                                                 _mm512_set1_epi8(1));
+    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, three_byte_starts, length_per_lane_u8x64,
+                                                 _mm512_set1_epi8(2));
 
     __m512i compressed_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
     __m512i compressed_lengths_u8x64 = _mm512_maskz_compress_epi8(compress_mask, length_per_lane_u8x64);
@@ -122,9 +122,11 @@ SZ_INTERNAL sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
     __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask, text);
     result.window = window_u8x64;
 
-    /* The three forward neighbours of each lane, gathered via in-register permutes (never `vpgather`). */
-    __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), window_u8x64);
-    __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), window_u8x64);
+    // The three forward neighbours of each lane, gathered via in-register permutes (never `vpgather`).
+    __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)),
+                                                        window_u8x64);
+    __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)),
+                                                        window_u8x64);
 
     __mmask64 const loaded_lanes = load_mask;
     __mmask64 const is_continuation = _mm512_mask_cmpeq_epi8_mask(
@@ -138,13 +140,13 @@ SZ_INTERNAL sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
     result.four_byte_starts = _mm512_mask_cmpeq_epi8_mask(
         loaded_lanes, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF8)), _mm512_set1_epi8((char)0xF0));
 
-    /* 2-byte: cp = ((lead & 0x1F) << 6) | (next1 & 0x3F); high = cp >> 8, low = cp & 0xFF. */
+    // 2-byte: cp = ((lead & 0x1F) << 6) | (next1 & 0x3F); high = cp >> 8, low = cp & 0xFF.
     __m512i const lead_five_bits_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x1F));
     __m512i const next1_six_bits_u8x64 = _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F));
     __m512i const high_two_byte_u8x64 = sz_utf8_srl8_icelake_(lead_five_bits_u8x64, 2, 0x07);
     __m512i const low_two_byte_u16x32 = _mm512_or_si512(
         _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x03)), 6), next1_six_bits_u8x64);
-    /* 3-byte: cp = ((lead & 0x0F) << 12) | ((next1 & 0x3F) << 6) | (next2 & 0x3F). */
+    // 3-byte: cp = ((lead & 0x0F) << 12) | ((next1 & 0x3F) << 6) | (next2 & 0x3F).
     __m512i const lead_four_bits_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x0F));
     __m512i const high_three_byte_u16x32 = _mm512_or_si512(_mm512_slli_epi16(lead_four_bits_u8x64, 4),
                                                            sz_utf8_srl8_icelake_(next1_u8x64, 2, 0x0F));
@@ -172,15 +174,15 @@ SZ_INTERNAL __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, _
     __m512i const within_u16x32 = _mm512_and_si512(indices, _mm512_set1_epi16(0x7F));
     __m512i const page_u16x32 = _mm512_srli_epi16(indices, 7);
     int const page_count = (count + 127) / 128;
-    /*  Visit only the distinct 128-byte pages present across the lanes (real text targets ~1-3 of up to ~20), not the
-     *  whole table: the present-page set is a `1 << page` OR-reduction; an absent page is bit-exact to skip (its
-     *  `mask_mov` selects no lane). */
+    // Visit only the distinct 128-byte pages present across the lanes (real text targets ~1-3 of up to ~20), not the
+    // whole table: the present-page set is a `1 << page` OR-reduction; an absent page is bit-exact to skip (its
+    // `mask_mov` selects no lane).
     __m512i const single_bit_u32x16 = _mm512_set1_epi32(1);
     __m512i const page_low_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(page_u16x32));
     __m512i const page_high_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64(page_u16x32, 1));
-    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(_mm512_or_si512(
-        _mm512_sllv_epi32(single_bit_u32x16, page_low_half_u32x16),
-        _mm512_sllv_epi32(single_bit_u32x16, page_high_half_u32x16)));
+    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(
+        _mm512_or_si512(_mm512_sllv_epi32(single_bit_u32x16, page_low_half_u32x16),
+                        _mm512_sllv_epi32(single_bit_u32x16, page_high_half_u32x16)));
     present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
     __m512i result_u16x32 = _mm512_setzero_si512();
     while (present_pages) {
@@ -213,14 +215,14 @@ SZ_INTERNAL __m512i sz_utf8_rune_gather_word_(sz_u16_t const *table, int count, 
     __m512i const within_u16x32 = _mm512_and_si512(indices, _mm512_set1_epi16(0x3F));
     __m512i const page_u16x32 = _mm512_srli_epi16(indices, 6);
     int const page_count = (count + 63) / 64;
-    /*  Data-dependent page loop (see `sz_utf8_rune_gather_byte_`): visit only the distinct 64-word pages
-     *  present across the lanes; bit-exact since an absent page contributes no `hit`. */
+    // Data-dependent page loop (see `sz_utf8_rune_gather_byte_`): visit only the distinct 64-word pages
+    // present across the lanes; bit-exact since an absent page contributes no `hit`.
     __m512i const single_bit_u32x16 = _mm512_set1_epi32(1);
     __m512i const page_low_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(page_u16x32));
     __m512i const page_high_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64(page_u16x32, 1));
-    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(_mm512_or_si512(
-        _mm512_sllv_epi32(single_bit_u32x16, page_low_half_u32x16),
-        _mm512_sllv_epi32(single_bit_u32x16, page_high_half_u32x16)));
+    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(
+        _mm512_or_si512(_mm512_sllv_epi32(single_bit_u32x16, page_low_half_u32x16),
+                        _mm512_sllv_epi32(single_bit_u32x16, page_high_half_u32x16)));
     present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
     __m512i result_u16x32 = _mm512_setzero_si512();
     while (present_pages) {
@@ -229,7 +231,7 @@ SZ_INTERNAL __m512i sz_utf8_rune_gather_word_(sz_u16_t const *table, int count, 
         int const tile_base = page_index * 64;
         int const tile_remaining = count - tile_base;
         __m512i const tile_lo_u16x32 = _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)tile_remaining),
-                                                               table + tile_base);
+                                                                table + tile_base);
         __m512i const tile_hi_u16x32 = tile_remaining > 32
                                            ? _mm512_maskz_loadu_epi16(
                                                  sz_u32_clamp_mask_until_((sz_size_t)(tile_remaining - 32)),
@@ -281,7 +283,7 @@ SZ_INTERNAL __m512i sz_utf8_rune_trie_walk_icelake_( //
     __m512i const super_v16_u16x32 = _mm512_set1_epi16((short)superblock);
     __m512i const block_v16_u16x32 = _mm512_set1_epi16((short)block);
 
-    /* Reconstruct cp = (high << 8) | low into two 16-bit halves so the trie math stays exact to 0xFFFF. */
+    // Reconstruct cp = (high << 8) | low into two 16-bit halves so the trie math stays exact to 0xFFFF.
     __m512i const zero_u16x32 = _mm512_setzero_si512();
     __m512i const offset_lo_u16x32 = _mm512_sub_epi16(
         _mm512_or_si512(_mm512_slli_epi16(_mm512_unpacklo_epi8(high, zero_u16x32), 8),
@@ -301,11 +303,11 @@ SZ_INTERNAL __m512i sz_utf8_rune_trie_walk_icelake_( //
     __m512i const super_lo_u16x32 = _mm512_srl_epi16(block_idx_lo_u16x32, super_log2_u32x4);
     __m512i const super_hi_u16x32 = _mm512_srl_epi16(block_idx_hi_u16x32, super_log2_u32x4);
 
-    /* Stage 1: level1 = l1[super]. */
+    // Stage 1: level1 = l1[super].
     __m512i const level1_lo_u8x64 = sz_utf8_rune_gather_byte_(l1, l1_count, super_lo_u16x32);
     __m512i const level1_hi_u8x64 = sz_utf8_rune_gather_byte_(l1, l1_count, super_hi_u16x32);
 
-    /* Stage 2: leaf = l2[level1 * superblock + super_offset]. */
+    // Stage 2: leaf = l2[level1 * superblock + super_offset].
     __m512i const l2_index_lo_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(level1_lo_u8x64, super_v16_u16x32),
                                                         super_off_lo_u16x32);
     __m512i const l2_index_hi_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(level1_hi_u8x64, super_v16_u16x32),
@@ -313,7 +315,7 @@ SZ_INTERNAL __m512i sz_utf8_rune_trie_walk_icelake_( //
     __m512i const leaf_idx_lo_u16x32 = sz_utf8_rune_gather_word_(l2, l2_count, l2_index_lo_u16x32);
     __m512i const leaf_idx_hi_u16x32 = sz_utf8_rune_gather_word_(l2, l2_count, l2_index_hi_u16x32);
 
-    /* Leaf: class = leaf_bytes[leaf * block + within]. */
+    // Leaf: class = leaf_bytes[leaf * block + within].
     __m512i const leaf_byte_lo_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_lo_u16x32, block_v16_u16x32),
                                                          within_lo_u16x32);
     __m512i const leaf_byte_hi_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_hi_u16x32, block_v16_u16x32),
@@ -321,7 +323,7 @@ SZ_INTERNAL __m512i sz_utf8_rune_trie_walk_icelake_( //
     __m512i const class_lo_u8x64 = sz_utf8_rune_gather_byte_(leaf, leaf_count, leaf_byte_lo_u16x32);
     __m512i const class_hi_u8x64 = sz_utf8_rune_gather_byte_(leaf, leaf_count, leaf_byte_hi_u16x32);
 
-    /* Re-pack the two 16-bit class halves (each already in [0,255]) into the original byte lane order. */
+    // Re-pack the two 16-bit class halves (each already in [0,255]) into the original byte lane order.
     return _mm512_packus_epi16(class_lo_u8x64, class_hi_u8x64);
 }
 
@@ -462,17 +464,18 @@ SZ_INTERNAL __m128i sz_utf8_rune_pick16_icelake_(__m512i value, __m512i lane_ide
  */
 SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
     __m512i window, sz_u64_t emit_starts, sz_u64_t ill_formed, __m512i consumed_length, __m512i lane_identity,
-    int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
+    int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
+    sz_size_t *consumed_bytes) {
 
     __mmask64 const compress_mask = _cvtu64_mask64(emit_starts);
     __m512i const start_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
     __m512i const consumed_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask, consumed_length);
     __m512i const lead_bytes_u8x64 = _mm512_permutexvar_epi8(start_offsets_u8x64, window);
-    __m512i const second_bytes_u8x64 =
-        _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(1)), window);
-    /*  The 3rd and 4th trailing bytes are gathered only when a 3/4-byte lead is present in this window (their
-     *  forms are otherwise dead, and a narrower lead never satisfies the `is_three`/`is_four` blend predicate).
-     *  `third_bytes_u8x64` is hoisted so the 4-byte sibling reuses it (has_four implies has_three). */
+    __m512i const second_bytes_u8x64 = _mm512_permutexvar_epi8(
+        _mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(1)), window);
+    // The 3rd and 4th trailing bytes are gathered only when a 3/4-byte lead is present in this window (their
+    // forms are otherwise dead, and a narrower lead never satisfies the `is_three`/`is_four` blend predicate).
+    // `third_bytes_u8x64` is hoisted so the 4-byte sibling reuses it (has_four implies has_three).
     __m512i third_bytes_u8x64 = _mm512_setzero_si512();
     __m512i fourth_bytes_u8x64 = _mm512_setzero_si512();
     if (has_three)
@@ -480,9 +483,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
     if (has_four)
         fourth_bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(3)), window);
 
-    /*  Per-lane (window-order) ill-formed selector, broadcast into a dword mask we can compact in lockstep with the
-     *  start offsets: lane holds 0xFF where the start is ill-formed, 0 otherwise. After the same `vpcompressb`, lane
-     *  `j` of `ill_compressed` is the ill-formed flag of the `j`-th emitted start. */
+    // Per-lane (window-order) ill-formed selector, broadcast into a dword mask we can compact in lockstep with the
+    // start offsets: lane holds 0xFF where the start is ill-formed, 0 otherwise. After the same `vpcompressb`, lane
+    // `j` of `ill_compressed` is the ill-formed flag of the `j`-th emitted start.
     __m512i const ill_byte_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(ill_formed), _mm512_set1_epi8((char)0xFF));
     __m512i const ill_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask, ill_byte_u8x64);
 
@@ -490,14 +493,15 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
     sz_size_t produced = 0;
     for (sz_size_t block_start = 0; block_start < want; block_start += 16) {
         int const block = (int)(block_start >> 4);
-        __m512i const b0_u32x16 = _mm512_cvtepu8_epi32(sz_utf8_rune_pick16_icelake_(lead_bytes_u8x64, lane_identity, block));
-        __m512i const b1_u32x16 =
-            _mm512_cvtepu8_epi32(sz_utf8_rune_pick16_icelake_(second_bytes_u8x64, lane_identity, block));
+        __m512i const b0_u32x16 = _mm512_cvtepu8_epi32(
+            sz_utf8_rune_pick16_icelake_(lead_bytes_u8x64, lane_identity, block));
+        __m512i const b1_u32x16 = _mm512_cvtepu8_epi32(
+            sz_utf8_rune_pick16_icelake_(second_bytes_u8x64, lane_identity, block));
 
-        /*  Width-blend by the lead-byte range: each wider path only fires for its own lead, and a value blended into
-         *  a narrower lead is already inert, so the cases compose and stay bit-identical. The 2-byte form is always
-         *  assembled; the 3/4-byte forms (and their trailing-byte widens) run only when such a lead is present in the
-         *  window, so a 3-byte window never gathers/assembles the 4th byte (the regression that flattening added). */
+        // Width-blend by the lead-byte range: each wider path only fires for its own lead, and a value blended into
+        // a narrower lead is already inert, so the cases compose and stay bit-identical. The 2-byte form is always
+        // assembled; the 3/4-byte forms (and their trailing-byte widens) run only when such a lead is present in the
+        // window, so a 3-byte window never gathers/assembles the 4th byte (the regression that flattening added).
         __mmask16 const is_two = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)),
                                                _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xC0)));
         __m512i const two_byte_u32x16 = _mm512_or_si512(
@@ -505,8 +509,8 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
             _mm512_and_si512(b1_u32x16, _mm512_set1_epi32(0x3F)));
         __m512i codepoints_u32x16 = _mm512_mask_blend_epi32(is_two, b0_u32x16, two_byte_u32x16);
         if (has_three) {
-            __m512i const b2_u32x16 =
-                _mm512_cvtepu8_epi32(sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
+            __m512i const b2_u32x16 = _mm512_cvtepu8_epi32(
+                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
             __mmask16 const is_three = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0)),
                                                      _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)));
             __m512i const three_byte_u32x16 = _mm512_or_si512(
@@ -516,10 +520,10 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
             codepoints_u32x16 = _mm512_mask_blend_epi32(is_three, codepoints_u32x16, three_byte_u32x16);
         }
         if (has_four) {
-            __m512i const b2_u32x16 =
-                _mm512_cvtepu8_epi32(sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
-            __m512i const b3_u32x16 =
-                _mm512_cvtepu8_epi32(sz_utf8_rune_pick16_icelake_(fourth_bytes_u8x64, lane_identity, block));
+            __m512i const b2_u32x16 = _mm512_cvtepu8_epi32(
+                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
+            __m512i const b3_u32x16 = _mm512_cvtepu8_epi32(
+                sz_utf8_rune_pick16_icelake_(fourth_bytes_u8x64, lane_identity, block));
             __mmask16 const is_four = _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0));
             __m512i const four_byte_u32x16 = _mm512_or_si512(
                 _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(b0_u32x16, _mm512_set1_epi32(0x07)), 18),
@@ -529,7 +533,7 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
             codepoints_u32x16 = _mm512_mask_blend_epi32(is_four, codepoints_u32x16, four_byte_u32x16);
         }
 
-        /* Overwrite every ill-formed lane in this block with U+FFFD (the garbage decode is discarded). */
+        // Overwrite every ill-formed lane in this block with U+FFFD (the garbage decode is discarded).
         __m512i const ill_block_u32x16 = _mm512_cvtepu8_epi32(
             sz_utf8_rune_pick16_icelake_(ill_compressed_u8x64, lane_identity, block));
         __mmask16 const ill_mask = _mm512_test_epi32_mask(ill_block_u32x16, ill_block_u32x16);
@@ -541,9 +545,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_icelake_( //
         produced += lanes;
     }
 
-    /*  Resume cursor delta = end of the last emitted start = its byte offset + its maximal-subpart length. For a
-     *  well-formed lane that subpart length equals the declared rune length; for an ill-formed lane it is the 1-3 byte
-     *  subpart, so the cursor never skips bytes that must become their own next-window U+FFFD. */
+    // Resume cursor delta = end of the last emitted start = its byte offset + its maximal-subpart length. For a
+    // well-formed lane that subpart length equals the declared rune length; for an ill-formed lane it is the 1-3 byte
+    // subpart, so the cursor never skips bytes that must become their own next-window U+FFFD.
     sz_u8_t const start_off = (sz_u8_t)(_mm_cvtsi128_si32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(
                                             _mm512_set1_epi8((char)(produced - 1)), start_offsets_u8x64))) &
                                         0xFF);
@@ -585,8 +589,8 @@ SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length) {
 
 SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n) {
 
-    /*  The logic of this function is similar to `sz_utf8_count_icelake`, but uses PDEP to locate the Nth start byte
-     *  within a window in one step. The start-byte test is the same shared one-op `vpcmpgtb(-65)` form. */
+    // The logic of this function is similar to `sz_utf8_count_icelake`, but uses PDEP to locate the Nth start byte
+    // within a window in one step. The start-byte test is the same shared one-op `vpcmpgtb(-65)` form.
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     // Process 64 bytes at a time
@@ -633,7 +637,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
     __mmask64 const load_mask = sz_u64_mask_until_(chunk);
     __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask, (sz_u8_t const *)text);
 
-    /* ASCII fast lane: an entire window of 1-byte runes widens directly with `vpmovzxbd`, no classification needed. */
+    // ASCII fast lane: an entire window of 1-byte runes widens directly with `vpmovzxbd`, no classification needed.
     if ((_mm512_movepi8_mask(window_u8x64) & load_mask) == 0) {
         sz_size_t const runes_to_unpack = chunk < runes_capacity ? chunk : runes_capacity;
         _mm512_mask_storeu_epi32(runes, sz_u16_clamp_mask_until_(runes_to_unpack),
@@ -651,17 +655,18 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
         return text + runes_to_unpack;
     }
 
-    /*  Single-source classification: a high-nibble LUT gives the per-lane byte length, and both the validity gate and
-     *  the width-blend derive from it, so a lead and its length can never disagree (the class of malformed-gate bug). */
-    __m512i const length_lut_u8x64 = _mm512_broadcast_i32x4(_mm_setr_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4));
+    // Single-source classification: a high-nibble LUT gives the per-lane byte length, and both the validity gate and
+    // the width-blend derive from it, so a lead and its length can never disagree (the class of malformed-gate bug).
+    __m512i const length_lut_u8x64 = _mm512_broadcast_i32x4(
+        _mm_setr_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4));
     __mmask64 const starts = sz_utf8_rune_start_mask_icelake_(window_u8x64, load_mask);
     __mmask64 const continuations = _kandn_mask64(starts, load_mask);
     __m512i const high_nibble_u8x64 = _mm512_and_si512(_mm512_srli_epi16(window_u8x64, 4), _mm512_set1_epi8(0x0F));
     __m512i const lengths_u8x64 = _mm512_shuffle_epi8(length_lut_u8x64, high_nibble_u8x64);
     sz_u64_t const starts_bits = _cvtmask64_u64(starts);
-    /*  Any start whose declared sequence would reach past the window is deferred: well-formed text has only the
-     *  trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun earlier - the
-     *  FIRST overrunning start bounds the decodable prefix, and its bytes resume in the next window or via serial. */
+    // Any start whose declared sequence would reach past the window is deferred: well-formed text has only the
+    // trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun earlier - the
+    // FIRST overrunning start bounds the decodable prefix, and its bytes resume in the next window or via serial.
     __m512i const sequence_end_u8x64 = _mm512_add_epi8(lane_identity_u8x64, lengths_u8x64);
     __mmask64 const overruns = _kand_mask64(_mm512_cmpgt_epu8_mask(sequence_end_u8x64, _mm512_set1_epi8((char)chunk)),
                                             starts);
@@ -669,10 +674,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_size_t const decodable_end = overruns_bits ? (sz_size_t)_tzcnt_u64(overruns_bits) : chunk;
     sz_u64_t const decodable_mask = _cvtmask64_u64(sz_u64_mask_until_(decodable_end));
 
-    /*  Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The window is decoded TOTAL:
-     *  well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain, overlong /
-     *  surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one U+FFFD over the
-     *  maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference. */
+    // Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The window is decoded TOTAL:
+    // well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain, overlong /
+    // surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one U+FFFD over the
+    // maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference.
     __mmask64 const length_ge_two = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(2)), starts);
     __mmask64 const length_ge_three = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(3)), starts);
     __mmask64 const length_ge_four = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(4)), starts);
@@ -683,20 +688,20 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_u64_t const continuation_bits = _cvtmask64_u64(continuations);
 
     // Bad lead: 0xC0/0xC1 (overlong 2-byte by the LUT) or 0xF5..0xFF (out of range, length-4 by the LUT).
-    __mmask64 const bad_lead =
-        _kor_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(2)),
-                                 _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xC2))),
-                    _kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(4)),
-                                 _mm512_cmpgt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF4))));
+    __mmask64 const bad_lead = _kor_mask64(
+        _kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(2)),
+                     _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xC2))),
+        _kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(4)),
+                     _mm512_cmpgt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF4))));
     sz_u64_t const bad_lead_bits = _cvtmask64_u64(bad_lead);
-    /*  First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF). Computed
-     *  whenever a 3/4-byte lead is present; for any other lead this mask is empty, so `b1_ok` keeps the lane. */
+    // First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF). Computed
+    // whenever a 3/4-byte lead is present; for any other lead this mask is empty, so `b1_ok` keeps the lane.
     int const has_three = _cvtmask64_u64(length_ge_three) != 0;
     int const has_four = _cvtmask64_u64(length_ge_four) != 0;
     sz_u64_t overlong_or_surrogate_or_range_bits = 0;
     if (has_three || has_four) {
-        __m512i const next_byte_u8x64 =
-            _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), window_u8x64);
+        __m512i const next_byte_u8x64 = _mm512_permutexvar_epi8(
+            _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), window_u8x64);
         __mmask64 const overlong_or_surrogate_or_range = _kor_mask64(
             _kor_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0)),
                                      _mm512_cmplt_epu8_mask(next_byte_u8x64, _mm512_set1_epi8((char)0xA0))),
@@ -724,16 +729,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_u64_t const wf4 = length_four_bits & ~bad_lead_bits & b1_range_ok & cont1 & cont2 & cont3;
     sz_u64_t const well_formed = (wf1 | wf2 | wf3 | wf4) & decodable_mask;
 
-    /*  Per-lane maximal-subpart length (mirror of `sz_utf8_maximal_subpart_`): start at 1 and extend across each
-     *  continuation slot that a well-formed sequence would still accept. For well-formed lanes this equals the
-     *  declared length; for ill-formed lanes it is the 1-3 byte subpart that one U+FFFD consumes. */
+    // Per-lane maximal-subpart length (mirror of `sz_utf8_maximal_subpart_`): start at 1 and extend across each
+    // continuation slot that a well-formed sequence would still accept. For well-formed lanes this equals the
+    // declared length; for ill-formed lanes it is the 1-3 byte subpart that one U+FFFD consumes.
     sz_u64_t const step2 = _cvtmask64_u64(length_ge_two) & first_ok;
     sz_u64_t const step3 = step2 & _cvtmask64_u64(length_ge_three) & cont2;
     sz_u64_t const step4 = step3 & _cvtmask64_u64(length_ge_four) & cont3;
 
-    /*  Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span (well-formed OR the bytes
-     *  an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte U+FFFD. The subpart spans are exactly the
-     *  continuation slots the `step2/3/4` adds reached, so coverage is those slots smeared by their offset. */
+    // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span (well-formed OR the bytes
+    // an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte U+FFFD. The subpart spans are exactly the
+    // continuation slots the `step2/3/4` adds reached, so coverage is those slots smeared by their offset.
     sz_u64_t const covered = ((step2 & decodable_mask) << 1) | ((step3 & decodable_mask) << 2) |
                              ((step4 & decodable_mask) << 3);
     sz_u64_t const orphan = continuation_bits & decodable_mask & ~covered;
@@ -743,23 +748,23 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_u64_t const ill_formed = emit_starts & ~well_formed;    // Orphans are continuations → never well-formed.
     __m512i consumed_length_u8x64 = _mm512_set1_epi8(1);
     __m512i const one_u8x64 = _mm512_set1_epi8(1);
-    consumed_length_u8x64 =
-        _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step2), consumed_length_u8x64, one_u8x64);
-    consumed_length_u8x64 =
-        _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step3), consumed_length_u8x64, one_u8x64);
-    consumed_length_u8x64 =
-        _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step4), consumed_length_u8x64, one_u8x64);
+    consumed_length_u8x64 = _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step2), consumed_length_u8x64,
+                                                 one_u8x64);
+    consumed_length_u8x64 = _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step3), consumed_length_u8x64,
+                                                 one_u8x64);
+    consumed_length_u8x64 = _mm512_mask_add_epi8(consumed_length_u8x64, _cvtu64_mask64(step4), consumed_length_u8x64,
+                                                 one_u8x64);
 
-    /*  Drain-side wide-byte gating: a 3/4-byte trailing gather is needed only when such a lead appears in this window.
-     *  `length_ge_three` already subsumes `length_ge_four`, so `(length_ge_three | length_ge_four) != 0` is just
-     *  `length_ge_three != 0`. Distinct from the validity-gate `has_three`/`has_four` above (those guard the
-     *  first-continuation range-check) — these only steer the drain's conditional trailing-byte assembly. */
+    // Drain-side wide-byte gating: a 3/4-byte trailing gather is needed only when such a lead appears in this window.
+    // `length_ge_three` already subsumes `length_ge_four`, so `(length_ge_three | length_ge_four) != 0` is just
+    // `length_ge_three != 0`. Distinct from the validity-gate `has_three`/`has_four` above (those guard the
+    // first-continuation range-check) — these only steer the drain's conditional trailing-byte assembly.
     int const drain_has_three = (_cvtmask64_u64(length_ge_three) | _cvtmask64_u64(length_ge_four)) != 0;
     int const drain_has_four = _cvtmask64_u64(length_ge_four) != 0;
     sz_size_t consumed = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_icelake_(window_u8x64, emit_starts, ill_formed,
-                                                           consumed_length_u8x64, lane_identity_u8x64, drain_has_three,
-                                                           drain_has_four, emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_icelake_(window_u8x64, emit_starts, ill_formed, consumed_length_u8x64,
+                                                           lane_identity_u8x64, drain_has_three, drain_has_four,
+                                                           emit_count, runes, runes_capacity, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }
@@ -781,10 +786,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_icelake(     //
             cursor = next;
             continue;
         }
-        /*  The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
-         *  declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
-         *  awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
-         *  ill-formed subpart, a bounded <=3-byte finalize, never a serial window re-decode. */
+        // The in-vector step decodes its whole decodable span; `step_unpacked == 0` only when the very first lead
+        // declares a sequence crossing the window edge (a boundary truncation). A resumable truncation breaks and
+        // awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its maximal
+        // ill-formed subpart, a bounded <=3-byte finalize, never a serial window re-decode.
         if (sz_utf8_incomplete_tail_(cursor, end)) break;
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
