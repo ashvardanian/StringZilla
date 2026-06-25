@@ -1,6 +1,6 @@
 # Clang cross-compilation toolchain for LoongArch64 with the LASX 256-bit SIMD extension.
 #
-# Usage: cmake -B build_loongarch64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/loongarch64.cmake ... ctest --test-dir
+# Usage: cmake -B build_loongarch64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-loongarch64.cmake ... ctest --test-dir
 # build_loongarch64   # runs cross binaries under qemu-loongarch64-static
 
 set(CMAKE_SYSTEM_NAME Linux)

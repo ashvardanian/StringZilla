@@ -1,7 +1,7 @@
 # Clang cross-compilation toolchain for 64-bit Arm (AArch64) exercising the full NEON + crypto + SVE/SVE2 + SVE2-AES
 # feature set.
 #
-# Usage: cmake -B build_aarch64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/aarch64.cmake ... ctest --test-dir build_aarch64
+# Usage: cmake -B build_aarch64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake ... ctest --test-dir build_aarch64
 # # runs cross binaries under qemu-aarch64-static
 #
 # `-march=armv9-a+sve2+sve2-aes+sha3+aes` makes clang define `__ARM_NEON`, `__ARM_FEATURE_SVE`, `__ARM_FEATURE_SVE2`,

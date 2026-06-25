@@ -1,6 +1,6 @@
 # Clang cross-compilation toolchain for little-endian 64-bit PowerPC (POWER9) with VSX.
 #
-# Usage: cmake -B build_ppc64le -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/ppc64le.cmake ... ctest --test-dir build_ppc64le
+# Usage: cmake -B build_ppc64le -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-ppc64le.cmake ... ctest --test-dir build_ppc64le
 # # runs cross binaries under qemu-ppc64le-static
 
 set(CMAKE_SYSTEM_NAME Linux)

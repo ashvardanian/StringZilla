@@ -1,6 +1,6 @@
 # Clang cross-compilation toolchain for WebAssembly (wasm32) with SIMD128 + relaxed-SIMD.
 #
-# Usage: cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/wasm32.cmake ... ; ctest --test-dir build_wasm
+# Usage: cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake ... ; ctest --test-dir build_wasm
 # # builds the wasm32 test binaries and runs each .wasm under the selected runtime via CTest.
 #
 # Pick the runtime with -DSZ_WASM_RUNTIME=wasmtime (default) or =wasmer; both execute a `.wasm` WASI command

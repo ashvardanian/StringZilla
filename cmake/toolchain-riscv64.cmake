@@ -1,6 +1,6 @@
 # Clang cross-compilation toolchain for 64-bit RISC-V with the RVV 1.0 Vector extension.
 #
-# Usage: cmake -B build_riscv64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/riscv64.cmake ... ctest --test-dir build_riscv64
+# Usage: cmake -B build_riscv64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-riscv64.cmake ... ctest --test-dir build_riscv64
 # # runs cross binaries under qemu-riscv64-static
 #
 # Requires: clang-23 / clang++-23, the riscv64-linux-gnu sysroot + gcc-14 cross libstdc++, and qemu-riscv64-static. See
