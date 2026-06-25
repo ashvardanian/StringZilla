@@ -21,10 +21,10 @@
 #ifndef STRINGZILLAS_SIMILARITIES_SERIAL_HPP_
 #define STRINGZILLAS_SIMILARITIES_SERIAL_HPP_
 
-#include "stringzilla/types.hpp"    // `sz::error_cost_t`
-#include "stringzilla/memory.h"     // `sz_move_serial`
-#include "stringzilla/utf8_runes.h" // `sz_rune_parse_unchecked`
-#include "stringzillas/types.hpp"   // `sz::executor_like`
+#include "stringzilla/types.hpp"           // `sz::error_cost_t`
+#include "stringzilla/memory.h"            // `sz_move_serial`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
+#include "stringzillas/types.hpp"          // `sz::executor_like`
 
 #include <atomic>      // `std::atomic` to synchronize threads
 #include <type_traits> // `std::enable_if_t` for meta-programming
@@ -2893,14 +2893,14 @@ struct levenshtein_distance_utf8 {
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++first_length_utf32) {
-            rune_length = sz_rune_parse_unchecked(first.data() + progress_utf8, first_data_utf32 + first_length_utf32);
-            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+            rune_length = sz_rune_decode_unchecked(first.data() + progress_utf8, first_data_utf32 + first_length_utf32);
+            if (rune_length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
         }
         for (size_t progress_utf8 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++second_length_utf32) {
-            rune_length = sz_rune_parse_unchecked(second.data() + progress_utf8,
-                                                  second_data_utf32 + second_length_utf32);
-            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+            rune_length = sz_rune_decode_unchecked(second.data() + progress_utf8,
+                                                   second_data_utf32 + second_length_utf32);
+            if (rune_length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
         }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.

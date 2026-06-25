@@ -4,12 +4,12 @@
  *  @author Ash Vardanian
  *
  *  Fully-vectorized, gather-free twin of @ref sz_find_delimiters_utf8_serial. Each 64-byte window is decoded once
- *  through the shared codepoint substrate (`sz_utf8_codepoints_decode_window_`), and EVERY codepoint-start lane's
+ *  through the shared codepoint substrate (`sz_utf8_rune_decode_window_`), and EVERY codepoint-start lane's
  *  delimiter membership is resolved IN-REGISTER over the decoded `high`/`low` halves: the BMP block id via a `vpermb`
  *  256-entry lookup, the 32-byte bitmap byte via the substrate `vpermi2b` page network, and the per-lane bit test by a
  *  `vpermb` bit-mask. The 4-byte (astral) lanes reconstruct the full 21-bit codepoint and walk the small astral L1/L2
  *  network the same gather-free way; the whole astral block is gated on a 4-byte lead being present. Per-lane validity
- *  (overlong / surrogate / out-of-range / bad-continuation, mirroring `sz_rune_parse`) is computed as a mask and
+ *  (overlong / surrogate / out-of-range / bad-continuation, mirroring `sz_rune_decode`) is computed as a mask and
  *  intersected with membership, so a malformed lead is never reported and the result is bit-identical to the serial
  *  oracle for the returned pointer and matched length. There is NO scalar per-codepoint membership and NO ASCII fast
  *  path with a scalar tail; no `vpgather` / `vpscatter` is ever issued.
@@ -19,7 +19,7 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/utf8_codepoints/icelake.h"
+#include "stringzilla/utf8_runes/icelake.h"
 #include "stringzilla/utf8_delimiters/serial.h"
 #include "stringzilla/utf8_delimiters/tables.h"
 
@@ -51,7 +51,7 @@ SZ_INTERNAL __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, __m512
  *  @brief  BMP (codepoint < 0x10000) delimiter membership for every lane, gather-free.
  *
  *  `high` (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned 256-entry `bmp_block` table via
- *  `vpermb` (`sz_utf8_codepoints_permute256_icelake_`); the bitmap byte at `row_id*32 + (low >> 3)` is read through the
+ *  `vpermb` (`sz_utf8_rune_permute256_icelake_`); the bitmap byte at `row_id*32 + (low >> 3)` is read through the
  *  substrate page network; the bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally — block 0
  *  encodes the ASCII delimiters. No `vpgather`.
  */
@@ -81,10 +81,10 @@ SZ_INTERNAL __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __m51
     __m512i const high2 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high, 2));
     __m512i const high3 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high, 3));
     __m512i const block_id = sz_delimiter_pack_chunks_epi8_icelake_(
-        sz_utf8_codepoints_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high0),
-        sz_utf8_codepoints_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high1),
-        sz_utf8_codepoints_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high2),
-        sz_utf8_codepoints_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high3));
+        sz_utf8_rune_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high0),
+        sz_utf8_rune_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high1),
+        sz_utf8_rune_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high2),
+        sz_utf8_rune_permute256_icelake_(sz_utf8_delimiter_bmp_block_, high3));
 
     // bit_index = block_id*32 + (low>>3), as 16-bit indices in [0, 1664); read through the page network.
     __m512i const nibble = _mm512_srli_epi16(_mm512_and_si512(low, _mm512_set1_epi8((char)0xF8)), 3);
@@ -96,10 +96,10 @@ SZ_INTERNAL __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __m51
         _mm512_slli_epi16(
             _mm512_and_si512(_mm512_unpackhi_epi8(block_id, _mm512_setzero_si512()), _mm512_set1_epi16(0x00FF)), 5),
         _mm512_and_si512(_mm512_unpackhi_epi8(nibble, _mm512_setzero_si512()), _mm512_set1_epi16(0x001F)));
-    __m512i const byte_lo = sz_utf8_codepoints_gather_byte_(sz_utf8_delimiter_bmp_bitmaps_,
-                                                            sz_utf8_delimiter_bmp_bitmaps_count_k * 32, idx_lo);
-    __m512i const byte_hi = sz_utf8_codepoints_gather_byte_(sz_utf8_delimiter_bmp_bitmaps_,
-                                                            sz_utf8_delimiter_bmp_bitmaps_count_k * 32, idx_hi);
+    __m512i const byte_lo = sz_utf8_rune_gather_byte_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                      sz_utf8_delimiter_bmp_bitmaps_count_k * 32, idx_lo);
+    __m512i const byte_hi = sz_utf8_rune_gather_byte_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                      sz_utf8_delimiter_bmp_bitmaps_count_k * 32, idx_hi);
     __m512i const bitmap_byte = _mm512_packus_epi16(byte_lo, byte_hi);
     return sz_delimiter_test_bit_icelake_(bitmap_byte, low);
 }
@@ -117,7 +117,7 @@ SZ_INTERNAL __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __
     __m512i const byte1 = _mm512_and_si512(next1, _mm512_set1_epi8(0x3F));
     __m512i const byte2 = _mm512_and_si512(next2, _mm512_set1_epi8(0x3F));
     __m512i const byte3 = _mm512_and_si512(next3, _mm512_set1_epi8(0x3F));
-    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
     __m512i row_bytes = _mm512_setzero_si512();
     __m512i low_bytes = _mm512_setzero_si512();
     for (int chunk = 0; chunk < 4; ++chunk) {
@@ -131,11 +131,10 @@ SZ_INTERNAL __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __
             _mm512_or_si512(_mm512_slli_epi32(c2, 6), c3));
         __m512i const offset = _mm512_sub_epi32(codepoint, _mm512_set1_epi32(0x10000));
         __m512i const super = _mm512_and_si512(_mm512_srli_epi32(offset, 16), _mm512_set1_epi32(0x0F));
-        __m512i const group = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_delimiter_astral_l1_, (16 + 63) / 64,
-                                                                      super);
+        __m512i const group = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_delimiter_astral_l1_, (16 + 63) / 64, super);
         __m512i const sub = _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xFF));
         __m512i const l2_index = _mm512_add_epi32(_mm512_slli_epi32(group, 8), sub);
-        __m512i const row = sz_utf8_codepoints_lut_cascade_icelake_(
+        __m512i const row = sz_utf8_rune_lut_cascade_icelake_(
             sz_utf8_delimiter_astral_l2_, (sz_utf8_delimiter_astral_groups_count_k * 256 + 63) / 64, l2_index);
         __m512i const low8 = _mm512_and_si512(offset, _mm512_set1_epi32(0xFF));
         __m128i const row_packed = _mm512_cvtepi32_epi8(row);
@@ -155,22 +154,22 @@ SZ_INTERNAL __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __
         _mm512_slli_epi16(
             _mm512_and_si512(_mm512_unpackhi_epi8(row_bytes, _mm512_setzero_si512()), _mm512_set1_epi16(0x00FF)), 5),
         _mm512_and_si512(_mm512_unpackhi_epi8(nibble, _mm512_setzero_si512()), _mm512_set1_epi16(0x001F)));
-    __m512i const byte_lo = sz_utf8_codepoints_gather_byte_(sz_utf8_delimiter_astral_bitmaps_,
-                                                            sz_utf8_delimiter_astral_bitmaps_count_k * 32, idx_lo);
-    __m512i const byte_hi = sz_utf8_codepoints_gather_byte_(sz_utf8_delimiter_astral_bitmaps_,
-                                                            sz_utf8_delimiter_astral_bitmaps_count_k * 32, idx_hi);
+    __m512i const byte_lo = sz_utf8_rune_gather_byte_(sz_utf8_delimiter_astral_bitmaps_,
+                                                      sz_utf8_delimiter_astral_bitmaps_count_k * 32, idx_lo);
+    __m512i const byte_hi = sz_utf8_rune_gather_byte_(sz_utf8_delimiter_astral_bitmaps_,
+                                                      sz_utf8_delimiter_astral_bitmaps_count_k * 32, idx_hi);
     __m512i const bitmap_byte = _mm512_packus_epi16(byte_lo, byte_hi);
     return sz_delimiter_test_bit_icelake_(bitmap_byte, low_bytes);
 }
 
 /**
- *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_parse` exactly: a 2/3/4-byte lead is
+ *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
  *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
  *          overlong, a surrogate, or beyond U+10FFFF. Invalid leads are never reported (serial advances one byte and
  *          re-syncs, which never matches the cleared lane).
  */
 SZ_INTERNAL __mmask64 sz_delimiter_valid_starts_icelake_( //
-    __m512i window, __m512i next1, __m512i next2, __m512i next3, sz_utf8_codepoints_window_t const *decoded) {
+    __m512i window, __m512i next1, __m512i next2, __m512i next3, sz_utf8_rune_window_t const *decoded) {
     __mmask64 const loaded = sz_u64_clamp_mask_until_(decoded->loaded);
     __m512i const continuation_pattern = _mm512_set1_epi8((char)0x80);
     __m512i const continuation_mask = _mm512_set1_epi8((char)0xC0);
@@ -216,12 +215,12 @@ SZ_INTERNAL __mmask64 sz_delimiter_valid_starts_icelake_( //
 /** @copydoc sz_find_delimiter_utf8 */
 SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
-    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
 
     sz_size_t base = 0;
     while (base < length) {
-        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(
-            text_u8 + base, length - base, lane_identity);
+        sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + base, length - base,
+                                                                                  lane_identity);
         sz_size_t const loaded = decoded.loaded;
         __m512i const window = decoded.window;
         __m512i const next1 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), window);
@@ -233,12 +232,12 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_icelake(sz_cptr_t text, sz_size_t le
         sz_size_t byte_span = loaded;
         if (loaded >= 64) {
             sz_u64_t const overrun =
-                (_cvtmask64_u64(decoded.two_byte_starts) & ~sz_utf8_codepoints_mask_until_(loaded - 1)) |
-                (_cvtmask64_u64(decoded.three_byte_starts) & ~sz_utf8_codepoints_mask_until_(loaded - 2)) |
-                (_cvtmask64_u64(decoded.four_byte_starts) & ~sz_utf8_codepoints_mask_until_(loaded - 3));
+                (_cvtmask64_u64(decoded.two_byte_starts) & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                (_cvtmask64_u64(decoded.three_byte_starts) & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                (_cvtmask64_u64(decoded.four_byte_starts) & ~sz_u64_mask_until_serial_(loaded - 3));
             byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
         }
-        __mmask64 const span_mask = _cvtu64_mask64(sz_utf8_codepoints_mask_until_(byte_span));
+        __mmask64 const span_mask = _cvtu64_mask64(sz_u64_mask_until_serial_(byte_span));
 
         __mmask64 const valid_starts = sz_delimiter_valid_starts_icelake_(window, next1, next2, next3, &decoded) &
                                        decoded.codepoint_starts & span_mask;

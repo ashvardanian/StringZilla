@@ -619,7 +619,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/sort.c
     c/stringzilla/intersect.c
     c/stringzilla/utf8_norm.c
-    c/stringzilla/utf8_codepoints.c
+    c/stringzilla/utf8_runes.c
     c/stringzilla/utf8_tokens.c
     c/stringzilla/utf8_words.c
     c/stringzilla/utf8_graphemes.c
@@ -909,7 +909,7 @@ if (STRINGZILLA_BUILD_TEST)
     set(STRINGZILLA_TEST_SOURCES
         scripts/test_stringzilla.cpp
         scripts/test_hash.cpp
-        scripts/test_utf8_codepoints.cpp
+        scripts/test_utf8_runes.cpp
         scripts/test_utf8_tokens.cpp
         scripts/test_utf8_words.cpp
         scripts/test_utf8_graphemes.cpp

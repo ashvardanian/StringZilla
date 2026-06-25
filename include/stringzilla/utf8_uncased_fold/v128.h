@@ -97,7 +97,7 @@ SZ_INTERNAL v128_t sz_utf8_load_window_v128_(sz_u8_t const *source_ptr, sz_size_
     return available >= 16 ? wasm_v128_load(source_ptr) : sz_load_partial_v128_((sz_cptr_t)source_ptr, available);
 }
 
-/** @brief Lanes set (0xFF) on every malformed lead byte, mirroring `sz_rune_parse` branchlessly.
+/** @brief Lanes set (0xFF) on every malformed lead byte, mirroring `sz_rune_decode` branchlessly.
  *
  *  A lead is well-formed iff its declared continuations follow AND it escapes the bad-special set: C0/C1,
  *  F5..FF (no width bit, auto-excluded), E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0 (surrogate),
@@ -112,12 +112,13 @@ SZ_INTERNAL v128_t sz_utf8_malformed_lead_v128_(v128_t source, v128_t next, v128
     v128_t continuation_plus2 = sz_utf8_slide1down_v128_(continuation_plus1, 0);
     v128_t continuation_plus3 = sz_utf8_slide1down_v128_(continuation_plus2, 0);
 
-    v128_t is_two_byte_lead = sz_utf8_in_range_v128_(source, 0xC2, 0x1E);  // C2..DF
+    v128_t is_two_byte_lead = sz_utf8_in_range_v128_(source, 0xC2, 0x1E);   // C2..DF
     v128_t is_three_byte_lead = sz_utf8_in_range_v128_(source, 0xE0, 0x10); // E0..EF
     v128_t is_four_byte_lead = sz_utf8_in_range_v128_(source, 0xF0, 0x05);  // F0..F4
 
     v128_t two_byte_complete = wasm_v128_and(is_two_byte_lead, continuation_plus1);
-    v128_t three_byte_complete = wasm_v128_and(is_three_byte_lead, wasm_v128_and(continuation_plus1, continuation_plus2));
+    v128_t three_byte_complete = wasm_v128_and(is_three_byte_lead,
+                                               wasm_v128_and(continuation_plus1, continuation_plus2));
     v128_t four_byte_complete = wasm_v128_and(
         is_four_byte_lead, wasm_v128_and(continuation_plus1, wasm_v128_and(continuation_plus2, continuation_plus3)));
 
@@ -461,13 +462,12 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source
         if (!needs_serial && consumed) continue; // a clean vectorized strip (or trailing-incomplete trim)
 
         // One codepoint the vector path can't fold in place: full serial decode / Unicode fold / encode.
-        // `sz_rune_parse` is the well-formedness authority - a malformed lead (the only reason the
+        // `sz_rune_decode` is the well-formedness authority - a malformed lead (the only reason the
         // vector handlers decline a multi-byte sequence) copies one byte through and resyncs, byte-for-byte
         // with the serial reference; valid sequences fold exactly as before.
         sz_rune_t rune;
-        sz_rune_length_t const rune_length =
-            sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             *destination_ptr++ = *source_ptr++; // Maximal-subpart resync: copy the offending byte, advance one
             continue;
         }
@@ -475,7 +475,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-            destination_ptr += sz_rune_export(folded_runes[rune_index], destination_ptr);
+            destination_ptr += sz_rune_encode(folded_runes[rune_index], destination_ptr);
     }
 
     return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);

@@ -1,13 +1,13 @@
 /**
  *  @brief WebAssembly SIMD128 backend for UTF-8 codepoint mechanics.
- *  @file include/stringzilla/utf8_codepoints/v128.h
+ *  @file include/stringzilla/utf8_runes/v128.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_CODEPOINTS_V128_H_
-#define STRINGZILLA_UTF8_CODEPOINTS_V128_H_
+#ifndef STRINGZILLA_UTF8_RUNES_V128_H_
+#define STRINGZILLA_UTF8_RUNES_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_codepoints/serial.h"
+#include "stringzilla/utf8_runes/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,8 +83,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128(sz_cptr_t text, sz_size_t length, sz_s
 
 /*  Decodes UTF-8 into UTF-32 runes. The pure-ASCII prefix (every byte `< 0x80`) widens 16 bytes straight
  *  into 16 u32 runes via zero-extends; the first non-ASCII byte or exhausted capacity defers the remainder
- *  to `sz_utf8_unpack_chunk_serial`, which owns all multi-byte / malformed / truncation logic. */
-SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
+ *  to `sz_utf8_decode_serial`, which owns all multi-byte / malformed / truncation logic. */
+SZ_PUBLIC sz_cptr_t sz_utf8_decode_v128(        //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
@@ -111,9 +111,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
     // Remainder (multi-byte sequences, ragged tail, or exhausted capacity) goes through serial.
     sz_size_t bytes_consumed = (sz_size_t)(text_cursor - (sz_u8_t const *)text);
     sz_size_t tail_unpacked = 0;
-    sz_cptr_t tail_end = sz_utf8_unpack_chunk_serial((sz_cptr_t)text_cursor, length - bytes_consumed,
-                                                     runes + runes_written, runes_capacity - runes_written,
-                                                     &tail_unpacked);
+    sz_cptr_t tail_end = sz_utf8_decode_serial((sz_cptr_t)text_cursor, length - bytes_consumed, runes + runes_written,
+                                               runes_capacity - runes_written, &tail_unpacked);
     *runes_unpacked = runes_written + tail_unpacked;
     return tail_end;
 }
@@ -132,4 +131,4 @@ SZ_PUBLIC sz_cptr_t sz_utf8_unpack_chunk_v128(  //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CODEPOINTS_V128_H_
+#endif // STRINGZILLA_UTF8_RUNES_V128_H_

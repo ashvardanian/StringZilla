@@ -56,7 +56,6 @@ def test_utf8_uncased_fold_expansions(input_str, expected):
     assert sz.utf8_uncased_fold(input_str) == expected
 
 
-
 def test_utf8_uncased_fold_all_codepoints():
     """Compare StringZilla case folding with Unicode 17.0 CaseFolding.txt rules.
 

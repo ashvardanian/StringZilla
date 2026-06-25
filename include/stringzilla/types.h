@@ -807,11 +807,11 @@ typedef enum sz_capability_t {
  *  @see https://en.wikipedia.org/wiki/UTF-8
  */
 typedef enum sz_rune_length_t {
-    sz_utf8_invalid_k = 0,     //!< Invalid UTF8 character.
-    sz_utf8_rune_1byte_k = 1,  //!< 1-byte UTF8 character.
-    sz_utf8_rune_2bytes_k = 2, //!< 2-byte UTF8 character.
-    sz_utf8_rune_3bytes_k = 3, //!< 3-byte UTF8 character.
-    sz_utf8_rune_4bytes_k = 4, //!< 4-byte UTF8 character.
+    sz_rune_invalid_k = 0, //!< Invalid UTF8 character.
+    sz_rune_1byte_k = 1,   //!< 1-byte UTF8 character.
+    sz_rune_2bytes_k = 2,  //!< 2-byte UTF8 character.
+    sz_rune_3bytes_k = 3,  //!< 3-byte UTF8 character.
+    sz_rune_4bytes_k = 4,  //!< 4-byte UTF8 character.
 } sz_rune_length_t;
 
 /**
@@ -825,6 +825,9 @@ typedef enum sz_rune_length_t {
  *  That's @b 0.004% of the 32-bit space, so sparse data-structures are encouraged for UTF-8 oriented algorithms.
  */
 typedef sz_u32_t sz_rune_t;
+
+/** @brief The Unicode @b replacement character U+FFFD, emitted once per maximal ill-formed UTF-8 subpart. */
+enum { sz_rune_replacement_k = 0xFFFD };
 
 SZ_PUBLIC sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
     // TODO: A perfect hashing scheme can be constructed to map a 32-bit rune into an 18-bit representation,
@@ -979,8 +982,8 @@ typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_utf8_find_nth`. */
 typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_unpack_chunk`. */
-typedef sz_cptr_t (*sz_utf8_unpack_chunk_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
+/** @brief Signature of `sz_utf8_decode`. */
+typedef sz_cptr_t (*sz_utf8_decode_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_utf8_uncased_fold`. */
 typedef sz_size_t (*sz_utf8_uncased_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t);

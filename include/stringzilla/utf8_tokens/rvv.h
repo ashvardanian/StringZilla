@@ -7,9 +7,9 @@
 #define STRINGZILLA_UTF8_TOKENS_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes.h" // `sz_rune_parse_unchecked`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
 #include "stringzilla/utf8_tokens/serial.h"
-#include "stringzilla/utf8_codepoints/rvv.h"
+#include "stringzilla/utf8_runes/rvv.h"
 
 #ifdef __cplusplus
 extern "C" {

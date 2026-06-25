@@ -391,7 +391,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
         // purity precondition and degrades to one short prefix per full cascade pass.
         __mmask64 is_lead_mask = is_non_ascii & ~is_cont_mask & load_mask;
 
-        // Branchless well-formedness gate, mirroring `sz_rune_parse`: a lead is well-formed iff its
+        // Branchless well-formedness gate, mirroring `sz_rune_decode`: a lead is well-formed iff its
         // required continuations follow AND it is not overlong/surrogate/out-of-range. Shifting `is_cont_mask`
         // down by 1/2/3 tests "the next 1/2/3 bytes are continuations"; the bad-special compares strip the
         // overlong (E0<A0, F0<90), surrogate (ED>=A0) and out-of-range (F4>=90) leads, plus C0/C1 and F5..FF
@@ -870,8 +870,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
                 if (first_special_index == 0) {
                     // First character needs serial - fold it if well-formed, else copy one byte to resync
                     sz_rune_t rune;
-                    sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
-                    if (rune_length == sz_utf8_invalid_k) {
+                    sz_rune_length_t const rune_length = sz_rune_decode(source, source + source_length, &rune);
+                    if (rune_length == sz_rune_invalid_k) {
                         *target++ = *source++;
                         source_length -= 1;
                         continue;
@@ -879,7 +879,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
                     sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
                     sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
                     for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-                        target += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target);
+                        target += sz_rune_encode(folded_runes[rune_index], (sz_u8_t *)target);
                     source += rune_length;
                     source_length -= rune_length;
                     continue;
@@ -1351,8 +1351,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
                         if (first_special_byte == 0) {
                             // First char needs serial - fold it if well-formed, else copy one byte to resync
                             sz_rune_t rune;
-                            sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
-                            if (rune_length == sz_utf8_invalid_k) {
+                            sz_rune_length_t const rune_length = sz_rune_decode(source, source + source_length, &rune);
+                            if (rune_length == sz_rune_invalid_k) {
                                 *target++ = *source++;
                                 source_length -= 1;
                                 continue;
@@ -1360,7 +1360,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
                             sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
                             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
                             for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-                                target += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target);
+                                target += sz_rune_encode(folded_runes[rune_index], (sz_u8_t *)target);
                             source += rune_length;
                             source_length -= rune_length;
                             continue;
@@ -1544,8 +1544,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
         // through unchanged one byte at a time, resyncing exactly like the serial reference.
         {
             sz_rune_t rune;
-            sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
-            if (rune_length == sz_utf8_invalid_k) {
+            sz_rune_length_t const rune_length = sz_rune_decode(source, source + source_length, &rune);
+            if (rune_length == sz_rune_invalid_k) {
                 *target++ = *source++;
                 source_length -= 1;
                 continue;
@@ -1554,7 +1554,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t sou
             sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
             sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
             for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-                target += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target);
+                target += sz_rune_encode(folded_runes[rune_index], (sz_u8_t *)target);
             source += rune_length;
             source_length -= rune_length;
         }

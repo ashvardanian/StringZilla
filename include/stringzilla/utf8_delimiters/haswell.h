@@ -4,13 +4,13 @@
  *  @author Ash Vardanian
  *
  *  Fully-vectorized, gather-free twin of @ref sz_find_delimiters_utf8_serial and AVX2 mirror of the Ice Lake backend.
- *  Each 64-byte window is decoded once through the shared codepoint substrate (`sz_utf8_codepoints_decode_window_haswell_`),
+ *  Each 64-byte window is decoded once through the shared codepoint substrate (`sz_utf8_rune_decode_window_haswell_`),
  *  and EVERY codepoint-start lane's delimiter membership is resolved IN-REGISTER over the decoded `high`/`low` halves:
- *  the BMP block id via a 256-entry `vpshufb` cascade (`sz_utf8_codepoints_lut256_haswell_`), the 32-byte bitmap byte via
+ *  the BMP block id via a 256-entry `vpshufb` cascade (`sz_utf8_rune_lut256_haswell_`), the 32-byte bitmap byte via
  *  a transposed-column select over the `..._columns_` tables (AVX2 has no `vpermi2b` page network), and the per-lane bit
  *  test by a `vpshufb` bit-mask. The 4-byte (astral) lanes reconstruct the full 21-bit codepoint in byte-domain and walk
  *  the small astral L1/L2 network the same gather-free way; the whole astral block is gated on a 4-byte lead being present.
- *  Per-lane validity (overlong / surrogate / out-of-range / bad-continuation, mirroring `sz_rune_parse`) is computed as a
+ *  Per-lane validity (overlong / surrogate / out-of-range / bad-continuation, mirroring `sz_rune_decode`) is computed as a
  *  mask and intersected with membership, so a malformed lead is never reported and the result is bit-identical to the
  *  serial oracle for the returned pointer and matched length. There is NO scalar per-codepoint membership and NO ASCII
  *  fast path with a scalar tail; no `vpgather` is ever issued.
@@ -20,7 +20,7 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/utf8_codepoints/haswell.h"
+#include "stringzilla/utf8_runes/haswell.h"
 #include "stringzilla/utf8_delimiters/serial.h"
 #include "stringzilla/utf8_delimiters/tables.h"
 
@@ -76,7 +76,7 @@ SZ_INTERNAL __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __
                                                   _mm256_set1_epi8(0x1F)); // (low>>3) in [0,32)
     __m256i result = _mm256_setzero_si256();
     for (int column = 0; column < 32; ++column) {
-        __m256i const candidate = sz_utf8_codepoints_cascade_stage_haswell_(columns + column * 64, 4, selector, within);
+        __m256i const candidate = sz_utf8_rune_cascade_stage_haswell_(columns + column * 64, 4, selector, within);
         __m256i const here = _mm256_cmpeq_epi8(column_index, _mm256_set1_epi8((char)column));
         result = _mm256_blendv_epi8(result, candidate, here);
     }
@@ -90,7 +90,7 @@ SZ_INTERNAL __m256i sz_delimiter_bmp_membership_haswell_(__m256i window, __m256i
                                             _mm256_setzero_si256());
     __m256i const high = _mm256_andnot_si256(ascii, high_in);
     __m256i const low = _mm256_blendv_epi8(low_in, window, ascii);
-    __m256i const block_id = sz_utf8_codepoints_lut256_haswell_(sz_utf8_delimiter_bmp_block_, high);
+    __m256i const block_id = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_bmp_block_, high);
     __m256i const bitmap_byte = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_bmp_bitmaps_columns_, block_id,
                                                                   low);
     return sz_delimiter_test_bit_haswell_(bitmap_byte, low);
@@ -121,83 +121,83 @@ SZ_INTERNAL __m256i sz_delimiter_astral_membership_haswell_( //
     __m256i const low8 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b2, _mm256_set1_epi8(0x03)), 6), b3);
 
     // group = astral_l1[super]; row id = astral_l2[group*256 + sub]; bitmap byte from astral columns.
-    __m256i const group = sz_utf8_codepoints_lut256_haswell_(sz_utf8_delimiter_astral_l1_, super);
+    __m256i const group = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l1_, super);
     // l2 index = group*256 + sub. group < 2, so the index high byte is `group` and the low byte is `sub`; a 512-entry
     // table is two 256-entry pages selected by `group`.
-    __m256i const page0 = sz_utf8_codepoints_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 0, sub);
-    __m256i const page1 = sz_utf8_codepoints_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 256, sub);
+    __m256i const page0 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 0, sub);
+    __m256i const page1 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 256, sub);
     __m256i const pick_page1 = _mm256_cmpeq_epi8(group, _mm256_set1_epi8(1));
     __m256i const row = _mm256_blendv_epi8(page0, page1, pick_page1);
     __m256i const bitmap_byte = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_astral_bitmaps_columns_, row, low8);
     return sz_delimiter_test_bit_haswell_(bitmap_byte, low8);
 }
 
-/** @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_parse` exactly: a 2/3/4-byte lead is
+/** @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
  *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
  *          overlong, a surrogate, or beyond U+10FFFF. Returned as a `sz_u64_t` lane mask. */
 SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_haswell_( //
-    sz_utf8_codepoints_window_haswell_t const *decoded, __m256i next1_lo, __m256i next1_hi, __m256i next2_lo,
+    sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo, __m256i next1_hi, __m256i next2_lo,
     __m256i next2_hi, __m256i next3_lo, __m256i next3_hi) {
     sz_size_t const loaded = decoded->loaded;
     sz_u64_t const loaded_mask = loaded >= 64 ? ~(sz_u64_t)0 : (((sz_u64_t)1 << loaded) - 1);
 
     __m256i const continuation_mask = _mm256_set1_epi8((char)0xC0);
     __m256i const continuation_pattern = _mm256_set1_epi8((char)0x80);
-    sz_u64_t const c1_ok = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const c1_ok = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(_mm256_and_si256(next1_lo, continuation_mask), continuation_pattern),
         _mm256_cmpeq_epi8(_mm256_and_si256(next1_hi, continuation_mask), continuation_pattern));
-    sz_u64_t const c2_ok = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const c2_ok = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(_mm256_and_si256(next2_lo, continuation_mask), continuation_pattern),
         _mm256_cmpeq_epi8(_mm256_and_si256(next2_hi, continuation_mask), continuation_pattern));
-    sz_u64_t const c3_ok = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const c3_ok = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(_mm256_and_si256(next3_lo, continuation_mask), continuation_pattern),
         _mm256_cmpeq_epi8(_mm256_and_si256(next3_hi, continuation_mask), continuation_pattern));
 
     // 2-byte: lead >= 0xC2 (reject C0/C1 overlong).
-    sz_u64_t const lead_ge_c2 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_ge_c2 = sz_utf8_mask_combine_haswell_(
         sz_delimiter_cmpge_epu8_haswell_(decoded->window_lo, _mm256_set1_epi8((char)0xC2)),
         sz_delimiter_cmpge_epu8_haswell_(decoded->window_hi, _mm256_set1_epi8((char)0xC2)));
 
     // 3-byte: not overlong (E0 with next1 < 0xA0), not surrogate (ED with next1 >= 0xA0).
-    sz_u64_t const lead_e0 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_e0 = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xE0)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xE0)));
-    sz_u64_t const lead_ed = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_ed = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xED)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xED)));
     __m256i const n1_lo_ge_a0 = sz_delimiter_cmpge_epu8_haswell_(next1_lo, _mm256_set1_epi8((char)0xA0));
     __m256i const n1_hi_ge_a0 = sz_delimiter_cmpge_epu8_haswell_(next1_hi, _mm256_set1_epi8((char)0xA0));
-    sz_u64_t const n1_ge_a0 = sz_utf8_codepoints_mask_combine_haswell_(n1_lo_ge_a0, n1_hi_ge_a0);
+    sz_u64_t const n1_ge_a0 = sz_utf8_mask_combine_haswell_(n1_lo_ge_a0, n1_hi_ge_a0);
     sz_u64_t const n1_lt_a0 = ~n1_ge_a0;
 
     // 4-byte: lead <= 0xF4, not overlong (F0 with next1 < 0x90), not > U+10FFFF (F4 with next1 >= 0x90).
-    sz_u64_t const lead_le_f4 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_le_f4 = sz_utf8_mask_combine_haswell_(
         _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_lo, _mm256_set1_epi8((char)0xF5)),
                             _mm256_set1_epi8((char)0xFF)),
         _mm256_andnot_si256(sz_delimiter_cmpge_epu8_haswell_(decoded->window_hi, _mm256_set1_epi8((char)0xF5)),
                             _mm256_set1_epi8((char)0xFF)));
-    sz_u64_t const lead_f0 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_f0 = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xF0)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xF0)));
-    sz_u64_t const lead_f4 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const lead_f4 = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xF4)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xF4)));
-    sz_u64_t const n1_ge_90 = sz_utf8_codepoints_mask_combine_haswell_(
+    sz_u64_t const n1_ge_90 = sz_utf8_mask_combine_haswell_(
         sz_delimiter_cmpge_epu8_haswell_(next1_lo, _mm256_set1_epi8((char)0x90)),
         sz_delimiter_cmpge_epu8_haswell_(next1_hi, _mm256_set1_epi8((char)0x90)));
     sz_u64_t const n1_lt_90 = ~n1_ge_90;
 
     sz_u64_t const ascii = loaded_mask &
-                           ~sz_utf8_codepoints_mask_combine_haswell_(
+                           ~sz_utf8_mask_combine_haswell_(
                                _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_lo, _mm256_set1_epi8((char)0x80)),
                                                  _mm256_set1_epi8((char)0x80)),
                                _mm256_cmpeq_epi8(_mm256_and_si256(decoded->window_hi, _mm256_set1_epi8((char)0x80)),
                                                  _mm256_set1_epi8((char)0x80)));
 
     // Spans must lie within the loaded window (so we never validate against a wrapped neighbour or read past loaded).
-    sz_u64_t const span2 = loaded >= 1 ? sz_utf8_codepoints_mask_until_(loaded - 1) : 0;
-    sz_u64_t const span3 = loaded >= 2 ? sz_utf8_codepoints_mask_until_(loaded - 2) : 0;
-    sz_u64_t const span4 = loaded >= 3 ? sz_utf8_codepoints_mask_until_(loaded - 3) : 0;
+    sz_u64_t const span2 = loaded >= 1 ? sz_u64_mask_until_serial_(loaded - 1) : 0;
+    sz_u64_t const span3 = loaded >= 2 ? sz_u64_mask_until_serial_(loaded - 2) : 0;
+    sz_u64_t const span4 = loaded >= 3 ? sz_u64_mask_until_serial_(loaded - 3) : 0;
 
     sz_u64_t const two_ok = decoded->two_byte_starts & span2 & c1_ok & lead_ge_c2;
     sz_u64_t const three_ok = decoded->three_byte_starts & span3 & c1_ok & c2_ok & ~(lead_e0 & n1_lt_a0) &
@@ -217,13 +217,13 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_haswell(sz_cptr_t text, sz_size_t le
     sz_size_t base = 0;
 
     while (base < length) {
-        sz_utf8_codepoints_window_haswell_t const decoded = sz_utf8_codepoints_decode_window_haswell_(text_u8 + base,
-                                                                                                      length - base);
+        sz_utf8_rune_window_haswell_t const decoded = sz_utf8_rune_decode_window_haswell_(text_u8 + base,
+                                                                                          length - base);
         sz_size_t const loaded = decoded.loaded;
 
         __m256i next1_lo, next1_hi, next2_lo, next2_hi;
-        sz_utf8_codepoints_forward_neighbours_haswell_(decoded.window_lo, decoded.window_hi, &next1_lo, &next1_hi,
-                                                       &next2_lo, &next2_hi);
+        sz_utf8_forward_neighbours_haswell_(decoded.window_lo, decoded.window_hi, &next1_lo, &next1_hi, &next2_lo,
+                                            &next2_hi);
         __m256i next3_lo, next3_hi;
         sz_delimiter_forward_neighbour3_haswell_(decoded.window_lo, decoded.window_hi, &next3_lo, &next3_hi);
 
@@ -231,24 +231,24 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_haswell(sz_cptr_t text, sz_size_t le
         // against a wrapped neighbour; defer it to the next window. The lowest overrunning start bounds the span.
         sz_size_t byte_span = loaded;
         if (loaded >= 64) {
-            sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 1)) |
-                                     (decoded.three_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 2)) |
-                                     (decoded.four_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 3));
+            sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                                     (decoded.three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                                     (decoded.four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
             byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
         }
-        sz_u64_t const span_mask = sz_utf8_codepoints_mask_until_(byte_span);
+        sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
 
         sz_u64_t const valid_starts = sz_delimiter_valid_starts_haswell_(&decoded, next1_lo, next1_hi, next2_lo,
                                                                          next2_hi, next3_lo, next3_hi) &
                                       decoded.codepoint_starts & span_mask;
 
         // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
-        sz_u64_t member = sz_utf8_codepoints_mask_combine_haswell_(
+        sz_u64_t member = sz_utf8_mask_combine_haswell_(
             sz_delimiter_bmp_membership_haswell_(decoded.window_lo, decoded.high_lo, decoded.low_lo),
             sz_delimiter_bmp_membership_haswell_(decoded.window_hi, decoded.high_hi, decoded.low_hi));
         sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
         if (four_byte) {
-            sz_u64_t const astral_member = sz_utf8_codepoints_mask_combine_haswell_(
+            sz_u64_t const astral_member = sz_utf8_mask_combine_haswell_(
                 sz_delimiter_astral_membership_haswell_(decoded.window_lo, next1_lo, next2_lo, next3_lo),
                 sz_delimiter_astral_membership_haswell_(decoded.window_hi, next1_hi, next2_hi, next3_hi));
             member = (member & ~four_byte) | (astral_member & four_byte);

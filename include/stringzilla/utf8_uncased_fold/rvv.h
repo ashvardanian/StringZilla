@@ -153,7 +153,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, s
     vbool1_t is_family_lead = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0xC2, vector_length), 4,
                                                         vector_length);
     vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
-    // Well-formed C2-C6 lead (mirrors `sz_rune_parse`): the next byte must be a continuation. C2-C6 are
+    // Well-formed C2-C6 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. C2-C6 are
     // all 2-byte leads with no overlong/surrogate special case, so the continuation test is the whole gate; a
     // malformed family lead is treated as foreign so the strip stops before it and serial copies one byte.
     vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
@@ -205,7 +205,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr
                                             vector_length);
     vbool1_t is_family_lead = __riscv_vmor_mm_b1(is_d0, is_d1, vector_length);
     vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
-    // Well-formed D0/D1 lead (mirrors `sz_rune_parse`): the next byte must be a continuation. D0/D1 are
+    // Well-formed D0/D1 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. D0/D1 are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
     vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
@@ -271,7 +271,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, s
                                             vector_length);
     vbool1_t is_family_lead = __riscv_vmor_mm_b1(is_ce, is_cf, vector_length);
     vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
-    // Well-formed CE/CF lead (mirrors `sz_rune_parse`): the next byte must be a continuation. CE/CF are
+    // Well-formed CE/CF lead (mirrors `sz_rune_decode`): the next byte must be a continuation. CE/CF are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
     vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
@@ -285,9 +285,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, s
         vector_length);
     vbool1_t cf_excluded = __riscv_vmand_mm_b1(is_cf, __riscv_vmsgeu_vx_u8m8_b1(next, 0x8F, vector_length),
                                                vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(
-        __riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-        __riscv_vmor_mm_b1(ce_excluded, cf_excluded, vector_length), vector_length);
+    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
+                                       __riscv_vmor_mm_b1(ce_excluded, cf_excluded, vector_length), vector_length);
 
     // Promoting ranges (second byte A0-A1 or A3-AB), used both for the second-byte -0x20 and the lead +1.
     vbool1_t in_promote_a0 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0xA0, vector_length), 0x02,
@@ -354,7 +353,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr
                                             vector_length);
     vbool1_t is_family = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_d4, is_d5, vector_length), is_d6, vector_length);
     vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family, vector_length);
-    // Well-formed D4/D5/D6 lead (mirrors `sz_rune_parse`): the next byte must be a continuation. D4-D6 are
+    // Well-formed D4/D5/D6 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. D4-D6 are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
     vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
@@ -363,9 +362,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr
     vbool1_t d4_stop = __riscv_vmand_mm_b1(is_d4, __riscv_vmsltu_vx_u8m8_b1(next, 0xB1, vector_length), vector_length);
     vbool1_t ligature_stop = __riscv_vmand_mm_b1(is_d6, __riscv_vmseq_vx_u8m8_b1(next, 0x87, vector_length),
                                                  vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(
-        __riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-        __riscv_vmor_mm_b1(d4_stop, ligature_stop, vector_length), vector_length);
+    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
+                                       __riscv_vmor_mm_b1(d4_stop, ligature_stop, vector_length), vector_length);
 
     vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
     vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
@@ -432,14 +430,14 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr
                                               vector_length);
     vbool1_t is_foreign_e1 = __riscv_vmandn_mm_b1(is_e1, __riscv_vmor_mm_b1(is_82_lead, is_83_lead, vector_length),
                                                   vector_length);
-    // Well-formed E1 82/83 lead (mirrors `sz_rune_parse`): the second byte (82/83) is already a
+    // Well-formed E1 82/83 lead (mirrors `sz_rune_decode`): the second byte (82/83) is already a
     // continuation, so the gate is that the THIRD byte is a continuation too. E1 has no overlong/surrogate
     // special case. A malformed E1 family lead is treated as foreign so the strip stops before it and serial
     // copies one byte.
     vbool1_t third_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_next, 0xC0, vector_length),
                                                               0x80, vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(
-        __riscv_vmor_mm_b1(is_82_lead, is_83_lead, vector_length), third_is_continuation, vector_length);
+    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(__riscv_vmor_mm_b1(is_82_lead, is_83_lead, vector_length),
+                                                          third_is_continuation, vector_length);
     vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, is_foreign_e1, vector_length),
                                        malformed_family_lead, vector_length);
 
@@ -543,14 +541,16 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_
         // One codepoint that the vector path can't fold in place: fold only well-formed runes; copy malformed
         // bytes through unchanged, resyncing one byte at a time, exactly as the strict serial reference does.
         sz_rune_t rune;
-        sz_rune_length_t const rune_length =
-            sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
-        if (rune_length == sz_utf8_invalid_k) { *destination_ptr++ = *source_ptr++; continue; }
+        sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
+            *destination_ptr++ = *source_ptr++;
+            continue;
+        }
         source_ptr += rune_length;
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-            destination_ptr += sz_rune_export(folded_runes[rune_index], destination_ptr);
+            destination_ptr += sz_rune_encode(folded_runes[rune_index], destination_ptr);
     }
     return (sz_size_t)(destination_ptr - (sz_u8_t *)destination);
 }

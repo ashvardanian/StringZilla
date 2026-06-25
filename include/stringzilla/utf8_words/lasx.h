@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_words/tables.h"
 #include "stringzilla/utf8_words/serial.h"
-#include "stringzilla/utf8_codepoints/lasx.h"
+#include "stringzilla/utf8_runes/lasx.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,7 +89,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_lasx(              //
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
-    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_lead_length_(text_u8[0]);
 
     // Oracle-free fast path: an all-ASCII window [position-2, position+30) resolves boundaries at positions
     // [position, position+28]; one fixed sub-block loop compacts each group and emits it as a shifted-difference,
@@ -112,7 +112,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_lasx(              //
                 word_starts[words] = word_start, word_lengths[words] = position - word_start, ++words;
                 word_start = position;
             }
-            position += sz_utf8_codepoint_length_(text_u8[position]);
+            position += sz_utf8_lead_length_(text_u8[position]);
             continue;
         }
 

@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_sentences/tables.h"
 #include "stringzilla/utf8_sentences/serial.h"
-#include "stringzilla/utf8_codepoints/haswell.h"
+#include "stringzilla/utf8_runes/haswell.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,16 +41,16 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high, __m2
     __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
     __m256i const high_high = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
     __m256i const high_low = _mm256_and_si256(high, low_nibble_mask);
-    __m256i const page = sz_utf8_codepoints_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage1_,
-                                                                   sz_utf8_sentence_break_haswell_stage1_count_k / 16,
-                                                                   high_high, high_low);
+    __m256i const page = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage1_,
+                                                             sz_utf8_sentence_break_haswell_stage1_count_k / 16,
+                                                             high_high, high_low);
     __m256i const low_high = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_codepoints_cascade_stage_haswell_(
-        sz_utf8_sentence_break_haswell_stage2_lo_, sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16, page,
-        low_high);
-    __m256i const leaf_hi = sz_utf8_codepoints_cascade_stage_haswell_(
-        sz_utf8_sentence_break_haswell_stage2_hi_, sz_utf8_sentence_break_haswell_stage2_hi_count_k / 16, page,
-        low_high);
+    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage2_lo_,
+                                                                sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16,
+                                                                page, low_high);
+    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage2_hi_,
+                                                                sz_utf8_sentence_break_haswell_stage2_hi_count_k / 16,
+                                                                page, low_high);
     __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
                                                _mm256_slli_epi16(leaf_hi, 4));
     __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
@@ -58,8 +58,8 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high, __m2
     __m256i const lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), low_low);
     __m256i result = _mm256_setzero_si256();
     for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_codepoints_lut256_haswell_(
-            sz_utf8_sentence_break_haswell_stage3_groups_ + group * 256, lut_index);
+        __m256i const value = sz_utf8_rune_lut256_haswell_(sz_utf8_sentence_break_haswell_stage3_groups_ + group * 256,
+                                                           lut_index);
         __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
         result = _mm256_blendv_epi8(result, value, here);
     }
@@ -74,17 +74,16 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane, 
     __m256i const n4 = _mm256_and_si256(plane, low_nibble_mask);
     __m256i const n3 = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
     __m256i const stage1_index = _mm256_or_si256(_mm256_slli_epi16(n4, 4), n3);
-    __m256i const page = sz_utf8_codepoints_lut256_haswell_(sz_utf8_sentence_break_haswell_astral_stage1_,
-                                                            stage1_index);
+    __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_sentence_break_haswell_astral_stage1_, stage1_index);
     __m256i const n2 = _mm256_and_si256(high, low_nibble_mask);
-    __m256i const leaf2_lo = sz_utf8_codepoints_cascade_stage_haswell_(
+    __m256i const leaf2_lo = sz_utf8_rune_cascade_stage_haswell_(
         sz_utf8_sentence_break_haswell_astral_stage2_lo_, sz_utf8_sentence_break_haswell_astral_stage2_lo_count_k / 16,
         page, n2);
     __m256i const n1 = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_codepoints_cascade_stage_haswell_(
+    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(
         sz_utf8_sentence_break_haswell_astral_stage3_lo_, sz_utf8_sentence_break_haswell_astral_stage3_lo_count_k / 16,
         leaf2_lo, n1);
-    __m256i const leaf_hi = sz_utf8_codepoints_cascade_stage_haswell_(
+    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(
         sz_utf8_sentence_break_haswell_astral_stage3_hi_, sz_utf8_sentence_break_haswell_astral_stage3_hi_count_k / 16,
         leaf2_lo, n1);
     __m256i const n0 = _mm256_and_si256(low, low_nibble_mask);
@@ -94,7 +93,7 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane, 
     __m256i const stage4_lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), n0);
     __m256i result = _mm256_setzero_si256();
     for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_astral_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_codepoints_lut256_haswell_(
+        __m256i const value = sz_utf8_rune_lut256_haswell_(
             sz_utf8_sentence_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
         __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
         result = _mm256_blendv_epi8(result, value, here);
@@ -118,7 +117,7 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_classify_half_haswell_( //
 
     //  ASCII reconstruction: codepoint == raw byte (low = raw, high = 0). The decoded window's high/low only covers
     //  2-/3-byte leads, so ASCII lanes carry stale two-byte arithmetic and must be overwritten.
-    __m256i const ascii_select = sz_utf8_codepoints_byte_mask_from_bits_haswell_(ascii_bits);
+    __m256i const ascii_select = sz_utf8_byte_mask_from_bits_haswell_(ascii_bits);
     __m256i low = _mm256_blendv_epi8(window_low, raw, ascii_select);
     __m256i high = _mm256_andnot_si256(ascii_select, window_high);
 
@@ -131,15 +130,15 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_classify_half_haswell_( //
         __m256i const four_high = _mm256_or_si256(
             _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1, low_four_bits), 4),
                              _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_codepoints_srl8_haswell_(next2, 2, 0x0F));
-        __m256i const four_select = sz_utf8_codepoints_byte_mask_from_bits_haswell_(four_byte_bits);
+            sz_utf8_srl8_haswell_(next2, 2, 0x0F));
+        __m256i const four_select = sz_utf8_byte_mask_from_bits_haswell_(four_byte_bits);
         low = _mm256_blendv_epi8(low, four_low, four_select);
         high = _mm256_blendv_epi8(high, four_high, four_select);
 
         __m256i const plane = _mm256_or_si256(
             _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw, _mm256_set1_epi8(0x07)), 2),
                              _mm256_set1_epi8(0x1C)),
-            sz_utf8_codepoints_srl8_haswell_(next1, 4, 0x03));
+            sz_utf8_srl8_haswell_(next1, 4, 0x03));
         __m256i const plane_off = _mm256_sub_epi8(_mm256_and_si256(four_select, plane), _mm256_set1_epi8(1));
         __m256i const bmp = sz_utf8_sentence_break_bmp_class_haswell_(high, low);
         __m256i const astral = sz_utf8_sentence_break_astral_class_haswell_(plane_off, high, low);
@@ -172,8 +171,8 @@ SZ_INTERNAL sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_
     sz_utf8_sentence_break_frame_t frame;
     for (int cls = 0; cls < 15; ++cls) {
         __m256i const value = _mm256_set1_epi8((char)cls);
-        frame.by_class[cls] = sz_utf8_codepoints_mask_combine_haswell_(_mm256_cmpeq_epi8(dense_lo, value),
-                                                                       _mm256_cmpeq_epi8(dense_hi, value)) &
+        frame.by_class[cls] = sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(dense_lo, value),
+                                                            _mm256_cmpeq_epi8(dense_hi, value)) &
                               valid;
     }
     return frame;
@@ -189,19 +188,19 @@ SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_de
 
 /** @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the AVX2 twin of the icelake
  *          driver's effective-window<64 trim. Never below 1 when the window is non-empty. */
-SZ_INTERNAL sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_codepoints_window_haswell_t window,
+SZ_INTERNAL sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
                                                                      sz_u8_t const *bytes_after, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
-    sz_u64_t const valid = sz_utf8_codepoints_mask_until_(loaded);
+    sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = window.codepoint_starts & valid;
     if (!start_bytes) return loaded;
     sz_u64_t const two = window.two_byte_starts & valid;
     sz_u64_t const three = window.three_byte_starts & valid;
     sz_u64_t const four = window.four_byte_starts & valid;
-    sz_u64_t const straddle = ((two & ~sz_utf8_codepoints_mask_until_(loaded > 1 ? loaded - 1 : 0)) |
-                               (three & ~sz_utf8_codepoints_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
-                               (four & ~sz_utf8_codepoints_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
+    sz_u64_t const straddle = ((two & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
+                               (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
+                               (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                               valid;
     sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
     if ((bytes_after[0] & 0xC0) == 0x80) {
@@ -245,8 +244,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
     int sb8_pending_active = 0;
 
     while (position < length) {
-        sz_utf8_codepoints_window_haswell_t const window = sz_utf8_codepoints_decode_window_haswell_(text_u8 + position,
-                                                                                                     length - position);
+        sz_utf8_rune_window_haswell_t const window = sz_utf8_rune_decode_window_haswell_(text_u8 + position,
+                                                                                         length - position);
         sz_size_t const loaded = window.loaded;
         sz_u64_t const lead_continuation = (position == 0) ? 1ull : 0ull;
         sz_u64_t const start_bytes = window.codepoint_starts | lead_continuation;
@@ -254,14 +253,14 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
 
         //  Forward neighbours for the ASCII / 4-byte codepoint reconstruction inside the classifier.
         __m256i next1_lo, next1_hi, next2_lo, next2_hi, next3_lo, next3_hi;
-        sz_utf8_codepoints_forward_neighbours_haswell_(window.window_lo, window.window_hi, &next1_lo, &next1_hi,
-                                                       &next2_lo, &next2_hi);
+        sz_utf8_forward_neighbours_haswell_(window.window_lo, window.window_hi, &next1_lo, &next1_hi, &next2_lo,
+                                            &next2_hi);
         sz_utf8_sentence_break_next3_haswell_(window.window_lo, window.window_hi, &next3_lo, &next3_hi);
 
         //  ASCII start lanes (raw < 0x80 on a codepoint start) need the raw-byte codepoint reconstruction.
         sz_u64_t const ascii_bits =
             window.codepoint_starts &
-            sz_utf8_codepoints_mask_combine_haswell_(
+            sz_utf8_mask_combine_haswell_(
                 _mm256_cmpeq_epi8(_mm256_and_si256(window.window_lo, _mm256_set1_epi8((char)0x80)),
                                   _mm256_setzero_si256()),
                 _mm256_cmpeq_epi8(_mm256_and_si256(window.window_hi, _mm256_set1_epi8((char)0x80)),
@@ -283,7 +282,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
         _mm256_storeu_si256((__m256i *)(class_bytes + 0), classes_lo);
         _mm256_storeu_si256((__m256i *)(class_bytes + 32), classes_hi);
 
-        sz_u64_t const complete_mask = sz_utf8_codepoints_mask_until_(complete_limit);
+        sz_u64_t const complete_mask = sz_u64_mask_until_serial_(complete_limit);
         sz_u64_t const dense_start_lanes = start_bytes & complete_mask;
         sz_size_t const dense_count = (sz_size_t)_mm_popcnt_u64(dense_start_lanes);
         sz_u8_t dense_classes[64];
@@ -318,7 +317,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
 
         //  Scatter the trusted dense breaks back to byte lanes (`_pdep_u64` into the dense start lanes).
         sz_size_t const dense_adv = win.resolved;
-        sz_u64_t const dense_breaks = win.breaks & sz_utf8_codepoints_mask_until_(dense_adv);
+        sz_u64_t const dense_breaks = win.breaks & sz_u64_mask_until_serial_(dense_adv);
         sz_u64_t boundary_lanes = _pdep_u64(dense_breaks, dense_start_lanes);
         if (!carry.have_prev) boundary_lanes &= ~1ull;
 
@@ -329,9 +328,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
             byte_adv = (sz_size_t)sz_u64_ctz(upto);
         }
 
-        sentences = sz_utf8_codepoints_drain_forward_haswell_(boundary_lanes, position, sentence_starts,
-                                                              sentence_lengths, sentences, sentences_capacity,
-                                                              &sentence_start);
+        sentences = sz_utf8_rune_drain_forward_haswell_(boundary_lanes, position, sentence_starts, sentence_lengths,
+                                                        sentences, sentences_capacity, &sentence_start);
         if (sentences == sentences_capacity) {
             if (bytes_consumed) *bytes_consumed = sentence_start;
             return sentences;

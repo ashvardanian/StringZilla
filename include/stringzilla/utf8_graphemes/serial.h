@@ -8,8 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_graphemes/tables.h"
-#include "stringzilla/utf8_codepoints/serial.h" // shared decode helpers
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +35,7 @@ SZ_PUBLIC sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
 
 /**
  *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
- *         Mirrors the SIMD `sz_utf8_codepoints_decode_window_` codepoint-start convention (every loaded
+ *         Mirrors the SIMD `sz_utf8_rune_decode_window_` codepoint-start convention (every loaded
  *         non-continuation byte begins a codepoint) so the serial and Ice Lake backends step over malformed
  *         input identically. Stepping by the lead's declared byte length would skip past trailing
  *         non-continuation bytes of a truncated lead, diverging from the window decoder.
@@ -110,7 +109,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
     if (position >= length) return sz_true_k; // GB2
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
 
-    sz_size_t before_start = sz_utf8_previous_codepoint_start_(text, position);
+    sz_size_t before_start = sz_utf8_previous_rune_start_(text, position);
     // When `prev_start` lands on an orphan continuation byte there is no real codepoint before `position`: the SIMD
     // window excludes continuation bytes from `codepoint_starts`, so the codepoint at `position` is the FIRST real
     // codepoint with no left context and the leading orphan bytes form their own cluster. Force a boundary to match.
@@ -146,7 +145,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_bool_t seen_linker = sz_false_k;
         sz_size_t scan = position;
         while (scan > 0) {
-            sz_size_t scan_start = sz_utf8_previous_codepoint_start_(text, scan);
+            sz_size_t scan_start = sz_utf8_previous_rune_start_(text, scan);
             sz_u8_t scan_incb = sz_grapheme_break_descriptor_incb_(
                 sz_grapheme_break_property_at_(text, length, scan_start));
             if (scan_incb == sz_grapheme_incb_linker_k) {
@@ -173,7 +172,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_size_t walk = before_start; // we always inspect the codepoint that starts before `walk`
         sz_bool_t found = sz_false_k;
         for (;;) {
-            sz_size_t walk_start = sz_utf8_previous_codepoint_start_(text, walk);
+            sz_size_t walk_start = sz_utf8_previous_rune_start_(text, walk);
             sz_u8_t walk_descriptor = sz_grapheme_break_property_at_(text, length, walk_start);
             if (sz_grapheme_break_descriptor_gcb_(walk_descriptor) == sz_grapheme_break_extend_k && walk_start > 0) {
                 walk = walk_start;
@@ -192,7 +191,7 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_
         sz_size_t ri_count = 0;
         sz_size_t scan = position;
         while (scan > 0) {
-            sz_size_t scan_start = sz_utf8_previous_codepoint_start_(text, scan);
+            sz_size_t scan_start = sz_utf8_previous_rune_start_(text, scan);
             if (sz_grapheme_break_descriptor_gcb_(sz_grapheme_break_property_at_(text, length, scan_start)) ==
                 sz_grapheme_break_regional_indicator_k) {
                 ++ri_count;
@@ -326,7 +325,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
         sz_u8_t const after_descriptor = sz_grapheme_break_property_at_(text, length, position);
         // A leading orphan continuation before `position` has no real left codepoint: force a boundary (matches the
         // window decoder, which excludes continuation bytes from codepoint starts). Bounded back-scan, amortized O(n).
-        sz_size_t const before_start = sz_utf8_previous_codepoint_start_(text, position);
+        sz_size_t const before_start = sz_utf8_previous_rune_start_(text, position);
         sz_bool_t const boundary = (((sz_u8_t)text[before_start] & 0xC0u) == 0x80u)
                                        ? sz_true_k
                                        : sz_grapheme_serial_boundary_(&state, after_descriptor);
@@ -419,7 +418,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t cons
         // previous-window run, so XOR in the carried odd-parity bit. Then a segmented XOR-parity scan over the run.
         sz_u64_t const seed = regional ^
                               (regional & ~starts & 1ull & (sz_u64_t)(previous->regional_indicator_run_odd & 1));
-        sz_u64_t const parity = sz_utf8_codepoints_segmented_parity_(seed, regional & ~starts);
+        sz_u64_t const parity = sz_u64_segmented_parity_(seed, regional & ~starts);
         join |= regional & previous_ri & ~parity; // parity[i]==0 -> even member -> pairs with i-1 -> no break
         next->regional_indicator_run_odd = (regional & last_bit) ? ((parity & last_bit) != 0) : 0;
     }
@@ -431,7 +430,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t cons
     if (window->extended_pictographic | zero_width_joiner | (previous->extended_pictographic_run ? 1ull : 0ull)) {
         sz_u64_t run = window->extended_pictographic;
         run |= (extend & 1ull) & (sz_u64_t)(previous->extended_pictographic_run); // branchless lane-0 chain seed
-        run = sz_utf8_codepoints_fill_right_(run, extend);
+        run = sz_u64_fill_right_(run, extend);
         sz_u64_t const previous_run = (run << 1) | (previous->extended_pictographic_run ? 1ull : 0ull);
         sz_u64_t const connector = zero_width_joiner & previous_run;
         sz_u64_t const previous_connector = (connector << 1) | (previous->zero_width_joiner_connector ? 1ull : 0ull);
@@ -452,11 +451,11 @@ SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t cons
         sz_u64_t const continuation = window->indic_extend | window->indic_linker;
         sz_u64_t open = window->indic_consonant;
         open |= (continuation & 1ull) & (sz_u64_t)(previous->indic_conjunct_open); // branchless lane-0 open seed
-        open = sz_utf8_codepoints_fill_right_(open, continuation);
+        open = sz_u64_fill_right_(open, continuation);
         sz_u64_t seen = window->indic_linker & open;
         seen |= (continuation & 1ull) &
                 (sz_u64_t)(previous->indic_conjunct_open & previous->indic_conjunct_seen_linker);
-        seen = sz_utf8_codepoints_fill_right_(seen, continuation & open);
+        seen = sz_u64_fill_right_(seen, continuation & open);
         sz_u64_t previous_open_seen = ((open & seen) << 1);
         previous_open_seen |= (sz_u64_t)(previous->indic_conjunct_open & previous->indic_conjunct_seen_linker);
         join |= previous_open_seen & window->indic_consonant;

@@ -106,7 +106,7 @@ struct utf8_count_from_sz {
 };
 
 /** @brief Wraps a hardware-specific UTF-8 to UTF-32 unpacking backend. */
-template <sz_utf8_unpack_chunk_t func_>
+template <sz_utf8_decode_t func_>
 struct utf8_unpack_from_sz {
 
     environment_t const &env;
@@ -314,33 +314,27 @@ void bench_utf8_count(environment_t const &env) {
 
 void bench_utf8_unpack(environment_t const &env) {
 
-    auto validator = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env, {}};
-    bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", validator).log();
+    auto validator = utf8_unpack_from_sz<sz_utf8_decode_serial> {env, {}};
+    bench_result_t base = bench_unary(env, "sz_utf8_decode_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_unpack_chunk_icelake", validator,
-                utf8_unpack_from_sz<sz_utf8_unpack_chunk_icelake> {env, {}})
+    bench_unary(env, "sz_utf8_decode_icelake", validator, utf8_unpack_from_sz<sz_utf8_decode_icelake> {env, {}})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_unpack_chunk_neon", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env, {}})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_neon", validator, utf8_unpack_from_sz<sz_utf8_decode_neon> {env, {}}).log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_unpack_chunk_v128", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_v128> {env, {}})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_v128", validator, utf8_unpack_from_sz<sz_utf8_decode_v128> {env, {}}).log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_unpack_chunk_rvv", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_rvv> {env, {}})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_rvv", validator, utf8_unpack_from_sz<sz_utf8_decode_rvv> {env, {}}).log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_unpack_chunk_lasx", validator, utf8_unpack_from_sz<sz_utf8_unpack_chunk_lasx> {env, {}})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_lasx", validator, utf8_unpack_from_sz<sz_utf8_decode_lasx> {env, {}}).log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_unpack_chunk_powervsx", validator,
-                utf8_unpack_from_sz<sz_utf8_unpack_chunk_powervsx> {env, {}})
+    bench_unary(env, "sz_utf8_decode_powervsx", validator, utf8_unpack_from_sz<sz_utf8_decode_powervsx> {env, {}})
         .log(base);
 #endif
 }

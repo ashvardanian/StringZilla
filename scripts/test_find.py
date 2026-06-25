@@ -23,7 +23,6 @@ def test_unit_count():
     assert big.count("aa", allowoverlap=True) == 4
 
 
-
 def test_unit_count_byteset():
     native = "abcdef"
     big = Str(native)
@@ -62,13 +61,11 @@ def test_unit_count_byteset():
     assert sz.count_byteset("abc", "abc", -10, -5) == 0  # negative out of bounds
 
 
-
 def test_unit_contains():
     big = Str("abcdef")
     assert "a" in big
     assert "ab" in big
     assert "xxx" not in big
-
 
 
 def test_unit_globals():
@@ -151,7 +148,6 @@ def test_unit_globals():
     assert sz.rsplit("hello world test", " ", 1) == ["hello world", "test"]
 
 
-
 def test_slice_of_split():
     def impl(native_str: str):
         native_split = native_str.split()
@@ -166,7 +162,6 @@ def test_slice_of_split():
     copies = int(len(native_str) / 5e9)
     # Eek. Cover 64-bit indices
     impl(native_str * copies)
-
 
 
 def check_identical(
@@ -236,4 +231,3 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     assert native.find(pattern) == big.find(
         pattern
     ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
-

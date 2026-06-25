@@ -55,8 +55,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory
     return sz_dispatch_table.sequence_argsort(array, alloc, order, top_count, reverse);
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_uncased(sz_sequence_t const *array,
-                                                                 sz_memory_allocator_t *alloc, sz_size_t *order,
-                                                                 sz_size_t top_count, sz_bool_t reverse) {
+SZ_DYNAMIC sz_status_t sz_sequence_argsort_utf8_uncased(sz_sequence_t const *array, sz_memory_allocator_t *alloc,
+                                                        sz_size_t *order, sz_size_t top_count, sz_bool_t reverse) {
     return sz_dispatch_table.sequence_argsort_utf8_uncased(array, alloc, order, top_count, reverse);
 }

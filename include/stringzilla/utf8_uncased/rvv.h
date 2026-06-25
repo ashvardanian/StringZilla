@@ -710,7 +710,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_find_rvv_scripted_( //
 
     // The first folded rune of the safe window, for the serial danger-zone pivot.
     sz_rune_t needle_first_safe_folded_rune = 0;
-    if (alarm) sz_rune_parse_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune);
+    if (alarm) sz_rune_decode_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune);
 
     // Scratch space: a folded-strip buffer (e8m8 strip + slack) and a per-candidate window buffer.
     // RVV 1.0 caps VLEN at 64 Kib, so an e8m8 strip is at most VLMAX = 8*VLEN/8 = 8192 bytes; we cap the
@@ -1004,8 +1004,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_rvv(sz_cptr_t str, sz_size_t lengt
         // A byte that does not begin a well-formed codepoint folds to itself - it is caseless, never a
         // violation - so resync by one byte, matching the serial backend.
         sz_rune_t rune;
-        sz_rune_length_t const rune_length = sz_rune_parse((sz_cptr_t)cursor, (sz_cptr_t)end, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)cursor, (sz_cptr_t)end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             cursor++;
             continue;
         }

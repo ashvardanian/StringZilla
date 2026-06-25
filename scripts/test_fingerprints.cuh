@@ -548,16 +548,16 @@ static std::vector<std::string> rolling_hasher_degenerate_inputs() {
     std::vector<std::string> strings;
     std::size_t const run_length = scale_iterations(64);
 
-    strings.emplace_back("");                                // Empty string
-    strings.emplace_back(1, 'a');                            // Single byte
-    strings.emplace_back(1, '\x00');                         // Single NUL byte
-    strings.emplace_back(1, '\xff');                         // Single high byte
-    strings.emplace_back(run_length, 'a');                   // All-identical printable bytes
-    strings.emplace_back(run_length, '\x00');                // All-identical NUL bytes
-    strings.emplace_back(run_length, '\xff');                // All-identical high bytes
-    strings.emplace_back("\x00\xff\x00\xff\x00\xff", 6);     // Alternating edge bytes
-    strings.emplace_back("a");                               // Shorter than any tested window
-    strings.emplace_back("ab");                              // Shorter than any tested window
+    strings.emplace_back("");                            // Empty string
+    strings.emplace_back(1, 'a');                        // Single byte
+    strings.emplace_back(1, '\x00');                     // Single NUL byte
+    strings.emplace_back(1, '\xff');                     // Single high byte
+    strings.emplace_back(run_length, 'a');               // All-identical printable bytes
+    strings.emplace_back(run_length, '\x00');            // All-identical NUL bytes
+    strings.emplace_back(run_length, '\xff');            // All-identical high bytes
+    strings.emplace_back("\x00\xff\x00\xff\x00\xff", 6); // Alternating edge bytes
+    strings.emplace_back("a");                           // Shorter than any tested window
+    strings.emplace_back("ab");                          // Shorter than any tested window
     return strings;
 }
 

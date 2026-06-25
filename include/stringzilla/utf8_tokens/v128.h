@@ -8,7 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_tokens/serial.h"
-#include "stringzilla/utf8_codepoints/v128.h"
+#include "stringzilla/utf8_runes/v128.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -8,8 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_linewraps/tables.h"
-#include "stringzilla/utf8_codepoints/serial.h" // shared decode helpers
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
 extern "C" {
@@ -131,7 +130,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
                 break;
             }
             sz_size_t decode = position;
-            sz_rune_t rune = sz_utf8_decode_(text, length, &decode);
+            sz_rune_t rune = sz_utf8_next_rune_(text, length, &decode);
             sz_u16_t cp_descriptor = sz_rune_line_break_property(rune);
             sz_u8_t line_break_class = sz_line_break_descriptor_class_(cp_descriptor);
             if (line_break_class == sz_line_break_sa_k)
@@ -688,18 +687,18 @@ SZ_INTERNAL sz_u64_t sz_line_break_effective_range_(sz_line_break_frame_t const 
 
 /** @brief Previous-cluster mask: bit k set => the cluster ending just before lane k has a base in @p class_base. */
 SZ_INTERNAL sz_u64_t sz_line_break_prev_(sz_u64_t class_base, sz_u64_t gate) {
-    return sz_utf8_codepoints_fill_right_(class_base, gate) << 1;
+    return sz_u64_fill_right_(class_base, gate) << 1;
 }
 
 /** @brief Next-cluster mask: bit k set => the cluster starting just after lane k has a base in @p class_base. */
 SZ_INTERNAL sz_u64_t sz_line_break_next_(sz_u64_t class_base, sz_u64_t gate) {
-    return sz_utf8_codepoints_fill_left_(class_base, gate) >> 1;
+    return sz_u64_fill_left_(class_base, gate) >> 1;
 }
 
 /** @brief Carry-aware previous-cluster mask: like @ref sz_line_break_prev_, but additionally marks @p edge (lane 0)
  *         when the carried left cluster matches (@p left_in_set), so cross-window left context needs no byte re-read. */
 SZ_INTERNAL sz_u64_t sz_line_break_prevc_(sz_u64_t class_base, sz_u64_t gate, sz_bool_t left_in_set, sz_u64_t edge) {
-    return (sz_utf8_codepoints_fill_right_(class_base, gate) << 1) | (left_in_set ? edge : 0);
+    return (sz_u64_fill_right_(class_base, gate) << 1) | (left_in_set ? edge : 0);
 }
 
 /** @brief Commit a forced break at the undecided lanes of @p where (sets break + settled). */
@@ -716,7 +715,7 @@ SZ_INTERNAL void sz_line_break_force_join_(sz_u64_t where, sz_u64_t all, sz_u64_
 /** @brief Opener-governed "X SP*" run over byte-start lanes (LB8/14/16/17): flood the opener rightward across the
  *         transparent gate and the space bases; the result marks the opener + the governed space base lanes. */
 SZ_INTERNAL sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u64_t spaces, sz_u64_t gate) {
-    return sz_utf8_codepoints_fill_right_(opener, gate | spaces) & (opener | spaces);
+    return sz_u64_fill_right_(opener, gate | spaces) & (opener | spaces);
 }
 
 /** @brief Inclusive segmented prefix-XOR of @p members over each contiguous @p run_gate run (LB30a RI parity); when
@@ -724,8 +723,8 @@ SZ_INTERNAL sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u64_t spaces, s
  *         inclusive parity. The prefix-XOR scan is the shared substrate primitive; this wrapper adds the RI-pairing
  *         inbound-run seed (mirrors the word kernel's `ri_join_`). */
 SZ_INTERNAL sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u64_t run_gate, sz_bool_t inbound_parity) {
-    sz_u64_t bits = sz_utf8_codepoints_segmented_parity_(members, run_gate);
-    if (inbound_parity) bits ^= sz_utf8_codepoints_fill_right_(run_gate & 1ull, run_gate);
+    sz_u64_t bits = sz_u64_segmented_parity_(members, run_gate);
+    if (inbound_parity) bits ^= sz_u64_fill_right_(run_gate & 1ull, run_gate);
     return bits;
 }
 
@@ -908,7 +907,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         base, &settled, &breaks);
     // LB8a: ZWJ x (codepoint-level: previous codepoint is the original ZWJ class). A carried bare ZWJ joins lane 0.
     {
-        sz_u64_t zwj_join_targets = (sz_utf8_codepoints_fill_right_(zwj_starts, non_start) << 1) & base;
+        sz_u64_t zwj_join_targets = (sz_u64_fill_right_(zwj_starts, non_start) << 1) & base;
         if (carry.prev_is_zwj) zwj_join_targets |= edge;
         sz_line_break_force_join_(zwj_join_targets & interior_lanes, base, &settled);
     }
@@ -1110,8 +1109,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         sz_u64_t const symbol_or_infix = class_symbol | class_infix_separator;
         sz_u64_t const nu_seed = class_numeric |
                                  (carry.in_nu_run && ((class_numeric | symbol_or_infix) & first_base) ? first_base : 0);
-        sz_u64_t const numeric_run = sz_utf8_codepoints_fill_right_(nu_seed, gate | symbol_or_infix) &
-                                     (nu_seed | symbol_or_infix);
+        sz_u64_t const numeric_run = sz_u64_fill_right_(nu_seed, gate | symbol_or_infix) & (nu_seed | symbol_or_infix);
         sz_u64_t const numeric_run_prev = sz_line_break_prevc_(numeric_run, gate, (sz_bool_t)carry.in_nu_run, edge);
         //  A CL/CP closing a NU run; the run may have closed at the carried left (carry.in_nu_close).
         sz_u64_t const numeric_run_close = numeric_run_prev & (class_close_punctuation | class_close_parenthesis);
@@ -1285,8 +1283,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     // the parity of indicators at-or-before it; the 2nd of each pair (even inclusive parity) is joined. A run
     // straddling in from the previous window toggles the leading run via the inbound-parity seed.
     if (class_regional_indicator) {
-        sz_u64_t const ri_run_gate = sz_utf8_codepoints_fill_right_(class_regional_indicator, gate) |
-                                     class_regional_indicator;
+        sz_u64_t const ri_run_gate = sz_u64_fill_right_(class_regional_indicator, gate) | class_regional_indicator;
         sz_bool_t const inbound = (sz_bool_t)(carry.ri_open && carry.ri_parity_odd);
         sz_u64_t const inclusive = sz_line_break_segmented_parity_(class_regional_indicator, ri_run_gate, inbound);
         sz_line_break_force_join_((class_regional_indicator & ~inclusive) & interior_lanes, base, &settled);
@@ -1317,11 +1314,11 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     sz_u64_t const symbol_or_infix_all = class_symbol | class_infix_separator;
     sz_u64_t const nu_seed_all =
         class_numeric | (carry.in_nu_run && ((class_numeric | symbol_or_infix_all) & first_base) ? first_base : 0);
-    sz_u64_t const numeric_run_all = sz_utf8_codepoints_fill_right_(nu_seed_all, gate | symbol_or_infix_all) &
+    sz_u64_t const numeric_run_all = sz_u64_fill_right_(nu_seed_all, gate | symbol_or_infix_all) &
                                      (nu_seed_all | symbol_or_infix_all);
     sz_size_t resolved = complete_limit;
     if (more_text) {
-        sz_u64_t const complete_mask = sz_utf8_codepoints_mask_until_(complete_limit);
+        sz_u64_t const complete_mask = sz_u64_mask_until_serial_(complete_limit);
         sz_u64_t const complete_base = base & complete_mask;
         sz_size_t const top_base = complete_base ? (sz_size_t)(63 - sz_u64_clz(complete_base)) : 0;
         sz_u64_t const top_bit = complete_base ? (1ull << top_base) : 0ull;
@@ -1335,7 +1332,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
             //  Flood the open construct back left across its gate to the run's lowest lane: the next window re-derives
             //  the verdict there with the carried run-state, so trust ends at that base.
             sz_u64_t const run_gate = gate | symbol_or_infix_all | class_space;
-            sz_u64_t const reaching = base & sz_utf8_codepoints_fill_left_(undecided, run_gate);
+            sz_u64_t const reaching = base & sz_u64_fill_left_(undecided, run_gate);
             sz_size_t const low_lane = reaching ? (sz_size_t)sz_u64_ctz(reaching) : top_base;
             if (low_lane < resolved) resolved = low_lane;
         }
@@ -1344,7 +1341,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         sz_size_t const lookahead = 2;
         sz_size_t count = 0, lane = top_base;
         for (;;) {
-            sz_u64_t const lane_mask = sz_utf8_codepoints_mask_until_(lane);
+            sz_u64_t const lane_mask = sz_u64_mask_until_serial_(lane);
             sz_u64_t const lower = complete_base & lane_mask;
             if (!lower || count + 1 >= lookahead) {
                 if (lane < resolved) resolved = lane;
@@ -1355,7 +1352,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
         }
         if (resolved > complete_limit) resolved = complete_limit;
     }
-    breaks &= sz_utf8_codepoints_mask_until_(resolved);
+    breaks &= sz_u64_mask_until_serial_(resolved);
 
     //  The driver advances by `advance` bytes after this call: the clamp horizon `resolved` when it bit before the
     //  complete edge, else the whole complete span. The carry anchors at THAT byte so a single decision rebuilds the
@@ -1367,7 +1364,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     //  left context). An all-ignorable region below `advance` threads the inbound carry unchanged.
     if (carry_out) {
         sz_line_break_carry_t out = carry;
-        sz_u64_t const below = base & sz_utf8_codepoints_mask_until_(advance);
+        sz_u64_t const below = base & sz_u64_mask_until_serial_(advance);
         if (below) {
             //  At least one cluster resolved: rebuild the full left context + run-state at the complete edge.
             out.open_sp_opener = 0xFF, out.in_nu_run = 0, out.in_nu_close = 0, out.ri_open = 0, out.ri_parity_odd = 0,
@@ -1390,7 +1387,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
             //  LB8a is codepoint-level: the previous CLUSTER joins lane 0 when its LAST codepoint is a bare ZWJ -- that
             //  ZWJ is an attached mark (LB9), so it sits ABOVE the base `pbit`, not on it. Test the highest codepoint
             //  START below the edge, not the highest base.
-            sz_u64_t const starts_below = frame->starts & sz_utf8_codepoints_mask_until_(advance);
+            sz_u64_t const starts_below = frame->starts & sz_u64_mask_until_serial_(advance);
             sz_u64_t const last_start = starts_below ? (1ull << (63 - sz_u64_clz(starts_below))) : 0ull;
             out.prev_is_zwj = (sz_u8_t)((zwj_starts & last_start) != 0);
             //  The two-left context is the prior resolved base, or -- when only one cluster resolved here -- the inbound
@@ -1429,8 +1426,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
                                                                    edge) &
                                               (class_close_punctuation | class_close_parenthesis);
             out.in_nu_close = (sz_u8_t)((nu_run_close_all & previous_cluster_bit) != 0);
-            sz_u64_t const ri_run_gate = sz_utf8_codepoints_fill_right_(class_regional_indicator, gate) |
-                                         class_regional_indicator;
+            sz_u64_t const ri_run_gate = sz_u64_fill_right_(class_regional_indicator, gate) | class_regional_indicator;
             sz_bool_t const inbound = (sz_bool_t)(carry.ri_open && carry.ri_parity_odd);
             sz_u64_t const inclusive = sz_line_break_segmented_parity_(class_regional_indicator, ri_run_gate, inbound);
             out.ri_open = (sz_u8_t)((class_regional_indicator & previous_cluster_bit) != 0);

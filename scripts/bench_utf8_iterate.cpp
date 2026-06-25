@@ -14,7 +14,7 @@
  *  - UAX-29 grapheme-cluster segmentation - @b utf8_graphemes.
  *  - UAX-29 sentence-boundary segmentation - @b utf8_sentences.
  *  - UAX-14 line-break segmentation - @b utf8_linewraps.
- *  - UTF-8 -> UTF-32 transcoding - @b utf8_unpack_chunk.
+ *  - UTF-8 -> UTF-32 transcoding - @b utf8_decode.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -42,12 +42,12 @@
 #include "bench.hpp"
 #include "test_stringzilla.hpp" // `log_environment`
 
-#include "stringzilla/utf8_codepoints.h" // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_unpack_chunk`
-#include "stringzilla/utf8_tokens.h" // `sz_utf8_newlines`, `sz_utf8_whitespaces`
-#include "stringzilla/utf8_words.h"      // `sz_utf8_words`
-#include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
-#include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
-#include "stringzilla/utf8_linewraps.h"      // `sz_utf8_linewraps`
+#include "stringzilla/utf8_runes.h"     // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_decode`
+#include "stringzilla/utf8_tokens.h"    // `sz_utf8_newlines`, `sz_utf8_whitespaces`
+#include "stringzilla/utf8_words.h"     // `sz_utf8_words`
+#include "stringzilla/utf8_graphemes.h" // `sz_utf8_graphemes`
+#include "stringzilla/utf8_sentences.h" // `sz_utf8_sentences`
+#include "stringzilla/utf8_linewraps.h" // `sz_utf8_linewraps`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -355,31 +355,32 @@ void bench_utf8_linewraps(environment_t const &env) {
 #endif
 }
 
-void bench_utf8_unpack_chunk(environment_t const &env) {
-    auto base_v = utf8_unpack_from_sz<sz_utf8_unpack_chunk_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_unpack_chunk_serial", base_v).log();
+void bench_utf8_decode(environment_t const &env) {
+    auto base_v = utf8_unpack_from_sz<sz_utf8_decode_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_decode_serial", base_v).log();
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_decode_haswell", base_v, utf8_unpack_from_sz<sz_utf8_decode_haswell> {env}).log(base);
+#endif
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_unpack_chunk_icelake", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_icelake> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_icelake", base_v, utf8_unpack_from_sz<sz_utf8_decode_icelake> {env}).log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_unpack_chunk_neon", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_neon> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_neon", base_v, utf8_unpack_from_sz<sz_utf8_decode_neon> {env}).log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_decode_sve2", base_v, utf8_unpack_from_sz<sz_utf8_decode_sve2> {env}).log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_unpack_chunk_v128", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_v128> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_v128", base_v, utf8_unpack_from_sz<sz_utf8_decode_v128> {env}).log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_unpack_chunk_rvv", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_rvv> {env}).log(base);
+    bench_unary(env, "sz_utf8_decode_rvv", base_v, utf8_unpack_from_sz<sz_utf8_decode_rvv> {env}).log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_unpack_chunk_powervsx", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_powervsx> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_powervsx", base_v, utf8_unpack_from_sz<sz_utf8_decode_powervsx> {env}).log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_unpack_chunk_lasx", base_v, utf8_unpack_from_sz<sz_utf8_unpack_chunk_lasx> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_decode_lasx", base_v, utf8_unpack_from_sz<sz_utf8_decode_lasx> {env}).log(base);
 #endif
 }
 
@@ -406,7 +407,7 @@ int main(int argc, char const **argv) {
     bench_utf8_graphemes(env);
     bench_utf8_sentences(env);
     bench_utf8_linewraps(env);
-    bench_utf8_unpack_chunk(env);
+    bench_utf8_decode(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

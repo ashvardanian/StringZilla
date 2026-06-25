@@ -134,10 +134,10 @@ SZ_INTERNAL sz_sort_haswell_block_masks_t sz_sort_haswell_classify_block_( //
 
 /** @brief Left-packs both 4-lane halves of one 8-lane block into @p cursor under @p mask_lower / @p mask_upper,
  *         advancing the cursor by the surviving-lane counts (the lower half first, preserving lane order). */
-SZ_INTERNAL void sz_sort_haswell_compact_block_into_(                            //
-    sz_sort_haswell_region_cursor_t *const cursor,                              //
-    __m256i const keys_lower_u64x4, __m256i const order_lower_u64x4,            //
-    __m256i const keys_upper_u64x4, __m256i const order_upper_u64x4,            //
+SZ_INTERNAL void sz_sort_haswell_compact_block_into_(                //
+    sz_sort_haswell_region_cursor_t *const cursor,                   //
+    __m256i const keys_lower_u64x4, __m256i const order_lower_u64x4, //
+    __m256i const keys_upper_u64x4, __m256i const order_upper_u64x4, //
     sz_u32_t const mask_lower, sz_u32_t const mask_upper) {
 
     sz_size_t taken;
@@ -176,8 +176,8 @@ SZ_INTERNAL void sz_sequence_argsort_haswell_3way_partition_(                   
     for (; i + 8 <= end_in_sequence; i += 8) {
         __m256i keys_lower_u64x4 = _mm256_loadu_si256((__m256i const *)(initial_pgrams + i));
         __m256i keys_upper_u64x4 = _mm256_loadu_si256((__m256i const *)(initial_pgrams + i + 4));
-        sz_sort_haswell_block_masks_t const masks =
-            sz_sort_haswell_classify_block_(keys_lower_u64x4, keys_upper_u64x4, pivot_biased_u64x4, sign_u64x4);
+        sz_sort_haswell_block_masks_t const masks = sz_sort_haswell_classify_block_(keys_lower_u64x4, keys_upper_u64x4,
+                                                                                    pivot_biased_u64x4, sign_u64x4);
         count_smaller += (sz_size_t)_mm_popcnt_u32(masks.smaller_lower);
         count_smaller += (sz_size_t)_mm_popcnt_u32(masks.smaller_upper);
         count_greater += (sz_size_t)_mm_popcnt_u32(masks.greater_lower);
@@ -206,8 +206,8 @@ SZ_INTERNAL void sz_sequence_argsort_haswell_3way_partition_(                   
         __m256i keys_upper_u64x4 = _mm256_loadu_si256((__m256i const *)(initial_pgrams + i + 4));
         __m256i order_lower_u64x4 = _mm256_loadu_si256((__m256i const *)(initial_order + i));
         __m256i order_upper_u64x4 = _mm256_loadu_si256((__m256i const *)(initial_order + i + 4));
-        sz_sort_haswell_block_masks_t const masks =
-            sz_sort_haswell_classify_block_(keys_lower_u64x4, keys_upper_u64x4, pivot_biased_u64x4, sign_u64x4);
+        sz_sort_haswell_block_masks_t const masks = sz_sort_haswell_classify_block_(keys_lower_u64x4, keys_upper_u64x4,
+                                                                                    pivot_biased_u64x4, sign_u64x4);
 
         sz_sort_haswell_compact_block_into_(&smaller_cursor, keys_lower_u64x4, order_lower_u64x4, keys_upper_u64x4,
                                             order_upper_u64x4, masks.smaller_lower, masks.smaller_upper);
@@ -410,8 +410,8 @@ SZ_PUBLIC void sz_sequence_argsort_haswell_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_haswell( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_haswell(  //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;

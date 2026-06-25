@@ -62,12 +62,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_find( //
-    sz_cptr_t haystack, sz_size_t haystack_length,  //
-    sz_cptr_t needle, sz_size_t needle_length,      //
+SZ_DYNAMIC sz_cptr_t sz_utf8_uncased_find(         //
+    sz_cptr_t haystack, sz_size_t haystack_length, //
+    sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-    return sz_dispatch_table.utf8_uncased_find(haystack, haystack_length, needle, needle_length,
-                                                        needle_metadata, matched_length);
+    return sz_dispatch_table.utf8_uncased_find(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                               matched_length);
 }
 
 SZ_DYNAMIC sz_ordering_t sz_utf8_uncased_order( //

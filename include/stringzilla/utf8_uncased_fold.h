@@ -10,7 +10,7 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_H_
 
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,13 +52,13 @@ extern "C" {
  *      // destination now contains "hello", result_length = 5
  *  @endcode
  */
-SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(        //
+SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(     //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial(  //
-    sz_cptr_t source, sz_size_t source_length, //
+SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial( //
+    sz_cptr_t source, sz_size_t source_length,   //
     sz_ptr_t destination);
 
 #if SZ_USE_ICELAKE

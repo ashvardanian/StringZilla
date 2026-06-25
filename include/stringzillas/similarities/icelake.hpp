@@ -3422,14 +3422,14 @@ struct levenshtein_distance_utf8<linear_gap_costs_t, capability_,
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++first_length_utf32) {
-            rune_length = sz_rune_parse_unchecked(first.data() + progress_utf8, first_data_utf32 + first_length_utf32);
-            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+            rune_length = sz_rune_decode_unchecked(first.data() + progress_utf8, first_data_utf32 + first_length_utf32);
+            if (rune_length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
         }
         for (size_t progress_utf8 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++second_length_utf32) {
-            rune_length = sz_rune_parse_unchecked(second.data() + progress_utf8,
-                                                  second_data_utf32 + second_length_utf32);
-            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+            rune_length = sz_rune_decode_unchecked(second.data() + progress_utf8,
+                                                   second_data_utf32 + second_length_utf32);
+            if (rune_length == sz_rune_invalid_k) return status_t::invalid_utf8_k;
         }
 
         using diagonal_memory_requirements_t = diagonal_memory_requirements<size_t>;
@@ -4123,8 +4123,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             rune_length_t rune_length;
             for (size_t progress = 0; progress < bytes.size(); progress += rune_length) {
                 rune_t rune;
-                rune_length = sz_rune_parse_unchecked(bytes.data() + progress, &rune);
-                if (rune_length == sz_utf8_invalid_k) return false;
+                rune_length = sz_rune_decode_unchecked(bytes.data() + progress, &rune);
+                if (rune_length == sz_rune_invalid_k) return false;
                 if (arena.try_resize(arena.size() + 1) != status_t::success_k) return false;
                 arena[arena.size() - 1] = rune;
             }
@@ -4301,17 +4301,17 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             rune_length_t rune_length;
             for (size_t progress = 0; progress < query.size(); progress += rune_length, ++query_runes_count) {
                 if (query_offset + query_runes_count >= rune_arena_runes) return false;
-                rune_length = sz_rune_parse_unchecked(query.data() + progress,
-                                                      rune_arena + query_offset + query_runes_count);
-                if (rune_length == sz_utf8_invalid_k) return false;
+                rune_length = sz_rune_decode_unchecked(query.data() + progress,
+                                                       rune_arena + query_offset + query_runes_count);
+                if (rune_length == sz_rune_invalid_k) return false;
             }
             size_t const candidate_offset = query_offset + query_runes_count;
             size_t candidate_runes_count = 0;
             for (size_t progress = 0; progress < candidate.size(); progress += rune_length, ++candidate_runes_count) {
                 if (candidate_offset + candidate_runes_count >= rune_arena_runes) return false;
-                rune_length = sz_rune_parse_unchecked(candidate.data() + progress,
-                                                      rune_arena + candidate_offset + candidate_runes_count);
-                if (rune_length == sz_utf8_invalid_k) return false;
+                rune_length = sz_rune_decode_unchecked(candidate.data() + progress,
+                                                       rune_arena + candidate_offset + candidate_runes_count);
+                if (rune_length == sz_rune_invalid_k) return false;
             }
             arena_used = candidate_offset + candidate_runes_count;
             span<rune_t const> const query_view {rune_arena + query_offset, query_runes_count};
@@ -4695,8 +4695,8 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
             rune_length_t rune_length;
             for (size_t progress = 0; progress < bytes.size(); progress += rune_length) {
                 rune_t rune;
-                rune_length = sz_rune_parse_unchecked(bytes.data() + progress, &rune);
-                if (rune_length == sz_utf8_invalid_k) return false;
+                rune_length = sz_rune_decode_unchecked(bytes.data() + progress, &rune);
+                if (rune_length == sz_rune_invalid_k) return false;
                 if (arena.try_resize(arena.size() + 1) != status_t::success_k) return false;
                 arena[arena.size() - 1] = rune;
             }
@@ -7185,9 +7185,7 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i16` recurrence hardcodes `_mm512_max_epi16`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -7489,9 +7487,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i32` recurrence hardcodes `_mm512_max_epi32`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};

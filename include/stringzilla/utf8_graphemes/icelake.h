@@ -4,7 +4,7 @@
  *  @brief  Ice Lake (AVX-512) backend for UAX-29 extended grapheme cluster boundaries, fully vectorized end-to-end.
  *
  *  Every 64-byte window is decoded for all 64 lanes through the shared codepoint substrate
- *  (`sz_utf8_codepoints_decode_window_`), classified gather-free into one packed Grapheme_Cluster_Break descriptor
+ *  (`sz_utf8_rune_decode_window_`), classified gather-free into one packed Grapheme_Cluster_Break descriptor
  *  per lane, compacted to a codepoint-dense descriptor vector with a single `vpcompressb`, and resolved by the
  *  branchless rule algebra. The classifier routes each codepoint through one rare-class-gated path - an ASCII
  *  `vpermb`, a 2-byte page LUT, the cold three-stage BMP trie, or a 4-stage astral trie - so a pure-ASCII or 2-byte
@@ -29,7 +29,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_graphemes/tables.h"
 #include "stringzilla/utf8_graphemes/serial.h"
-#include "stringzilla/utf8_codepoints/icelake.h"
+#include "stringzilla/utf8_runes/icelake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,7 +50,7 @@ extern "C" {
 enum {
     sz_grapheme_break_mid_tiles_k = sizeof(sz_utf8_grapheme_break_stage_mid_) / 64, /**< ZMM tiles of `stage_mid`. */
     sz_grapheme_break_sub_packed_tiles_k = sizeof(sz_utf8_grapheme_break_stage_sub_packed_) /
-                                           64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
+        64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
     sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
@@ -69,8 +69,8 @@ SZ_INTERNAL __m512i sz_grapheme_ascii_descriptor_icelake_(__m512i codepoints) {
 
 /** @brief  Descriptor of a codepoint < 0x800 via the aligned `page_0800` LUT (a substrate `vpermi2b` cascade). */
 SZ_INTERNAL __m512i sz_grapheme_small_page_icelake_(__m512i codepoints) {
-    return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_page_0800_, 32,
-                                                   _mm512_and_si512(codepoints, _mm512_set1_epi32(0x7FF)));
+    return sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_page_0800_, 32,
+                                             _mm512_and_si512(codepoints, _mm512_set1_epi32(0x7FF)));
 }
 
 /** @brief  Descriptor of a cold BMP codepoint (0x800..0xFFFF) by the three-stage trie: `stage_hi` `vpermb`, then the
@@ -78,16 +78,16 @@ SZ_INTERNAL __m512i sz_grapheme_small_page_icelake_(__m512i codepoints) {
  *          18-byte `id_to_desc` `vpermb`. All tables read straight from aligned `.rodata` — no per-call load. */
 SZ_INTERNAL __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
     __m512i const high_byte = _mm512_and_si512(_mm512_srli_epi32(codepoints, 8), _mm512_set1_epi32(0xFF));
-    __m512i const mid = sz_utf8_codepoints_permute256_icelake_(sz_utf8_grapheme_break_stage_hi_, high_byte);
+    __m512i const mid = sz_utf8_rune_permute256_icelake_(sz_utf8_grapheme_break_stage_hi_, high_byte);
     __m512i const mid_index = _mm512_add_epi32(
         _mm512_slli_epi32(mid, 4), _mm512_and_si512(_mm512_srli_epi32(codepoints, 4), _mm512_set1_epi32(0xF)));
-    __m512i const sub = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_stage_mid_,
-                                                                sz_grapheme_break_mid_tiles_k, mid_index);
+    __m512i const sub = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_stage_mid_,
+                                                          sz_grapheme_break_mid_tiles_k, mid_index);
     __m512i const sub_index = _mm512_add_epi32(_mm512_slli_epi32(sub, 4),
                                                _mm512_and_si512(codepoints, _mm512_set1_epi32(0xF)));
     // `stage_sub` outputs a 4-bit descriptor index, so it is stored two cells per byte: the nibble cascade walks half
     // the tiles (25 vs 50), halving this stage's `vpermi2b` port-5 cost — the residual-cascade hot spot for Indic/CJK.
-    __m512i const descriptor_index = sz_utf8_codepoints_lut_cascade_nibble_icelake_(
+    __m512i const descriptor_index = sz_utf8_rune_lut_cascade_nibble_icelake_(
         sz_utf8_grapheme_break_stage_sub_packed_, sz_grapheme_break_sub_packed_tiles_k, sub_index);
     __m512i const id_to_desc = _mm512_load_si512((void const *)sz_utf8_grapheme_break_id_to_desc_);
     return _mm512_and_si512(_mm512_permutexvar_epi8(descriptor_index, id_to_desc), _mm512_set1_epi32(0xFF));
@@ -98,20 +98,20 @@ SZ_INTERNAL __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
  *          sorted-range scan, replacing the per-window linear fold. */
 SZ_INTERNAL __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints) {
     __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
-    __m512i const stage1 = sz_utf8_codepoints_permute256_icelake_(
+    __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_grapheme_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
     __m512i const stage2_index = _mm512_add_epi32(
         _mm512_slli_epi32(stage1, 4), _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xF)));
-    __m512i const stage2 = sz_utf8_codepoints_lut_cascade_icelake_(
-        sz_utf8_grapheme_break_astral_s1_, sz_grapheme_break_astral_stage1_tiles_k, stage2_index);
+    __m512i const stage2 = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s1_,
+                                                             sz_grapheme_break_astral_stage1_tiles_k, stage2_index);
     __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
                                                 _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s2_,
-                                                                 sz_grapheme_break_astral_stage2_tiles_k, leaf_index);
+    __m512i const leaf = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s2_,
+                                                           sz_grapheme_break_astral_stage2_tiles_k, leaf_index);
     __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
                                                  _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
-    return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_leaf_,
-                                                   sz_grapheme_break_astral_leaf_tiles_k, class_index);
+    return sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_leaf_, sz_grapheme_break_astral_leaf_tiles_k,
+                                             class_index);
 }
 
 /**
@@ -218,7 +218,7 @@ SZ_INTERNAL __m512i sz_grapheme_classify_quarter_icelake_( //
  *  as one byte per lane. No scalar per-lane loop, no `vpgather`, no spill round-trip.
  */
 SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
-    sz_utf8_codepoints_window_t const *decoded, __m512i next1, __m512i next2, __m512i next3) {
+    sz_utf8_rune_window_t const *decoded, __m512i next1, __m512i next2, __m512i next3) {
     // Astral (4-byte) lead reconstruction: plane = ((b0 & 7) << 2) | ((b1 >> 4) & 3); mid = ((b1 & F) << 4) |
     // ((b2 >> 2) & F); low = ((b2 & 3) << 6) | (b3 & 3F); codepoint = (plane << 16) | (mid << 8) | low.
     __m512i const window = decoded->window;
@@ -231,14 +231,13 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
     __mmask64 const ascii = _mm512_cmplt_epu8_mask(window, _mm512_set1_epi8((char)0x80));
     __mmask64 const three_byte = decoded->three_byte_starts;
     // 2-byte lead `110xxxxx`: high = ((lead & 0x1F) >> 2) & 0x07; low = ((lead & 0x03) << 6) | (next1 & 0x3F).
-    __m512i const two_high = sz_utf8_codepoints_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2,
-                                                              0x07);
+    __m512i const two_high = sz_utf8_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
     __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
                                             _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
     // 3-byte lead `1110xxxx`: high = ((lead & 0x0F) << 4) | ((next1 >> 2) & 0x0F); low = ((next1 & 0x03) << 6) |
     // (next2 & 0x3F).
     __m512i const three_high = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-                                               sz_utf8_codepoints_srl8_icelake_(next1, 2, 0x0F));
+                                               sz_utf8_srl8_icelake_(next1, 2, 0x0F));
     __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
                                               _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
     __m512i const non_ascii_high = _mm512_mask_blend_epi8(three_byte, two_high, three_high);
@@ -246,9 +245,9 @@ SZ_INTERNAL __m512i sz_grapheme_classify_window_icelake_( //
     __m512i const high = _mm512_maskz_mov_epi8(_knot_mask64(ascii), non_ascii_high);
     __m512i const low = _mm512_mask_blend_epi8(ascii, non_ascii_low, window);
     __m512i const plane = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x07)), 2),
-                                          sz_utf8_codepoints_srl8_icelake_(next1, 4, 0x03));
+                                          sz_utf8_srl8_icelake_(next1, 4, 0x03));
     __m512i const mid_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
-                                             sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F));
+                                             sz_utf8_srl8_icelake_(next2, 2, 0x0F));
     __m512i const lo_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6),
                                             _mm512_and_si512(next3, _mm512_set1_epi8(0x3F)));
     sz_u64_t const four_byte = _cvtmask64_u64(decoded->four_byte_starts);
@@ -354,8 +353,8 @@ typedef struct sz_grapheme_window_t {
 SZ_INTERNAL sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base, __m512i lane_identity, sz_grapheme_carry_t *carry) {
 
-    sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(text + base, length - base,
-                                                                                          lane_identity);
+    sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text + base, length - base,
+                                                                              lane_identity);
     sz_size_t const loaded = decoded.loaded;
     sz_u64_t start_lanes = _cvtmask64_u64(decoded.codepoint_starts);
 
@@ -426,7 +425,7 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(             //
         return 0;
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
 
     sz_grapheme_carry_t carry = sz_grapheme_carry_empty_();
     sz_size_t cluster_start = 0;
@@ -440,8 +439,8 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(             //
         // The GB1 anchor at byte 0 of the first window is the open cluster's own start, not a new break: clear it so
         // the substrate drain (which has no zero-length-cluster guard) never emits an empty leading cluster.
         sz_u64_t boundary = base == 0 ? (window.boundary & ~1ull) : window.boundary;
-        clusters = sz_utf8_codepoints_drain_forward_(boundary, base, lane_identity, cluster_starts, cluster_lengths,
-                                                     clusters, clusters_capacity, &cluster_start);
+        clusters = sz_utf8_rune_drain_forward_(boundary, base, lane_identity, cluster_starts, cluster_lengths, clusters,
+                                               clusters_capacity, &cluster_start);
         if (clusters == clusters_capacity) {
             if (bytes_consumed) *bytes_consumed = cluster_start;
             return clusters;

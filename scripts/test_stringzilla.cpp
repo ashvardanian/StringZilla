@@ -186,9 +186,9 @@ int main(int argc, char const **argv) {
 #endif
 
     std::printf("\n=== UTF-8 ===\n");
-    failures += run_test("test_utf8_codepoints_unit", test_utf8_codepoints_unit);
-    failures += run_test("test_utf8_codepoints_safety", test_utf8_codepoints_safety);
-    failures += run_test("test_utf8_codepoints_all", test_utf8_codepoints_all);
+    failures += run_test("test_utf8_runes_unit", test_utf8_runes_unit);
+    failures += run_test("test_utf8_runes_safety", test_utf8_runes_safety);
+    failures += run_test("test_utf8_runes_all", test_utf8_runes_all);
     failures += run_test("test_utf8_tokens_unit", test_utf8_tokens_unit);
     failures += run_test("test_utf8_tokens_safety", test_utf8_tokens_safety);
     failures += run_test("test_utf8_tokens_all", test_utf8_tokens_all);

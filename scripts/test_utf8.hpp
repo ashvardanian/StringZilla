@@ -124,11 +124,11 @@ inline void print_utf8_test_bytes_(char const *label, char const *bytes, std::si
     std::fprintf(stderr, "\n");
 }
 
-/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_export` (silently skips invalid runes). */
+/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
 inline void append_codepoint_(std::string &text, sz_rune_t codepoint) {
     sz_u8_t bytes[4];
-    sz_rune_length_t const length = sz_rune_export(codepoint, bytes);
-    if (length == sz_utf8_invalid_k) return;
+    sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
+    if (length == sz_rune_invalid_k) return;
     text.append((char const *)bytes, (std::size_t)length);
 }
 

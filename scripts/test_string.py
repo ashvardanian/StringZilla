@@ -44,7 +44,6 @@ def test_library_properties():
     sz.reset_capabilities(sz.__capabilities__)  # Should not raise
 
 
-
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])
 def test_unit_construct(native_type):
     native = "aaaaa"
@@ -66,7 +65,6 @@ def test_unit_indexing():
     big = Str(native)
     for i in range(len(native)):
         assert big[i] == native[i]
-
 
 
 def test_unit_str_rich_comparisons():
@@ -147,7 +145,6 @@ def test_str_write_to():
             assert content == native, "The content of the file does not match the expected output"
     finally:
         os.remove(temp_filename)
-
 
 
 def test_unit_split():
@@ -410,7 +407,6 @@ def test_unit_strip():
     assert native_no_match.strip("xyz") == str(big_no_match.strip("xyz"))
 
 
-
 def test_unit_slicing():
     native = "abcdef"
     big = Str(native)
@@ -421,7 +417,6 @@ def test_unit_slicing():
     assert big[:-1] == "abcde"
     assert big[-3:] == "def"
     assert big[:-3] == "abc"
-
 
 
 def test_unit_strs_rich_comparisons():
@@ -528,7 +523,6 @@ def test_unit_strs_sequence_slicing():
     assert isinstance(str(empty_slice), str), "Empty slice str failed"
 
 
-
 def test_string_lengths():
     assert 4 == len(sz.Str("abcd"))
     assert 8 == len(sz.Str("αβγδ"))
@@ -563,7 +557,6 @@ def test_decoding_exceptions(byte_string, encoding):
         byte_string.decode(encoding)
     with pytest.raises(UnicodeDecodeError):
         sz.Str(byte_string).decode(encoding)
-
 
 
 def baseline_translate(body: str, lut: Sequence) -> str:
@@ -664,7 +657,6 @@ def test_fill_random_alphabet(length: int, seed_value: int):
     alphabet = b"0123456789"
     random_digits = sz.random(128, nonce=seed_value, alphabet=alphabet)
     assert set(random_digits).issubset(set(alphabet))
-
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")

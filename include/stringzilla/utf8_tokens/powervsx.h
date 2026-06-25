@@ -8,7 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_tokens/serial.h"
-#include "stringzilla/utf8_codepoints/powervsx.h"
+#include "stringzilla/utf8_runes/powervsx.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -5,7 +5,7 @@
  *  @date January 16, 2024
  *
  *  The compiled StringZilla library is split into one translation unit per domain
- *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_codepoints.c`,
+ *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`,
  *  `utf8_tokens.c`, `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linewraps.c`,
  *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
@@ -64,7 +64,7 @@ typedef struct sz_implementations_t {
     sz_utf8_segmenter_t utf8_newlines;
     sz_utf8_segmenter_t utf8_whitespaces;
     sz_find_delimiter_utf8_t find_delimiter_utf8;
-    sz_utf8_unpack_chunk_t utf8_unpack_chunk;
+    sz_utf8_decode_t utf8_decode;
 
     sz_utf8_norm_t utf8_norm;
     sz_utf8_norm_violation_t utf8_norm_violation;
@@ -98,7 +98,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_codepoints_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_words_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);

@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_sentences/tables.h"
 #include "stringzilla/utf8_sentences/serial.h"
-#include "stringzilla/utf8_codepoints/icelake.h"
+#include "stringzilla/utf8_runes/icelake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,7 +33,7 @@ extern "C" {
  *          region (Latin/Greek/Cyrillic/Arabic/Hebrew) is resolved by an in-register `vpermi2b` page network
  *          over `sz_utf8_sentence_break_flat_lut_0800_`; the big homogeneous OLetter blocks (CJK/Hangul/...) by
  *          arithmetic range compares (zero data); the 3-byte-BMP residue by the shared two-stage trie substrate
- *          (`sz_utf8_codepoints_trie_walk_icelake_`) over all 64 lanes at once. No scalar per-lane loop, no
+ *          (`sz_utf8_rune_trie_walk_icelake_`) over all 64 lanes at once. No scalar per-lane loop, no
  *          stack round-trip, no `vpgather`. Astral (4-byte) lanes are reconstructed to full 21-bit codepoints in
  *          register (four 16-lane chunks) and resolved through the canonical sorted astral range list with
  *          arithmetic compares - still gather-free, still all 64 lanes uniformly.
@@ -88,7 +88,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
     // lane being present so a pure-3-byte (CJK) window pays nothing here.
     if (small_lanes) {
         __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-        __m512i const low_high_bit = sz_utf8_codepoints_srl8_icelake_(low, 7, 0x01);
+        __m512i const low_high_bit = sz_utf8_srl8_icelake_(low, 7, 0x01);
         __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
                                              low_high_bit);
         __m512i small_class = _mm512_setzero_si512();
@@ -107,7 +107,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
     // the trie output would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
     __mmask64 const trie_residual = trie_lanes & ~oletter;
     if (trie_residual) {
-        __m512i const trie_class = sz_utf8_codepoints_trie_walk_icelake_(
+        __m512i const trie_class = sz_utf8_rune_trie_walk_icelake_(
             high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_,
             sz_utf8_sentence_break_trie_leaf_, sz_utf8_sentence_break_trie_block_k,
             sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
@@ -126,7 +126,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
         __m512i const b1 = _mm512_and_si512(raw_next1, _mm512_set1_epi8(0x3F));
         __m512i const b2 = _mm512_and_si512(raw_next2, _mm512_set1_epi8(0x3F));
         __m512i const b3 = _mm512_and_si512(raw_next3, _mm512_set1_epi8(0x3F));
-        __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+        __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
         for (int chunk = 0; chunk < 4; ++chunk) {
             // Bring this chunk's 16 bytes to the low 16 lanes via a runtime permute, then widen to 32-bit lanes.
             __m512i const select = _mm512_add_epi8(lane_identity, _mm512_set1_epi8((char)(chunk * 16)));
@@ -218,7 +218,7 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t sentence_start = 0;
     sz_size_t position = 0;
-    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
 
     sz_utf8_sentence_break_carry_t carry;
     carry.have_prev = 0;
@@ -230,8 +230,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
     int sb8_pending_active = 0;
 
     while (position < length) {
-        sz_utf8_codepoints_window_t const decoded = sz_utf8_codepoints_decode_window_icelake_(
-            text_u8 + position, length - position, lane_identity);
+        sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,
+                                                                                  lane_identity);
         sz_size_t const loaded = decoded.loaded;
         __mmask64 const lead_continuation = (position == 0) ? (__mmask64)1 : (__mmask64)0;
         __mmask64 const codepoint_starts = decoded.codepoint_starts | lead_continuation;
@@ -248,19 +248,18 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
         __m512i const next3 = _mm512_maskz_permutexvar_epi8(keep3, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)),
                                                             window);
 
-        __m512i const two_high = sz_utf8_codepoints_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2,
-                                                                  0x07);
+        __m512i const two_high = sz_utf8_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
         __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
                                                 _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
         __m512i const three_high = _mm512_or_si512(
             _mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-            sz_utf8_codepoints_srl8_icelake_(next1, 2, 0x0F));
+            sz_utf8_srl8_icelake_(next1, 2, 0x0F));
         __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
                                                   _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
         __m512i const four_low = _mm512_or_si512(_mm512_and_si512(next3, _mm512_set1_epi8(0x3F)),
                                                  _mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6));
         __m512i const four_high = _mm512_or_si512(
-            sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F),
+            sz_utf8_srl8_icelake_(next2, 2, 0x0F),
             _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4));
         __m512i high = _mm512_setzero_si512();
         high = _mm512_mask_mov_epi8(high, decoded.two_byte_starts, two_high);
@@ -339,8 +338,8 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
             byte_adv = (sz_size_t)sz_u64_ctz(upto);
         }
 
-        sentences = sz_utf8_codepoints_drain_forward_(boundary_lanes, position, lane_identity, sentence_starts,
-                                                      sentence_lengths, sentences, sentences_capacity, &sentence_start);
+        sentences = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity, sentence_starts,
+                                                sentence_lengths, sentences, sentences_capacity, &sentence_start);
         if (sentences == sentences_capacity) {
             if (bytes_consumed) *bytes_consumed = sentence_start;
             return sentences;

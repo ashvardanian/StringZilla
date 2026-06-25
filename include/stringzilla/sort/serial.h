@@ -8,9 +8,9 @@
 #define STRINGZILLA_SORT_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h"    // `sz_compare`
-#include "stringzilla/memory.h"     // `sz_copy`
-#include "stringzilla/utf8_runes.h" // `sz_unicode_fold_codepoint_`
+#include "stringzilla/compare.h"                  // `sz_compare`
+#include "stringzilla/memory.h"                   // `sz_copy`
+#include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -666,11 +666,11 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_casefold_window_(            
             // A byte that does not begin a well-formed codepoint is its own 1-byte maximal subpart: it
             // contributes a single field equal to its raw byte value (always >= 0x80, so unaffected by
             // case-folding) and we resync at the next byte. This keeps the order total and deterministic
-            // while leaving the all-valid case byte-identical to the old `sz_rune_parse` path.
+            // while leaving the all-valid case byte-identical to the old `sz_rune_decode` path.
             sz_rune_t source_rune;
-            sz_rune_length_t const source_rune_length =
-                sz_rune_parse(source_str + raw_position, source_str + source_length, &source_rune);
-            if (source_rune_length == sz_utf8_invalid_k) {
+            sz_rune_length_t const source_rune_length = sz_rune_decode(source_str + raw_position,
+                                                                       source_str + source_length, &source_rune);
+            if (source_rune_length == sz_rune_invalid_k) {
                 ++raw_position;
                 if (skipped < folded_skip_count) {
                     ++skipped;
@@ -748,8 +748,8 @@ SZ_PUBLIC void sz_sequence_argsort_serial_sort_casefold_windows_(         //
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_serial( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,        //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_serial(   //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;

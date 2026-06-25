@@ -33,8 +33,8 @@ inline sz_status_t emplace_smith_waterman_engine(szs_smith_waterman_scores_t *en
  *  `sz_ssize_t`, and @p results_row_stride counts elements (not bytes) between consecutive query rows.
  */
 template <typename queries_type_, typename candidates_type_>
-sz_status_t szs_smith_waterman_cross_(                                              //
-    smith_waterman_backends_t *engine, szs_device_scope_t device_punned,           //
+sz_status_t szs_smith_waterman_cross_(                                                    //
+    smith_waterman_backends_t *engine, szs_device_scope_t device_punned,                  //
     queries_type_ const &queries_container, candidates_type_ const *candidates_container, //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -56,12 +56,12 @@ sz_status_t szs_smith_waterman_cross_(                                          
 #if SZ_USE_CUDA
             if (std::holds_alternative<gpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                szs::cuda_status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                szs::cuda_status_t status = candidates_container != nullptr
+                                                ? engine_variant(queries_container, *candidates_container,
+                                                                 results_matrix, get_executor(device_scope),
+                                                                 get_specs(device_scope))
+                                                : engine_variant(queries_container, results_matrix, //
+                                                                 get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<default_scope_t>(device->variants)) {
@@ -77,11 +77,11 @@ sz_status_t szs_smith_waterman_cross_(                                          
                         result = propagate_error(exec_status, error_message);
                     }
                     else {
-                        szs::cuda_status_t status =
-                            candidates_container != nullptr
-                                ? engine_variant(queries_container, *candidates_container, results_matrix, executor,
-                                                 specs)
-                                : engine_variant(queries_container, results_matrix, executor, specs);
+                        szs::cuda_status_t status = candidates_container != nullptr
+                                                        ? engine_variant(queries_container, *candidates_container,
+                                                                         results_matrix, executor, specs)
+                                                        : engine_variant(queries_container, results_matrix, executor,
+                                                                         specs);
                         result = propagate_error(status, error_message);
                     }
                 }
@@ -95,22 +95,20 @@ sz_status_t szs_smith_waterman_cross_(                                          
         else {
             if (std::holds_alternative<default_scope_t>(device->variants)) {
                 auto &device_scope = std::get<default_scope_t>(device->variants);
-                sz::status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                sz::status_t status = candidates_container != nullptr
+                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                                           get_executor(device_scope), get_specs(device_scope))
+                                          : engine_variant(queries_container, results_matrix, //
+                                                           get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
                 auto &device_scope = std::get<cpu_scope_t>(device->variants);
-                sz::status_t status =
-                    candidates_container != nullptr
-                        ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                         get_executor(device_scope), get_specs(device_scope))
-                        : engine_variant(queries_container, results_matrix, //
-                                         get_executor(device_scope), get_specs(device_scope));
+                sz::status_t status = candidates_container != nullptr
+                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                                           get_executor(device_scope), get_specs(device_scope))
+                                          : engine_variant(queries_container, results_matrix, //
+                                                           get_executor(device_scope), get_specs(device_scope));
                 result = propagate_error(status, error_message);
             }
             else { result = propagate_error(sz::status_t::unknown_k, error_message); }
@@ -214,13 +212,13 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                               
     auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_as_cpp_container_t {candidates};
-    return szs_smith_waterman_cross_(                                                                  //
+    return szs_smith_waterman_cross_(                                                                      //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                        //
-    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                          //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -229,13 +227,13 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                       
     auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u32tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u32tape_as_cpp_container_t {candidates};
-    return szs_smith_waterman_cross_(                                                                  //
+    return szs_smith_waterman_cross_(                                                                      //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                        //
-    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned, //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                          //
+    szs_smith_waterman_scores_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
 
@@ -244,7 +242,7 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                       
     auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
     auto queries_container = sz_sequence_u64tape_as_cpp_container_t {queries};
     auto candidates_container = sz_sequence_u64tape_as_cpp_container_t {candidates};
-    return szs_smith_waterman_cross_(                                                                  //
+    return szs_smith_waterman_cross_(                                                                      //
         engine, device_punned, queries_container, candidates != nullptr ? &candidates_container : nullptr, //
         results, results_row_stride, error_message);
 }

@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_words/tables.h"
 #include "stringzilla/utf8_words/serial.h"
-#include "stringzilla/utf8_codepoints/powervsx.h"
+#include "stringzilla/utf8_runes/powervsx.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,7 +80,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_powervsx(          //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).
     // Skip the first codepoint (position 0 is always a boundary, WB1).
-    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]);
+    sz_size_t position = sz_utf8_lead_length_(text_u8[0]);
 
     // Byte-permutation rows compacting a 2-lane sub-block's set `u64` boundary positions to the front of a
     // `vector unsigned long long` via `vec_perm` (a VSX vector holds two `u64`): row `[m]` in ascending lane
@@ -111,7 +111,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_powervsx(          //
                 word_starts[words] = word_start, word_lengths[words] = position - word_start, ++words;
                 word_start = position;
             }
-            position += sz_utf8_codepoint_length_(text_u8[position]);
+            position += sz_utf8_lead_length_(text_u8[position]);
             continue;
         }
 

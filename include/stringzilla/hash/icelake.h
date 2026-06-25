@@ -288,10 +288,10 @@ SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
     //  Per-lane identity {0, 1, ..., 63} used to slide incoming bytes to the buffer offset entirely in-register.
-    sz_align_(64) static sz_u8_t const lane_iota[64] = {
-        0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
-        22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-        44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+    sz_align_(64) static sz_u8_t const lane_iota[64] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+                                                        16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+                                                        32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+                                                        48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
     __m512i const lane_iota_vec = _mm512_load_si512((__m512i const *)lane_iota);
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
@@ -308,8 +308,8 @@ SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_
         __m512i const incoming = _mm512_maskz_loadu_epi8(copy_mask, text);
         __m512i const slide = _mm512_sub_epi8(lane_iota_vec, _mm512_set1_epi8((char)buffered));
         __m512i const shifted = _mm512_permutexvar_epi8(slide, incoming);
-        state.ins.zmm =
-            _mm512_mask_blend_epi8(_cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered), state.ins.zmm, shifted);
+        state.ins.zmm = _mm512_mask_blend_epi8(_cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered), state.ins.zmm,
+                                               shifted);
         buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
     sz_hash_state_store_icelake_(state_ptr, &state);

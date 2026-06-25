@@ -8,12 +8,172 @@
 #define STRINGZILLA_UTF8_UNCASED_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes.h"
-#include "stringzilla/find/serial.h" // `sz_find_serial`
+#include "stringzilla/utf8_runes/serial.h"
+#include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
+#include "stringzilla/find/serial.h"              // `sz_find_serial`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ *  @brief Iterator state for streaming through folded UTF-8 runes.
+ *  Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently.
+ */
+typedef struct {
+    sz_cptr_t ptr;           // Current position in UTF-8 string
+    sz_cptr_t end;           // End of string
+    sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions
+    sz_size_t pending_count; // Number of pending folded runes
+    sz_size_t pending_idx;   // Current index into pending buffer
+} sz_utf8_folded_iter_t_;
+
+/** @brief Initialize a folded rune iterator. */
+SZ_INTERNAL void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *iterator, sz_cptr_t string, sz_size_t length) {
+    iterator->ptr = string;
+    iterator->end = string + length;
+    iterator->pending_count = 0;
+    iterator->pending_idx = 0;
+}
+
+/**
+ *  @brief Get next folded rune. Returns `sz_false_k` when exhausted.
+ *  Malformed UTF-8 is handled losslessly: a byte that does not begin a well-formed codepoint is emitted as a
+ *  single literal byte (tagged so it compares byte-for-byte and never collides with a real folded codepoint) and
+ *  the iterator resyncs by one byte, never reading past `end`.
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_rune_t *out_rune) {
+    // Refill pending buffer if exhausted
+    if (it->pending_idx >= it->pending_count) {
+        if (it->ptr >= it->end) return sz_false_k;
+
+        // ASCII fast-path: fold inline without buffering
+        sz_u8_t lead = *(sz_u8_t const *)it->ptr;
+        if (lead < 0x80) {
+            *out_rune = sz_ascii_fold_(lead);
+            it->ptr++;
+            it->pending_count = 0; // Clear pending buffer
+            it->pending_idx = 0;   // Signal first rune of new codepoint for source tracking
+            return sz_true_k;
+        }
+
+        // Multi-byte UTF-8: decode (bounds-checked), fold, and buffer. A byte that does not begin a
+        // well-formed codepoint folds to itself (>= 0x80 bytes are unchanged by `sz_ascii_fold_`) and resyncs
+        // by one byte, never over-reading past `end`.
+        sz_rune_t rune;
+        sz_rune_length_t const rune_length = sz_rune_decode(it->ptr, it->end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
+            *out_rune = sz_rune_malformed_byte_(lead);
+            it->ptr++;
+            it->pending_count = 0;
+            it->pending_idx = 0;
+            return sz_true_k;
+        }
+
+        it->ptr += rune_length;
+        // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
+        // The fold function will overwrite positions it uses; unused positions keep the sentinel.
+        // This follows the same pattern as sz_utf8_uncased_find_2folded_serial_ and
+        // sz_utf8_uncased_find_3folded_serial_.
+        it->pending[0] = 0xFFFFFFFFu;
+        it->pending[1] = 0xFFFFFFFEu;
+        it->pending[2] = 0xFFFFFFFDu;
+        it->pending[3] = 0xFFFFFFFCu;
+        it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
+        it->pending_idx = 0;
+    }
+
+    *out_rune = it->pending[it->pending_idx++];
+    return sz_true_k;
+}
+
+/**
+ *  @brief Reverse iterator state for streaming through folded UTF-8 runes backwards.
+ * Handles one-to-many case folding expansions (e.g., 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)) transparently
+ * in reverse order.
+ */
+typedef struct {
+    sz_cptr_t ptr;           // Current position (points to byte AFTER current sequence)
+    sz_cptr_t start;         // Start of string (stop when ptr reaches this)
+    sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions (in reverse order)
+    sz_size_t pending_count; // Number of pending folded runes
+    sz_size_t pending_idx;   // Current index into pending buffer
+} sz_utf8_folded_reverse_iter_t_;
+
+/** @brief Initialize a reverse folded rune iterator. Iterates from end towards start. */
+SZ_INTERNAL void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t_ *it, sz_cptr_t start, sz_cptr_t end) {
+    it->ptr = end;
+    it->start = start;
+    it->pending_count = 0;
+    it->pending_idx = 0;
+}
+
+/**
+ *  @brief Get previous folded rune (walking backwards). Returns `sz_false_k` when exhausted.
+ * When a codepoint folds to multiple runes (like 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73)), returns them in
+ * reverse order ('s', then 's'). Malformed UTF-8 is handled losslessly and byte-identically to the forward
+ * iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
+ * the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
+ */
+SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t_ *it, sz_rune_t *out_rune) {
+    // Return pending runes if any (stored in reverse order, consumed in reverse)
+    if (it->pending_idx < it->pending_count) {
+        *out_rune = it->pending[it->pending_count - 1 - it->pending_idx];
+        it->pending_idx++;
+        return sz_true_k;
+    }
+
+    // Refill: find previous codepoint
+    if (it->ptr <= it->start) return sz_false_k;
+
+    // Remember one-past-the-end of the sequence we are about to decode, so the strict decode is bounded
+    // and a malformed run resyncs one byte at a time - mirroring the forward iterator byte-for-byte.
+    sz_cptr_t const sequence_end = it->ptr;
+
+    // The byte immediately before `sequence_end` is the last byte of whatever codepoint ends here.
+    sz_u8_t const last_byte = *(sz_u8_t const *)(sequence_end - 1);
+
+    // ASCII fast-path: a byte < 0x80 is always its own complete 1-byte codepoint.
+    if (last_byte < 0x80) {
+        it->ptr = sequence_end - 1;
+        *out_rune = sz_ascii_fold_(last_byte);
+        it->pending_count = 0;
+        it->pending_idx = 0;
+        return sz_true_k;
+    }
+
+    // Otherwise walk backwards over up to 3 continuation bytes (0x80-0xBF) to locate a candidate lead.
+    // A well-formed multi-byte rune is at most 4 bytes, so stop after considering 4 positions.
+    sz_cptr_t candidate = sequence_end - 1;
+    for (sz_size_t back = 0; back < 3 && candidate > it->start && (*(sz_u8_t const *)candidate & 0xC0) == 0x80; ++back)
+        candidate--;
+
+    // Multi-byte UTF-8: decode (bounded) and fold only if the bytes from the candidate lead form a well-formed
+    // codepoint that ends EXACTLY at `sequence_end`. Otherwise the last byte does not begin/end a valid rune, so
+    // treat it as a literal folded-to-itself byte and resync by one - matching the forward iterator byte-for-byte.
+    sz_rune_t rune;
+    sz_rune_length_t const rune_length = sz_rune_decode(candidate, sequence_end, &rune);
+    if (rune_length == sz_rune_invalid_k || candidate + rune_length != sequence_end) {
+        it->ptr = sequence_end - 1;
+        *out_rune = sz_rune_malformed_byte_(last_byte);
+        it->pending_count = 0;
+        it->pending_idx = 0;
+        return sz_true_k;
+    }
+    it->ptr = candidate;
+
+    // Store folded runes in pending buffer
+    it->pending[0] = 0xFFFFFFFFu;
+    it->pending[1] = 0xFFFFFFFEu;
+    it->pending[2] = 0xFFFFFFFDu;
+    it->pending[3] = 0xFFFFFFFCu;
+    it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
+    it->pending_idx = 1; // We'll return the last one now, then the rest in subsequent calls
+
+    // Return the LAST folded rune first (since we're going backwards)
+    *out_rune = it->pending[it->pending_count - 1];
+    return sz_true_k;
+}
 
 #pragma region Case Invariance & Ordering
 
@@ -140,8 +300,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_serial(sz_cptr_t str, sz_size_t le
         // Multi-byte: decode and check. A byte that does not begin a well-formed codepoint is its own
         // 1-byte maximal subpart - it folds to itself, so it is caseless and never a violation; resync by one byte.
         sz_rune_t rune;
-        sz_rune_length_t const rune_length = sz_rune_parse((sz_cptr_t)text_cursor, (sz_cptr_t)text_end, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)text_cursor, (sz_cptr_t)text_end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             text_cursor++;
             continue;
         }
@@ -340,12 +500,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_1folded_serial_( //
     while (haystack < haystack_end) {
         // A byte that does not begin a well-formed codepoint folds to itself and matches byte-for-byte;
         // resync by one byte. Fill the unused fold slots with sentinels so they never false-match.
-        haystack_rune_length = sz_rune_parse(haystack, haystack_end, &haystack_rune);
-        if (haystack_rune_length == sz_utf8_invalid_k) {
+        haystack_rune_length = sz_rune_decode(haystack, haystack_end, &haystack_rune);
+        if (haystack_rune_length == sz_rune_invalid_k) {
             haystack_folded_runes[0] = sz_rune_malformed_byte_((sz_u8_t)*haystack);
             haystack_folded_runes[1] = ~needle_folded;
             haystack_folded_runes[2] = ~needle_folded;
-            haystack_rune_length = sz_utf8_rune_1byte_k;
+            haystack_rune_length = sz_rune_1byte_k;
         }
         else { sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes); }
 
@@ -415,12 +575,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
         sz_rune_length_t haystack_rune_length;
         sz_rune_t haystack_folded_runes[3] = {~needle_first_safe_folded_rune};
         // A byte that does not begin a well-formed codepoint folds to itself and resyncs by one byte.
-        haystack_rune_length = sz_rune_parse(danger_cursor, haystack_end, &haystack_rune);
+        haystack_rune_length = sz_rune_decode(danger_cursor, haystack_end, &haystack_rune);
         sz_size_t haystack_folded_runes_count;
-        if (haystack_rune_length == sz_utf8_invalid_k) {
+        if (haystack_rune_length == sz_rune_invalid_k) {
             haystack_folded_runes[0] = sz_rune_malformed_byte_((sz_u8_t)*danger_cursor);
             haystack_folded_runes_count = 1;
-            haystack_rune_length = sz_utf8_rune_1byte_k;
+            haystack_rune_length = sz_rune_1byte_k;
         }
         else { haystack_folded_runes_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes); }
 
@@ -630,7 +790,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
     sz_rune_t haystack_folded_runes[4] = {~first_needle_folded};
     while (haystack < haystack_end) {
         // A byte that does not begin a well-formed codepoint folds to itself and resyncs by one byte.
-        haystack_rune_length = sz_rune_parse(haystack, haystack_end, &haystack_rune);
+        haystack_rune_length = sz_rune_decode(haystack, haystack_end, &haystack_rune);
 
         // Pre-fill positions [2] and [3] with sentinels before folding.
         // The fold will overwrite positions it uses; unused positions keep the sentinel.
@@ -641,10 +801,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
         // Export into the last 3 rune entries of the 4-element array,
         // keeping the first position with historical data untouched
         sz_size_t folded_count;
-        if (haystack_rune_length == sz_utf8_invalid_k) {
+        if (haystack_rune_length == sz_rune_invalid_k) {
             haystack_folded_runes[1] = sz_rune_malformed_byte_((sz_u8_t)*haystack);
             folded_count = 1;
-            haystack_rune_length = sz_utf8_rune_1byte_k;
+            haystack_rune_length = sz_rune_1byte_k;
         }
         else { folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 1); }
 
@@ -717,7 +877,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
     sz_rune_t haystack_folded_runes[5] = {~first_needle_folded, ~second_needle_folded, 0, 0, 0};
     while (haystack < haystack_end) {
         // A byte that does not begin a well-formed codepoint folds to itself and resyncs by one byte.
-        haystack_rune_length = sz_rune_parse(haystack, haystack_end, &haystack_rune);
+        haystack_rune_length = sz_rune_decode(haystack, haystack_end, &haystack_rune);
 
         // Pre-fill positions [3] and [4] with sentinels before folding.
         // The fold will overwrite positions it uses; unused positions keep the sentinel.
@@ -728,10 +888,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
         // Export into the last 3 rune entries of the 5-element array,
         // keeping the first two positions with historical data untouched
         sz_size_t folded_count;
-        if (haystack_rune_length == sz_utf8_invalid_k) {
+        if (haystack_rune_length == sz_rune_invalid_k) {
             haystack_folded_runes[2] = sz_rune_malformed_byte_((sz_u8_t)*haystack);
             folded_count = 1;
-            haystack_rune_length = sz_utf8_rune_1byte_k;
+            haystack_rune_length = sz_rune_1byte_k;
         }
         else { folded_count = sz_unicode_fold_codepoint_(haystack_rune, haystack_folded_runes + 2); }
 
@@ -1596,21 +1756,21 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
         while (position < needle_end && any_active) {
             // Parse current rune
             sz_rune_t rune;
-            sz_rune_length_t const rune_bytes = sz_rune_parse_unchecked((sz_cptr_t)position, &rune);
+            sz_rune_length_t const rune_bytes = sz_rune_decode_unchecked((sz_cptr_t)position, &rune);
             if (position + rune_bytes > needle_end) break; // Incomplete rune
 
             // Parse next rune for context (if available)
             sz_rune_t next_rune = 0;
-            sz_rune_length_t next_bytes = sz_utf8_invalid_k;
+            sz_rune_length_t next_bytes = sz_rune_invalid_k;
             if (position + rune_bytes < needle_end) {
-                next_bytes = sz_rune_parse_unchecked((sz_cptr_t)(position + rune_bytes), &next_rune);
+                next_bytes = sz_rune_decode_unchecked((sz_cptr_t)(position + rune_bytes), &next_rune);
                 if (position + rune_bytes + next_bytes > needle_end) next_rune = 0;
             }
 
             // Parse next-next rune for context
             sz_rune_t next_next_rune = 0;
             if (next_rune != 0 && position + rune_bytes + next_bytes < needle_end) {
-                sz_rune_length_t const next_next_bytes = sz_rune_parse_unchecked(
+                sz_rune_length_t const next_next_bytes = sz_rune_decode_unchecked(
                     (sz_cptr_t)(position + rune_bytes + next_bytes), &next_next_rune);
                 if (position + rune_bytes + next_bytes + next_next_bytes > needle_end) next_next_rune = 0;
             }
@@ -1628,7 +1788,7 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
             sz_u8_t folded_utf8[16];
             sz_size_t folded_utf8_length = 0;
             for (sz_size_t rune_index = 0; rune_index < folded_count; ++rune_index) {
-                folded_utf8_length += sz_rune_export(folded_runes[rune_index], folded_utf8 + folded_utf8_length);
+                folded_utf8_length += sz_rune_encode(folded_runes[rune_index], folded_utf8 + folded_utf8_length);
             }
 
             // Update each script's window
@@ -1683,7 +1843,7 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
 
         // Advance to next rune for next starting position
         sz_rune_t skip_rune;
-        sz_rune_length_t const skip_length = sz_rune_parse_unchecked((sz_cptr_t)needle_cursor, &skip_rune);
+        sz_rune_length_t const skip_length = sz_rune_decode_unchecked((sz_cptr_t)needle_cursor, &skip_rune);
         needle_cursor += skip_length;
     }
 

@@ -26,7 +26,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_norm/tables.h"
-#include "stringzilla/utf8_runes.h" // `sz_rune_parse`, `sz_rune_export`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_rune_encode`
 
 #ifdef __cplusplus
 extern "C" {
@@ -188,7 +188,7 @@ typedef struct sz_utf8_norm_out_t {
 
 SZ_INTERNAL void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
     sz_u8_t bytes[4];
-    sz_size_t length = (sz_size_t)sz_rune_export(rune, bytes);
+    sz_size_t length = (sz_size_t)sz_rune_encode(rune, bytes);
     if (out->dst) {
         for (sz_size_t i = 0; i != length; ++i) out->dst[i] = bytes[i];
         out->dst += length;
@@ -207,7 +207,7 @@ SZ_INTERNAL void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
  *  @brief Emit one literal byte to the sink, bypassing rune re-encoding.
  *
  *  A malformed byte is not a codepoint - it is its own 1-byte maximal subpart and must reach the
- *  output verbatim, never round-tripped through `sz_rune_export`. It is an opaque barrier: it does
+ *  output verbatim, never round-tripped through `sz_rune_encode`. It is an opaque barrier: it does
  *  not decompose, compose, or participate in canonical ordering.
  */
 SZ_INTERNAL void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
@@ -268,8 +268,8 @@ SZ_INTERNAL void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz
     sz_u8_t decomposed_canonical_combining_classes[SZ_UTF8_NORM_DECOMP_MAX_];
     while (source_ptr < source_end) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             // A malformed byte is an opaque 1-byte barrier: flush the buffered segment so the valid
             // runes before it order/compose normally, emit the byte verbatim, and resync one byte.
             sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
@@ -347,8 +347,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t le
     sz_u8_t const *end = ptr + length;
     while (ptr < end) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)ptr, (sz_cptr_t)end, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)ptr, (sz_cptr_t)end, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             ++ptr;
             continue;
         } // malformed byte: inert, passed through
@@ -414,8 +414,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz
         }
         else if (lead >= 0xE0) { // 3-/4-byte: validating parse + props trie
             sz_rune_t rune;
-            sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)position, (sz_cptr_t)end, &rune);
-            if (rune_length == sz_utf8_invalid_k) {
+            sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
+            if (rune_length == sz_rune_invalid_k) {
                 previous_canonical_combining_class = 0, ++position;
                 continue;
             }
@@ -464,8 +464,8 @@ typedef sz_cptr_t (*sz_utf8_norm_scan_t)(sz_cptr_t, sz_size_t, sz_normal_form_t)
  */
 SZ_INTERNAL sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end, sz_normal_form_t form) {
     sz_rune_t rune;
-    sz_rune_length_t const rune_length = sz_rune_parse((sz_cptr_t)position, (sz_cptr_t)end, &rune);
-    if (rune_length == sz_utf8_invalid_k) return sz_true_k; // malformed byte: opaque barrier
+    sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
+    if (rune_length == sz_rune_invalid_k) return sz_true_k; // malformed byte: opaque barrier
     return sz_utf8_norm_is_safe_boundary_(rune, form);
 }
 
@@ -480,9 +480,9 @@ SZ_INTERNAL sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u
     sz_u8_t const *probe = position - 1;
     while (probe > begin && (*probe & 0xC0u) == 0x80u && (position - probe) < 4) --probe;
     sz_rune_t rune;
-    sz_rune_length_t const rune_length = sz_rune_parse((sz_cptr_t)probe, (sz_cptr_t)position, &rune);
+    sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)probe, (sz_cptr_t)position, &rune);
     // A clean rune ending exactly at `position` is the real predecessor; otherwise retreat one byte.
-    if (rune_length != sz_utf8_invalid_k && probe + rune_length == position) return probe;
+    if (rune_length != sz_rune_invalid_k && probe + rune_length == position) return probe;
     return position - 1;
 }
 
@@ -518,14 +518,14 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
         sz_u8_t const *tail = dirty_ptr;
         {
             sz_rune_t rune;
-            sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
-            tail += rune_length == sz_utf8_invalid_k ? 1 : rune_length;
+            sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
+            tail += rune_length == sz_rune_invalid_k ? 1 : rune_length;
         }
         while (tail < end) {
             if (sz_utf8_norm_boundary_at_(tail, end, form)) break;
             sz_rune_t rune;
-            sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
-            tail += rune_length == sz_utf8_invalid_k ? 1 : rune_length;
+            sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
+            tail += rune_length == sz_rune_invalid_k ? 1 : rune_length;
         }
 
         // Emit the clean prefix verbatim, then normalize the bounded dirty region.
@@ -578,14 +578,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_violation_engine_(sz_cptr_t source, sz_size_t
         sz_u8_t const *tail = stop_ptr;
         {
             sz_rune_t rune;
-            sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
-            tail += rune_length == sz_utf8_invalid_k ? 1 : rune_length;
+            sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
+            tail += rune_length == sz_rune_invalid_k ? 1 : rune_length;
         }
         while (tail < end) {
             if (sz_utf8_norm_boundary_at_(tail, end, form)) break;
             sz_rune_t rune;
-            sz_rune_length_t rune_length = sz_rune_parse((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
-            tail += rune_length == sz_utf8_invalid_k ? 1 : rune_length;
+            sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)tail, (sz_cptr_t)end, &rune);
+            tail += rune_length == sz_rune_invalid_k ? 1 : rune_length;
         }
         sz_utf8_norm_out_t out;
         out.dst = SZ_NULL;

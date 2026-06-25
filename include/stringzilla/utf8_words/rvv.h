@@ -7,10 +7,10 @@
 #define STRINGZILLA_UTF8_WORDS_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes.h" // `sz_rune_parse_unchecked`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
 #include "stringzilla/utf8_words/tables.h"
 #include "stringzilla/utf8_words/serial.h"
-#include "stringzilla/utf8_codepoints/rvv.h"
+#include "stringzilla/utf8_runes/rvv.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,7 +49,7 @@ SZ_INTERNAL int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t
     offset = 0;
     while (offset < length) {
         sz_u8_t lead = text_u8[offset];
-        sz_size_t codepoint_length = sz_utf8_codepoint_length_(lead);
+        sz_size_t codepoint_length = sz_utf8_lead_length_(lead);
         if ((lead & 0xC0) == 0x80) return 0;              // stray continuation byte at a lead position
         if (offset + codepoint_length > length) return 0; // truncated trailing sequence
         for (sz_size_t byte_index = 1; byte_index < codepoint_length; ++byte_index)
@@ -130,7 +130,7 @@ SZ_INTERNAL int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_
 SZ_INTERNAL sz_bool_t sz_utf8_word_break_decision_at_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_u8_t prev_prop = sz_utf8_word_break_previous_property_(text, position);
     sz_size_t after_position = position;
-    sz_u8_t after_raw = sz_rune_word_break_property(sz_utf8_decode_(text, length, &after_position));
+    sz_u8_t after_raw = sz_rune_word_break_property(sz_utf8_next_rune_(text, length, &after_position));
     sz_u8_t after_prop = sz_utf8_word_break_effective_property_(text, length, position, (sz_size_t *)0);
     int decision = sz_utf8_word_break_local_decision_rvv_(prev_prop, after_raw, after_prop);
     return (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length, position) : (sz_bool_t)decision;
@@ -296,8 +296,8 @@ SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_si
                                          sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t words = 0;
-    sz_size_t word_start = 0; // Start of the in-progress word (always a true boundary).
-    sz_size_t position = sz_utf8_codepoint_length_(text_u8[0]); // position 0 is a boundary; start past it
+    sz_size_t word_start = 0;                              // Start of the in-progress word (always a true boundary).
+    sz_size_t position = sz_utf8_lead_length_(text_u8[0]); // position 0 is a boundary; start past it
 
     while (position < length && words < words_capacity) {
         sz_size_t base = position - 2; // lane j = byte base+j; trusted lanes [2, vl-2] → boundaries [position, ...]
@@ -330,7 +330,7 @@ SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_si
             word_starts[words] = word_start, word_lengths[words] = position - word_start, ++words;
             word_start = position;
         }
-        position += sz_utf8_codepoint_length_(text_u8[position]);
+        position += sz_utf8_lead_length_(text_u8[position]);
     }
 
     // The trailing span [word_start, length) is the last word (end of text is always a boundary).

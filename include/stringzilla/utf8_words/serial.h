@@ -8,8 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_codepoints/serial.h" // shared decode helpers
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
 extern "C" {
@@ -145,7 +144,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_from_class_masks_(                 
 SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     while (position < length) {
         sz_size_t next_position = position;
-        sz_rune_t rune = sz_utf8_decode_(text, length, &next_position);
+        sz_rune_t rune = sz_utf8_next_rune_(text, length, &next_position);
         sz_u8_t property = sz_rune_word_break_property(rune);
         if (!sz_utf8_word_break_is_ignorable_(property)) break;
         position = next_position;
@@ -160,12 +159,12 @@ SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t
 SZ_INTERNAL sz_u8_t sz_utf8_word_break_effective_property_(sz_cptr_t text, sz_size_t length, sz_size_t position,
                                                            sz_size_t *next_position) {
     sz_size_t current = position;
-    sz_rune_t rune = sz_utf8_decode_(text, length, &current);
+    sz_rune_t rune = sz_utf8_next_rune_(text, length, &current);
     sz_u8_t property = sz_rune_word_break_property(rune);
 
     // Skip ignorables to find effective next
     while (current < length && sz_utf8_word_break_is_ignorable_(property)) {
-        rune = sz_utf8_decode_(text, length, &current);
+        rune = sz_utf8_next_rune_(text, length, &current);
         property = sz_rune_word_break_property(rune);
     }
 
@@ -186,7 +185,7 @@ SZ_INTERNAL sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_siz
 
     // Decode and get property
     sz_size_t decode_position = previous;
-    sz_rune_t rune = sz_utf8_decode_(text, position, &decode_position);
+    sz_rune_t rune = sz_utf8_next_rune_(text, position, &decode_position);
     sz_u8_t property = sz_rune_word_break_property(rune);
 
     // Skip back over ignorables (WB4). EXCEPTION: an ignorable immediately after a Newline/CR/LF — or at sot — is
@@ -197,7 +196,7 @@ SZ_INTERNAL sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_siz
         sz_size_t predecessor = previous - 1;
         while (predecessor > 0 && ((sz_u8_t)text[predecessor] & 0xC0) == 0x80) predecessor--;
         sz_size_t predecessor_decode = predecessor;
-        sz_rune_t predecessor_rune = sz_utf8_decode_(text, previous, &predecessor_decode);
+        sz_rune_t predecessor_rune = sz_utf8_next_rune_(text, previous, &predecessor_decode);
         sz_u8_t predecessor_property = sz_rune_word_break_property(predecessor_rune);
         if (predecessor_property == sz_utf8_word_break_newline_k || predecessor_property == sz_utf8_word_break_cr_k ||
             predecessor_property == sz_utf8_word_break_lf_k)
@@ -222,7 +221,7 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_count_regional_indicators_before_(sz_cp
         while (previous > 0 && ((sz_u8_t)text[previous] & 0xC0) == 0x80) previous--;
 
         sz_size_t decode_position = previous;
-        sz_rune_t rune = sz_utf8_decode_(text, current, &decode_position);
+        sz_rune_t rune = sz_utf8_next_rune_(text, current, &decode_position);
         sz_u8_t property = sz_rune_word_break_property(rune);
 
         if (property == sz_utf8_word_break_regional_ind_k) {
@@ -278,7 +277,7 @@ SZ_INTERNAL sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t code
 }
 
 /** @brief Byte offset of the codepoint start immediately before @p position (which must be > 0), using the canonical
- *         maximal-subpart partition so it agrees with the forward `sz_utf8_decode_` on malformed input: a run of
+ *         maximal-subpart partition so it agrees with the forward `sz_utf8_next_rune_` on malformed input: a run of
  *         continuation bytes is absorbed into the nearest preceding lead ONLY if that lead's sequence actually reaches
  *         @p position; otherwise the byte just before @p position is a stray continuation (its own U+FFFD). A naive
  *         continuation-skip would absorb a stray into the previous codepoint and SKIP it during the backward look-back,
@@ -288,7 +287,7 @@ SZ_INTERNAL sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position
     sz_size_t lead = position - 1;
     while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
     sz_size_t reach = lead;
-    sz_utf8_decode_(text, position, &reach);
+    sz_utf8_next_rune_(text, position, &reach);
     return reach == position ? lead : position - 1;
 }
 
@@ -300,7 +299,7 @@ SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_
 
     sz_size_t last_start = sz_word_previous_start_(text, position);
     sz_size_t decode_at = last_start;
-    sz_rune_t last_codepoint = sz_utf8_decode_(text, position, &decode_at);
+    sz_rune_t last_codepoint = sz_utf8_next_rune_(text, position, &decode_at);
     sz_u8_t last_property = sz_rune_word_break_property(last_codepoint);
     element.ends_in_zwj = (sz_bool_t)(last_property == sz_utf8_word_break_zwj_k);
 
@@ -310,7 +309,7 @@ SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_
     while (sz_utf8_word_break_is_ignorable_(base_property) && base_start > 0) {
         sz_size_t predecessor_start = sz_word_previous_start_(text, base_start);
         sz_size_t predecessor_at = predecessor_start;
-        sz_rune_t predecessor_codepoint = sz_utf8_decode_(text, base_start, &predecessor_at);
+        sz_rune_t predecessor_codepoint = sz_utf8_next_rune_(text, base_start, &predecessor_at);
         //  WB4 exception: an ignorable directly after a Newline/CR/LF is de-ignored and is its own base.
         if (sz_word_is_newline_(sz_rune_word_break_property(predecessor_codepoint))) break;
         base_start = predecessor_start;
@@ -329,18 +328,18 @@ SZ_INTERNAL sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t le
     sz_word_element_t element;
     element.valid = sz_false_k;
     sz_size_t cursor = position;
-    sz_rune_t base_codepoint = sz_utf8_decode_(text, length, &cursor);
+    sz_rune_t base_codepoint = sz_utf8_next_rune_(text, length, &cursor);
     if (!sz_word_is_newline_(sz_rune_word_break_property(base_codepoint))) {
         while (cursor < length) {
             sz_size_t probe = cursor;
-            sz_rune_t codepoint = sz_utf8_decode_(text, length, &probe);
+            sz_rune_t codepoint = sz_utf8_next_rune_(text, length, &probe);
             if (!sz_utf8_word_break_is_ignorable_(sz_rune_word_break_property(codepoint))) break;
             cursor = probe;
         }
     }
     if (cursor >= length) return element;
     sz_size_t decode_at = cursor;
-    sz_rune_t next_codepoint = sz_utf8_decode_(text, length, &decode_at);
+    sz_rune_t next_codepoint = sz_utf8_next_rune_(text, length, &decode_at);
     element.property = sz_rune_word_break_property(next_codepoint);
     element.codepoint = next_codepoint;
     element.start = cursor;
@@ -378,17 +377,17 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
         sz_size_t lead = position;
         while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
         sz_size_t reach = lead;
-        sz_utf8_decode_(text, length, &reach);
+        sz_utf8_next_rune_(text, length, &reach);
         if (reach > position) return sz_false_k; // interior byte of a valid multi-byte codepoint
     }
 
     sz_size_t after_at = position;
-    sz_rune_t next_codepoint = sz_utf8_decode_(text, length, &after_at);
+    sz_rune_t next_codepoint = sz_utf8_next_rune_(text, length, &after_at);
     sz_u8_t next_property = sz_rune_word_break_property(next_codepoint);
 
     sz_size_t immediate_start = sz_word_previous_start_(text, position);
     sz_size_t immediate_at = immediate_start;
-    sz_rune_t immediate_codepoint = sz_utf8_decode_(text, position, &immediate_at);
+    sz_rune_t immediate_codepoint = sz_utf8_next_rune_(text, position, &immediate_at);
     sz_u8_t immediate_property = sz_rune_word_break_property(immediate_codepoint);
 
     if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
@@ -626,16 +625,16 @@ SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
     state.has_previous = sz_false_k;
 
     // Position 0 is always a boundary (WB1); seed the state from the first codepoint and report interior boundaries
-    // from the second onward. Step by the maximal-subpart partition (the same `sz_utf8_decode_` grid the predicate and
+    // from the second onward. Step by the maximal-subpart partition (the same `sz_utf8_next_rune_` grid the predicate and
     // its forward look-ahead use) so a streamed resume reproduces the identical segmentation on malformed input.
     sz_size_t word_start = 0;
     sz_size_t position = 0;
-    sz_rune_t const first_codepoint = sz_utf8_decode_(text, length, &position);
+    sz_rune_t const first_codepoint = sz_utf8_next_rune_(text, length, &position);
     sz_word_serial_advance_(&state, sz_rune_word_break_property(first_codepoint), first_codepoint);
 
     while (position < length) {
         sz_size_t next_position = position;
-        sz_rune_t const next_codepoint = sz_utf8_decode_(text, length, &next_position);
+        sz_rune_t const next_codepoint = sz_utf8_next_rune_(text, length, &next_position);
         sz_u8_t const next_property = sz_rune_word_break_property(next_codepoint);
         if (sz_word_serial_boundary_(&state, next_property, next_codepoint, text, length, position)) {
             if (words == words_capacity) {
@@ -829,7 +828,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_ri_join_( //
         bits ^= (bits << shift) & reach;
         reach &= reach << shift;
     }
-    if (inbound_parity) bits ^= sz_utf8_codepoints_fill_right_(run_gate & 1ull, run_gate);
+    if (inbound_parity) bits ^= sz_u64_fill_right_(run_gate & 1ull, run_gate);
     *inclusive_parity_out = bits;
     return ri & (bits ^ ri);
 }
@@ -880,7 +879,7 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, sz_size_t loaded,
     sz_utf8_word_break_carry_t *carry, sz_bool_t more_text) {
 
-    sz_u64_t const valid = sz_utf8_codepoints_mask_until_(loaded);
+    sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
     sz_u64_t const continuation = continuation_all & valid;
     sz_size_t const high_lane = loaded - 1;
@@ -891,9 +890,9 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     sz_u64_t const lead_two = length_two & start_bytes;
     sz_u64_t const lead_three = length_three & start_bytes;
     sz_u64_t const lead_four = length_four & start_bytes;
-    sz_u64_t const truncated_raw = ((lead_two & ~sz_utf8_codepoints_mask_until_(loaded > 1 ? loaded - 1 : 0)) |
-                                    (lead_three & ~sz_utf8_codepoints_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
-                                    (lead_four & ~sz_utf8_codepoints_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
+    sz_u64_t const truncated_raw = ((lead_two & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
+                                    (lead_three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
+                                    (lead_four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                                    valid;
     // Every U+FFFD lane — truncated at the edge OR ill-formed (already forced to Other by the driver) — must be excluded
     // from the raw-byte WB3c (pictograph) and WB3d (WSegSpace) checks, which read the raw membership masks directly.
@@ -924,12 +923,12 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     // WB4: Extend/Format/ZWJ are transparent. A "flow" mask lets a class run reach across ignorables (and the CLAIMED
     // continuation bytes of a multi-byte codepoint) so neighbour shifts read the effective adjacent class.
     sz_u64_t const flow_ignorable = continuation | lead_ignorable;
-    sz_u64_t const aletter_right_base = sz_utf8_codepoints_fill_right_(class_aletter, flow_ignorable);
-    sz_u64_t const numeric_right_base = sz_utf8_codepoints_fill_right_(class_numeric, flow_ignorable);
-    sz_u64_t const hebrew_right_base = sz_utf8_codepoints_fill_right_(class_hebrew, flow_ignorable);
-    sz_u64_t const aletter_left_base = sz_utf8_codepoints_fill_left_(class_aletter, flow_ignorable);
-    sz_u64_t const numeric_left_base = sz_utf8_codepoints_fill_left_(class_numeric, flow_ignorable);
-    sz_u64_t const hebrew_left_base = sz_utf8_codepoints_fill_left_(class_hebrew, flow_ignorable);
+    sz_u64_t const aletter_right_base = sz_u64_fill_right_(class_aletter, flow_ignorable);
+    sz_u64_t const numeric_right_base = sz_u64_fill_right_(class_numeric, flow_ignorable);
+    sz_u64_t const hebrew_right_base = sz_u64_fill_right_(class_hebrew, flow_ignorable);
+    sz_u64_t const aletter_left_base = sz_u64_fill_left_(class_aletter, flow_ignorable);
+    sz_u64_t const numeric_left_base = sz_u64_fill_left_(class_numeric, flow_ignorable);
+    sz_u64_t const hebrew_left_base = sz_u64_fill_left_(class_hebrew, flow_ignorable);
     int const left_is_aletter = left_property == sz_utf8_word_break_aletter_k;
     int const left_is_hebrew = left_property == sz_utf8_word_break_hebrew_letter_k;
     int const left_is_numeric = left_property == sz_utf8_word_break_numeric_k;
@@ -937,7 +936,7 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     // The leading window-edge region runs from lane 0 up to and including the first significant (non-ignorable) lead.
     sz_u64_t const significant_leads = start_bytes & ~lead_ignorable;
     sz_u64_t const edge_region = significant_leads
-                                     ? sz_utf8_codepoints_mask_until_((sz_size_t)sz_u64_ctz(significant_leads) + 1)
+                                     ? sz_u64_mask_until_serial_((sz_size_t)sz_u64_ctz(significant_leads) + 1)
                                      : valid;
 
     int const carry_bridge_aletter = carry->bridge_open && carry->bridge_kind == sz_utf8_word_break_bridge_aletter_k;
@@ -970,25 +969,23 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
         numeric_left = numeric_left_base;
     }
     else {
-        aletter_right = sz_utf8_codepoints_fill_right_(class_aletter, flow);
-        numeric_right = sz_utf8_codepoints_fill_right_(class_numeric, flow);
-        aletter_left = sz_utf8_codepoints_fill_left_(class_aletter, flow);
-        numeric_left = sz_utf8_codepoints_fill_left_(class_numeric, flow);
+        aletter_right = sz_u64_fill_right_(class_aletter, flow);
+        numeric_right = sz_u64_fill_right_(class_numeric, flow);
+        aletter_left = sz_u64_fill_left_(class_aletter, flow);
+        numeric_left = sz_u64_fill_left_(class_numeric, flow);
     }
-    sz_u64_t const katakana_right = sz_utf8_codepoints_fill_right_(class_katakana, flow);
-    sz_u64_t const extendnumlet_right = sz_utf8_codepoints_fill_right_(class_extendnumlet, flow);
-    sz_u64_t const hebrew_right = sz_utf8_codepoints_fill_right_(class_hebrew, flow);
-    sz_u64_t const katakana_left = sz_utf8_codepoints_fill_left_(class_katakana, flow);
-    sz_u64_t const extendnumlet_left = sz_utf8_codepoints_fill_left_(class_extendnumlet, flow);
+    sz_u64_t const katakana_right = sz_u64_fill_right_(class_katakana, flow);
+    sz_u64_t const extendnumlet_right = sz_u64_fill_right_(class_extendnumlet, flow);
+    sz_u64_t const hebrew_right = sz_u64_fill_right_(class_hebrew, flow);
+    sz_u64_t const katakana_left = sz_u64_fill_left_(class_katakana, flow);
+    sz_u64_t const extendnumlet_left = sz_u64_fill_left_(class_extendnumlet, flow);
 
     // WB3/WB3a/WB3b/WB3c: Newline (CR/LF/Newline) forces a break on both sides except CR x LF; ZWJ x suppresses the
     // break after a ZWJ. Multi-byte newlines smear across their OWN continuation bytes (NOT the wider `flow`).
-    sz_u64_t previous_newline =
-        (sz_utf8_codepoints_smear_right_(class_newline, continuation, sz_utf8_word_break_smear_steps_k) << 1);
-    sz_u64_t previous_cr = (sz_utf8_codepoints_smear_right_(class_cr, continuation, sz_utf8_word_break_smear_steps_k)
-                            << 1);
-    sz_u64_t previous_zwj = (sz_utf8_codepoints_smear_right_(class_zwj, continuation, sz_utf8_word_break_smear_steps_k)
-                             << 1) |
+    sz_u64_t previous_newline = (sz_u64_smear_right_(class_newline, continuation, sz_utf8_word_break_smear_steps_k)
+                                 << 1);
+    sz_u64_t previous_cr = (sz_u64_smear_right_(class_cr, continuation, sz_utf8_word_break_smear_steps_k) << 1);
+    sz_u64_t previous_zwj = (sz_u64_smear_right_(class_zwj, continuation, sz_utf8_word_break_smear_steps_k) << 1) |
                             sz_u64_or_if_(0ull, 1ull, carry->prev_ends_in_zwj != 0);
     int const left_is_cr = left_property == sz_utf8_word_break_cr_k;
     int const left_is_newline = left_is_cr || left_property == sz_utf8_word_break_lf_k ||
@@ -998,7 +995,7 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
 
     int const leading_mid_bridged = (edge_region & bridge) != 0;
     sz_u64_t const carry_seed_extension = leading_mid_bridged
-                                              ? ((sz_utf8_codepoints_fill_right_(edge_region, flow) << 1) & start_bytes)
+                                              ? ((sz_u64_fill_right_(edge_region, flow) << 1) & start_bytes)
                                               : 0ull;
     sz_u64_t const carry_seed = edge_region | carry_seed_extension;
     sz_u64_t const seed_aletter = sz_u64_or_if_(0ull, carry_seed, left_is_aletter || left_is_hebrew);
@@ -1032,18 +1029,16 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     }
 
     // WB3d: WSegSpace x WSegSpace, raw adjacency over the space's OWN continuation bytes only.
-    sz_u64_t const previous_wseg =
-        (sz_utf8_codepoints_smear_right_(wseg, continuation, sz_utf8_word_break_smear_steps_k) << 1) |
-        sz_u64_or_if_(0ull, 1ull, carry->prev_is_wseg != 0);
+    sz_u64_t const previous_wseg = (sz_u64_smear_right_(wseg, continuation, sz_utf8_word_break_smear_steps_k) << 1) |
+                                   sz_u64_or_if_(0ull, 1ull, carry->prev_is_wseg != 0);
     join |= previous_wseg & wseg;
 
     // WB15/WB16: Regional_Indicator pairs, resolved by the segmented parity scan.
     sz_u64_t ri_inclusive = 0;
     int const lane0_continues_ri = carry->left_property == sz_utf8_word_break_regional_ind_k &&
                                    ((class_regional | flow_ignorable) & 1ull) != 0;
-    sz_u64_t const ri_run_gate = sz_u64_or_if_(sz_utf8_codepoints_fill_right_(class_regional, flow_ignorable) |
-                                                   sz_utf8_codepoints_fill_left_(class_regional, flow_ignorable) |
-                                                   class_regional,
+    sz_u64_t const ri_run_gate = sz_u64_or_if_(sz_u64_fill_right_(class_regional, flow_ignorable) |
+                                                   sz_u64_fill_left_(class_regional, flow_ignorable) | class_regional,
                                                1ull, lane0_continues_ri);
     sz_u64_t const ri_join = sz_utf8_word_break_ri_join_(
         class_regional, ri_run_gate, (sz_u8_t)(lane0_continues_ri ? carry->ri_parity : 0), &ri_inclusive);
@@ -1064,10 +1059,9 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     sz_u64_t const reach_gate = flow_ignorable;
     sz_u64_t const back_gate = flow_ignorable | mid_any;
     sz_u64_t const top_bit = at_tail ? 0ull : (1ull << high_lane);
-    sz_u64_t const open_to_edge = sz_utf8_codepoints_fill_right_(mid_open, reach_gate) & top_bit;
-    sz_u64_t const undecided = (!at_tail && open_to_edge)
-                                   ? (mid_open & sz_utf8_codepoints_fill_left_(open_to_edge, back_gate))
-                                   : 0ull;
+    sz_u64_t const open_to_edge = sz_u64_fill_right_(mid_open, reach_gate) & top_bit;
+    sz_u64_t const undecided = (!at_tail && open_to_edge) ? (mid_open & sz_u64_fill_left_(open_to_edge, back_gate))
+                                                          : 0ull;
 
     sz_u64_t const lowbit = carry->have_prev ? 1ull : 0ull;
     sz_u64_t const produced = start_bytes & (~1ull | lowbit);
@@ -1076,11 +1070,11 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     if (undecided) {
         sz_size_t const lane = (sz_size_t)sz_u64_ctz(undecided);
         resolved = lane;
-        boundary &= sz_utf8_codepoints_mask_until_(lane);
+        boundary &= sz_u64_mask_until_serial_(lane);
     }
 
     // Update the carry from the block's high edge (resolved lane and below).
-    sz_u64_t const resolved_valid = sz_utf8_codepoints_mask_until_(resolved);
+    sz_u64_t const resolved_valid = sz_u64_mask_until_serial_(resolved);
     sz_u64_t const resolved_starts = start_bytes & resolved_valid;
     sz_u64_t const resolved_significant = resolved_starts & ~lead_ignorable;
     sz_u8_t left_out;
@@ -1098,8 +1092,7 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
         sz_u8_t base_class = frame->classes_byte[last_lane];
         int const base_is_newline = base_class == sz_utf8_word_break_cr_k || base_class == sz_utf8_word_break_lf_k ||
                                     base_class == sz_utf8_word_break_newline_k;
-        sz_u64_t const ignorable_after = lead_ignorable & resolved_valid &
-                                         ~sz_utf8_codepoints_mask_until_(last_lane + 1);
+        sz_u64_t const ignorable_after = lead_ignorable & resolved_valid & ~sz_u64_mask_until_serial_(last_lane + 1);
         if (base_is_newline && ignorable_after)
             base_class = frame->classes_byte[(sz_size_t)sz_u64_ctz(ignorable_after)];
         left_out = base_class;
@@ -1127,10 +1120,10 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( /
     }
 
     // Outbound bridge shadow.
-    sz_u64_t const open_at_edge = sz_utf8_codepoints_fill_right_(mid_open, reach_gate) & resolved_valid;
-    sz_u64_t const open_run = open_at_edge & ~sz_utf8_codepoints_mask_until_(resolved > 0 ? resolved - 1 : 0);
+    sz_u64_t const open_at_edge = sz_u64_fill_right_(mid_open, reach_gate) & resolved_valid;
+    sz_u64_t const open_run = open_at_edge & ~sz_u64_mask_until_serial_(resolved > 0 ? resolved - 1 : 0);
     if (open_run) {
-        sz_u64_t const reaching = mid_open & sz_utf8_codepoints_fill_left_(open_run, back_gate);
+        sz_u64_t const reaching = mid_open & sz_u64_fill_left_(open_run, back_gate);
         if (reaching) {
             sz_size_t const mid_lane = (sz_size_t)(63 - sz_u64_clz(reaching));
             sz_u64_t const mid_bit = 1ull << mid_lane;

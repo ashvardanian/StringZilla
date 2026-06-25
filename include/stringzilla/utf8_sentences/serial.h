@@ -8,8 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_sentences/tables.h"
-#include "stringzilla/utf8_codepoints/serial.h" // shared decode helpers
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +66,7 @@ SZ_INTERNAL sz_bool_t sz_sentence_break_sb8_stops_(sz_u8_t property) {
 
 /**
  *  @brief Start offset of the codepoint after @p position: the next non-continuation byte, or @p length.
- *         Mirrors the SIMD `sz_utf8_codepoints_decode_window_` codepoint-start convention so the serial and
+ *         Mirrors the SIMD `sz_utf8_rune_decode_window_` codepoint-start convention so the serial and
  *         Ice Lake backends segment malformed input identically (UAX-29 leaves ill-formed bytes undefined).
  */
 SZ_INTERNAL sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
@@ -78,7 +77,7 @@ SZ_INTERNAL sz_size_t sz_sentence_break_next_start_(sz_cptr_t text, sz_size_t le
 
 /**
  *  @brief Sentence_Break property of the codepoint starting at `start`, decoded BLINDLY to mirror the SIMD
- *         `sz_utf8_codepoints_decode_window_`: the lead's strict length class (2-byte `110xxxxx`, 3-byte
+ *         `sz_utf8_rune_decode_window_`: the lead's strict length class (2-byte `110xxxxx`, 3-byte
  *         `1110xxxx`, 4-byte `11110xxx`; everything else single-byte) selects how many following bytes are
  *         folded in with no continuation/overlong/surrogate validation, missing trailing bytes read as zero.
  *         Valid UTF-8 decodes identically to the checked path; only ill-formed input differs, by design.
@@ -407,20 +406,20 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_
     // Leading edge region: lane 0 up to and including the first significant lead, where the cross-window carried
     // class is injected so lane-0 left context arrives as a register carry (no scalar re-walk).
     int const first_sig = significant ? sz_u64_ctz(significant) : -1;
-    sz_u64_t const edge_region = (first_sig < 0) ? valid : sz_utf8_codepoints_mask_until_((sz_size_t)first_sig + 1);
+    sz_u64_t const edge_region = (first_sig < 0) ? valid : sz_u64_mask_until_serial_((sz_size_t)first_sig + 1);
 
     // Effective-previous significant codepoint (SB6 ATerm, SB7 Upper/Lower two-back seeds).
-    sz_u64_t const eb_aterm = (sz_utf8_codepoints_fill_right_(m_aterm & significant, flow) << 1) |
+    sz_u64_t const eb_aterm = (sz_u64_fill_right_(m_aterm & significant, flow) << 1) |
                               sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_aterm_k);
-    sz_u64_t const eb_upper = (sz_utf8_codepoints_fill_right_(m_upper & significant, flow) << 1) |
+    sz_u64_t const eb_upper = (sz_u64_fill_right_(m_upper & significant, flow) << 1) |
                               sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_upper_k);
-    sz_u64_t const eb_lower = (sz_utf8_codepoints_fill_right_(m_lower & significant, flow) << 1) |
+    sz_u64_t const eb_lower = (sz_u64_fill_right_(m_lower & significant, flow) << 1) |
                               sz_u64_or_if_(0ull, edge_region, have_prev && prev_eff == sz_sentence_break_lower_k);
 
-    sz_u64_t const eb2_upper = (sz_utf8_codepoints_fill_right_(eb_upper & significant, flow) << 1) |
+    sz_u64_t const eb2_upper = (sz_u64_fill_right_(eb_upper & significant, flow) << 1) |
                                sz_u64_or_if_(0ull, edge_region,
                                              have_prev && prev_prev_eff == sz_sentence_break_upper_k);
-    sz_u64_t const eb2_lower = (sz_utf8_codepoints_fill_right_(eb_lower & significant, flow) << 1) |
+    sz_u64_t const eb2_lower = (sz_u64_fill_right_(eb_lower & significant, flow) << 1) |
                                sz_u64_or_if_(0ull, edge_region,
                                              have_prev && prev_prev_eff == sz_sentence_break_lower_k);
 
@@ -443,22 +442,20 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_
     sz_u64_t const carry_aterm_sp = sz_u64_or_if_(sz_u64_or_if_(0ull, lane0_sp_only, (int)(open_no_sp & aterm_carry)),
                                                   lane0_sp, (int)(open_with_sp & aterm_carry));
 
-    sz_u64_t const close_phase = sz_utf8_codepoints_fill_right_(m_saterm | carry_close_seed, gate_close) |
-                                 carry_sp_seed;
-    sz_u64_t const shadow = sz_utf8_codepoints_fill_right_(close_phase | carry_sp_seed, gate_sp);
+    sz_u64_t const close_phase = sz_u64_fill_right_(m_saterm | carry_close_seed, gate_close) | carry_sp_seed;
+    sz_u64_t const shadow = sz_u64_fill_right_(close_phase | carry_sp_seed, gate_sp);
     sz_u64_t const sp_in_shadow = (m_sp & shadow) | carry_sp_seed;
-    sz_u64_t const saw_sp_upto = sz_utf8_codepoints_fill_right_(sp_in_shadow, gate_sp) & shadow;
-    sz_u64_t const aterm_close_phase = sz_utf8_codepoints_fill_right_(m_aterm | carry_aterm_close, gate_close) |
-                                       carry_aterm_sp;
-    sz_u64_t const aterm_shadow = sz_utf8_codepoints_fill_right_(aterm_close_phase | carry_aterm_sp, gate_sp);
+    sz_u64_t const saw_sp_upto = sz_u64_fill_right_(sp_in_shadow, gate_sp) & shadow;
+    sz_u64_t const aterm_close_phase = sz_u64_fill_right_(m_aterm | carry_aterm_close, gate_close) | carry_aterm_sp;
+    sz_u64_t const aterm_shadow = sz_u64_fill_right_(aterm_close_phase | carry_aterm_sp, gate_sp);
 
     // SB8 in-window lower-ahead: `fill_left` of Lower through the SB8 neutral set. In dense space a stop is one
     // lane, so no continuation-byte exclusion is needed; the neutral gate is just every non-stop codepoint.
     sz_u64_t const sb8_stop = m_lower | m_upper | m_oletter | m_parasep | m_saterm;
     sz_u64_t const neutral = valid & ~sb8_stop;
-    sz_u64_t const lower_ahead = sz_utf8_codepoints_fill_left_(m_lower, neutral);
+    sz_u64_t const lower_ahead = sz_u64_fill_left_(m_lower, neutral);
     sz_u64_t const top_bit = (count >= 64) ? (1ull << 63) : (1ull << (count - 1));
-    sz_u64_t const neutral_to_edge = sz_utf8_codepoints_fill_left_(top_bit & neutral, neutral) & ~lower_ahead;
+    sz_u64_t const neutral_to_edge = sz_u64_fill_left_(top_bit & neutral, neutral) & ~lower_ahead;
 
     // Raw immediately-preceding codepoint for SB3/SB4: dense `<<1` reads the previous codepoint regardless of
     // Extend/Format (raw, not SB5-skipped). Lane 0 seeds from the carried raw class.
@@ -512,7 +509,7 @@ SZ_INTERNAL sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_block_
     if (undecided) {
         sz_size_t const lane = sz_u64_ctz(undecided);
         resolved = lane;
-        breaks &= sz_utf8_codepoints_mask_until_(lane);
+        breaks &= sz_u64_mask_until_serial_(lane);
     }
 
     // Update the carry from this window's high edge: trailing shadow run-state and the trailing class context.

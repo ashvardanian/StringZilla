@@ -145,7 +145,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16, uint
 }
 
 /**
- *  @brief Per-lead well-formedness mirror of `sz_rune_parse`, computed branchlessly so every
+ *  @brief Per-lead well-formedness mirror of `sz_rune_decode`, computed branchlessly so every
  *      family handler can treat overlong, surrogate, truncated, and out-of-range leads as foreign and
  *      resync one byte at a time - byte-for-byte with the serial reference. The NEON twin of the
  *      Haswell `well_formed_lead_mask`: a lead is well-formed iff its declared continuations follow
@@ -193,7 +193,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16
         is_four_byte_lead_u8x16,
         vandq_u8(next1_is_continuation_u8x16, vandq_u8(next2_is_continuation_u8x16, next3_is_continuation_u8x16)));
 
-    // Bad-special set keyed by the lead and its second byte, mirroring `sz_rune_parse`
+    // Bad-special set keyed by the lead and its second byte, mirroring `sz_rune_decode`
     uint8x16_t e0_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xE0)),
                                        vcltq_u8(next1_u8x16, vdupq_n_u8(0xA0)));
     uint8x16_t ed_bad_u8x16 = vandq_u8(vceqq_u8(source_u8x16, vdupq_n_u8(0xED)),
@@ -968,12 +968,12 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source
         // reference output, just slower. Georgian, fullwidth, and supplementary copy handlers
         // are candidates for the ARM-hardware tuning round if profiles justify them.
         //
-        // `sz_rune_parse` is the parse-side authority: a malformed lead - the only reason
+        // `sz_rune_decode` is the parse-side authority: a malformed lead - the only reason
         // the vector handlers decline a multi-byte sequence after the malformed-mask fix - copies
         // one byte through unchanged and resyncs, byte-for-byte with the serial reference.
         sz_rune_t rune;
-        sz_rune_length_t const rune_length = sz_rune_parse(source, source + source_length, &rune);
-        if (rune_length == sz_utf8_invalid_k) {
+        sz_rune_length_t const rune_length = sz_rune_decode(source, source + source_length, &rune);
+        if (rune_length == sz_rune_invalid_k) {
             *(sz_u8_t *)target = *(sz_u8_t const *)source; // Maximal-subpart resync: copy one byte, advance one
             target += 1, source += 1, source_length -= 1;
             continue;
@@ -981,7 +981,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t source
         sz_rune_t folded_runes[3]; // Unicode case folding produces at most 3 runes
         sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
         for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-            target += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target);
+            target += sz_rune_encode(folded_runes[rune_index], (sz_u8_t *)target);
         // With ≥ 64 bytes remaining, valid UTF-8 guarantees the rune fits the buffer
         source += rune_length, source_length -= rune_length;
     }

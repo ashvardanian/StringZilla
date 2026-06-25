@@ -7,7 +7,7 @@
 #define STRINGZILLA_UTF8_TOKENS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_runes.h"
+#include "stringzilla/utf8_runes/serial.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_linewraps/tables.h"
 #include "stringzilla/utf8_linewraps/serial.h"
-#include "stringzilla/utf8_codepoints/neon.h"
+#include "stringzilla/utf8_runes/neon.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,7 +38,7 @@ extern "C" {
  *  icelake/haswell descriptor unpack. */
 
 /** @brief Expand a 16-bit lane mask into a `uint8x16_t` select vector (byte `i` = 0xFF when bit `i` is set), the
- *         NEON twin of @ref sz_utf8_codepoints_byte_mask_from_bits_haswell_ (which expands 32 bits to a `__m256i`).
+ *         NEON twin of @ref sz_utf8_byte_mask_from_bits_haswell_ (which expands 32 bits to a `__m256i`).
  *         Inverse of `movemask16_neon_`: route the right mask byte to each lane, isolate its bit, then `vceqq`. */
 SZ_INTERNAL uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
     static sz_u8_t const byte_router_lanes[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
@@ -59,12 +59,12 @@ SZ_INTERNAL uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high, uint8x16_t
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const high_high = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
     uint8x16_t const high_low = vandq_u8(high, low_nibble_mask);
-    uint8x16_t const page = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const page = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_stage1_, sz_utf8_line_break_haswell_stage1_count_k / 16, high_high, high_low);
     uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_stage2_lo_, sz_utf8_line_break_haswell_stage2_lo_count_k / 16, page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_stage2_hi_, sz_utf8_line_break_haswell_stage2_hi_count_k / 16, page, low_high);
     uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
     uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
@@ -72,8 +72,8 @@ SZ_INTERNAL uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high, uint8x16_t
     uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
     uint8x16_t result = vdupq_n_u8(0);
     for (int group = 0; group < (int)sz_utf8_line_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_codepoints_lut256_neon_(
-            sz_utf8_line_break_haswell_stage3_groups_ + group * 256, lut_index);
+        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_haswell_stage3_groups_ + group * 256,
+                                                           lut_index);
         uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
         result = vbslq_u8(here, value, result);
     }
@@ -88,16 +88,16 @@ SZ_INTERNAL uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane, uin
     uint8x16_t const n4 = vandq_u8(plane, low_nibble_mask);
     uint8x16_t const n3 = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
     uint8x16_t const stage1_index = vorrq_u8(vshlq_n_u8(n4, 4), n3);
-    uint8x16_t const page = sz_utf8_codepoints_lut256_neon_(sz_utf8_line_break_haswell_astral_stage1_, stage1_index);
+    uint8x16_t const page = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_haswell_astral_stage1_, stage1_index);
     uint8x16_t const n2 = vandq_u8(high, low_nibble_mask);
-    uint8x16_t const leaf2_lo = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const leaf2_lo = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_astral_stage2_lo_, sz_utf8_line_break_haswell_astral_stage2_lo_count_k / 16, page,
         n2);
     uint8x16_t const n1 = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_astral_stage3_lo_, sz_utf8_line_break_haswell_astral_stage3_lo_count_k / 16,
         leaf2_lo, n1);
-    uint8x16_t const leaf_hi = sz_utf8_codepoints_cascade_stage_neon_(
+    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(
         sz_utf8_line_break_haswell_astral_stage3_hi_, sz_utf8_line_break_haswell_astral_stage3_hi_count_k / 16,
         leaf2_lo, n1);
     uint8x16_t const n0 = vandq_u8(low, low_nibble_mask);
@@ -106,7 +106,7 @@ SZ_INTERNAL uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane, uin
     uint8x16_t const stage4_lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), n0);
     uint8x16_t result = vdupq_n_u8(0);
     for (int group = 0; group < (int)sz_utf8_line_break_haswell_astral_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_codepoints_lut256_neon_(
+        uint8x16_t const value = sz_utf8_rune_lut256_neon_(
             sz_utf8_line_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
         uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
         result = vbslq_u8(here, value, result);
@@ -117,30 +117,29 @@ SZ_INTERNAL uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane, uin
 /** @brief A 64-bit "(byte & mask) == pattern" lane mask over the four window quarters. */
 SZ_INTERNAL sz_u64_t sz_line_break_byte_match_neon_(uint8x16_t const *quarters, sz_u8_t mask, sz_u8_t pattern) {
     uint8x16_t const m = vdupq_n_u8(mask), p = vdupq_n_u8(pattern);
-    return sz_utf8_codepoints_mask_combine_neon_(
-        vceqq_u8(vandq_u8(quarters[0], m), p), vceqq_u8(vandq_u8(quarters[1], m), p),
-        vceqq_u8(vandq_u8(quarters[2], m), p), vceqq_u8(vandq_u8(quarters[3], m), p));
+    return sz_utf8_mask_combine_neon_(vceqq_u8(vandq_u8(quarters[0], m), p), vceqq_u8(vandq_u8(quarters[1], m), p),
+                                      vceqq_u8(vandq_u8(quarters[2], m), p), vceqq_u8(vandq_u8(quarters[3], m), p));
 }
 
 /** @brief A 64-bit "byte == value" lane mask over the four window quarters. */
 SZ_INTERNAL sz_u64_t sz_line_break_byte_equal_neon_(uint8x16_t const *quarters, sz_u8_t value) {
     uint8x16_t const v = vdupq_n_u8(value);
-    return sz_utf8_codepoints_mask_combine_neon_(vceqq_u8(quarters[0], v), vceqq_u8(quarters[1], v),
-                                                 vceqq_u8(quarters[2], v), vceqq_u8(quarters[3], v));
+    return sz_utf8_mask_combine_neon_(vceqq_u8(quarters[0], v), vceqq_u8(quarters[1], v), vceqq_u8(quarters[2], v),
+                                      vceqq_u8(quarters[3], v));
 }
 
 /** @brief A 64-bit "byte >= bound" (unsigned) lane mask over the four window quarters (`vcgeq_u8` is native). */
 SZ_INTERNAL sz_u64_t sz_line_break_byte_ge_neon_(uint8x16_t const *quarters, sz_u8_t bound) {
     uint8x16_t const bound_vec = vdupq_n_u8(bound);
-    return sz_utf8_codepoints_mask_combine_neon_(vcgeq_u8(quarters[0], bound_vec), vcgeq_u8(quarters[1], bound_vec),
-                                                 vcgeq_u8(quarters[2], bound_vec), vcgeq_u8(quarters[3], bound_vec));
+    return sz_utf8_mask_combine_neon_(vcgeq_u8(quarters[0], bound_vec), vcgeq_u8(quarters[1], bound_vec),
+                                      vcgeq_u8(quarters[2], bound_vec), vcgeq_u8(quarters[3], bound_vec));
 }
 
 /** @brief A 64-bit "byte < bound" (unsigned) lane mask over the four window quarters (`vcltq_u8` is native). */
 SZ_INTERNAL sz_u64_t sz_line_break_byte_lt_neon_(uint8x16_t const *quarters, sz_u8_t bound) {
     uint8x16_t const bound_vec = vdupq_n_u8(bound);
-    return sz_utf8_codepoints_mask_combine_neon_(vcltq_u8(quarters[0], bound_vec), vcltq_u8(quarters[1], bound_vec),
-                                                 vcltq_u8(quarters[2], bound_vec), vcltq_u8(quarters[3], bound_vec));
+    return sz_utf8_mask_combine_neon_(vcltq_u8(quarters[0], bound_vec), vcltq_u8(quarters[1], bound_vec),
+                                      vcltq_u8(quarters[2], bound_vec), vcltq_u8(quarters[3], bound_vec));
 }
 
 /** @brief Per-window byte-lane classification (NEON): class/side per lane as four `uint8x16_t` quarters plus the
@@ -160,9 +159,9 @@ typedef struct sz_line_break_classified_neon_t {
  *         the icelake `vpermb` palette permute and the haswell `lut256` reads. */
 SZ_INTERNAL void sz_line_break_palette_unpack_neon_(uint8x16_t index, uint8x16_t *classes, uint8x16_t *side,
                                                     uint8x16_t *dotted) {
-    *classes = sz_utf8_codepoints_lut256_neon_(sz_utf8_line_break_palette_class_, index);
-    *side = sz_utf8_codepoints_lut256_neon_(sz_utf8_line_break_palette_side_, index);
-    *dotted = sz_utf8_codepoints_lut256_neon_(sz_utf8_line_break_palette_dotted_, index);
+    *classes = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_class_, index);
+    *side = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_side_, index);
+    *dotted = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_dotted_, index);
 }
 
 /**
@@ -171,9 +170,8 @@ SZ_INTERNAL void sz_line_break_palette_unpack_neon_(uint8x16_t index, uint8x16_t
  *          "consume-1 U+FFFD" malformed policy: an invalid lead / short or stray continuation / overlong /
  *          surrogate / out-of-range lead each become one single-byte U+FFFD unit (class AL).
  */
-SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
-    sz_utf8_codepoints_window_neon_t window) {
-    sz_u64_t const loaded_mask = sz_utf8_codepoints_mask_until_(window.loaded);
+SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(sz_utf8_rune_window_neon_t window) {
+    sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(window.loaded);
     sz_u64_t const continuation = window.continuation & loaded_mask;
     sz_u64_t const two_byte = window.two_byte_starts;
     sz_u64_t const three_byte = window.three_byte_starts;
@@ -182,7 +180,7 @@ SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
 
     //  Forward neighbours (mod-64 wrap, matching icelake's `_mm512_permutexvar_epi8`).
     uint8x16_t next1[4], next2[4], next3[4];
-    sz_utf8_codepoints_forward_neighbours_neon_(raw, next1, next2, next3);
+    sz_utf8_forward_neighbours_neon_(raw, next1, next2, next3);
 
     sz_u64_t const next1_continuation = continuation >> 1, next2_continuation = continuation >> 2,
                    next3_continuation = continuation >> 3;
@@ -259,7 +257,7 @@ SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
         uint8x16_t const low_four = vorrq_u8(vandq_u8(vshlq_n_u8(vandq_u8(n2, low_two_bits), 6), vdupq_n_u8(0xC0)),
                                              vandq_u8(n3, low_six_bits));
         uint8x16_t const high_four = vorrq_u8(vandq_u8(vshlq_n_u8(vandq_u8(n1, low_four_bits), 4), vdupq_n_u8(0xF0)),
-                                              sz_utf8_codepoints_srl8_neon_(n2, 2, 0x0F));
+                                              sz_utf8_srl8_neon_(n2, 2, 0x0F));
 
         //  Blend ASCII (cp == raw byte, high == 0) then 4-byte reconstruction over the decode-window halves.
         uint8x16_t low_q = vbslq_u8(ascii_select, raw_q, window.low[quarter]);
@@ -269,7 +267,7 @@ SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
 
         //  4-byte plane bits (bits 16..20 of the codepoint); zero on every non-4-byte lane.
         uint8x16_t const plane = vorrq_u8(vandq_u8(vshlq_n_u8(vandq_u8(raw_q, low_three_bits), 2), vdupq_n_u8(0x1C)),
-                                          sz_utf8_codepoints_srl8_neon_(n1, 4, 0x03));
+                                          sz_utf8_srl8_neon_(n1, 4, 0x03));
         uint8x16_t const plane_masked = vandq_u8(four_select, plane);
 
         //  Palette index per byte-lane. BMP through the validated full-BMP cascade; astral blended in; replacement
@@ -291,7 +289,7 @@ SZ_INTERNAL sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
                                            &dotted_q[quarter]);
     }
 
-    sz_u64_t const dotted = sz_utf8_codepoints_mask_combine_neon_(
+    sz_u64_t const dotted = sz_utf8_mask_combine_neon_(
         vtstq_u8(dotted_q[0], dotted_q[0]), vtstq_u8(dotted_q[1], dotted_q[1]), vtstq_u8(dotted_q[2], dotted_q[2]),
         vtstq_u8(dotted_q[3], dotted_q[3]));
     result.dotted = dotted & starts;
@@ -314,8 +312,8 @@ SZ_INTERNAL sz_u64_t sz_line_break_class_mask_neon_(uint8x16_t const *classes, s
 /** @brief Build a 64-bit "lane (side & @p bit) != 0" mask over the four side quarters (`vtstq_u8` is native). */
 SZ_INTERNAL sz_u64_t sz_line_break_side_mask_neon_(uint8x16_t const *side, sz_u8_t bit) {
     uint8x16_t const m = vdupq_n_u8(bit);
-    return sz_utf8_codepoints_mask_combine_neon_(vtstq_u8(side[0], m), vtstq_u8(side[1], m), vtstq_u8(side[2], m),
-                                                 vtstq_u8(side[3], m));
+    return sz_utf8_mask_combine_neon_(vtstq_u8(side[0], m), vtstq_u8(side[1], m), vtstq_u8(side[2], m),
+                                      vtstq_u8(side[3], m));
 }
 
 /** @brief Byte-lane gate/base derivation (LB9/LB10) — the NEON twin of @ref sz_line_break_byte_frame_haswell_t. */
@@ -341,8 +339,8 @@ SZ_INTERNAL sz_line_break_byte_frame_neon_t sz_line_break_byte_frame_neon_(sz_li
                                sz_line_break_class_mask_neon_(classes, sz_line_break_zw_k)) &
                               starts;
     sz_u64_t const good_base = starts & ~excluded & ~mark_start;
-    sz_u64_t const mark_bytes = sz_utf8_codepoints_fill_right_(mark_start, non_start) | mark_start;
-    sz_u64_t const flood = sz_utf8_codepoints_fill_right_(good_base, non_start | mark_bytes);
+    sz_u64_t const mark_bytes = sz_u64_fill_right_(mark_start, non_start) | mark_start;
+    sz_u64_t const flood = sz_u64_fill_right_(good_base, non_start | mark_bytes);
     sz_u64_t const attached = flood & mark_start;
     sz_u64_t const lone_mark = mark_start & ~attached;
 
@@ -433,17 +431,17 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_neon_(sz_line
  *  @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the NEON twin of
  *          @ref sz_line_break_complete_limit_haswell_ over the NEON window struct. Never below 1.
  */
-SZ_INTERNAL sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_codepoints_window_neon_t window, sz_bool_t more_text) {
+SZ_INTERNAL sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
-    sz_u64_t const valid = sz_utf8_codepoints_mask_until_(loaded);
+    sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const starts = window.codepoint_starts & valid;
     sz_u64_t const two = window.two_byte_starts & starts;
     sz_u64_t const three = window.three_byte_starts & starts;
     sz_u64_t const four = window.four_byte_starts & starts;
-    sz_u64_t const straddle = ((two & ~sz_utf8_codepoints_mask_until_(loaded > 1 ? loaded - 1 : 0)) |
-                               (three & ~sz_utf8_codepoints_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
-                               (four & ~sz_utf8_codepoints_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
+    sz_u64_t const straddle = ((two & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
+                               (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
+                               (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                               valid;
     sz_size_t const limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
     return limit > 0 ? limit : loaded;
@@ -469,8 +467,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon_bytes_( //
     sz_line_break_carry_t carry = sz_line_break_carry_sot_();
 
     while (position < length) {
-        sz_utf8_codepoints_window_neon_t const window = sz_utf8_codepoints_decode_window_neon_(bytes + position,
-                                                                                               length - position);
+        sz_utf8_rune_window_neon_t const window = sz_utf8_rune_decode_window_neon_(bytes + position, length - position);
         sz_bool_t const more_text = (sz_bool_t)(position + window.loaded < length);
         sz_size_t const complete_limit = sz_line_break_complete_limit_neon_(window, more_text);
         sz_line_break_classified_neon_t const classified = sz_line_break_classify_window_neon_(window);
@@ -478,10 +475,9 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon_bytes_( //
         sz_line_break_carry_t carry_next = carry;
         sz_line_break_window_t const win = sz_line_break_decide_window_neon_(classified, carry, &carry_next,
                                                                              complete_limit, more_text);
-        sz_u64_t const commit = win.breaks & sz_utf8_codepoints_mask_until_(win.resolved);
+        sz_u64_t const commit = win.breaks & sz_u64_mask_until_serial_(win.resolved);
 
-        produced = sz_utf8_codepoints_drain_forward_neon_(commit, position, starts, lengths, produced, capacity,
-                                                          &line_start);
+        produced = sz_utf8_rune_drain_forward_neon_(commit, position, starts, lengths, produced, capacity, &line_start);
         if (produced >= capacity) {
             if (bytes_consumed) *bytes_consumed = line_start;
             return produced;

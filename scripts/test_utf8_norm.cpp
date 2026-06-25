@@ -201,7 +201,7 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
     for (std::size_t it = 0; it <= iterations; ++it) {
         if (it > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
         char *write_cursor = input_buffer.data();
-        for (sz_rune_t cp : all_runes) write_cursor += sz_rune_export(cp, (sz_u8_t *)write_cursor);
+        for (sz_rune_t cp : all_runes) write_cursor += sz_rune_encode(cp, (sz_u8_t *)write_cursor);
         sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
 
         for (sz_normal_form_t normal_form : norm_forms) {

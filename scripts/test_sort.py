@@ -66,7 +66,6 @@ def test_unit_strs_sequence():
     assert "p4" not in sampled
 
 
-
 def test_unit_strs_argsort_out():
     """`argsort(out=...)` writes the permutation into a caller `uint64` buffer and returns it."""
     import array
@@ -94,7 +93,6 @@ def test_unit_strs_argsort_out():
         strs.argsort(out=bytes(8 * n))
     with pytest.raises(TypeError):
         strs.sorted(out=buf)
-
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
@@ -144,4 +142,3 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, see
     assert len(native_list) == len(big_list)
     for native_str, big_str in zip(native_list, big_list):
         assert native_str == str(big_str), "Order is wrong"
-

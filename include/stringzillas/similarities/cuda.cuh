@@ -2244,9 +2244,9 @@ struct device_tier_maxima_t {
  *         outputs (engine-owned, device-accessible). The stream is synchronized before the host reads the results.
  */
 template <typename char_type_, typename cub_temp_type_, typename maxima_scratch_type_>
-cuda_status_t reduce_device_tier_maxima_(span<cuda_similarity_task<char_type_> const> tasks,
-                                         cub_temp_type_ &cub_temp, maxima_scratch_type_ &maxima_scratch,
-                                         cudaStream_t stream, device_tier_maxima_t &maxima) noexcept {
+cuda_status_t reduce_device_tier_maxima_(span<cuda_similarity_task<char_type_> const> tasks, cub_temp_type_ &cub_temp,
+                                         maxima_scratch_type_ &maxima_scratch, cudaStream_t stream,
+                                         device_tier_maxima_t &maxima) noexcept {
     maxima = {};
     size_t const count = tasks.size();
     if (!count) return {status_t::success_k, cudaSuccess};
@@ -3045,7 +3045,8 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_cooperative_per_c
 
     unsigned const warp_in_block = threadIdx.x >> 5, lane = threadIdx.x & 31u;
     extern __shared__ u64_t shared_cooperative_match_masks[]; // [warps_per_block][words_count_ * 256]
-    u64_t *const match_masks = shared_cooperative_match_masks + static_cast<size_t>(warp_in_block) * (words_count_ * 256);
+    u64_t *const match_masks = shared_cooperative_match_masks +
+                               static_cast<size_t>(warp_in_block) * (words_count_ * 256);
     size_t const warp_index = (static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x) >> 5;
     size_t const warps_per_device = (static_cast<size_t>(gridDim.x) * blockDim.x) >> 5;
 
@@ -3065,7 +3066,8 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_cooperative_per_c
         u32_t const words = (shorter_length + 63u) >> 6; // <= words_count_ by construction (gated on host)
         bool const active = lane < words;
         u32_t const last_word = words - 1u, last_bit = (shorter_length - 1u) & 63u;
-        u64_t *const lane_row = match_masks + static_cast<size_t>(lane) * 256; // this lane's word OWNS its 256-entry row
+        u64_t *const lane_row = match_masks +
+                                static_cast<size_t>(lane) * 256; // this lane's word OWNS its 256-entry row
 
         // Build the match-masks with lane w owning word w: each active lane fills ONLY its own row from its <= 64
         // shorter chars, so no two lanes ever touch the same slot - no atomics and no warp barrier needed (the scan
@@ -3097,7 +3099,8 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_cooperative_per_c
             for (unsigned step = 1; step < 32u; step <<= 1) {
                 u64_t const generate_below = __shfl_up_sync(0xffffffffu, generate, step);
                 u64_t const propagate_below = __shfl_up_sync(0xffffffffu, propagate, step);
-                if (lane >= step) generate = generate | (propagate & generate_below), propagate = propagate & propagate_below;
+                if (lane >= step)
+                    generate = generate | (propagate & generate_below), propagate = propagate & propagate_below;
             }
             u64_t const carry_below = __shfl_up_sync(0xffffffffu, generate, 1);
             u64_t const addition_carry = (lane == 0) ? 0ull : carry_below;
@@ -3134,13 +3137,14 @@ __global__ __launch_bounds__(256, 4) void unit_myers_multiword_cooperative_per_c
  *         mirrors the write. The single-word Peq is computed on the fly per scanned char (cheap for short tokens).
  */
 template <typename char_type_, typename value_type_>
-__global__ void unit_myers_singleword_direct_per_cuda_cell_(                       //
+__global__ void unit_myers_singleword_direct_per_cuda_cell_(                         //
     span<char_type_ const> const *queries, span<char_type_ const> const *candidates, //
-    size_t queries_count, size_t candidates_count, size_t row_stride,             //
+    size_t queries_count, size_t candidates_count, size_t row_stride,                //
     cross_similarities_t cross_kind, value_type_ *results) {
 
     bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
-    size_t const total_cells = is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
+    size_t const total_cells = is_symmetric ? queries_count * (queries_count + 1) / 2
+                                            : queries_count * candidates_count;
     size_t const cell_index = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (cell_index >= total_cells) return;
 
@@ -3417,7 +3421,7 @@ __global__ __launch_bounds__(256, 1) void unit_gotoh_u16_per_cuda_thread_( //
 /**
  *  @brief Branchless single-codepoint UTF-8 decode, advancing by the returned byte length.
  *
- *  Mirrors the `sz_rune_parse_unchecked` value contract used by the CPU UTF-8 Levenshtein engine: it reads the lead
+ *  Mirrors the `sz_rune_decode_unchecked` value contract used by the CPU UTF-8 Levenshtein engine: it reads the lead
  *  byte, derives the encoded length from the high bits, and accumulates the continuation bytes with no data-dependent
  *  branches (the higher continuation reads are masked out by length, not skipped). Unlike the CPU version, each
  *  continuation read index is clamped to the rune's own length (`bytes[length > k ? k : 0]`), so a well-formed rune
@@ -3428,7 +3432,7 @@ __global__ __launch_bounds__(256, 1) void unit_gotoh_u16_per_cuda_thread_( //
  *  `length - 1` bytes of whatever follows, identical in spirit to the CPU unchecked contract.
  *
  *  The lead mask is `length == 1 ? 0xFF : (0x7F >> length)` (1->0xFF, 2->0x1F, 3->0x0F, 4->0x07): a one-byte rune keeps
- *  the raw lead and multibyte leads strip exactly their marker bits, matching `sz_rune_parse_unchecked` bit-for-bit on
+ *  the raw lead and multibyte leads strip exactly their marker bits, matching `sz_rune_decode_unchecked` bit-for-bit on
  *  both well-formed and malformed input. The ternary lowers to a predicated select, so the decode stays branchless.
  *  @param[in] bytes Pointer to the lead byte of the codepoint.
  *  @param[out] out The decoded codepoint.
@@ -4487,8 +4491,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 using results_value_t = typename std::remove_reference_t<results_type_>::value_type;
                 kernel_shape_t direct_shape;
                 cuda_status_t const direct_resolve = resolve_kernel_shape(
-                    direct_shape, (void const *)&unit_myers_singleword_direct_per_cuda_cell_<char, results_value_t>, 256,
-                    0, false);
+                    direct_shape, (void const *)&unit_myers_singleword_direct_per_cuda_cell_<char, results_value_t>,
+                    256, 0, false);
                 if (direct_resolve.status != status_t::success_k) return direct_resolve;
                 span<char const> *direct_queries = buffers_.query_descs_.data();
                 span<char const> *direct_candidates = buffers_.candidate_descs_.data();
@@ -4503,8 +4507,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 unsigned const direct_block = 256;
                 unsigned const direct_grid = static_cast<unsigned>((live_cells + direct_block - 1) / direct_block);
                 if (timer_.ensure_created() != CUDA_SUCCESS) return make_cuda_status(cudaGetLastError());
-                if (timer_.record_start(executor.stream()) != CUDA_SUCCESS)
-                    return make_cuda_status(cudaGetLastError());
+                if (timer_.record_start(executor.stream()) != CUDA_SUCCESS) return make_cuda_status(cudaGetLastError());
                 CUresult const direct_error = cuda_launch_t {}
                                                   .grid(direct_grid)
                                                   .block(direct_block)
@@ -4512,10 +4515,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                                                   .stream(executor.stream())
                                                   .launch(direct_shape.function, direct_args);
                 if (direct_error != CUDA_SUCCESS) return make_cuda_status(direct_error);
-                if (timer_.record_stop(executor.stream()) != CUDA_SUCCESS)
-                    return make_cuda_status(cudaGetLastError());
-                if (timer_.synchronize(executor.stream()) != CUDA_SUCCESS)
-                    return make_cuda_status(cudaGetLastError());
+                if (timer_.record_stop(executor.stream()) != CUDA_SUCCESS) return make_cuda_status(cudaGetLastError());
+                if (timer_.synchronize(executor.stream()) != CUDA_SUCCESS) return make_cuda_status(cudaGetLastError());
                 return {status_t::success_k, cudaSuccess, CUDA_SUCCESS, timer_.elapsed_milliseconds()};
             }
         }
@@ -4785,8 +4786,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                     shape_ptr = &kernel_table.myers.cooperative_warp_8, warps_per_block = 8, words_rounded = 8;
                 else if (cooperative_words <= 16)
                     shape_ptr = &kernel_table.myers.cooperative_warp_16, warps_per_block = 4, words_rounded = 16;
-                else
-                    shape_ptr = &kernel_table.myers.cooperative_warp_32, warps_per_block = 2, words_rounded = 32;
+                else shape_ptr = &kernel_table.myers.cooperative_warp_32, warps_per_block = 2, words_rounded = 32;
                 unsigned const block_threads = warps_per_block * 32u;
                 unsigned const cooperative_shared_k = warps_per_block * words_rounded * 256u * (unsigned)sizeof(u64_t);
                 unsigned const blocks = shape_ptr->blocks_per_multiprocessor * specs.streaming_multiprocessors;

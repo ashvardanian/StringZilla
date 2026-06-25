@@ -193,10 +193,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                 //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                  //
     szs_levenshtein_distances_t engine, szs_device_scope_t device, //
     sz_sequence_t const *queries, sz_sequence_t const *candidates, //
-    sz_size_t *results, sz_size_t results_row_stride,             //
+    sz_size_t *results, sz_size_t results_row_stride,              //
     char const **error_message);
 
 /**
@@ -209,10 +209,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                 //
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                       //
-    szs_levenshtein_distances_t engine, szs_device_scope_t device,              //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                          //
+    szs_levenshtein_distances_t engine, szs_device_scope_t device,                 //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
-    sz_size_t *results, sz_size_t results_row_stride,                           //
+    sz_size_t *results, sz_size_t results_row_stride,                              //
     char const **error_message);
 
 /**
@@ -225,10 +225,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                       
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                       //
-    szs_levenshtein_distances_t engine, szs_device_scope_t device,              //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                          //
+    szs_levenshtein_distances_t engine, szs_device_scope_t device,                 //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
-    sz_size_t *results, sz_size_t results_row_stride,                           //
+    sz_size_t *results, sz_size_t results_row_stride,                              //
     char const **error_message);
 
 /**
@@ -283,10 +283,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8(                  //
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                  //
-    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,         //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                     //
+    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,            //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
-    sz_size_t *results, sz_size_t results_row_stride,                           //
+    sz_size_t *results, sz_size_t results_row_stride,                              //
     char const **error_message);
 
 /**
@@ -299,10 +299,10 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                  
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                  //
-    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,         //
+SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                     //
+    szs_levenshtein_distances_utf8_t engine, szs_device_scope_t device,            //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
-    sz_size_t *results, sz_size_t results_row_stride,                           //
+    sz_size_t *results, sz_size_t results_row_stride,                              //
     char const **error_message);
 
 /**
@@ -368,10 +368,10 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores(                  //
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                     //
-    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,            //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                        //
+    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,               //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
-    sz_ssize_t *results, sz_size_t results_row_stride,                          //
+    sz_ssize_t *results, sz_size_t results_row_stride,                             //
     char const **error_message);
 
 /**
@@ -384,10 +384,10 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                     
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                     //
-    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,            //
+SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                        //
+    szs_needleman_wunsch_scores_t engine, szs_device_scope_t device,               //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
-    sz_ssize_t *results, sz_size_t results_row_stride,                          //
+    sz_ssize_t *results, sz_size_t results_row_stride,                             //
     char const **error_message);
 
 /**
@@ -427,10 +427,10 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                          
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                 //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                  //
     szs_smith_waterman_scores_t engine, szs_device_scope_t device, //
     sz_sequence_t const *queries, sz_sequence_t const *candidates, //
-    sz_ssize_t *results, sz_size_t results_row_stride,            //
+    sz_ssize_t *results, sz_size_t results_row_stride,             //
     char const **error_message);
 
 /**
@@ -443,10 +443,10 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores(                 //
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                      //
-    szs_smith_waterman_scores_t engine, szs_device_scope_t device,             //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                          //
+    szs_smith_waterman_scores_t engine, szs_device_scope_t device,                 //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
-    sz_ssize_t *results, sz_size_t results_row_stride,                         //
+    sz_ssize_t *results, sz_size_t results_row_stride,                             //
     char const **error_message);
 
 /**
@@ -459,10 +459,10 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u32tape(                      /
  *  @param[in] results_row_stride Number of elements between consecutive query rows (>= candidate count).
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                      //
-    szs_smith_waterman_scores_t engine, szs_device_scope_t device,             //
+SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_u64tape(                          //
+    szs_smith_waterman_scores_t engine, szs_device_scope_t device,                 //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
-    sz_ssize_t *results, sz_size_t results_row_stride,                         //
+    sz_ssize_t *results, sz_size_t results_row_stride,                             //
     char const **error_message);
 
 /**

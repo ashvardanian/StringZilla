@@ -537,9 +537,9 @@ void test_hash_multiseed_all();
 
 #pragma region UTF-8
 
-void test_utf8_codepoints_unit();
-void test_utf8_codepoints_safety();
-void test_utf8_codepoints_all();
+void test_utf8_runes_unit();
+void test_utf8_runes_safety();
+void test_utf8_runes_all();
 void test_utf8_tokens_unit();
 void test_utf8_tokens_safety();
 void test_utf8_tokens_all();

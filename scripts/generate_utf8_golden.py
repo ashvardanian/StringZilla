@@ -80,12 +80,12 @@ _CORPORA: dict[str, list[str]] = {
         "abc",
         "a\r\nb",  # GB3: CR x LF stays one cluster
         "é",  # GB9: e + combining acute -> one cluster
-        "\U0001F1FA\U0001F1F8",  # GB12/13: RI pair -> one flag
-        "\U0001F1FA\U0001F1F8\U0001F1EB\U0001F1F7",  # two flags (even RI run)
-        "\U0001F1FAa\U0001F1F8",  # RI ASCII RI: parity reset
-        "\U0001F1FA\U0001F1F8\U0001F1EB",  # odd RI run (3)
-        "\U0001F469‍\U0001F469‍\U0001F467",  # GB11: ZWJ family -> one cluster
-        "\U0001F44D\U0001F3FD",  # emoji + skin-tone modifier
+        "\U0001f1fa\U0001f1f8",  # GB12/13: RI pair -> one flag
+        "\U0001f1fa\U0001f1f8\U0001f1eb\U0001f1f7",  # two flags (even RI run)
+        "\U0001f1faa\U0001f1f8",  # RI ASCII RI: parity reset
+        "\U0001f1fa\U0001f1f8\U0001f1eb",  # odd RI run (3)
+        "\U0001f469‍\U0001f469‍\U0001f467",  # GB11: ZWJ family -> one cluster
+        "\U0001f44d\U0001f3fd",  # emoji + skin-tone modifier
         "☺️",  # emoji + VS16
         "가",  # Hangul LV syllable
         "각",  # GB6/7/8: Hangul L+V+T jamo -> one cluster
@@ -130,8 +130,9 @@ def emit_family(family: str) -> None:
     print(f"std::vector<utf8_segment_unit_case_t> const {family}_golden_cases = {{")
     for text in _CORPORA[family]:
         segments = segmenter(text)
-        rendered = ", ".join(f"{{{c_escape(bytes_)}, {'true' if mandatory else 'false'}}}"
-                             for bytes_, mandatory in segments)
+        rendered = ", ".join(
+            f"{{{c_escape(bytes_)}, {'true' if mandatory else 'false'}}}" for bytes_, mandatory in segments
+        )
         print(f"    {{{c_escape(text)}, {{{rendered}}}}},")
     print("};")
     print()

@@ -844,7 +844,7 @@ enum {
  *  @brief Complete-BMP two-stage trie (B=8 / SB=8) over `0x800..0xFFFF`, holding the resolved 6-bit *palette
  *         index* per codepoint (not the class). Unlike `sz_utf8_line_break_trie_*`, this trie absorbs the BMP
  *         big-range overrides (CJK, U+FFFD, ...) so the icelake classifier can resolve every BMP codepoint in
- *         one all-64-lane `sz_utf8_codepoints_trie_walk_icelake_` pass with no per-group big-range scan. Bit-exact
+ *         one all-64-lane `sz_utf8_rune_trie_walk_icelake_` pass with no per-group big-range scan. Bit-exact
  *         with `sz_rune_line_break_property` -> palette index across the whole BMP (generator self-validated). The
  *         arrays are zero-padded for the resident `vpermi2*` tiles; the logical entry counts are below.
  */

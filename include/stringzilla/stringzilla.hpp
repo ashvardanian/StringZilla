@@ -822,7 +822,9 @@ class find_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -948,7 +950,9 @@ class rfind_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -970,12 +974,14 @@ class rfind_splits_view {
 /**
  *  @brief A range view over UTF-8 characters (codepoints) in a string.
  *
- *  Iterates over UTF-32 codepoints decoded from UTF-8 bytes using efficient batched decoding.
- *  Decodes up to 64 characters at a time for performance, then yields them one by one.
+ *  Iterates over UTF-32 codepoints decoded from UTF-8 bytes using efficient batched decoding. Each refill
+ *  decodes up to @p steps_ codepoints in a single `sz_utf8_decode` call (the decoder fills the whole
+ *  buffer regardless of script width), then yields them one by one. Ill-formed bytes decode to U+FFFD.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ *  @tparam steps_       Codepoints buffered per decode call (the batch width, defaults to the shared constant).
  */
-template <typename string_type_>
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
 class utf8_runes_view {
   public:
     using string_type = string_type_;
@@ -997,7 +1003,7 @@ class utf8_runes_view {
         size_type octets_offset_;
 
         // Batch buffer for efficient decoding
-        sz_rune_t runes_[64];
+        sz_rune_t runes_[steps_];
         size_type runes_count_;
         size_type runes_offset_;
 
@@ -1011,13 +1017,22 @@ class utf8_runes_view {
             char const *octets_ptr = octets_start_ + octets_offset_;
             size_type unpacked_count = 0;
 
-            char const *next_ptr = sz_utf8_unpack_chunk(octets_ptr, chunk_size, runes_, 64, &unpacked_count);
+            char const *next_ptr = sz_utf8_decode(octets_ptr, chunk_size, runes_, steps_, &unpacked_count);
 
             // Update position
             size_type bytes_consumed = static_cast<size_type>(next_ptr - octets_ptr);
             octets_offset_ += bytes_consumed;
-            runes_count_ = unpacked_count;
             runes_offset_ = 0;
+
+            // The decoder stops (yielding nothing) on a well-formed but truncated trailing sequence so a streaming
+            // caller can resume. We own the whole view, so finalize that tail as a single U+FFFD (its maximal
+            // subpart) instead of silently dropping it, matching the lossy contract.
+            if (unpacked_count == 0 && octets_offset_ < octets_length_) {
+                runes_[0] = (sz_rune_t)sz_rune_replacement_k;
+                runes_count_ = 1;
+                octets_offset_ = octets_length_;
+            }
+            else { runes_count_ = unpacked_count; }
         }
 
       public:
@@ -1101,7 +1116,9 @@ class utf8_runes_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -2950,10 +2967,14 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -2968,10 +2989,14 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }

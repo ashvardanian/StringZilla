@@ -8,7 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_tokens/serial.h"
-#include "stringzilla/utf8_codepoints/haswell.h"
+#include "stringzilla/utf8_runes/haswell.h"
 
 #ifdef __cplusplus
 extern "C" {

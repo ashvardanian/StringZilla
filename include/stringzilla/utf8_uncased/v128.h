@@ -7,7 +7,7 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_V128_H_
 #define STRINGZILLA_UTF8_UNCASED_V128_H_
 
-#include "stringzilla/find/v128.h"           // `sz_find_v128`
+#include "stringzilla/find/v128.h"              // `sz_find_v128`
 #include "stringzilla/utf8_uncased_fold/v128.h" //
 #include "stringzilla/utf8_uncased/serial.h"
 
@@ -51,7 +51,7 @@ SZ_INTERNAL v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes, sz_u8_t start, 
 
 /** @brief Zero a scratch buffer then copy `length` bytes, so strip kernels can read one byte past. */
 SZ_INTERNAL sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
-                                                        sz_size_t buffer_capacity) {
+                                                             sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
@@ -59,7 +59,7 @@ SZ_INTERNAL sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, s
 
 /** @brief Gather the C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits (irregular flag kept). */
 SZ_INTERNAL v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source, v128_t after_c4, v128_t after_c5, v128_t after_c6,
-                                                v128_t is_continuation) {
+                                                     v128_t is_continuation) {
     v128_t low6 = wasm_v128_and(source, wasm_i8x16_splat(0x3F));
     v128_t c4 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
                                        wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
@@ -107,7 +107,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_s
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_INTERNAL void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                 sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t_ chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -126,7 +127,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_INTERNAL void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                 sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t_ chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -142,7 +144,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *
         v128_t is_latin1_upper = wasm_v128_andnot(wasm_v128_and(after_c3, latin1_range),
                                                   wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x97)));
         folded = sz_utf8_masked_add_v128_(folded, is_latin1_upper, 0x20);
-        v128_t delta = sz_utf8_uncased_latin_delta_v128_(source, after_c4, after_c5, wasm_i8x16_splat(0), is_continuation);
+        v128_t delta = sz_utf8_uncased_latin_delta_v128_(source, after_c4, after_c5, wasm_i8x16_splat(0),
+                                                         is_continuation);
         folded = wasm_i8x16_add(folded, wasm_v128_and(delta, wasm_i8x16_splat(0x01)));
         sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
     }
@@ -245,7 +248,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, s
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_INTERNAL void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                             sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
@@ -304,10 +308,11 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const 
             sz_utf8_uncased_inrange01_v128_(next, 0x96, 0x09));
         danger = wasm_v128_or(
             danger,
-            wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2)),
-                          wasm_v128_or(sz_utf8_uncased_eq01_v128_(next, 0xAA), sz_utf8_uncased_eq01_v128_(next, 0xAB))));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC), sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
+            wasm_v128_and(
+                wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2)),
+                wasm_v128_or(sz_utf8_uncased_eq01_v128_(next, 0xAA), sz_utf8_uncased_eq01_v128_(next, 0xAB))));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xB8)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c3, sz_utf8_uncased_eq01_v128_(source, 0x9F)));
@@ -326,14 +331,15 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const 
         v128_t after_c3 = sz_utf8_uncased_eq01_v128_(previous, 0xC3);
         v128_t after_c4 = sz_utf8_uncased_eq01_v128_(previous, 0xC4);
         v128_t after_c5 = sz_utf8_uncased_eq01_v128_(previous, 0xC5);
-        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2));
+        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
+                                      sz_utf8_uncased_eq01_v128_(previous, 0xE2));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c3, sz_utf8_uncased_eq01_v128_(source, 0x9F)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c4, sz_utf8_uncased_eq01_v128_(source, 0xB0)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c4, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xB8)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC), sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
         sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
         if (best >= 0) break;
     }
@@ -374,8 +380,8 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_
             wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0xB0), sz_utf8_uncased_eq01_v128_(source, 0xB1)),
             wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0xB4), sz_utf8_uncased_eq01_v128_(source, 0xB5)));
         danger = wasm_v128_or(danger, wasm_v128_and(after_cf, wasm_v128_or(second_9x, second_bx)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
         sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
         if (blanket < 0) {
             v128_t lead_blanket = wasm_v128_or(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xE1)),
@@ -396,9 +402,10 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src, 
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
         v128_t previous = sz_utf8_uncased_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
-        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x87), sz_utf8_uncased_eq01_v128_(previous, 0xD6));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC), sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
+        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x87),
+                                      sz_utf8_uncased_eq01_v128_(previous, 0xD6));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
         sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
         if (best >= 0) break;
     }
@@ -414,19 +421,20 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src
         v128_t danger = wasm_v128_and(
             wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBA), sz_utf8_uncased_eq01_v128_(previous, 0xE1)),
             sz_utf8_uncased_inrange01_v128_(next, 0x96, 0x0A));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x9F), sz_utf8_uncased_eq01_v128_(previous, 0xC3)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBF), sz_utf8_uncased_eq01_v128_(previous, 0xC5)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC), sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x9F),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xC3)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBF),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xC5)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
         v128_t is_cont = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                        wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t delta = sz_utf8_uncased_latin_delta_v128_(source, wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4)),
-                                                    wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5)),
-                                                    wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC6)), is_cont);
+        v128_t delta = sz_utf8_uncased_latin_delta_v128_(
+            source, wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4)),
+            wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5)),
+            wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC6)), is_cont);
         v128_t irregular = wasm_v128_and(
             wasm_i8x16_eq(wasm_v128_and(delta, wasm_i8x16_splat((sz_i8_t)0x80)), wasm_i8x16_splat((sz_i8_t)0x80)),
             wasm_i8x16_splat(1));
@@ -447,8 +455,8 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, 
         v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB2), after_e1);
         danger = wasm_v128_or(danger, wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x82), after_e1),
                                                     sz_utf8_uncased_inrange01_v128_(next, 0xA0, 0x46)));
-        danger = wasm_v128_or(
-            danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB4), sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
+        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB4),
+                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
         sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
         if (best >= 0) break;
     }
@@ -462,8 +470,8 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, 
 typedef void (*sz_utf8_uncased_fold_strip_v128_t_)(sz_u8_t const *, sz_size_t, sz_u8_t *);
 typedef long (*sz_utf8_uncased_alarm_strip_v128_t_)(sz_u8_t const *, sz_size_t);
 
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                                         //
-    sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,                 //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                                    //
+    sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,       //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
 
@@ -478,7 +486,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
     sz_u8_t const probe_last = needle_metadata->folded_slice[offset_last];
 
     sz_rune_t needle_first_safe_folded_rune = 0;
-    if (alarm) sz_rune_parse_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune);
+    if (alarm) sz_rune_decode_unchecked((sz_cptr_t)needle_metadata->folded_slice, &needle_first_safe_folded_rune);
 
     // 32-byte chunks (NEON/Ice Lake granularity): finer than RVV strips so an alarmed chunk only serial-scans
     // ~32 bytes, and the danger retreat `step = valid_starts - 2` keeps cross-chunk patterns visible.
@@ -495,7 +503,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
         sz_size_t const step = !alarm ? valid_starts : valid_starts > 2 ? valid_starts - 2 : 1;
 
         sz_u8_t const *source = sz_utf8_uncased_load_padded_v128_(haystack_ptr, chunk_size, source_buffer,
-                                                             chunk_capacity_k + fold_pad_k);
+                                                                  chunk_capacity_k + fold_pad_k);
 
         if (alarm) {
             if (alarm(source, chunk_size) >= 0) {
@@ -557,9 +565,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
 
 SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t length);
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128( //
-    sz_cptr_t haystack, sz_size_t haystack_length,      //
-    sz_cptr_t needle, sz_size_t needle_length,          //
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128(     //
+    sz_cptr_t haystack, sz_size_t haystack_length, //
+    sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
 
     if (needle_length == 0) {
@@ -578,48 +586,49 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128( //
     if (is_unknown) {
         sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
         if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length,
-                                                        needle_metadata, matched_length);
+            return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                               matched_length);
     }
 
     switch (needle_metadata->kernel_id) {
     case sz_utf8_uncased_rune_ascii_invariant_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, SZ_NULL, haystack, haystack_length,
-                                              needle, needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, SZ_NULL, haystack,
+                                                   haystack_length, needle, needle_length, needle_metadata,
+                                                   matched_length);
     case sz_utf8_uncased_rune_safe_western_europe_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_western_europe_strip_v128_,
-                                              sz_utf8_uncased_alarm_western_europe_strip_v128_, haystack, haystack_length,
-                                              needle, needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_western_europe_strip_v128_, sz_utf8_uncased_alarm_western_europe_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_central_europe_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_central_europe_strip_v128_,
-                                              sz_utf8_uncased_alarm_central_europe_strip_v128_, haystack, haystack_length,
-                                              needle, needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_central_europe_strip_v128_, sz_utf8_uncased_alarm_central_europe_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_cyrillic_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_cyrillic_strip_v128_,
-                                              sz_utf8_uncased_alarm_cyrillic_strip_v128_, haystack, haystack_length, needle,
-                                              needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_cyrillic_strip_v128_, sz_utf8_uncased_alarm_cyrillic_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_greek_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_, sz_utf8_uncased_alarm_greek_strip_v128_,
-                                              haystack, haystack_length, needle, needle_length, needle_metadata,
-                                              matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_,
+                                                   sz_utf8_uncased_alarm_greek_strip_v128_, haystack, haystack_length,
+                                                   needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_armenian_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_armenian_strip_v128_,
-                                              sz_utf8_uncased_alarm_armenian_strip_v128_, haystack, haystack_length, needle,
-                                              needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_armenian_strip_v128_, sz_utf8_uncased_alarm_armenian_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_vietnamese_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_vietnamese_strip_v128_,
-                                              sz_utf8_uncased_alarm_vietnamese_strip_v128_, haystack, haystack_length,
-                                              needle, needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_vietnamese_strip_v128_, sz_utf8_uncased_alarm_vietnamese_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_georgian_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, sz_utf8_uncased_alarm_georgian_strip_v128_,
-                                              haystack, haystack_length, needle, needle_length, needle_metadata,
-                                              matched_length);
+        return sz_utf8_uncased_find_scripted_v128_(
+            sz_utf8_uncased_fold_ascii_strip_v128_, sz_utf8_uncased_alarm_georgian_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, matched_length);
     default: break;
     }
 
     needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
     return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                matched_length);
+                                       matched_length);
 }
 
 #pragma region Case Invariance
@@ -642,9 +651,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                                : wasm_i8x16_splat(0);
         }
         sz_u32_t is_upper = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'A', 26),
-                                                        sz_utf8_in_range_v128_(high, 'A', 26));
+                                                             sz_utf8_in_range_v128_(high, 'A', 26));
         sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'a', 26),
-                                                        sz_utf8_in_range_v128_(high, 'a', 26));
+                                                             sz_utf8_in_range_v128_(high, 'a', 26));
         if (is_upper | is_lower) return sz_utf8_uncased_violation_serial(str, length);
 
         v128_t x80 = wasm_i8x16_splat((sz_i8_t)0x80);
@@ -654,13 +663,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
             v128_t xe0 = wasm_i8x16_splat((sz_i8_t)0xE0), xf0 = wasm_i8x16_splat((sz_i8_t)0xF0);
             v128_t xc0 = wasm_i8x16_splat((sz_i8_t)0xC0), xf8 = wasm_i8x16_splat((sz_i8_t)0xF8);
             sz_u32_t is_two = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xe0), xc0),
-                                                          wasm_i8x16_eq(wasm_v128_and(high, xe0), xc0)) &
+                                                               wasm_i8x16_eq(wasm_v128_and(high, xe0), xc0)) &
                               lead_mask;
             sz_u32_t is_three = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xf0), xe0),
-                                                            wasm_i8x16_eq(wasm_v128_and(high, xf0), xe0)) &
+                                                                 wasm_i8x16_eq(wasm_v128_and(high, xf0), xe0)) &
                                 lead_mask;
             sz_u32_t is_four = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xf8), xf0),
-                                                           wasm_i8x16_eq(wasm_v128_and(high, xf8), xf0)) &
+                                                                wasm_i8x16_eq(wasm_v128_and(high, xf8), xf0)) &
                                lead_mask;
             if (is_four) {
                 static sz_u8_t const seconds[5] = {0x90, 0x91, 0x96, 0x9D, 0x9E};
@@ -673,12 +682,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
             }
             if (is_two) {
                 sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xC3, 0x14),
-                                                                    sz_utf8_in_range_v128_(high, 0xC3, 0x14));
+                                                                         sz_utf8_in_range_v128_(high, 0xC3, 0x14));
                 v128_t xc2 = wasm_i8x16_splat((sz_i8_t)0xC2), xb5 = wasm_i8x16_splat((sz_i8_t)0xB5);
                 sz_u32_t is_c2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xc2), wasm_i8x16_eq(high, xc2)) &
                                  is_two;
                 if (is_c2) {
-                    sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xb5), wasm_i8x16_eq(high, xb5));
+                    sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xb5),
+                                                                      wasm_i8x16_eq(high, xb5));
                     if ((is_c2 << 1) & is_b5) return sz_utf8_uncased_violation_serial(str, length);
                 }
                 if (is_bicameral & is_two) return sz_utf8_uncased_violation_serial(str, length);
@@ -694,7 +704,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                                  is_three;
                 if (is_e2) {
                     sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x80, 0x04),
-                                                                   sz_utf8_in_range_v128_(high, 0x80, 0x04));
+                                                                        sz_utf8_in_range_v128_(high, 0x80, 0x04));
                     if ((is_e2 << 1) & ~e2_safe) return sz_utf8_uncased_violation_serial(str, length);
                 }
                 v128_t xea = wasm_i8x16_splat((sz_i8_t)0xEA);
@@ -702,9 +712,9 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                                  is_three;
                 if (is_ea) {
                     sz_u32_t is_99 = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x99, 0x07),
-                                                                 sz_utf8_in_range_v128_(high, 0x99, 0x07));
+                                                                      sz_utf8_in_range_v128_(high, 0x99, 0x07));
                     sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xAC, 0x03),
-                                                                 sz_utf8_in_range_v128_(high, 0xAC, 0x03));
+                                                                      sz_utf8_in_range_v128_(high, 0xAC, 0x03));
                     if ((is_ea << 1) & (is_99 | is_ac)) return sz_utf8_uncased_violation_serial(str, length);
                 }
             }
@@ -717,8 +727,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
 
 #pragma endregion // Case Invariance
 
-SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                            sz_size_t b_length) {
+SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 

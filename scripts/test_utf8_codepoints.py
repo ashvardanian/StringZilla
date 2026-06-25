@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UTF-8 codepoint tests: utf8_count (codepoints, not bytes), plus round-trip and malformed-byte safety.
+"""UTF-8 codepoint tests: utf8_count (codepoints, not bytes) and utf8_codepoints iteration, plus round-trip and malformed-byte safety.
 
 Mirrors the C++ scripts/test_utf8_codepoints.cpp translation unit.
 """
@@ -63,6 +63,38 @@ def test_utf8_count_malformed():
     for raw in adversarial_utf8_inputs(rng, random_input_count=500):
         count = sz.utf8_count(raw)
         assert 0 <= count <= len(raw)
+
+
+def test_unit_utf8_codepoints():
+    """utf8_codepoints yields one int per Unicode scalar value, matching Python's own iteration."""
+    assert list(sz.utf8_codepoints("")) == []
+    assert list(sz.utf8_codepoints("AB")) == [65, 66]
+    for text in ["café", "日本語", "🎉", "αβγδ", "АБВГ", "𐍈", "hello世界"]:
+        assert list(sz.utf8_codepoints(text)) == [ord(c) for c in text]
+    # str, Str, and bytes inputs agree.
+    assert list(sz.utf8_codepoints(sz.Str("café"))) == [ord(c) for c in "café"]
+    assert list(sz.utf8_codepoints("café".encode())) == [ord(c) for c in "café"]
+
+
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_utf8_codepoints_roundtrip(seed_value: int):
+    """On valid UTF-8 corpora, utf8_codepoints reproduces Python's codepoint sequence for str and bytes inputs."""
+    rng = Random(seed_value)
+    for _ in range(200):
+        raw = random_segmentation_corpus(rng.randint(1, 400), "valid", None, rng)
+        text = raw.decode("utf-8")
+        expected = [ord(c) for c in text]
+        assert list(sz.utf8_codepoints(text)) == expected
+        assert list(sz.utf8_codepoints(raw)) == expected
+
+
+def test_utf8_codepoints_malformed():
+    """Lossy + total: malformed bytes decode to U+FFFD, iteration never raises, and only scalar values are emitted."""
+    assert list(sz.utf8_codepoints(b"a\xffb")) == [0x61, 0xFFFD, 0x62]
+    rng = Random(0)
+    for raw in adversarial_utf8_inputs(rng, random_input_count=500):
+        for codepoint in sz.utf8_codepoints(raw):
+            assert 0 <= codepoint <= 0x10FFFF and not (0xD800 <= codepoint <= 0xDFFF)
 
 
 #  endregion Synthetic corner cases (round-trip / malformed)

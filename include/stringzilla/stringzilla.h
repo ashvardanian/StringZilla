@@ -88,7 +88,7 @@
 #include "stringzilla/sort.h"      // `sz_sequence_argsort`, `sz_pgrams_sort`
 #include "stringzilla/intersect.h" // `sz_sequence_intersect`
 
-#include "stringzilla/utf8_codepoints.h"   // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_unpack_chunk`
+#include "stringzilla/utf8_runes.h"        // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_decode`
 #include "stringzilla/utf8_tokens.h"       // `sz_utf8_newlines`, `sz_utf8_whitespaces`
 #include "stringzilla/utf8_delimiters.h"   // `sz_find_delimiter_utf8`
 #include "stringzilla/utf8_words.h"        // `sz_utf8_words`, `sz_rune_word_break_property`

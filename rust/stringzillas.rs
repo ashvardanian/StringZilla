@@ -914,7 +914,8 @@ where
     fn try_allocate(queries_count: usize, candidates_count: usize) -> Result<Self, Error> {
         let element_count = queries_count.saturating_mul(candidates_count);
         let mut data = allocator_api2::vec::Vec::new_in(UnifiedAlloc);
-        data.try_reserve_exact(element_count).map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        data.try_reserve_exact(element_count)
+            .map_err(|_| Error::from(SzStatus::BadAlloc))?;
         data.resize(element_count, T::default()); // No reallocation: capacity was just reserved.
         Ok(Mat {
             data,
@@ -1073,12 +1074,7 @@ impl LevenshteinDistances {
     /// assert_eq!(matrix.dimensions(), (2, 3));
     /// assert_eq!(matrix[(0, 0)], 1); // cat vs bat
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        queries: T,
-        candidates: T,
-    ) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -1404,12 +1400,7 @@ impl LevenshteinDistancesUtf8 {
     /// // Distance would be non-zero without normalization
     /// // Use unicode-normalization crate if needed
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        queries: T,
-        candidates: T,
-    ) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<str>,
@@ -1730,12 +1721,7 @@ impl NeedlemanWunschScores {
     ///     .max_by_key(|(_, &score)| score)
     ///     .map(|(flat_index, _)| flat_index);
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        queries: T,
-        candidates: T,
-    ) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
@@ -2121,12 +2107,7 @@ impl SmithWatermanScores {
     ///     println!("Database[{}]: score {}", database_index, score);
     /// }
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        queries: T,
-        candidates: T,
-    ) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,

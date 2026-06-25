@@ -9,7 +9,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_linewraps/tables.h"
 #include "stringzilla/utf8_linewraps/serial.h"
-#include "stringzilla/utf8_codepoints/icelake.h"
+#include "stringzilla/utf8_runes/icelake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,25 +44,25 @@ extern "C" {
  *         618-range linear astral fold; replaces that per-window scan. */
 SZ_INTERNAL __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints) {
     __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
-    __m512i const stage1 = sz_utf8_codepoints_permute256_icelake_(
+    __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_line_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
     __m512i const stage2_index = _mm512_add_epi32(
         _mm512_slli_epi32(stage1, 4), _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xF)));
-    __m512i const stage2 = sz_utf8_codepoints_lut_cascade_icelake_(
-        sz_utf8_line_break_astral_s1_, (int)sz_utf8_line_break_astral_s1_tiles_k, stage2_index);
+    __m512i const stage2 = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_line_break_astral_s1_,
+                                                             (int)sz_utf8_line_break_astral_s1_tiles_k, stage2_index);
     __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
                                                 _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_line_break_astral_s2_,
-                                                                 (int)sz_utf8_line_break_astral_s2_tiles_k, leaf_index);
+    __m512i const leaf = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_line_break_astral_s2_,
+                                                           (int)sz_utf8_line_break_astral_s2_tiles_k, leaf_index);
     __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
                                                  _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
-    return sz_utf8_codepoints_lut_cascade_icelake_(sz_utf8_line_break_astral_leaf_,
-                                                   (int)sz_utf8_line_break_astral_leaf_tiles_k, class_index);
+    return sz_utf8_rune_lut_cascade_icelake_(sz_utf8_line_break_astral_leaf_,
+                                             (int)sz_utf8_line_break_astral_leaf_tiles_k, class_index);
 }
 
 /** @brief All-64-lane complete-BMP palette index for `cp < 0x10000` over the full-BMP trie (offset = the codepoint
  *         itself, no `-0x800` subtract), so a SINGLE pass resolves the whole BMP -- the page LUT and the 0x800 split
- *         are gone. This mirrors `sz_utf8_codepoints_trie_walk_icelake_` exactly with `block = superblock = 8` and
+ *         are gone. This mirrors `sz_utf8_rune_trie_walk_icelake_` exactly with `block = superblock = 8` and
  *         `offset = (high << 8) | low`; the substrate function bakes in a hard `-0x800`, so the zero-base form lives
  *         here. Lanes whose codepoint is >= 0x10000 are undefined (the caller blends in the astral path). */
 SZ_INTERNAL __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i low) {
@@ -88,23 +88,23 @@ SZ_INTERNAL __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i 
     __m512i const super_lo = _mm512_srl_epi16(block_idx_lo, super_log2);
     __m512i const super_hi = _mm512_srl_epi16(block_idx_hi, super_log2);
 
-    __m512i const level1_lo = sz_utf8_codepoints_gather_byte_(
-        sz_utf8_line_break_bmp_full_trie_l1_, (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_lo);
-    __m512i const level1_hi = sz_utf8_codepoints_gather_byte_(
-        sz_utf8_line_break_bmp_full_trie_l1_, (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_hi);
+    __m512i const level1_lo = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
+                                                        (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_lo);
+    __m512i const level1_hi = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
+                                                        (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_hi);
 
     __m512i const l2_index_lo = _mm512_add_epi16(_mm512_mullo_epi16(level1_lo, super_v16), super_off_lo);
     __m512i const l2_index_hi = _mm512_add_epi16(_mm512_mullo_epi16(level1_hi, super_v16), super_off_hi);
-    __m512i const leaf_idx_lo = sz_utf8_codepoints_gather_word_(
+    __m512i const leaf_idx_lo = sz_utf8_rune_gather_word_(
         sz_utf8_line_break_bmp_full_trie_l2_, (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index_lo);
-    __m512i const leaf_idx_hi = sz_utf8_codepoints_gather_word_(
+    __m512i const leaf_idx_hi = sz_utf8_rune_gather_word_(
         sz_utf8_line_break_bmp_full_trie_l2_, (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index_hi);
 
     __m512i const leaf_byte_lo = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_lo, block_v16), within_lo);
     __m512i const leaf_byte_hi = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_hi, block_v16), within_hi);
-    __m512i const class_lo = sz_utf8_codepoints_gather_byte_(
+    __m512i const class_lo = sz_utf8_rune_gather_byte_(
         sz_utf8_line_break_bmp_full_trie_leaf_, (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte_lo);
-    __m512i const class_hi = sz_utf8_codepoints_gather_byte_(
+    __m512i const class_hi = sz_utf8_rune_gather_byte_(
         sz_utf8_line_break_bmp_full_trie_leaf_, (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte_hi);
 
     return _mm512_packus_epi16(class_lo, class_hi);
@@ -142,14 +142,14 @@ SZ_INTERNAL __m512i sz_line_break_bmp_full_index_compact_icelake_(__m512i high, 
     __m512i const super_off = _mm512_and_si512(block_idx, super_off_mask);
     __m512i const super = _mm512_srl_epi16(block_idx, super_log2);
 
-    __m512i const level1 = sz_utf8_codepoints_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
-                                                           (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super);
+    __m512i const level1 = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
+                                                     (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super);
     __m512i const l2_index = _mm512_add_epi16(_mm512_mullo_epi16(level1, super_v16), super_off);
-    __m512i const leaf_idx = sz_utf8_codepoints_gather_word_(
-        sz_utf8_line_break_bmp_full_trie_l2_, (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index);
+    __m512i const leaf_idx = sz_utf8_rune_gather_word_(sz_utf8_line_break_bmp_full_trie_l2_,
+                                                       (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index);
     __m512i const leaf_byte = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx, block_v16), within);
-    __m512i const class_word = sz_utf8_codepoints_gather_byte_(
-        sz_utf8_line_break_bmp_full_trie_leaf_, (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte);
+    __m512i const class_word = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_leaf_,
+                                                         (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte);
 
     //  Narrow the 32 class words back to 32 contiguous bytes (low half), then scatter to the original start lanes.
     __m512i const class_packed = _mm512_castsi256_si512(_mm512_cvtepi16_epi8(class_word));
@@ -213,12 +213,12 @@ typedef struct sz_line_break_classified_t {
 
 /**
  *  @brief  Classify a decoded 64-byte window onto byte-start lanes, fully in-register and zero-scalar. Reproduces
- *          the serial `sz_utf8_decode_` "consume-1 U+FFFD" policy: an invalid lead, a short/stray continuation, an
+ *          the serial `sz_utf8_next_rune_` "consume-1 U+FFFD" policy: an invalid lead, a short/stray continuation, an
  *          overlong / surrogate / out-of-range lead each become a single-byte U+FFFD unit (class AL), so serial and
  *          icelake agree on malformed input. Valid leads classify by decoded VALUE (page / trie / big / astral),
  *          matching the serial resolution precedence. The BMP trie uses the shared substrate `trie_walk_icelake_`.
  */
-SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_codepoints_window_t window,
+SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
                                                                               __m512i lane_identity) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_(window.loaded);
     sz_u64_t const continuation = _cvtmask64_u64(window.continuation) & loaded_mask;
@@ -294,7 +294,7 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
     __m512i const high_four = _mm512_or_si512(
         _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
                          _mm512_set1_epi8((char)0xF0)),
-        sz_utf8_codepoints_srl8_icelake_(next2, 2, 0x0F));
+        sz_utf8_srl8_icelake_(next2, 2, 0x0F));
     __m512i low_fixed = _mm512_mask_mov_epi8(window.low, _cvtu64_mask64(true_ascii), raw);
     low_fixed = _mm512_mask_mov_epi8(low_fixed, _cvtu64_mask64(four_byte), low_four);
     __m512i high_fixed = _mm512_maskz_mov_epi8(_cvtu64_mask64(~true_ascii), window.high);
@@ -310,7 +310,7 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
     //  4-byte plane bits (bits 16..20 of the codepoint); zero on every non-4-byte lane so cp = (high<<8)|low there.
     __m512i const plane_all = _mm512_or_si512(
         _mm512_and_si512(_mm512_slli_epi16(_mm512_and_si512(raw, _mm512_set1_epi8(0x07)), 2), _mm512_set1_epi8(0x1C)),
-        sz_utf8_codepoints_srl8_icelake_(next1, 4, 0x03));
+        sz_utf8_srl8_icelake_(next1, 4, 0x03));
     __m512i const previous_cluster_lane = _mm512_maskz_mov_epi8(_cvtu64_mask64(four_byte), plane_all);
 
     //  Build the 64-lane palette-index byte vector in ONE pass. The whole BMP (cp < 0x10000) resolves through ONE
@@ -337,10 +337,10 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
         __m512i const codepoint_high_half = _mm512_or_si512(
             _mm512_slli_epi16(_mm512_unpackhi_epi8(high_fixed, zero_bytes), 8),
             _mm512_unpackhi_epi8(low_fixed, zero_bytes));
-        __m512i const class_low_half = sz_utf8_codepoints_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
-                                                                       codepoint_low_half);
-        __m512i const class_high_half = sz_utf8_codepoints_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
-                                                                        codepoint_high_half);
+        __m512i const class_low_half = sz_utf8_rune_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
+                                                                 codepoint_low_half);
+        __m512i const class_high_half = sz_utf8_rune_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
+                                                                  codepoint_high_half);
         index = _mm512_packus_epi16(class_low_half, class_high_half);
     }
     else { index = sz_line_break_bmp_full_index_compact_icelake_(high_fixed, low_fixed, starts); }
@@ -462,8 +462,8 @@ SZ_INTERNAL sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line
     sz_u64_t const good_base = starts & ~excluded & ~mark_start;
     //  A mark attaches (LB9) when reachable from a good base across only continuations and other marks. Flood each
     //  good base rightward over (continuations | mark starts); the mark starts it reaches are the attached marks.
-    sz_u64_t const mark_bytes = sz_utf8_codepoints_fill_right_(mark_start, non_start) | mark_start;
-    sz_u64_t const flood = sz_utf8_codepoints_fill_right_(good_base, non_start | mark_bytes);
+    sz_u64_t const mark_bytes = sz_u64_fill_right_(mark_start, non_start) | mark_start;
+    sz_u64_t const flood = sz_u64_fill_right_(good_base, non_start | mark_bytes);
     sz_u64_t const attached = flood & mark_start;
     sz_u64_t const lone_mark = mark_start & ~attached; // LB10: a mark with no attachable base acts as AL
 
@@ -548,7 +548,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_l
  *          64-byte edge). Mirrors the word kernel's complete-limit: a declared-length lead whose span exceeds `loaded`
  *          ends the trusted region just before it; with no more text the whole window is complete. Never below 1.
  */
-SZ_INTERNAL sz_size_t sz_line_break_complete_limit_(sz_utf8_codepoints_window_t window, sz_bool_t more_text) {
+SZ_INTERNAL sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_(loaded);
@@ -584,15 +584,15 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake_bytes_( //
         return 0;
     }
     sz_u8_t const *bytes = (sz_u8_t const *)text;
-    __m512i const lane_identity = sz_utf8_codepoints_lane_identity_icelake_();
+    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
     sz_size_t produced = 0;
     sz_size_t line_start = 0;                                 // open line's first byte: a confirmed break (or 0)
     sz_size_t position = 0;                                   // codepoint-aligned anchor of the next window
     sz_line_break_carry_t carry = sz_line_break_carry_sot_(); // LB2: start-of-text has no left context
 
     while (position < length) {
-        sz_utf8_codepoints_window_t const window = sz_utf8_codepoints_decode_window_icelake_(
-            bytes + position, length - position, lane_identity);
+        sz_utf8_rune_window_t const window = sz_utf8_rune_decode_window_icelake_(bytes + position, length - position,
+                                                                                 lane_identity);
         sz_bool_t const more_text = (sz_bool_t)(position + window.loaded < length);
         sz_size_t const complete_limit = sz_line_break_complete_limit_(window, more_text);
         sz_line_break_classified_t const classified = sz_line_break_classify_window_icelake_(window, lane_identity);
@@ -602,8 +602,8 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake_bytes_( //
                                                                                 complete_limit, more_text);
         sz_u64_t const commit = win.breaks & sz_u64_mask_until_(win.resolved);
 
-        produced = sz_utf8_codepoints_drain_forward_(commit, position, lane_identity, starts, lengths, produced,
-                                                     capacity, &line_start);
+        produced = sz_utf8_rune_drain_forward_(commit, position, lane_identity, starts, lengths, produced, capacity,
+                                               &line_start);
         if (produced >= capacity) {
             if (bytes_consumed) *bytes_consumed = line_start;
             return produced;

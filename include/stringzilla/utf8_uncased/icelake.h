@@ -372,7 +372,7 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_find_icelake_scripted_( //
 
     // Pre-load the first folded rune for danger zone matching
     sz_rune_t needle_first_safe_folded_rune = 0;
-    if (alarm) sz_rune_parse_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune);
+    if (alarm) sz_rune_decode_unchecked((sz_cptr_t)(needle_metadata->folded_slice), &needle_first_safe_folded_rune);
 
     sz_u512_vec_t haystack_vec;
     sz_cptr_t haystack_ptr = haystack;

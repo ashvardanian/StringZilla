@@ -130,8 +130,8 @@ static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
     std::size_t needle_folded_count = 0;
     for (char const *cursor = needle, *end = needle + needle_length; cursor < end;) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length = sz_rune_parse(cursor, end, &rune);
-        if (rune_length == sz_utf8_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
+        sz_rune_length_t rune_length = sz_rune_decode(cursor, end, &rune);
+        if (rune_length == sz_rune_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
             assert(needle_folded_count < 128 && "reference needle buffer overflow");
             needle_folded[needle_folded_count++] = (sz_u8_t)*cursor;
             ++cursor;
@@ -155,8 +155,8 @@ static sz_cptr_t reference_uncased_find_(char const *haystack, std::size_t hayst
     std::size_t haystack_folded_count = 0;
     for (char const *cursor = haystack, *end = haystack + haystack_length; cursor < end;) {
         sz_rune_t rune;
-        sz_rune_length_t rune_length = sz_rune_parse(cursor, end, &rune);
-        if (rune_length == sz_utf8_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
+        sz_rune_length_t rune_length = sz_rune_decode(cursor, end, &rune);
+        if (rune_length == sz_rune_invalid_k) { // Malformed byte is its own 1-byte maximal subpart, copied unfolded
             assert(haystack_folded_count < 512 && "reference haystack buffer overflow");
             haystack_folded[haystack_folded_count] = (sz_u8_t)*cursor;
             source_begin[haystack_folded_count] = cursor;
@@ -580,11 +580,11 @@ void test_uncased_find_preimages_fuzz(sz_utf8_uncased_find_t find_base, sz_utf8_
         if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds aren't adversarial
 
         sz_u8_t preimage_utf8[4];
-        std::size_t const preimage_length = (std::size_t)sz_rune_export(preimage, preimage_utf8);
+        std::size_t const preimage_length = (std::size_t)sz_rune_encode(preimage, preimage_utf8);
         sz_u8_t folded_utf8[12];
         std::size_t folded_length = 0;
         for (sz_size_t i = 0; i < folded_count; ++i)
-            folded_length += (std::size_t)sz_rune_export(folded_runes[i], folded_utf8 + folded_length);
+            folded_length += (std::size_t)sz_rune_encode(folded_runes[i], folded_utf8 + folded_length);
         ++preimages_tested;
 
         // Needle variants: 0 = bare folded form, 1 = "x"-prefixed, 2 = "x"-suffixed
@@ -648,10 +648,10 @@ void test_uncased_find_tails_fuzz(sz_utf8_uncased_find_t find_base, sz_utf8_unca
         if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds can't expand
 
         expanding_preimage_t entry;
-        entry.preimage_length = (std::size_t)sz_rune_export(preimage, entry.preimage_utf8);
+        entry.preimage_length = (std::size_t)sz_rune_encode(preimage, entry.preimage_utf8);
         entry.folded_length = 0;
         for (sz_size_t i = 0; i < folded_count; ++i)
-            entry.folded_length += (std::size_t)sz_rune_export(folded_runes[i],
+            entry.folded_length += (std::size_t)sz_rune_encode(folded_runes[i],
                                                                entry.folded_utf8 + entry.folded_length);
         if (entry.folded_length == entry.preimage_length) continue; // Same width → not a tail-expansion shape
         expanding_preimages.push_back(entry);
@@ -753,7 +753,7 @@ void test_uncased_find_crossing_fuzz(sz_utf8_uncased_find_t find_base, sz_utf8_u
             std::size_t pair_length = 0;
             for (int which = 0; which < 2; ++which) {
                 sz_rune_t const codepoint = expanders[which == 0 ? first_index : second_index];
-                pair_length += (std::size_t)sz_rune_export(codepoint, pair_utf8 + pair_length);
+                pair_length += (std::size_t)sz_rune_encode(codepoint, pair_utf8 + pair_length);
                 sz_rune_t emitted[3];
                 sz_size_t emitted_count = sz_unicode_fold_codepoint_(codepoint, emitted);
                 for (sz_size_t index = 0; index < emitted_count; ++index) {
@@ -772,7 +772,7 @@ void test_uncased_find_crossing_fuzz(sz_utf8_uncased_find_t find_base, sz_utf8_u
 
                     std::size_t needle_length = 0;
                     for (std::size_t index = 0; index < length; ++index)
-                        needle_length += (std::size_t)sz_rune_export(folded_runes[start + index],
+                        needle_length += (std::size_t)sz_rune_encode(folded_runes[start + index],
                                                                      (sz_u8_t *)needle + needle_length);
 
                     for (std::size_t filler_index = 0; filler_index < filler_lengths_count; ++filler_index) {
@@ -2086,7 +2086,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
 
         char *write_cursor = input_buffer.data();
-        for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_export(codepoint, (sz_u8_t *)write_cursor);
+        for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_encode(codepoint, (sz_u8_t *)write_cursor);
         std::string const text(input_buffer.data(), (std::size_t)(write_cursor - input_buffer.data()));
         check(text);
     }
@@ -2225,7 +2225,7 @@ static void check_uncased_safety_(candidate_ candidate, std::size_t random_input
 /**
  *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
  *
- *  Mirrors `test_memory_safety()` / `test_utf8_codepoints_safety()`: the registered no-arg driver owns the per-ISA
+ *  Mirrors `test_memory_safety()` / `test_utf8_runes_safety()`: the registered no-arg driver owns the per-ISA
  *  ladder while the file-local `check_uncased_safety_` checker runs the actual probes. The serial backend
  *  faces the same invalid-input contract as the SIMD ones, then one `#if SZ_USE_*` block per ISA.
  */

@@ -1,14 +1,14 @@
 /**
  *  @brief WebAssembly relaxed-SIMD backend for UTF-8 codepoint mechanics (level above SIMD128).
- *  @file include/stringzilla/utf8_codepoints/v128relaxed.h
+ *  @file include/stringzilla/utf8_runes/v128relaxed.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_CODEPOINTS_V128RELAXED_H_
-#define STRINGZILLA_UTF8_CODEPOINTS_V128RELAXED_H_
+#ifndef STRINGZILLA_UTF8_RUNES_V128RELAXED_H_
+#define STRINGZILLA_UTF8_RUNES_V128RELAXED_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_codepoints/serial.h"
-#include "stringzilla/utf8_codepoints/v128.h" // baseline SIMD128 fallbacks
+#include "stringzilla/utf8_runes/serial.h"
+#include "stringzilla/utf8_runes/v128.h" // baseline SIMD128 fallbacks
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,4 +41,4 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128relaxed(sz_cptr_t text, sz_size_t lengt
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_CODEPOINTS_V128RELAXED_H_
+#endif // STRINGZILLA_UTF8_RUNES_V128RELAXED_H_

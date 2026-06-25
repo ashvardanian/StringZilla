@@ -203,4 +203,3 @@ def test_hmac_sha256_kwargs():
     # Too many arguments (3 args)
     with pytest.raises(TypeError, match="expects exactly 2 arguments"):
         sz.hmac_sha256(key=key, message=message, unknown=b"test")
-

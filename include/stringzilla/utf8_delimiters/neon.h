@@ -4,14 +4,14 @@
  *  @author Ash Vardanian
  *
  *  Fully-vectorized, gather-free twin of @ref sz_find_delimiters_utf8_serial, the NEON port of the Ice Lake reference.
- *  Each 64-byte window is decoded once through the shared codepoint substrate (`sz_utf8_codepoints_decode_window_neon_`),
+ *  Each 64-byte window is decoded once through the shared codepoint substrate (`sz_utf8_rune_decode_window_neon_`),
  *  and EVERY codepoint-start lane's delimiter membership is resolved IN-REGISTER over the decoded `high`/`low` halves:
  *  the BMP block id via a `vqtbl4q_u8` 256-entry lookup, the 32-byte bitmap byte via a transposed-column `vqtbl1q_u8`
  *  cascade (NEON has no `vpermi2b` page network, so the bitmaps are read column-major: `column_{low>>3}[block_id]`),
  *  and the per-lane bit test by a `vqtbl1q_u8` bit-mask. The 4-byte (astral) lanes reconstruct the full 21-bit
  *  codepoint and walk the small astral L1/L2 network the same gather-free way; the whole astral block is gated on a
  *  4-byte lead being present. Per-lane validity (overlong / surrogate / out-of-range / bad-continuation, mirroring
- *  `sz_rune_parse`) is computed as a mask and intersected with membership, so a malformed lead is never reported and
+ *  `sz_rune_decode`) is computed as a mask and intersected with membership, so a malformed lead is never reported and
  *  the result is bit-identical to the serial oracle for the returned pointer and matched length. There is NO scalar
  *  per-codepoint membership and NO ASCII fast path with a scalar tail; no vector-indexed gather is ever issued.
  */
@@ -20,7 +20,7 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/utf8_codepoints/neon.h"
+#include "stringzilla/utf8_runes/neon.h"
 #include "stringzilla/utf8_delimiters/serial.h"
 #include "stringzilla/utf8_delimiters/tables.h"
 
@@ -60,7 +60,7 @@ SZ_INTERNAL uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns, ui
     uint8x16_t const nibble = vshrq_n_u8(low, 3); // (low >> 3) in [0, 32): the column index
     uint8x16_t bitmap_byte = vdupq_n_u8(0);
     for (int column = 0; column < 32; ++column) {
-        uint8x16_t const candidate = sz_utf8_codepoints_cascade_stage_neon_(columns + column * 64, 4, selector, within);
+        uint8x16_t const candidate = sz_utf8_rune_cascade_stage_neon_(columns + column * 64, 4, selector, within);
         uint8x16_t const here = vceqq_u8(nibble, vdupq_n_u8((sz_u8_t)column));
         bitmap_byte = vbslq_u8(here, candidate, bitmap_byte);
     }
@@ -79,7 +79,7 @@ SZ_INTERNAL uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, uint
     uint8x16_t const is_ascii = vcltq_u8(window, vdupq_n_u8(0x80));
     uint8x16_t const high = vbicq_u8(high_in, is_ascii);       // high = is_ascii ? 0 : high_in
     uint8x16_t const low = vbslq_u8(is_ascii, window, low_in); // low  = is_ascii ? byte : low_in
-    uint8x16_t const block_id = sz_utf8_codepoints_lut256_neon_(sz_utf8_delimiter_bmp_block_, high);
+    uint8x16_t const block_id = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_bmp_block_, high);
     uint8x16_t const bitmap_byte = sz_delimiter_bitmap_byte_neon_(sz_utf8_delimiter_bmp_bitmaps_columns_, block_id,
                                                                   low);
     return sz_delimiter_test_bit_neon_(bitmap_byte, low);
@@ -110,12 +110,11 @@ SZ_INTERNAL uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window, u
     uint8x16_t const low8 = vorrq_u8(vshlq_n_u8(b2, 6), b3);
 
     // group = astral_l1[super]; super in [0, 16), so a single 16-entry cascade row addresses it.
-    uint8x16_t const group = sz_utf8_codepoints_cascade_stage_neon_(sz_utf8_delimiter_astral_l1_, 1, vdupq_n_u8(0),
-                                                                    super);
+    uint8x16_t const group = sz_utf8_rune_cascade_stage_neon_(sz_utf8_delimiter_astral_l1_, 1, vdupq_n_u8(0), super);
 
     // row_id = astral_l2[group*256 + sub]: read both 256-entry halves and blend by the group bit (group < 2).
-    uint8x16_t const row_group0 = sz_utf8_codepoints_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 0, sub);
-    uint8x16_t const row_group1 = sz_utf8_codepoints_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 256, sub);
+    uint8x16_t const row_group0 = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 0, sub);
+    uint8x16_t const row_group1 = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 256, sub);
     uint8x16_t const group_is_one = vceqq_u8(group, vdupq_n_u8(1));
     uint8x16_t const row_id = vbslq_u8(group_is_one, row_group1, row_group0);
 
@@ -125,15 +124,14 @@ SZ_INTERNAL uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window, u
 }
 
 /**
- *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_parse` exactly: a 2/3/4-byte lead is
+ *  @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
  *          valid only when its continuation bytes are well-formed and it is not overlong, a surrogate, or beyond
  *          U+10FFFF. Returned as one 64-bit lane mask. Span-clamping (so a lead near the loaded edge whose
  *          continuation bytes wrap is rejected) is applied by the caller via `byte_span`; here the substrate masks are
  *          already loaded-clamped. An invalid lead is never reported (serial advances one byte and re-syncs).
  */
-SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_codepoints_window_neon_t const *decoded,
-                                                     uint8x16_t const *next1, uint8x16_t const *next2,
-                                                     uint8x16_t const *next3) {
+SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded, uint8x16_t const *next1,
+                                                     uint8x16_t const *next2, uint8x16_t const *next3) {
     uint8x16_t const continuation_mask = vdupq_n_u8(0xC0), continuation_pattern = vdupq_n_u8(0x80);
     uint8x16_t c1_ok_bool[4], c2_ok_bool[4], c3_ok_bool[4];
     uint8x16_t lead_ge_c2_bool[4], three_well_bool[4], four_well_bool[4], ascii_bool[4];
@@ -166,25 +164,21 @@ SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_codepoints_window_n
         four_well_bool[quarter] = vandq_u8(lead_le_f4, vmvnq_u8(vorrq_u8(bad_f0, bad_f4)));
     }
 
-    sz_u64_t const c1_ok = sz_utf8_codepoints_mask_combine_neon_(c1_ok_bool[0], c1_ok_bool[1], c1_ok_bool[2],
-                                                                 c1_ok_bool[3]);
-    sz_u64_t const c2_ok = sz_utf8_codepoints_mask_combine_neon_(c2_ok_bool[0], c2_ok_bool[1], c2_ok_bool[2],
-                                                                 c2_ok_bool[3]);
-    sz_u64_t const c3_ok = sz_utf8_codepoints_mask_combine_neon_(c3_ok_bool[0], c3_ok_bool[1], c3_ok_bool[2],
-                                                                 c3_ok_bool[3]);
-    sz_u64_t const ascii = sz_utf8_codepoints_mask_combine_neon_(ascii_bool[0], ascii_bool[1], ascii_bool[2],
-                                                                 ascii_bool[3]);
-    sz_u64_t const lead_ge_c2 = sz_utf8_codepoints_mask_combine_neon_(lead_ge_c2_bool[0], lead_ge_c2_bool[1],
-                                                                      lead_ge_c2_bool[2], lead_ge_c2_bool[3]);
-    sz_u64_t const three_well = sz_utf8_codepoints_mask_combine_neon_(three_well_bool[0], three_well_bool[1],
-                                                                      three_well_bool[2], three_well_bool[3]);
-    sz_u64_t const four_well = sz_utf8_codepoints_mask_combine_neon_(four_well_bool[0], four_well_bool[1],
-                                                                     four_well_bool[2], four_well_bool[3]);
+    sz_u64_t const c1_ok = sz_utf8_mask_combine_neon_(c1_ok_bool[0], c1_ok_bool[1], c1_ok_bool[2], c1_ok_bool[3]);
+    sz_u64_t const c2_ok = sz_utf8_mask_combine_neon_(c2_ok_bool[0], c2_ok_bool[1], c2_ok_bool[2], c2_ok_bool[3]);
+    sz_u64_t const c3_ok = sz_utf8_mask_combine_neon_(c3_ok_bool[0], c3_ok_bool[1], c3_ok_bool[2], c3_ok_bool[3]);
+    sz_u64_t const ascii = sz_utf8_mask_combine_neon_(ascii_bool[0], ascii_bool[1], ascii_bool[2], ascii_bool[3]);
+    sz_u64_t const lead_ge_c2 = sz_utf8_mask_combine_neon_(lead_ge_c2_bool[0], lead_ge_c2_bool[1], lead_ge_c2_bool[2],
+                                                           lead_ge_c2_bool[3]);
+    sz_u64_t const three_well = sz_utf8_mask_combine_neon_(three_well_bool[0], three_well_bool[1], three_well_bool[2],
+                                                           three_well_bool[3]);
+    sz_u64_t const four_well = sz_utf8_mask_combine_neon_(four_well_bool[0], four_well_bool[1], four_well_bool[2],
+                                                          four_well_bool[3]);
 
-    sz_u64_t const loaded = sz_utf8_codepoints_mask_until_(decoded->loaded);
-    sz_u64_t const span2 = sz_utf8_codepoints_mask_until_(decoded->loaded >= 1 ? decoded->loaded - 1 : 0);
-    sz_u64_t const span3 = sz_utf8_codepoints_mask_until_(decoded->loaded >= 2 ? decoded->loaded - 2 : 0);
-    sz_u64_t const span4 = sz_utf8_codepoints_mask_until_(decoded->loaded >= 3 ? decoded->loaded - 3 : 0);
+    sz_u64_t const loaded = sz_u64_mask_until_serial_(decoded->loaded);
+    sz_u64_t const span2 = sz_u64_mask_until_serial_(decoded->loaded >= 1 ? decoded->loaded - 1 : 0);
+    sz_u64_t const span3 = sz_u64_mask_until_serial_(decoded->loaded >= 2 ? decoded->loaded - 2 : 0);
+    sz_u64_t const span4 = sz_u64_mask_until_serial_(decoded->loaded >= 3 ? decoded->loaded - 3 : 0);
 
     sz_u64_t const two_ok = decoded->two_byte_starts & span2 & c1_ok & lead_ge_c2;
     sz_u64_t const three_ok = decoded->three_byte_starts & span3 & c1_ok & c2_ok & three_well;
@@ -202,23 +196,22 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t lengt
 
     sz_size_t base = 0;
     while (base < length) {
-        sz_utf8_codepoints_window_neon_t const decoded = sz_utf8_codepoints_decode_window_neon_(text_u8 + base,
-                                                                                                length - base);
+        sz_utf8_rune_window_neon_t const decoded = sz_utf8_rune_decode_window_neon_(text_u8 + base, length - base);
         sz_size_t const loaded = decoded.loaded;
 
         uint8x16_t next1[4], next2[4], next3[4];
-        sz_utf8_codepoints_forward_neighbours_neon_(decoded.window, next1, next2, next3);
+        sz_utf8_forward_neighbours_neon_(decoded.window, next1, next2, next3);
 
         // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode
         // against a wrapped neighbour; defer it to the next window.
         sz_size_t byte_span = loaded;
         if (loaded >= 64) {
-            sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 1)) |
-                                     (decoded.three_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 2)) |
-                                     (decoded.four_byte_starts & ~sz_utf8_codepoints_mask_until_(loaded - 3));
+            sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                                     (decoded.three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                                     (decoded.four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
             byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
         }
-        sz_u64_t const span_mask = sz_utf8_codepoints_mask_until_(byte_span);
+        sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
 
         sz_u64_t const valid_starts = sz_delimiter_valid_starts_neon_(&decoded, next1, next2, next3) &
                                       decoded.codepoint_starts & span_mask;
@@ -229,7 +222,7 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t lengt
         for (int quarter = 0; quarter < 4; ++quarter) {
             uint8x16_t const bmp = sz_delimiter_bmp_membership_neon_(decoded.window[quarter], decoded.high[quarter],
                                                                      decoded.low[quarter]);
-            member |= sz_utf8_codepoints_movemask16_neon_(bmp) << (16 * quarter);
+            member |= sz_utf8_movemask16_neon_(bmp) << (16 * quarter);
         }
         // Blend astral over the four-byte lanes; the per-lane BMP/astral decision stays exact on the bit masks.
         if (four_byte) {
@@ -237,7 +230,7 @@ SZ_PUBLIC sz_cptr_t sz_find_delimiters_utf8_neon(sz_cptr_t text, sz_size_t lengt
             for (int quarter = 0; quarter < 4; ++quarter) {
                 uint8x16_t const astral = sz_delimiter_astral_membership_neon_(decoded.window[quarter], next1[quarter],
                                                                                next2[quarter], next3[quarter]);
-                astral_member |= sz_utf8_codepoints_movemask16_neon_(astral) << (16 * quarter);
+                astral_member |= sz_utf8_movemask16_neon_(astral) << (16 * quarter);
             }
             member = (member & ~four_byte) | (astral_member & four_byte);
         }

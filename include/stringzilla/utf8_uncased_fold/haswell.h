@@ -727,9 +727,8 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t_ {
  *      flag byte the Ice Lake `VPERMB` LUT produces. The caseless family merges D7-DF and E0 into
  *      one contiguous D7-E0 span.
  */
-SZ_INTERNAL sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_classify_leads_(__m256i source_ymm,
-                                                                                               sz_u32_t
-                                                                                                   is_non_ascii_mask) {
+SZ_INTERNAL sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_classify_leads_(
+    __m256i source_ymm, sz_u32_t is_non_ascii_mask) {
     sz_utf8_uncased_fold_haswell_leads_t_ leads;
 
     // Lead bytes are non-ASCII bytes outside the continuation range 10xxxxxx (80-BF).
@@ -755,17 +754,17 @@ SZ_INTERNAL sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_c
         _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE2)),
                         _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEA)),
                                         _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEF)))));
-    leads.is_complex_lead_mask = leads.is_lead_mask & ~(leads.is_caseless_lead_mask | leads.is_latin_lead_mask |
-                                                        leads.is_latin_extended_lead_mask | leads.is_cyrillic_lead_mask |
-                                                        leads.is_greek_lead_mask | leads.is_e1_lead_mask |
-                                                        leads.is_guarded_lead_mask);
+    leads.is_complex_lead_mask = leads.is_lead_mask &
+                                 ~(leads.is_caseless_lead_mask | leads.is_latin_lead_mask |
+                                   leads.is_latin_extended_lead_mask | leads.is_cyrillic_lead_mask |
+                                   leads.is_greek_lead_mask | leads.is_e1_lead_mask | leads.is_guarded_lead_mask);
     leads.lead_families = (sz_u8_t)( //
         ((leads.is_caseless_lead_mask != 0) << 0) | ((leads.is_latin_lead_mask != 0) << 1) |
         ((leads.is_latin_extended_lead_mask != 0) << 2) | ((leads.is_cyrillic_lead_mask != 0) << 3) |
         ((leads.is_greek_lead_mask != 0) << 4) | ((leads.is_e1_lead_mask != 0) << 5) |
         ((leads.is_guarded_lead_mask != 0) << 6) | ((leads.is_complex_lead_mask != 0) << 7));
 
-    // Well-formedness mirror of `sz_rune_parse`, computed branchlessly so the family handlers
+    // Well-formedness mirror of `sz_rune_decode`, computed branchlessly so the family handlers
     // can treat overlong, surrogate, truncated, and out-of-range leads as foreign and resync one byte
     // at a time - byte-for-byte with the serial reference. A lead is well-formed iff its declared
     // continuations follow (the continuation mask shifted down by 1/2/3 and ANDed with the matching
@@ -790,13 +789,13 @@ SZ_INTERNAL sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_c
                          sz_haswell_in_byte_range_(second_bytes_ymm, 0x90, 0x70)));
 
     sz_u32_t two_byte_complete_mask = leads.is_two_byte_lead_mask & (leads.is_continuation_mask >> 1);
-    sz_u32_t three_byte_complete_mask =
-        leads.is_three_byte_lead_mask & (leads.is_continuation_mask >> 1) & (leads.is_continuation_mask >> 2);
+    sz_u32_t three_byte_complete_mask = leads.is_three_byte_lead_mask & (leads.is_continuation_mask >> 1) &
+                                        (leads.is_continuation_mask >> 2);
     sz_u32_t four_byte_complete_mask = leads.is_four_byte_lead_mask & (leads.is_continuation_mask >> 1) &
                                        (leads.is_continuation_mask >> 2) & (leads.is_continuation_mask >> 3);
     sz_u32_t bad_special_mask = e0_bad_second_mask | ed_bad_second_mask | f0_bad_second_mask | f4_bad_second_mask;
-    leads.well_formed_lead_mask =
-        (two_byte_complete_mask | three_byte_complete_mask | four_byte_complete_mask) & ~bad_special_mask;
+    leads.well_formed_lead_mask = (two_byte_complete_mask | three_byte_complete_mask | four_byte_complete_mask) &
+                                  ~bad_special_mask;
     leads.malformed_lead_mask = leads.is_lead_mask & ~leads.well_formed_lead_mask;
     return leads;
 }
@@ -811,8 +810,9 @@ SZ_INTERNAL sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_c
  *      next family.
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
-SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
-    __m256i source_ymm, sz_utf8_uncased_fold_haswell_leads_t_ const *leads, sz_ptr_t target) {
+SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i source_ymm,
+                                                                   sz_utf8_uncased_fold_haswell_leads_t_ const *leads,
+                                                                   sz_ptr_t target) {
 
     // Malformed leads (overlong, surrogate, truncated, out-of-range, C0/C1, F5..FF) are foreign to
     // every family: ORing them into each handler's foreign/stop mask truncates the fold before them
@@ -826,9 +826,9 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
             (leads->is_lead_mask & ~leads->is_caseless_lead_mask) | malformed, target);
     // Unlike Ice Lake, pure Latin-1 chunks (German, French) take this handler too: it covers
     // their C2/C3 folds exactly, and there is no separate Latin-1 cascade to fall back onto
-    if (!handled && (leads->lead_families &
-                     (sz_utf8_fold_haswell_lead_latin_flag_ | sz_utf8_fold_haswell_lead_latin_extended_flag_ |
-                      sz_utf8_fold_haswell_lead_e1_flag_)))
+    if (!handled &&
+        (leads->lead_families & (sz_utf8_fold_haswell_lead_latin_flag_ |
+                                 sz_utf8_fold_haswell_lead_latin_extended_flag_ | sz_utf8_fold_haswell_lead_e1_flag_)))
         handled = sz_utf8_uncased_fold_haswell_latin_chunk_(
             source_ymm, leads->is_continuation_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask &
@@ -871,7 +871,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
 /**
  *  @brief Folds a single rune from @p source into @p target for chunks no handler accepted.
  *      With ≥ 32 source bytes still available, a complete (≤ 4-byte) sequence is guaranteed.
- *      Validates with `sz_rune_parse` so a malformed lead - the only reason the vector
+ *      Validates with `sz_rune_decode` so a malformed lead - the only reason the vector
  *      handlers decline a multi-byte sequence - copies one byte through unchanged and resyncs,
  *      byte-for-byte with the serial reference.
  *  @param source_end Pointer one past the last readable source byte.
@@ -881,10 +881,10 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
 SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end, sz_ptr_t target,
                                                              sz_rune_length_t *rune_length) {
     sz_rune_t rune;
-    sz_rune_length_t const parsed_length = sz_rune_parse(source, source_end, &rune);
-    if (parsed_length == sz_utf8_invalid_k) {
+    sz_rune_length_t const parsed_length = sz_rune_decode(source, source_end, &rune);
+    if (parsed_length == sz_rune_invalid_k) {
         *target = *source; // Maximal-subpart resync: copy the offending byte and advance by one
-        *rune_length = sz_utf8_rune_1byte_k;
+        *rune_length = sz_rune_1byte_k;
         return 1;
     }
     *rune_length = parsed_length;
@@ -892,7 +892,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, s
     sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
     sz_ptr_t target_ptr = target;
     for (sz_size_t rune_index = 0; rune_index != folded_count; ++rune_index)
-        target_ptr += sz_rune_export(folded_runes[rune_index], (sz_u8_t *)target_ptr);
+        target_ptr += sz_rune_encode(folded_runes[rune_index], (sz_u8_t *)target_ptr);
     return (sz_size_t)(target_ptr - target);
 }
 
@@ -920,8 +920,8 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size_t sou
         }
 
         // Classify lead bytes once, then route through the family handlers in priority order
-        sz_utf8_uncased_fold_haswell_leads_t_ leads =
-            sz_utf8_uncased_fold_haswell_classify_leads_(source_ymm, is_non_ascii_mask);
+        sz_utf8_uncased_fold_haswell_leads_t_ leads = sz_utf8_uncased_fold_haswell_classify_leads_(source_ymm,
+                                                                                                   is_non_ascii_mask);
         sz_size_t handled = sz_utf8_uncased_fold_haswell_dispatch_chunk_(source_ymm, &leads, target);
         if (handled) {
             target += handled, source += handled, source_length -= handled;

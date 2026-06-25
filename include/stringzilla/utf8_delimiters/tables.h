@@ -151,8 +151,10 @@ static sz_u8_t const sz_utf8_delimiter_bmp_bitmaps_[1664] = {
     0,   0,   0,   0,   127, 127, 0,   48,
 };
 
-/** @brief  Astral super-nibble `(cp-0x10000)>>12` (0..15) -> L2 group id. */
-static sz_align_(64) sz_u8_t const sz_utf8_delimiter_astral_l1_[16] = {
+/** @brief  Astral super-nibble `(cp-0x10000)>>12` (0..15) -> L2 group id. Padded to a full 64-byte tile so the
+ *          Ice Lake `sz_utf8_rune_lut_cascade_icelake_` whole-tile `_mm512_load_si512` stays in bounds; the
+ *          tail beyond index 15 is never permute-selected (the super nibble caps at 15). */
+static sz_align_(64) sz_u8_t const sz_utf8_delimiter_astral_l1_[64] = {
     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 };
 
