@@ -104,6 +104,29 @@ SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
     return sz_find_vreinterpretq_u8_u4_(matches_vec);
 }
 
+/**
+ *  @brief Branch-light substring verify, bit-identical to `sz_equal_neon`, inlined into the match loop
+ *         to avoid the per-candidate call + length re-dispatch. Loops over 16-byte `vceqq_u8` chunks with
+ *         a `vminvq_u8` all-match reduction and closes with one overlapping tail window.
+ */
+SZ_INTERNAL sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    if (length < 16) return sz_equal_serial(a, b, length);
+
+    sz_size_t offset = 0;
+    do {
+        uint8x16_t a_u8x16 = vld1q_u8((sz_u8_t const *)(a + offset));
+        uint8x16_t b_u8x16 = vld1q_u8((sz_u8_t const *)(b + offset));
+        if (vminvq_u8(vceqq_u8(a_u8x16, b_u8x16)) != 255) return sz_false_k; // Check if all bytes match.
+        offset += 16;
+    } while (offset + 16 <= length);
+
+    // Final check - load the last register-long window from the end.
+    uint8x16_t a_tail_u8x16 = vld1q_u8((sz_u8_t const *)(a + length - 16));
+    uint8x16_t b_tail_u8x16 = vld1q_u8((sz_u8_t const *)(b + length - 16));
+    if (vminvq_u8(vceqq_u8(a_tail_u8x16, b_tail_u8x16)) != 255) return sz_false_k;
+    return sz_true_k;
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                  sz_size_t needle_length) {
 
@@ -176,7 +199,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, 
             matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
-                if (sz_equal_neon(haystack + potential_offset, needle, needle_length))
+                if (sz_find_verify_neon_(haystack + potential_offset, needle, needle_length))
                     return haystack + potential_offset;
                 matches &= matches - 1;
             }
@@ -218,7 +241,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length,
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz(matches) / 4;
-            if (sz_equal_neon(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
+            if (sz_find_verify_neon_(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             sz_assert_((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                        "The bit must be set before we squash it");

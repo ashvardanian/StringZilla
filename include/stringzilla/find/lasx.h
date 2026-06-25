@@ -356,6 +356,52 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_by
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+
+    // Mirror of `sz_find_byteset_lasx` scanning from the end: same transposed Mula nibble-bitset classifier
+    // on the trailing 32-byte window, but the in-set bytes are collected into a movemask and the highest set
+    // bit (the last occurrence) is resolved with `sz_u32_clz`. The sub-32 prefix falls to the serial tail.
+    sz_u256_vec_t filter_even_vec, filter_odd_vec;
+    sz_u256_vec_t text_vec;
+    sz_u256_vec_t lower_nibbles_vec, higher_nibbles_vec;
+    sz_u256_vec_t bitset_even_vec, bitset_odd_vec;
+    sz_u256_vec_t bitmask_vec, bitmask_lookup_vec, matches_vec;
+
+    sz_u8_t even_pairs[32], odd_pairs[32];
+    sz_u8_t const *filter_bytes = &filter->_u8s[0];
+    for (sz_size_t j = 0; j < 16; ++j) {
+        even_pairs[j] = even_pairs[j + 16] = filter_bytes[2 * j];
+        odd_pairs[j] = odd_pairs[j + 16] = filter_bytes[2 * j + 1];
+    }
+    filter_even_vec.lasx = __lasx_xvld(even_pairs, 0);
+    filter_odd_vec.lasx = __lasx_xvld(odd_pairs, 0);
+
+    sz_u8_t bitmask_table[32];
+    for (sz_size_t j = 0; j < 16; ++j) bitmask_table[j] = bitmask_table[j + 16] = (sz_u8_t)(1u << (j & 7));
+    bitmask_lookup_vec.lasx = __lasx_xvld(bitmask_table, 0);
+
+    __m256i const zero_vec = __lasx_xvreplgr2vr_b(0);
+    __m256i const nibble_mask = __lasx_xvreplgr2vr_b(0x0F);
+    __m256i const eight_vec = __lasx_xvreplgr2vr_b(8);
+
+    while (length >= 32) {
+        sz_cptr_t const window = text + length - 32;
+        text_vec.lasx = __lasx_xvld(window, 0);
+        lower_nibbles_vec.lasx = __lasx_xvand_v(text_vec.lasx, nibble_mask);
+        bitmask_vec.lasx = __lasx_xvshuf_b(zero_vec, bitmask_lookup_vec.lasx, lower_nibbles_vec.lasx);
+        higher_nibbles_vec.lasx = __lasx_xvand_v(__lasx_xvsrli_b(text_vec.lasx, 4), nibble_mask);
+        bitset_even_vec.lasx = __lasx_xvshuf_b(zero_vec, filter_even_vec.lasx, higher_nibbles_vec.lasx);
+        bitset_odd_vec.lasx = __lasx_xvshuf_b(zero_vec, filter_odd_vec.lasx, higher_nibbles_vec.lasx);
+        __m256i use_odd_table_mask = __lasx_xvsle_bu(eight_vec, lower_nibbles_vec.lasx);
+        bitset_even_vec.lasx = __lasx_xvbitsel_v(bitset_even_vec.lasx, bitset_odd_vec.lasx, use_odd_table_mask);
+        matches_vec.lasx = __lasx_xvand_v(bitset_even_vec.lasx, bitmask_vec.lasx);
+        if (__lasx_xbnz_v(matches_vec.lasx)) {
+            __m256i in_set_vec = __lasx_xvslt_bu(zero_vec, matches_vec.lasx);
+            sz_u32_t matches_mask = sz_xvmovemask_b_find_lasx_(in_set_vec);
+            return window + (31 - sz_u32_clz(matches_mask)); // highest set bit = last matching byte
+        }
+        length -= 32;
+    }
+
     return sz_rfind_byteset_serial(text, length, filter);
 }
 

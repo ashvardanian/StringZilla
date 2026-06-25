@@ -68,10 +68,19 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystac
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)(haystack + haystack_length - 16));
+        // On Power10 we mirror the forward kernel's `vec_first_match_index`: reversing the window
+        // turns the last-match query into a first-match one, fusing compare + movemask + count into
+        // one instruction (after the byte-reverse permute). The Power9 fallback keeps movemask + clz.
+#if defined(_ARCH_PWR10)
+        __vector unsigned char reversed_u8x16 = vec_reve(haystack_u8x16);
+        unsigned int match_index = vec_first_match_index(reversed_u8x16, needle_u8x16);
+        if (match_index != 16) return haystack + haystack_length - 1 - match_index;
+#else
         __vector unsigned char cmp_u8x16 = (__vector unsigned char)vec_cmpeq(haystack_u8x16, needle_u8x16);
         sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16);
         // The mask occupies the low 16 bits; the highest set bit is the last match in the window.
         if (matches) return haystack + haystack_length - 1 - (sz_u64_clz(matches) - 48);
+#endif
         haystack_length -= 16;
     }
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
@@ -91,6 +100,45 @@ SZ_PUBLIC sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_leng
     __vector unsigned char needle_first_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_first]);
     __vector unsigned char needle_mid_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_mid]);
     __vector unsigned char needle_last_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_last]);
+
+    __vector unsigned char const zero_u8x16 = vec_splats((unsigned char)0);
+
+    // Unroll two 16-byte blocks per iteration. A single OR-reduced gate skips both blocks at once
+    // on the common no-match path, halving the movemask + ctz bookkeeping over dense haystacks.
+    while (haystack_length >= needle_length + 32) {
+        __vector unsigned char comparison_low_u8x16 = vec_and( //
+            vec_and((__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + offset_first)),
+                                                      needle_first_u8x16),
+                    (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + offset_mid)),
+                                                      needle_mid_u8x16)),
+            (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + offset_last)),
+                                              needle_last_u8x16));
+        __vector unsigned char comparison_high_u8x16 = vec_and( //
+            vec_and((__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + 16 + offset_first)),
+                                                      needle_first_u8x16),
+                    (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + 16 + offset_mid)),
+                                                      needle_mid_u8x16)),
+            (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(haystack + 16 + offset_last)),
+                                              needle_last_u8x16));
+        // Cheap "any match across either block?" gate before locating exact offsets.
+        if (!vec_all_eq(vec_or(comparison_low_u8x16, comparison_high_u8x16), zero_u8x16)) {
+            sz_u64_t matches = sz_movemask_powervsx_(comparison_low_u8x16);
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches);
+                if (sz_equal_powervsx(haystack + potential_offset, needle, needle_length))
+                    return haystack + potential_offset;
+                matches &= matches - 1;
+            }
+            matches = sz_movemask_powervsx_(comparison_high_u8x16);
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches);
+                if (sz_equal_powervsx(haystack + 16 + potential_offset, needle, needle_length))
+                    return haystack + 16 + potential_offset;
+                matches &= matches - 1;
+            }
+        }
+        haystack += 32, haystack_length -= 32;
+    }
 
     for (; haystack_length >= needle_length + 16; haystack += 16, haystack_length -= 16) {
         __vector unsigned char haystack_first_u8x16 = vec_xl(0, (unsigned char const *)(haystack + offset_first));
@@ -125,6 +173,48 @@ SZ_PUBLIC sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_len
     __vector unsigned char needle_first_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_first]);
     __vector unsigned char needle_mid_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_mid]);
     __vector unsigned char needle_last_u8x16 = vec_splats(*(unsigned char const *)&needle[offset_last]);
+
+    __vector unsigned char const zero_u8x16 = vec_splats((unsigned char)0);
+
+    // Unroll two 16-byte windows per iteration, scanning the higher (right-most) window first so the
+    // first match found is still the right-most. One OR-reduced gate skips both windows at once.
+    while (haystack_length >= needle_length + 32) {
+        sz_cptr_t cursor_hi = haystack + haystack_length - needle_length - 16 + 1;
+        sz_cptr_t cursor_lo = cursor_hi - 16;
+        __vector unsigned char comparison_high_u8x16 = vec_and( //
+            vec_and((__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_hi + offset_first)),
+                                                      needle_first_u8x16),
+                    (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_hi + offset_mid)),
+                                                      needle_mid_u8x16)),
+            (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_hi + offset_last)),
+                                              needle_last_u8x16));
+        __vector unsigned char comparison_low_u8x16 = vec_and( //
+            vec_and((__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_lo + offset_first)),
+                                                      needle_first_u8x16),
+                    (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_lo + offset_mid)),
+                                                      needle_mid_u8x16)),
+            (__vector unsigned char)vec_cmpeq(vec_xl(0, (unsigned char const *)(cursor_lo + offset_last)),
+                                              needle_last_u8x16));
+        if (!vec_all_eq(vec_or(comparison_high_u8x16, comparison_low_u8x16), zero_u8x16)) {
+            sz_u64_t matches = sz_movemask_powervsx_(comparison_high_u8x16);
+            while (matches) {
+                int potential_offset = (int)(sz_u64_clz(matches) - 48);
+                if (sz_equal_powervsx(haystack + haystack_length - needle_length - potential_offset, needle,
+                                      needle_length))
+                    return haystack + haystack_length - needle_length - potential_offset;
+                matches &= ~(1ull << (15 - potential_offset));
+            }
+            matches = sz_movemask_powervsx_(comparison_low_u8x16);
+            while (matches) {
+                int potential_offset = (int)(sz_u64_clz(matches) - 48) + 16;
+                if (sz_equal_powervsx(haystack + haystack_length - needle_length - potential_offset, needle,
+                                      needle_length))
+                    return haystack + haystack_length - needle_length - potential_offset;
+                matches &= ~(1ull << (31 - potential_offset));
+            }
+        }
+        haystack_length -= 32;
+    }
 
     for (; haystack_length >= needle_length + 16; haystack_length -= 16) {
         sz_cptr_t haystack_cursor = haystack + haystack_length - needle_length - 16 + 1;

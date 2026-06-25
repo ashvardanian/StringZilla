@@ -140,9 +140,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
     // Load the 32-byte filter as two 16-byte halves, separate even/odd bytes, pack, and broadcast to YMM.
     sz_u128_vec_t byte_mask_vec;
-    sz_u128_vec_t filter_lo_vec, filter_hi_vec;
-    sz_u128_vec_t lo_evens_vec, hi_evens_vec;
-    sz_u128_vec_t lo_odds_vec, hi_odds_vec;
+    sz_u128_vec_t filter_low_vec, filter_high_vec;
+    sz_u128_vec_t low_evens_vec, high_evens_vec;
+    sz_u128_vec_t low_odds_vec, high_odds_vec;
     sz_u128_vec_t evens_xmm_vec, odds_xmm_vec;
     sz_u256_vec_t filter_even_vec, filter_odd_vec;
 
@@ -154,15 +154,15 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
 
     byte_mask_vec.xmm = _mm_set1_epi16(0x00ff);
 
-    filter_lo_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter));
-    filter_hi_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter) + 1);
-    lo_evens_vec.xmm = _mm_and_si128(filter_lo_vec.xmm, byte_mask_vec.xmm);
-    hi_evens_vec.xmm = _mm_and_si128(filter_hi_vec.xmm, byte_mask_vec.xmm);
-    lo_odds_vec.xmm = _mm_srli_epi16(filter_lo_vec.xmm, 8);
-    hi_odds_vec.xmm = _mm_srli_epi16(filter_hi_vec.xmm, 8);
+    filter_low_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter));
+    filter_high_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter) + 1);
+    low_evens_vec.xmm = _mm_and_si128(filter_low_vec.xmm, byte_mask_vec.xmm);
+    high_evens_vec.xmm = _mm_and_si128(filter_high_vec.xmm, byte_mask_vec.xmm);
+    low_odds_vec.xmm = _mm_srli_epi16(filter_low_vec.xmm, 8);
+    high_odds_vec.xmm = _mm_srli_epi16(filter_high_vec.xmm, 8);
 
-    evens_xmm_vec.xmm = _mm_packus_epi16(lo_evens_vec.xmm, hi_evens_vec.xmm);
-    odds_xmm_vec.xmm = _mm_packus_epi16(lo_odds_vec.xmm, hi_odds_vec.xmm);
+    evens_xmm_vec.xmm = _mm_packus_epi16(low_evens_vec.xmm, high_evens_vec.xmm);
+    odds_xmm_vec.xmm = _mm_packus_epi16(low_odds_vec.xmm, high_odds_vec.xmm);
     filter_even_vec.ymm = _mm256_set_m128i(evens_xmm_vec.xmm, evens_xmm_vec.xmm);
     filter_odd_vec.ymm = _mm256_set_m128i(odds_xmm_vec.xmm, odds_xmm_vec.xmm);
 
@@ -240,6 +240,62 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+
+    // Mirror of `sz_find_byteset_haswell` scanning from the end: the same transposed Muła nibble-bitset
+    // classifier, but each iteration tests the trailing 32-byte window and resolves the highest matching
+    // lane (the last occurrence) with `~movemask` + `clz`.
+    sz_u128_vec_t byte_mask_vec;
+    sz_u128_vec_t filter_low_vec, filter_high_vec;
+    sz_u128_vec_t low_evens_vec, high_evens_vec;
+    sz_u128_vec_t low_odds_vec, high_odds_vec;
+    sz_u128_vec_t evens_xmm_vec, odds_xmm_vec;
+    sz_u256_vec_t filter_even_vec, filter_odd_vec;
+
+    sz_u256_vec_t text_vec;
+    sz_u256_vec_t matches_vec;
+    sz_u256_vec_t lower_nibbles_vec, higher_nibbles_vec;
+    sz_u256_vec_t bitset_even_vec, bitset_odd_vec;
+    sz_u256_vec_t bitmask_vec, bitmask_lookup_vec;
+
+    byte_mask_vec.xmm = _mm_set1_epi16(0x00ff);
+
+    filter_low_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter));
+    filter_high_vec.xmm = _mm_lddqu_si128((__m128i const *)(filter) + 1);
+    low_evens_vec.xmm = _mm_and_si128(filter_low_vec.xmm, byte_mask_vec.xmm);
+    high_evens_vec.xmm = _mm_and_si128(filter_high_vec.xmm, byte_mask_vec.xmm);
+    low_odds_vec.xmm = _mm_srli_epi16(filter_low_vec.xmm, 8);
+    high_odds_vec.xmm = _mm_srli_epi16(filter_high_vec.xmm, 8);
+
+    evens_xmm_vec.xmm = _mm_packus_epi16(low_evens_vec.xmm, high_evens_vec.xmm);
+    odds_xmm_vec.xmm = _mm_packus_epi16(low_odds_vec.xmm, high_odds_vec.xmm);
+    filter_even_vec.ymm = _mm256_set_m128i(evens_xmm_vec.xmm, evens_xmm_vec.xmm);
+    filter_odd_vec.ymm = _mm256_set_m128i(odds_xmm_vec.xmm, odds_xmm_vec.xmm);
+
+    bitmask_lookup_vec.ymm = _mm256_set_epi8(                       //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
+
+    while (length >= 32) {
+        sz_cptr_t const window = text + length - 32;
+        text_vec.ymm = _mm256_lddqu_si256((__m256i const *)window);
+        lower_nibbles_vec.ymm = _mm256_and_si256(text_vec.ymm, _mm256_set1_epi8(0x0f));
+        bitmask_vec.ymm = _mm256_shuffle_epi8(bitmask_lookup_vec.ymm, lower_nibbles_vec.ymm);
+        higher_nibbles_vec.ymm = _mm256_and_si256(_mm256_srli_epi16(text_vec.ymm, 4), _mm256_set1_epi8(0x0f));
+        bitset_even_vec.ymm = _mm256_shuffle_epi8(filter_even_vec.ymm, higher_nibbles_vec.ymm);
+        bitset_odd_vec.ymm = _mm256_shuffle_epi8(filter_odd_vec.ymm, higher_nibbles_vec.ymm);
+        __m256i take_first = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
+        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first);
+        matches_vec.ymm = _mm256_and_si256(bitset_even_vec.ymm, bitmask_vec.ymm);
+        matches_vec.ymm = _mm256_cmpeq_epi8(matches_vec.ymm, _mm256_setzero_si256());
+        int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);
+        if (matches_mask) {
+            // Highest set bit = last matching byte in the window.
+            int offset = 31 - sz_u32_clz((sz_u32_t)matches_mask);
+            return window + offset;
+        }
+        else { length -= 32; }
+    }
+
     return sz_rfind_byteset_serial(text, length, filter);
 }
 
