@@ -564,12 +564,8 @@ if sz_target == "stringzilla":
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
         ),
     ]
-    entry_points = {
-        "console_scripts": [
-            "sz_split=cli.split:main",
-            "sz_wc=cli.wc:main",
-        ],
-    }
+    # The `sz_split` / `sz_wc` CLIs moved to the standalone StringZilla-CLI repository.
+    entry_points = {"console_scripts": []}
     # Parallel per-language compile + header-depfile incremental rebuilds for the 17 core C TUs (the base module
     # has no numpy dependency, so it uses ParallelBuildExt directly rather than NumpyBuildExt).
     command_class = {"build_ext": ParallelBuildExt}
