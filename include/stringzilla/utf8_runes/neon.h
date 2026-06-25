@@ -6,8 +6,6 @@
 #ifndef STRINGZILLA_UTF8_RUNES_NEON_H_
 #define STRINGZILLA_UTF8_RUNES_NEON_H_
 
-#include <string.h> // `memcpy`, `memset` (partial-window staging; NEON has no byte-masked load)
-
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes/serial.h"
 
@@ -46,11 +44,11 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
         headers_vec.u8x16 = vandq_u8(text_vec.u8x16, continuation_mask_u8x16);
         continuation_vec.u8x16 = vceqq_u8(headers_vec.u8x16, continuation_pattern_u8x16);
         // Convert 0xFF/0x00 into 1/0 and sum.
-        uint8x16_t start_flags = vshrq_n_u8(vmvnq_u8(continuation_vec.u8x16), 7);
-        uint16x8_t sum16 = vpaddlq_u8(start_flags);
-        uint32x4_t sum32 = vpaddlq_u16(sum16);
-        uint64x2_t sum64 = vpaddlq_u32(sum32);
-        char_count_u64x2 = vaddq_u64(char_count_u64x2, sum64);
+        uint8x16_t start_flags_u8x16 = vshrq_n_u8(vmvnq_u8(continuation_vec.u8x16), 7);
+        uint16x8_t sum_u16x8 = vpaddlq_u8(start_flags_u8x16);
+        uint32x4_t sum_u32x4 = vpaddlq_u16(sum_u16x8);
+        uint64x2_t sum_u64x2 = vpaddlq_u32(sum_u32x4);
+        char_count_u64x2 = vaddq_u64(char_count_u64x2, sum_u64x2);
         text_u8 += 16;
         length -= 16;
     }
@@ -70,10 +68,10 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_s
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     while (length >= 16) {
-        uint8x16_t window = vld1q_u8(text_u8);
-        uint8x16_t headers = vandq_u8(window, continuation_mask_u8x16);
-        uint8x16_t starts_cmp = vmvnq_u8(vceqq_u8(headers, continuation_pattern_u8x16));
-        sz_u64_t start_bits = sz_utf8_vreinterpretq_u8_u4_neon_(starts_cmp);
+        uint8x16_t window_u8x16 = vld1q_u8(text_u8);
+        uint8x16_t headers_u8x16 = vandq_u8(window_u8x16, continuation_mask_u8x16);
+        uint8x16_t starts_cmp_u8x16 = vmvnq_u8(vceqq_u8(headers_u8x16, continuation_pattern_u8x16));
+        sz_u64_t start_bits = sz_utf8_vreinterpretq_u8_u4_neon_(starts_cmp_u8x16);
         sz_size_t const start_count = (sz_size_t)sz_u64_popcount(start_bits);
 
         if (n >= start_count) {
@@ -118,13 +116,13 @@ typedef struct sz_utf8_rune_window_neon_t {
  *          `vshrq_n_u8` needs an immediate shift; the shift amounts used by the segmentation classifiers (2 for the
  *          decode 3-byte high reconstruction, 4 for the line-break 4-byte plane reconstruction) are spelled out. */
 SZ_INTERNAL uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t keep) {
-    uint8x16_t shifted;
+    uint8x16_t shifted_u8x16;
     switch (shift) {
-    case 2: shifted = vshrq_n_u8(value, 2); break;
-    case 4: shifted = vshrq_n_u8(value, 4); break;
-    default: shifted = value; break;
+    case 2: shifted_u8x16 = vshrq_n_u8(value, 2); break;
+    case 4: shifted_u8x16 = vshrq_n_u8(value, 4); break;
+    default: shifted_u8x16 = value; break;
     }
-    return vandq_u8(shifted, vdupq_n_u8(keep));
+    return vandq_u8(shifted_u8x16, vdupq_n_u8(keep));
 }
 
 /**
@@ -138,10 +136,10 @@ SZ_INTERNAL uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t k
  */
 SZ_INTERNAL sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
-    uint8x16_t const bit_position = vld1q_u8(bit_position_lanes);
-    uint8x16_t const isolated = vandq_u8(boolean_lanes, bit_position);
-    sz_u64_t const low_bits = (sz_u64_t)vaddv_u8(vget_low_u8(isolated));
-    sz_u64_t const high_bits = (sz_u64_t)vaddv_u8(vget_high_u8(isolated));
+    uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
+    uint8x16_t const isolated_u8x16 = vandq_u8(boolean_lanes, bit_position_u8x16);
+    sz_u64_t const low_bits = (sz_u64_t)vaddv_u8(vget_low_u8(isolated_u8x16));
+    sz_u64_t const high_bits = (sz_u64_t)vaddv_u8(vget_high_u8(isolated_u8x16));
     return low_bits | (high_bits << 8);
 }
 
@@ -157,7 +155,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_mask_combine_neon_( //
 }
 
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
- *          `_mm512_maskz_loadu_epi8`). A small stack staging buffer covers the partial tail so we never read past
+ *          `_mm512_maskz_loadu_epi8`). A zero-initialized vector union stages the partial tail so we never read past
  *          `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
 SZ_INTERNAL void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out) {
     if (loaded >= 64) {
@@ -167,13 +165,13 @@ SZ_INTERNAL void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded
         out[3] = vld1q_u8(text + 48);
         return;
     }
-    sz_u8_t staging[64];
-    memset(staging, 0, sizeof(staging));
-    memcpy(staging, text, loaded);
-    out[0] = vld1q_u8(staging + 0);
-    out[1] = vld1q_u8(staging + 16);
-    out[2] = vld1q_u8(staging + 32);
-    out[3] = vld1q_u8(staging + 48);
+    sz_u512_vec_t window_vec;
+    window_vec.u8x16s[0] = window_vec.u8x16s[1] = window_vec.u8x16s[2] = window_vec.u8x16s[3] = vdupq_n_u8(0);
+    for (sz_size_t i = 0; i < loaded; ++i) window_vec.u8s[i] = text[i];
+    out[0] = window_vec.u8x16s[0];
+    out[1] = window_vec.u8x16s[1];
+    out[2] = window_vec.u8x16s[2];
+    out[3] = window_vec.u8x16s[3];
 }
 
 /**
@@ -186,11 +184,11 @@ SZ_INTERNAL void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded
 SZ_INTERNAL void sz_utf8_forward_neighbours_neon_( //
     uint8x16_t const *window, uint8x16_t *next1, uint8x16_t *next2, uint8x16_t *next3) {
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here = window[quarter];
-        uint8x16_t const successor = window[(quarter + 1) & 3];
-        next1[quarter] = vextq_u8(here, successor, 1);
-        next2[quarter] = vextq_u8(here, successor, 2);
-        next3[quarter] = vextq_u8(here, successor, 3);
+        uint8x16_t const here_u8x16 = window[quarter];
+        uint8x16_t const successor_u8x16 = window[(quarter + 1) & 3];
+        next1[quarter] = vextq_u8(here_u8x16, successor_u8x16, 1);
+        next2[quarter] = vextq_u8(here_u8x16, successor_u8x16, 2);
+        next3[quarter] = vextq_u8(here_u8x16, successor_u8x16, 3);
     }
 }
 
@@ -201,65 +199,67 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     sz_utf8_rune_window_neon_t result;
     result.loaded = available < 64 ? available : 64;
 
-    uint8x16_t window[4];
-    sz_utf8_load_window_neon_(text, result.loaded, window);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window[quarter];
+    uint8x16_t window_u8x16[4];
+    sz_utf8_load_window_neon_(text, result.loaded, window_u8x16);
+    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
 
     uint8x16_t next1[4], next2[4], next3[4];
-    sz_utf8_forward_neighbours_neon_(window, next1, next2, next3);
+    sz_utf8_forward_neighbours_neon_(window_u8x16, next1, next2, next3);
 
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(result.loaded);
 
-    // Lead-class detection over loaded lanes: (byte & mask) == pattern, AND-clamped to loaded lanes.
-    uint8x16_t continuation_bool[4], two_byte_bool[4], three_byte_bool[4], four_byte_bool[4];
-    uint8x16_t const mask_continuation = vdupq_n_u8(0xC0), pattern_continuation = vdupq_n_u8(0x80);
-    uint8x16_t const mask_two = vdupq_n_u8(0xE0), pattern_two = vdupq_n_u8(0xC0);
-    uint8x16_t const mask_three = vdupq_n_u8(0xF0), pattern_three = vdupq_n_u8(0xE0);
-    uint8x16_t const mask_four = vdupq_n_u8(0xF8), pattern_four = vdupq_n_u8(0xF0);
+    /* Lead-class detection over loaded lanes: (byte & mask) == pattern, AND-clamped to loaded lanes. */
+    uint8x16_t continuation_bool_u8x16[4], two_byte_bool_u8x16[4], three_byte_bool_u8x16[4], four_byte_bool_u8x16[4];
+    uint8x16_t const mask_continuation_u8x16 = vdupq_n_u8(0xC0), pattern_continuation_u8x16 = vdupq_n_u8(0x80);
+    uint8x16_t const mask_two_u8x16 = vdupq_n_u8(0xE0), pattern_two_u8x16 = vdupq_n_u8(0xC0);
+    uint8x16_t const mask_three_u8x16 = vdupq_n_u8(0xF0), pattern_three_u8x16 = vdupq_n_u8(0xE0);
+    uint8x16_t const mask_four_u8x16 = vdupq_n_u8(0xF8), pattern_four_u8x16 = vdupq_n_u8(0xF0);
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here = window[quarter];
-        continuation_bool[quarter] = vceqq_u8(vandq_u8(here, mask_continuation), pattern_continuation);
-        two_byte_bool[quarter] = vceqq_u8(vandq_u8(here, mask_two), pattern_two);
-        three_byte_bool[quarter] = vceqq_u8(vandq_u8(here, mask_three), pattern_three);
-        four_byte_bool[quarter] = vceqq_u8(vandq_u8(here, mask_four), pattern_four);
+        uint8x16_t const here_u8x16 = window_u8x16[quarter];
+        continuation_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_continuation_u8x16), pattern_continuation_u8x16);
+        two_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_two_u8x16), pattern_two_u8x16);
+        three_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_three_u8x16), pattern_three_u8x16);
+        four_byte_bool_u8x16[quarter] = vceqq_u8(vandq_u8(here_u8x16, mask_four_u8x16), pattern_four_u8x16);
     }
-    result.continuation = sz_utf8_mask_combine_neon_(continuation_bool[0], continuation_bool[1], continuation_bool[2],
-                                                     continuation_bool[3]) &
+    result.continuation = sz_utf8_mask_combine_neon_(continuation_bool_u8x16[0], continuation_bool_u8x16[1],
+                                                     continuation_bool_u8x16[2], continuation_bool_u8x16[3]) &
                           loaded_mask;
     result.codepoint_starts = loaded_mask & ~result.continuation;
-    result.two_byte_starts = sz_utf8_mask_combine_neon_(two_byte_bool[0], two_byte_bool[1], two_byte_bool[2],
-                                                        two_byte_bool[3]) &
+    result.two_byte_starts = sz_utf8_mask_combine_neon_(two_byte_bool_u8x16[0], two_byte_bool_u8x16[1],
+                                                        two_byte_bool_u8x16[2], two_byte_bool_u8x16[3]) &
                              loaded_mask;
-    result.three_byte_starts = sz_utf8_mask_combine_neon_(three_byte_bool[0], three_byte_bool[1], three_byte_bool[2],
-                                                          three_byte_bool[3]) &
+    result.three_byte_starts = sz_utf8_mask_combine_neon_(three_byte_bool_u8x16[0], three_byte_bool_u8x16[1],
+                                                          three_byte_bool_u8x16[2], three_byte_bool_u8x16[3]) &
                                loaded_mask;
-    result.four_byte_starts = sz_utf8_mask_combine_neon_(four_byte_bool[0], four_byte_bool[1], four_byte_bool[2],
-                                                         four_byte_bool[3]) &
+    result.four_byte_starts = sz_utf8_mask_combine_neon_(four_byte_bool_u8x16[0], four_byte_bool_u8x16[1],
+                                                         four_byte_bool_u8x16[2], four_byte_bool_u8x16[3]) &
                               loaded_mask;
 
-    uint8x16_t const low_five_bits = vdupq_n_u8(0x1F);
-    uint8x16_t const low_six_bits = vdupq_n_u8(0x3F);
-    uint8x16_t const low_two_bits = vdupq_n_u8(0x03);
-    uint8x16_t const low_four_bits = vdupq_n_u8(0x0F);
+    uint8x16_t const low_five_bits_u8x16 = vdupq_n_u8(0x1F);
+    uint8x16_t const low_six_bits_u8x16 = vdupq_n_u8(0x3F);
+    uint8x16_t const low_two_bits_u8x16 = vdupq_n_u8(0x03);
+    uint8x16_t const low_four_bits_u8x16 = vdupq_n_u8(0x0F);
 
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here = window[quarter];
-        uint8x16_t const n1 = next1[quarter];
-        uint8x16_t const n2 = next2[quarter];
+        uint8x16_t const here_u8x16 = window_u8x16[quarter];
+        uint8x16_t const next_byte_u8x16 = next1[quarter];
+        uint8x16_t const next_byte2_u8x16 = next2[quarter];
 
-        // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF.
-        uint8x16_t const high_two = sz_utf8_srl8_neon_(vandq_u8(here, low_five_bits), 2, 0x07);
-        uint8x16_t const low_two = vorrq_u8(vshlq_n_u8(vandq_u8(here, low_two_bits), 6), vandq_u8(n1, low_six_bits));
+        /* 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF. */
+        uint8x16_t const high_two_u8x16 = sz_utf8_srl8_neon_(vandq_u8(here_u8x16, low_five_bits_u8x16), 2, 0x07);
+        uint8x16_t const low_two_u8x16 =
+            vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_two_bits_u8x16), 6), vandq_u8(next_byte_u8x16, low_six_bits_u8x16));
 
-        // 3-byte: codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F).
-        uint8x16_t const high_three = vorrq_u8(vshlq_n_u8(vandq_u8(here, low_four_bits), 4),
-                                               sz_utf8_srl8_neon_(n1, 2, 0x0F));
-        uint8x16_t const low_three = vorrq_u8(vshlq_n_u8(vandq_u8(n1, low_two_bits), 6), vandq_u8(n2, low_six_bits));
+        /* 3-byte: codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F). */
+        uint8x16_t const high_three_u8x16 =
+            vorrq_u8(vshlq_n_u8(vandq_u8(here_u8x16, low_four_bits_u8x16), 4), sz_utf8_srl8_neon_(next_byte_u8x16, 2, 0x0F));
+        uint8x16_t const low_three_u8x16 =
+            vorrq_u8(vshlq_n_u8(vandq_u8(next_byte_u8x16, low_two_bits_u8x16), 6), vandq_u8(next_byte2_u8x16, low_six_bits_u8x16));
 
-        // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
-        uint8x16_t const three_select = three_byte_bool[quarter];
-        result.high[quarter] = vbslq_u8(three_select, high_three, high_two);
-        result.low[quarter] = vbslq_u8(three_select, low_three, low_two);
+        /* Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead. */
+        uint8x16_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
+        result.high[quarter] = vbslq_u8(three_select_u8x16, high_three_u8x16, high_two_u8x16);
+        result.low[quarter] = vbslq_u8(three_select_u8x16, low_three_u8x16, low_two_u8x16);
     }
     return result;
 }
@@ -272,14 +272,14 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
  *          quarter; the caller iterates the four quarters. */
 SZ_INTERNAL uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     sz_u8_t const *table, int tile_count, uint8x16_t selector, uint8x16_t within) {
-    uint8x16_t result = vdupq_n_u8(0);
+    uint8x16_t result_u8x16 = vdupq_n_u8(0);
     for (int tile = 0; tile < tile_count; ++tile) {
-        uint8x16_t const row = vld1q_u8(table + tile * 16);
-        uint8x16_t const picked = vqtbl1q_u8(row, within);
-        uint8x16_t const here = vceqq_u8(selector, vdupq_n_u8((sz_u8_t)tile));
-        result = vbslq_u8(here, picked, result);
+        uint8x16_t const row_u8x16 = vld1q_u8(table + tile * 16);
+        uint8x16_t const picked_u8x16 = vqtbl1q_u8(row_u8x16, within);
+        uint8x16_t const here_u8x16 = vceqq_u8(selector, vdupq_n_u8((sz_u8_t)tile));
+        result_u8x16 = vbslq_u8(here_u8x16, picked_u8x16, result_u8x16);
     }
-    return result;
+    return result_u8x16;
 }
 
 /** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = group_base[index[lane]]`.
@@ -287,19 +287,19 @@ SZ_INTERNAL uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
  *          so subtracting 64/128/192 routes each lane to exactly one quad and the four results OR together. The NEON
  *          twin of the substrate `lut256` leaf. @p index addresses one quarter. */
 SZ_INTERNAL uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index) {
-    uint8x16x4_t const quad0 = vld1q_u8_x4(group_base + 0 * 64);
-    uint8x16x4_t const quad1 = vld1q_u8_x4(group_base + 1 * 64);
-    uint8x16x4_t const quad2 = vld1q_u8_x4(group_base + 2 * 64);
-    uint8x16x4_t const quad3 = vld1q_u8_x4(group_base + 3 * 64);
-    uint8x16_t const within0 = index;
-    uint8x16_t const within1 = vsubq_u8(index, vdupq_n_u8(64));
-    uint8x16_t const within2 = vsubq_u8(index, vdupq_n_u8(128));
-    uint8x16_t const within3 = vsubq_u8(index, vdupq_n_u8(192));
-    uint8x16_t result = vqtbl4q_u8(quad0, within0);
-    result = vorrq_u8(result, vqtbl4q_u8(quad1, within1));
-    result = vorrq_u8(result, vqtbl4q_u8(quad2, within2));
-    result = vorrq_u8(result, vqtbl4q_u8(quad3, within3));
-    return result;
+    uint8x16x4_t const quad0_u8x16x4 = vld1q_u8_x4(group_base + 0 * 64);
+    uint8x16x4_t const quad1_u8x16x4 = vld1q_u8_x4(group_base + 1 * 64);
+    uint8x16x4_t const quad2_u8x16x4 = vld1q_u8_x4(group_base + 2 * 64);
+    uint8x16x4_t const quad3_u8x16x4 = vld1q_u8_x4(group_base + 3 * 64);
+    uint8x16_t const within0_u8x16 = index;
+    uint8x16_t const within1_u8x16 = vsubq_u8(index, vdupq_n_u8(64));
+    uint8x16_t const within2_u8x16 = vsubq_u8(index, vdupq_n_u8(128));
+    uint8x16_t const within3_u8x16 = vsubq_u8(index, vdupq_n_u8(192));
+    uint8x16_t result_u8x16 = vqtbl4q_u8(quad0_u8x16x4, within0_u8x16);
+    result_u8x16 = vorrq_u8(result_u8x16, vqtbl4q_u8(quad1_u8x16x4, within1_u8x16));
+    result_u8x16 = vorrq_u8(result_u8x16, vqtbl4q_u8(quad2_u8x16x4, within2_u8x16));
+    result_u8x16 = vorrq_u8(result_u8x16, vqtbl4q_u8(quad3_u8x16x4, within3_u8x16));
+    return result_u8x16;
 }
 
 #pragma endregion Shared SIMD leaf substrate
@@ -331,11 +331,11 @@ SZ_INTERNAL void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
  *          8-lane halves, ANDs each lane's bit-position {1,2,..,128}, and `vceqq` against it (gather-free, no scalar).*/
 SZ_INTERNAL uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
-    uint8x16_t const bit_position = vld1q_u8(bit_position_lanes);
-    uint8x8_t const low_byte = vdup_n_u8((sz_u8_t)(submask & 0xFF));
-    uint8x8_t const high_byte = vdup_n_u8((sz_u8_t)((submask >> 8) & 0xFF));
-    uint8x16_t const per_half = vcombine_u8(low_byte, high_byte);
-    return vceqq_u8(vandq_u8(per_half, bit_position), bit_position);
+    uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
+    uint8x8_t const low_byte_u8x8 = vdup_n_u8((sz_u8_t)(submask & 0xFF));
+    uint8x8_t const high_byte_u8x8 = vdup_n_u8((sz_u8_t)((submask >> 8) & 0xFF));
+    uint8x16_t const per_half_u8x16 = vcombine_u8(low_byte_u8x8, high_byte_u8x8);
+    return vceqq_u8(vandq_u8(per_half_u8x16, bit_position_u8x16), bit_position_u8x16);
 }
 
 SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
@@ -598,8 +598,8 @@ SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 0xFF
     };
     static sz_u8_t const iota16_lanes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    uint8x16_t const iota16 = vld1q_u8(iota16_lanes);
-    uint8x16_t const eight = vdupq_n_u8(8);
+    uint8x16_t const iota16_u8x16 = vld1q_u8(iota16_lanes);
+    uint8x16_t const eight_u8x16 = vdupq_n_u8(8);
 
     sz_size_t produced = 0;
     for (int quarter = 0; quarter < 4; ++quarter) {
@@ -612,20 +612,20 @@ SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out
 
         // Row of ascending set-bit positions for each 8-bit half; the high half's positions are +8 (lanes 8..15),
         // valid slots filled low, unused slots = 0x80 (out of `vqtbl1q_u8` range -> read as 0, never stored).
-        uint8x8_t const packed_low = vld1_u8(leftpack8 + low8 * 8);
-        uint8x8_t const packed_high = vadd_u8(vld1_u8(leftpack8 + high8 * 8), vdup_n_u8(8));
-        uint8x16_t const halves = vcombine_u8(packed_low, packed_high);
+        uint8x8_t const packed_low_u8x8 = vld1_u8(leftpack8 + low8 * 8);
+        uint8x8_t const packed_high_u8x8 = vadd_u8(vld1_u8(leftpack8 + high8 * 8), vdup_n_u8(8));
+        uint8x16_t const halves_u8x16 = vcombine_u8(packed_low_u8x8, packed_high_u8x8);
 
         // Stitch: output lane j reads source j for j < count_low, else j + (8 - count_low) (skip the low gap).
-        uint8x16_t const ge = vcgeq_u8(iota16, vdupq_n_u8((sz_u8_t)count_low));
-        uint8x16_t const gap = vandq_u8(ge, vsubq_u8(eight, vdupq_n_u8((sz_u8_t)count_low)));
-        uint8x16_t const source = vaddq_u8(iota16, gap);
-        uint8x16_t const stitched = vqtbl1q_u8(halves, source);
+        uint8x16_t const ge_u8x16 = vcgeq_u8(iota16_u8x16, vdupq_n_u8((sz_u8_t)count_low));
+        uint8x16_t const gap_u8x16 = vandq_u8(ge_u8x16, vsubq_u8(eight_u8x16, vdupq_n_u8((sz_u8_t)count_low)));
+        uint8x16_t const source_u8x16 = vaddq_u8(iota16_u8x16, gap_u8x16);
+        uint8x16_t const stitched_u8x16 = vqtbl1q_u8(halves_u8x16, source_u8x16);
 
         // Promote the quarter-relative offsets to global byte-offsets and append the `count` dense lanes.
-        uint8x16_t const global = vaddq_u8(stitched, vdupq_n_u8((sz_u8_t)(quarter * 16)));
+        uint8x16_t const global_u8x16 = vaddq_u8(stitched_u8x16, vdupq_n_u8((sz_u8_t)(quarter * 16)));
         sz_u8_t lanes[16];
-        vst1q_u8(lanes, global);
+        vst1q_u8(lanes, global_u8x16);
         for (int lane = 0; lane < count; ++lane) out[produced + (sz_size_t)lane] = lanes[lane];
         produced += (sz_size_t)count;
     }
@@ -679,21 +679,19 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  @param  ill_byte         Per-lane 0xFF where the emitted start is ill-formed (one U+FFFD), 0 otherwise; four quarters.
  *  @param  consumed_length  Per-lane maximal-subpart byte length (1..4) at each start; flat 64-byte window order.
  *  @param  emit_count       Popcount of @p emit_starts (number of runes available to emit).
- *  @param  has_three        Window holds at least one 3-byte (or wider) lead — skip the 3rd gather/blend otherwise.
- *  @param  has_four         Window holds at least one 4-byte lead — skip the 4th gather/blend otherwise.
  *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
  *  @return Number of runes emitted (<= min(emit_count, capacity)).
  */
 SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                                                 //
     uint8x16_t const *window, sz_u64_t emit_starts, uint8x16_t const *ill_byte, sz_u8_t const *consumed_length, //
-    int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
-    sz_size_t *consumed_bytes) {
+    sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     // Build the 64-byte tables once: `vqtbl4q_u8` addresses all four quarters as one `uint8x16x4_t`.
-    uint8x16x4_t table, ill_table;
-    table.val[0] = window[0], table.val[1] = window[1], table.val[2] = window[2], table.val[3] = window[3];
-    ill_table.val[0] = ill_byte[0], ill_table.val[1] = ill_byte[1];
-    ill_table.val[2] = ill_byte[2], ill_table.val[3] = ill_byte[3];
+    uint8x16x4_t table_u8x16x4, ill_table_u8x16x4;
+    table_u8x16x4.val[0] = window[0], table_u8x16x4.val[1] = window[1];
+    table_u8x16x4.val[2] = window[2], table_u8x16x4.val[3] = window[3];
+    ill_table_u8x16x4.val[0] = ill_byte[0], ill_table_u8x16x4.val[1] = ill_byte[1];
+    ill_table_u8x16x4.val[2] = ill_byte[2], ill_table_u8x16x4.val[3] = ill_byte[3];
 
     // Left-pack the emitted start byte-offsets (ascending) into a dense array via the shuffle-LUT compaction.
     sz_u8_t start_offsets[64];
@@ -701,8 +699,8 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 
 
     sz_size_t const want = emit_count < capacity ? emit_count : capacity;
     sz_size_t produced = 0;
-    uint8x16_t const v1 = vdupq_n_u8(1), v2 = vdupq_n_u8(2), v3 = vdupq_n_u8(3);
-    uint32x4_t const replacement32 = vdupq_n_u32((sz_u32_t)sz_rune_replacement_k);
+    uint8x16_t const v1_u8x16 = vdupq_n_u8(1), v2_u8x16 = vdupq_n_u8(2), v3_u8x16 = vdupq_n_u8(3);
+    uint32x4_t const replacement_u32x4 = vdupq_n_u32((sz_u32_t)sz_rune_replacement_k);
     // One 16-codepoint block per outer step; one 4-lane sub-block per inner widen-and-blend.
     for (sz_size_t block_start = 0; block_start < want; block_start += 16) {
         // Load up to 16 start offsets for this block into one index vector; trailing lanes index >= 64 read as 0.
@@ -711,70 +709,73 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 
             sz_size_t const source = block_start + (sz_size_t)lane;
             index_lanes[lane] = source < want ? start_offsets[source] : (sz_u8_t)0xFF;
         }
-        uint8x16_t const index = vld1q_u8(index_lanes);
+        uint8x16_t const index_u8x16 = vld1q_u8(index_lanes);
 
-        // Gather lead + up to three trailing bytes per codepoint in one table read each (zero past the window).
-        uint8x16_t const lead = vqtbl4q_u8(table, index);
-        uint8x16_t const byte1 = vqtbl4q_u8(table, vaddq_u8(index, v1));
-        uint8x16_t const byte2 = has_three ? vqtbl4q_u8(table, vaddq_u8(index, v2)) : vdupq_n_u8(0);
-        uint8x16_t const byte3 = has_four ? vqtbl4q_u8(table, vaddq_u8(index, v3)) : vdupq_n_u8(0);
+        // Gather the lead and all three trailing bytes per codepoint in one table read each (zero past the window).
+        uint8x16_t const lead_u8x16 = vqtbl4q_u8(table_u8x16x4, index_u8x16);
+        uint8x16_t const byte1_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v1_u8x16));
+        uint8x16_t const byte2_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v2_u8x16));
+        uint8x16_t const byte3_u8x16 = vqtbl4q_u8(table_u8x16x4, vaddq_u8(index_u8x16, v3_u8x16));
         // Gather the per-emitted-lane ill-formed flag with the SAME packed indices (0xFF => U+FFFD blend).
-        uint8x16_t const ill = vqtbl4q_u8(ill_table, index);
+        uint8x16_t const ill_u8x16 = vqtbl4q_u8(ill_table_u8x16x4, index_u8x16);
 
         // Widen all 16 byte lanes to 32-bit codepoint lanes via the two-step u8->u16->u32 ladder (four sub-blocks).
-        uint16x8_t const lead_lo16 = vmovl_u8(vget_low_u8(lead)), lead_hi16 = vmovl_u8(vget_high_u8(lead));
-        uint16x8_t const b1_lo16 = vmovl_u8(vget_low_u8(byte1)), b1_hi16 = vmovl_u8(vget_high_u8(byte1));
-        uint16x8_t const b2_lo16 = vmovl_u8(vget_low_u8(byte2)), b2_hi16 = vmovl_u8(vget_high_u8(byte2));
-        uint16x8_t const b3_lo16 = vmovl_u8(vget_low_u8(byte3)), b3_hi16 = vmovl_u8(vget_high_u8(byte3));
-        uint16x8_t const ill_lo16 = vmovl_u8(vget_low_u8(ill)), ill_hi16 = vmovl_u8(vget_high_u8(ill));
-        uint32x4_t const lead32[4] = {vmovl_u16(vget_low_u16(lead_lo16)), vmovl_u16(vget_high_u16(lead_lo16)),
-                                      vmovl_u16(vget_low_u16(lead_hi16)), vmovl_u16(vget_high_u16(lead_hi16))};
-        uint32x4_t const b1_32[4] = {vmovl_u16(vget_low_u16(b1_lo16)), vmovl_u16(vget_high_u16(b1_lo16)),
-                                     vmovl_u16(vget_low_u16(b1_hi16)), vmovl_u16(vget_high_u16(b1_hi16))};
-        uint32x4_t const b2_32[4] = {vmovl_u16(vget_low_u16(b2_lo16)), vmovl_u16(vget_high_u16(b2_lo16)),
-                                     vmovl_u16(vget_low_u16(b2_hi16)), vmovl_u16(vget_high_u16(b2_hi16))};
-        uint32x4_t const b3_32[4] = {vmovl_u16(vget_low_u16(b3_lo16)), vmovl_u16(vget_high_u16(b3_lo16)),
-                                     vmovl_u16(vget_low_u16(b3_hi16)), vmovl_u16(vget_high_u16(b3_hi16))};
-        uint32x4_t const ill32[4] = {vmovl_u16(vget_low_u16(ill_lo16)), vmovl_u16(vget_high_u16(ill_lo16)),
-                                     vmovl_u16(vget_low_u16(ill_hi16)), vmovl_u16(vget_high_u16(ill_hi16))};
+        uint16x8_t const lead_lo_u16x8 = vmovl_u8(vget_low_u8(lead_u8x16)), lead_hi_u16x8 = vmovl_u8(vget_high_u8(lead_u8x16));
+        uint16x8_t const b1_lo_u16x8 = vmovl_u8(vget_low_u8(byte1_u8x16)), b1_hi_u16x8 = vmovl_u8(vget_high_u8(byte1_u8x16));
+        uint16x8_t const b2_lo_u16x8 = vmovl_u8(vget_low_u8(byte2_u8x16)), b2_hi_u16x8 = vmovl_u8(vget_high_u8(byte2_u8x16));
+        uint16x8_t const b3_lo_u16x8 = vmovl_u8(vget_low_u8(byte3_u8x16)), b3_hi_u16x8 = vmovl_u8(vget_high_u8(byte3_u8x16));
+        uint16x8_t const ill_lo_u16x8 = vmovl_u8(vget_low_u8(ill_u8x16)), ill_hi_u16x8 = vmovl_u8(vget_high_u8(ill_u8x16));
+        uint32x4_t const lead32_u32x4[4] = {vmovl_u16(vget_low_u16(lead_lo_u16x8)), vmovl_u16(vget_high_u16(lead_lo_u16x8)),
+                                            vmovl_u16(vget_low_u16(lead_hi_u16x8)), vmovl_u16(vget_high_u16(lead_hi_u16x8))};
+        uint32x4_t const b1_32_u32x4[4] = {vmovl_u16(vget_low_u16(b1_lo_u16x8)), vmovl_u16(vget_high_u16(b1_lo_u16x8)),
+                                           vmovl_u16(vget_low_u16(b1_hi_u16x8)), vmovl_u16(vget_high_u16(b1_hi_u16x8))};
+        uint32x4_t const b2_32_u32x4[4] = {vmovl_u16(vget_low_u16(b2_lo_u16x8)), vmovl_u16(vget_high_u16(b2_lo_u16x8)),
+                                           vmovl_u16(vget_low_u16(b2_hi_u16x8)), vmovl_u16(vget_high_u16(b2_hi_u16x8))};
+        uint32x4_t const b3_32_u32x4[4] = {vmovl_u16(vget_low_u16(b3_lo_u16x8)), vmovl_u16(vget_high_u16(b3_lo_u16x8)),
+                                           vmovl_u16(vget_low_u16(b3_hi_u16x8)), vmovl_u16(vget_high_u16(b3_hi_u16x8))};
+        uint32x4_t const ill32_u32x4[4] = {vmovl_u16(vget_low_u16(ill_lo_u16x8)), vmovl_u16(vget_high_u16(ill_lo_u16x8)),
+                                           vmovl_u16(vget_low_u16(ill_hi_u16x8)), vmovl_u16(vget_high_u16(ill_hi_u16x8))};
 
         for (int sub = 0; sub < 4 && (block_start + (sz_size_t)sub * 4) < want; ++sub) {
             sz_size_t const out_base = block_start + (sz_size_t)sub * 4;
-            uint32x4_t const lead_v = lead32[sub], b1_v = b1_32[sub], b2_v = b2_32[sub], b3_v = b3_32[sub];
-            uint32x4_t const mask_3f = vdupq_n_u32(0x3F);
+            uint32x4_t const lead_v_u32x4 = lead32_u32x4[sub], b1_v_u32x4 = b1_32_u32x4[sub];
+            uint32x4_t const b2_v_u32x4 = b2_32_u32x4[sub], b3_v_u32x4 = b3_32_u32x4[sub];
+            uint32x4_t const mask_0x3f_u32x4 = vdupq_n_u32(0x3F);
 
-            // ASCII keeps the lead. 2-byte: ((b0&0x1F)<<6)|(b1&0x3F).
-            uint32x4_t const two_byte = vorrq_u32(vshlq_n_u32(vandq_u32(lead_v, vdupq_n_u32(0x1F)), 6),
-                                                  vandq_u32(b1_v, mask_3f));
-            uint32x4_t const is_two = vandq_u32(vcgeq_u32(lead_v, vdupq_n_u32(0xC0)),
-                                                vcltq_u32(lead_v, vdupq_n_u32(0xE0)));
-            uint32x4_t codepoints = vbslq_u32(is_two, two_byte, lead_v);
-            if (has_three) {
-                uint32x4_t const three_byte = vorrq_u32(vorrq_u32(vshlq_n_u32(vandq_u32(lead_v, vdupq_n_u32(0x0F)), 12),
-                                                                  vshlq_n_u32(vandq_u32(b1_v, mask_3f), 6)),
-                                                        vandq_u32(b2_v, mask_3f));
-                uint32x4_t const is_three = vandq_u32(vcgeq_u32(lead_v, vdupq_n_u32(0xE0)),
-                                                      vcltq_u32(lead_v, vdupq_n_u32(0xF0)));
-                codepoints = vbslq_u32(is_three, three_byte, codepoints);
-                if (has_four) {
-                    uint32x4_t const four_byte = vorrq_u32(
-                        vorrq_u32(vshlq_n_u32(vandq_u32(lead_v, vdupq_n_u32(0x07)), 18),
-                                  vshlq_n_u32(vandq_u32(b1_v, mask_3f), 12)),
-                        vorrq_u32(vshlq_n_u32(vandq_u32(b2_v, mask_3f), 6), vandq_u32(b3_v, mask_3f)));
-                    uint32x4_t const is_four = vcgeq_u32(lead_v, vdupq_n_u32(0xF0));
-                    codepoints = vbslq_u32(is_four, four_byte, codepoints);
-                }
-            }
+            /*  Compute every sequence width for all four lanes, then select by the lead-byte range. A lane whose lead
+             *  is ASCII / 2-byte never satisfies the 3- or 4-byte range, so the (harmless) wider gathers are discarded
+             *  by the blend — bit-identical to the gated nesting, just branchless. */
+            uint32x4_t const two_byte_u32x4 =
+                vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x1F)), 6), vandq_u32(b1_v_u32x4, mask_0x3f_u32x4));
+            uint32x4_t const three_byte_u32x4 =
+                vorrq_u32(vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x0F)), 12),
+                                    vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 6)),
+                          vandq_u32(b2_v_u32x4, mask_0x3f_u32x4));
+            uint32x4_t const four_byte_u32x4 =
+                vorrq_u32(vorrq_u32(vshlq_n_u32(vandq_u32(lead_v_u32x4, vdupq_n_u32(0x07)), 18),
+                                    vshlq_n_u32(vandq_u32(b1_v_u32x4, mask_0x3f_u32x4), 12)),
+                          vorrq_u32(vshlq_n_u32(vandq_u32(b2_v_u32x4, mask_0x3f_u32x4), 6), vandq_u32(b3_v_u32x4, mask_0x3f_u32x4)));
+
+            uint32x4_t const is_two_u32x4 =
+                vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xC0)), vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)));
+            uint32x4_t const is_three_u32x4 =
+                vandq_u32(vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xE0)), vcltq_u32(lead_v_u32x4, vdupq_n_u32(0xF0)));
+            uint32x4_t const is_four_u32x4 = vcgeq_u32(lead_v_u32x4, vdupq_n_u32(0xF0));
+
+            uint32x4_t codepoints_u32x4 = vbslq_u32(is_two_u32x4, two_byte_u32x4, lead_v_u32x4);
+            codepoints_u32x4 = vbslq_u32(is_three_u32x4, three_byte_u32x4, codepoints_u32x4);
+            codepoints_u32x4 = vbslq_u32(is_four_u32x4, four_byte_u32x4, codepoints_u32x4);
+
             // Overwrite every ill-formed lane in this sub-block with U+FFFD (the garbage decode is discarded).
-            uint32x4_t const ill_mask = vtstq_u32(ill32[sub], ill32[sub]);
-            codepoints = vbslq_u32(ill_mask, replacement32, codepoints);
+            uint32x4_t const ill_mask_u32x4 = vtstq_u32(ill32_u32x4[sub], ill32_u32x4[sub]);
+            codepoints_u32x4 = vbslq_u32(ill_mask_u32x4, replacement_u32x4, codepoints_u32x4);
 
             sz_size_t lanes = want - out_base;
             if (lanes > 4) lanes = 4;
-            if (lanes == 4) { vst1q_u32((sz_u32_t *)(runes + out_base), codepoints); }
+            if (lanes == 4) { vst1q_u32((sz_u32_t *)(runes + out_base), codepoints_u32x4); }
             else {
                 sz_u32_t lane_values[4];
-                vst1q_u32(lane_values, codepoints);
+                vst1q_u32(lane_values, codepoints_u32x4);
                 for (sz_size_t lane = 0; lane < lanes; ++lane) runes[out_base + lane] = (sz_rune_t)lane_values[lane];
             }
             produced += lanes;
@@ -802,33 +803,33 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;
-    uint8x16_t window[4];
-    sz_utf8_load_window_neon_((sz_u8_t const *)text, chunk, window);
+    uint8x16_t window_u8x16[4];
+    sz_utf8_load_window_neon_((sz_u8_t const *)text, chunk, window_u8x16);
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(chunk);
 
     // ASCII fast lane: a full window of 1-byte runes widens directly, no classification needed. A byte is non-ASCII
     // iff its sign bit is set, i.e. as a signed byte `< 0`; one signed compare replaces AND + compare per quarter.
-    int8x16_t const zero_s8 = vdupq_n_s8(0);
-    sz_u64_t const high_bit = sz_utf8_mask_combine_neon_(vcltq_s8(vreinterpretq_s8_u8(window[0]), zero_s8),
-                                                         vcltq_s8(vreinterpretq_s8_u8(window[1]), zero_s8),
-                                                         vcltq_s8(vreinterpretq_s8_u8(window[2]), zero_s8),
-                                                         vcltq_s8(vreinterpretq_s8_u8(window[3]), zero_s8)) &
+    int8x16_t const zero_s8x16 = vdupq_n_s8(0);
+    sz_u64_t const high_bit = sz_utf8_mask_combine_neon_(vcltq_s8(vreinterpretq_s8_u8(window_u8x16[0]), zero_s8x16),
+                                                         vcltq_s8(vreinterpretq_s8_u8(window_u8x16[1]), zero_s8x16),
+                                                         vcltq_s8(vreinterpretq_s8_u8(window_u8x16[2]), zero_s8x16),
+                                                         vcltq_s8(vreinterpretq_s8_u8(window_u8x16[3]), zero_s8x16)) &
                               loaded_mask;
     if (high_bit == 0) {
         sz_size_t const runes_to_unpack = chunk < runes_capacity ? chunk : runes_capacity;
         for (sz_size_t quarter = 0; quarter * 16 < runes_to_unpack; ++quarter) {
-            uint16x8_t const lo16 = vmovl_u8(vget_low_u8(window[quarter]));
-            uint16x8_t const hi16 = vmovl_u8(vget_high_u8(window[quarter]));
-            uint32x4_t const w[4] = {vmovl_u16(vget_low_u16(lo16)), vmovl_u16(vget_high_u16(lo16)),
-                                     vmovl_u16(vget_low_u16(hi16)), vmovl_u16(vget_high_u16(hi16))};
+            uint16x8_t const lo_u16x8 = vmovl_u8(vget_low_u8(window_u8x16[quarter]));
+            uint16x8_t const hi_u16x8 = vmovl_u8(vget_high_u8(window_u8x16[quarter]));
+            uint32x4_t const w_u32x4[4] = {vmovl_u16(vget_low_u16(lo_u16x8)), vmovl_u16(vget_high_u16(lo_u16x8)),
+                                           vmovl_u16(vget_low_u16(hi_u16x8)), vmovl_u16(vget_high_u16(hi_u16x8))};
             for (int sub = 0; sub < 4; ++sub) {
                 sz_size_t const out_base = quarter * 16 + (sz_size_t)sub * 4;
                 if (out_base >= runes_to_unpack) break;
                 sz_size_t lanes = runes_to_unpack - out_base;
-                if (lanes >= 4) { vst1q_u32((sz_u32_t *)(runes + out_base), w[sub]); }
+                if (lanes >= 4) { vst1q_u32((sz_u32_t *)(runes + out_base), w_u32x4[sub]); }
                 else {
                     sz_u32_t lane_values[4];
-                    vst1q_u32(lane_values, w[sub]);
+                    vst1q_u32(lane_values, w_u32x4[sub]);
                     for (sz_size_t lane = 0; lane < lanes; ++lane)
                         runes[out_base + lane] = (sz_rune_t)lane_values[lane];
                 }
@@ -841,7 +842,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
     // Single-source classification: a high-nibble LUT gives the per-lane byte length (the SAME LUT the serial
     // reference uses, so 0xF8..0xFF map to length 4 and cannot slip the gate). Derive `len == k` masks per lane.
     static sz_u8_t const length_by_high_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
-    uint8x16_t const length_lut = vld1q_u8(length_by_high_nibble);
+    uint8x16_t const length_lut_u8x16 = vld1q_u8(length_by_high_nibble);
     sz_u64_t starts_bits = 0, continuation_bits = 0;
     sz_u64_t len_eq2 = 0, len_eq3 = 0, len_eq4 = 0;
     sz_u64_t lead_lt_c2 = 0, lead_gt_f4 = 0;
@@ -851,37 +852,37 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
     // prefix. Lanes that are not overrunning starts contribute 0xFF, so `vminvq_u8` returns either the first
     // overrunning lane index or 0xFF when the quarter has none; the per-quarter scalar minima combine to the global.
     static sz_u8_t const within_iota_lanes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    uint8x16_t const within_iota = vld1q_u8(within_iota_lanes);
-    uint8x16_t const chunk_broadcast = vdupq_n_u8((sz_u8_t)chunk);
+    uint8x16_t const within_iota_u8x16 = vld1q_u8(within_iota_lanes);
+    uint8x16_t const chunk_broadcast_u8x16 = vdupq_n_u8((sz_u8_t)chunk);
     sz_size_t overrun_position = chunk; // No overrunning start -> the decodable prefix spans the whole window.
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here = window[quarter];
-        uint8x16_t const high_nibble = vshrq_n_u8(here, 4);
-        uint8x16_t const len = vqtbl1q_u8(length_lut, high_nibble);
+        uint8x16_t const here_u8x16 = window_u8x16[quarter];
+        uint8x16_t const high_nibble_u8x16 = vshrq_n_u8(here_u8x16, 4);
+        uint8x16_t const len_u8x16 = vqtbl1q_u8(length_lut_u8x16, high_nibble_u8x16);
         sz_u64_t const shift = (sz_u64_t)quarter * 16;
-        uint8x16_t const global_iota = vaddq_u8(within_iota, vdupq_n_u8((sz_u8_t)(quarter * 16)));
+        uint8x16_t const global_iota_u8x16 = vaddq_u8(within_iota_u8x16, vdupq_n_u8((sz_u8_t)(quarter * 16)));
         // Continuation = `0x80..0xBF`, i.e. as a signed byte `< -64`; one signed compare replaces AND + compare.
         // Its complement (signed `>= -64`) is the start predicate directly, with no `vmvnq_u8`.
-        int8x16_t const here_signed = vreinterpretq_s8_u8(here);
-        uint8x16_t const is_cont = vcltq_s8(here_signed, vdupq_n_s8(-64));
+        int8x16_t const here_signed_s8x16 = vreinterpretq_s8_u8(here_u8x16);
+        uint8x16_t const is_cont_u8x16 = vcltq_s8(here_signed_s8x16, vdupq_n_s8(-64));
         // A start lane (non-continuation, loaded) whose `index + length` exceeds the window declares an overrun.
-        uint8x16_t const is_start = vcgeq_s8(here_signed, vdupq_n_s8(-64));
-        uint8x16_t const reaches_past = vcgtq_u8(vaddq_u8(global_iota, len), chunk_broadcast);
-        uint8x16_t const overrun_lane = vandq_u8(is_start, reaches_past);
+        uint8x16_t const is_start_u8x16 = vcgeq_s8(here_signed_s8x16, vdupq_n_s8(-64));
+        uint8x16_t const reaches_past_u8x16 = vcgtq_u8(vaddq_u8(global_iota_u8x16, len_u8x16), chunk_broadcast_u8x16);
+        uint8x16_t const overrun_lane_u8x16 = vandq_u8(is_start_u8x16, reaches_past_u8x16);
         // Non-overrunning lanes -> 0xFF so they lose the min; overrunning lanes keep their global index.
-        uint8x16_t const overrun_candidate = vorrq_u8(global_iota, vmvnq_u8(overrun_lane));
-        sz_u8_t const quarter_first = vminvq_u8(overrun_candidate);
+        uint8x16_t const overrun_candidate_u8x16 = vorrq_u8(global_iota_u8x16, vmvnq_u8(overrun_lane_u8x16));
+        sz_u8_t const quarter_first = vminvq_u8(overrun_candidate_u8x16);
         if ((sz_size_t)quarter_first < overrun_position) overrun_position = quarter_first;
-        continuation_bits |= sz_utf8_movemask16_neon_(is_cont) << shift;
-        len_eq2 |= sz_utf8_movemask16_neon_(vceqq_u8(len, vdupq_n_u8(2))) << shift;
-        len_eq3 |= sz_utf8_movemask16_neon_(vceqq_u8(len, vdupq_n_u8(3))) << shift;
-        len_eq4 |= sz_utf8_movemask16_neon_(vceqq_u8(len, vdupq_n_u8(4))) << shift;
-        lead_lt_c2 |= sz_utf8_movemask16_neon_(vcltq_u8(here, vdupq_n_u8(0xC2))) << shift;
-        lead_gt_f4 |= sz_utf8_movemask16_neon_(vcgtq_u8(here, vdupq_n_u8(0xF4))) << shift;
-        e0 |= sz_utf8_movemask16_neon_(vceqq_u8(here, vdupq_n_u8(0xE0))) << shift;
-        ed |= sz_utf8_movemask16_neon_(vceqq_u8(here, vdupq_n_u8(0xED))) << shift;
-        f0 |= sz_utf8_movemask16_neon_(vceqq_u8(here, vdupq_n_u8(0xF0))) << shift;
-        f4 |= sz_utf8_movemask16_neon_(vceqq_u8(here, vdupq_n_u8(0xF4))) << shift;
+        continuation_bits |= sz_utf8_movemask16_neon_(is_cont_u8x16) << shift;
+        len_eq2 |= sz_utf8_movemask16_neon_(vceqq_u8(len_u8x16, vdupq_n_u8(2))) << shift;
+        len_eq3 |= sz_utf8_movemask16_neon_(vceqq_u8(len_u8x16, vdupq_n_u8(3))) << shift;
+        len_eq4 |= sz_utf8_movemask16_neon_(vceqq_u8(len_u8x16, vdupq_n_u8(4))) << shift;
+        lead_lt_c2 |= sz_utf8_movemask16_neon_(vcltq_u8(here_u8x16, vdupq_n_u8(0xC2))) << shift;
+        lead_gt_f4 |= sz_utf8_movemask16_neon_(vcgtq_u8(here_u8x16, vdupq_n_u8(0xF4))) << shift;
+        e0 |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xE0))) << shift;
+        ed |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xED))) << shift;
+        f0 |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xF0))) << shift;
+        f4 |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xF4))) << shift;
     }
     continuation_bits &= loaded_mask;
     starts_bits = loaded_mask & ~continuation_bits;
@@ -914,10 +915,10 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
         sz_u64_t n1_lt_a0 = 0, n1_ge_a0 = 0, n1_lt_90 = 0, n1_ge_90 = 0;
         for (int quarter = 0; quarter < 4; ++quarter) {
             sz_u64_t const shift = (sz_u64_t)quarter * 16;
-            n1_lt_a0 |= sz_utf8_movemask16_neon_(vcltq_u8(window[quarter], vdupq_n_u8(0xA0))) << shift;
-            n1_ge_a0 |= sz_utf8_movemask16_neon_(vcgeq_u8(window[quarter], vdupq_n_u8(0xA0))) << shift;
-            n1_lt_90 |= sz_utf8_movemask16_neon_(vcltq_u8(window[quarter], vdupq_n_u8(0x90))) << shift;
-            n1_ge_90 |= sz_utf8_movemask16_neon_(vcgeq_u8(window[quarter], vdupq_n_u8(0x90))) << shift;
+            n1_lt_a0 |= sz_utf8_movemask16_neon_(vcltq_u8(window_u8x16[quarter], vdupq_n_u8(0xA0))) << shift;
+            n1_ge_a0 |= sz_utf8_movemask16_neon_(vcgeq_u8(window_u8x16[quarter], vdupq_n_u8(0xA0))) << shift;
+            n1_lt_90 |= sz_utf8_movemask16_neon_(vcltq_u8(window_u8x16[quarter], vdupq_n_u8(0x90))) << shift;
+            n1_ge_90 |= sz_utf8_movemask16_neon_(vcgeq_u8(window_u8x16[quarter], vdupq_n_u8(0x90))) << shift;
         }
         // Shift the next-byte range masks right by one so lead lane `i` carries the test on byte `i+1`.
         overlong_or_surrogate_or_range_bits = ((e0 & (n1_lt_a0 >> 1)) | (ed & (n1_ge_a0 >> 1)) |
@@ -967,17 +968,17 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
     for (int quarter = 0; quarter < 4; ++quarter) {
         sz_u32_t const shift = (sz_u32_t)quarter * 16;
         ill_quarter[quarter] = sz_utf8_expand16_neon_((sz_u32_t)((ill_formed >> shift) & 0xFFFFu));
-        uint8x16_t const one = vdupq_n_u8(1);
-        uint8x16_t length_q = one;
-        length_q = vaddq_u8(length_q, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step2 >> shift) & 0xFFFFu)), one));
-        length_q = vaddq_u8(length_q, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step3 >> shift) & 0xFFFFu)), one));
-        length_q = vaddq_u8(length_q, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step4 >> shift) & 0xFFFFu)), one));
-        vst1q_u8(consumed_length + quarter * 16, length_q);
+        uint8x16_t const one_u8x16 = vdupq_n_u8(1);
+        uint8x16_t length_q_u8x16 = one_u8x16;
+        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step2 >> shift) & 0xFFFFu)), one_u8x16));
+        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step3 >> shift) & 0xFFFFu)), one_u8x16));
+        length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(sz_utf8_expand16_neon_((sz_u32_t)((step4 >> shift) & 0xFFFFu)), one_u8x16));
+        vst1q_u8(consumed_length + quarter * 16, length_q_u8x16);
     }
 
     sz_size_t consumed = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_neon_(window, emit_starts, ill_quarter, consumed_length, has_three,
-                                                        has_four, emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_neon_(window_u8x16, emit_starts, ill_quarter, consumed_length, emit_count,
+                                                        runes, runes_capacity, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }

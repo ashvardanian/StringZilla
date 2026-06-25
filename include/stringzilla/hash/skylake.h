@@ -238,8 +238,8 @@ SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_
         }
         sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
         __mmask64 const place_mask = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
-        __m512i const incoming = _mm512_maskz_loadu_epi8(place_mask, (void const *)(text - buffered));
-        state.ins.zmm = _mm512_mask_blend_epi8(place_mask, state.ins.zmm, incoming);
+        __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(place_mask, (void const *)(text - buffered));
+        state.ins.zmm = _mm512_mask_blend_epi8(place_mask, state.ins.zmm, incoming_u8x64);
         buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
     sz_hash_state_store_westmere_(state_ptr, &state);
