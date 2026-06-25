@@ -91,39 +91,39 @@ SZ_INTERNAL void sz_sequence_argsort_rvv_3way_partition_(
         vuint64m1_t order_u64m1 = __riscv_vle64_v_u64m1((sz_u64_t const *)(initial_order + block_index), vector_length);
 
         vbool64_t smaller_b64 = __riscv_vmsltu_vx_u64m1_b64(pgrams_u64m1, pivot_pgram, vector_length);
-        vbool64_t equal_b64 = __riscv_vmseq_vx_u64m1_b64(pgrams_u64m1, pivot_pgram, vector_length);
         vbool64_t greater_b64 = __riscv_vmsgtu_vx_u64m1_b64(pgrams_u64m1, pivot_pgram, vector_length);
+        // The equal lanes are the active lanes that are neither smaller nor greater, so a NOR derives them
+        // without a third compare; lanes past `vector_length` are ignored by the bounded compress / store.
+        vbool64_t equal_b64 = __riscv_vmnor_mm_b64(smaller_b64, greater_b64, vector_length);
 
-        // Compress the elements that satisfy the predicate and store them contiguously.
+        // Compress the elements that satisfy the predicate and store them contiguously. A compress of count
+        // zero is a no-op, so no per-segment branch guards the stores.
         sz_size_t block_count_smaller = __riscv_vcpop_m_b64(smaller_b64, vector_length);
         sz_size_t block_count_equal = __riscv_vcpop_m_b64(equal_b64, vector_length);
         sz_size_t block_count_greater = __riscv_vcpop_m_b64(greater_b64, vector_length);
-        if (block_count_smaller) {
-            vuint64m1_t comp_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, smaller_b64, vector_length);
-            vuint64m1_t comp_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, smaller_b64, vector_length);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + smaller_offset), comp_pgrams_u64m1,
-                                  block_count_smaller);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + smaller_offset), comp_order_u64m1,
-                                  block_count_smaller);
-            smaller_offset += block_count_smaller;
-        }
-        if (block_count_equal) {
-            vuint64m1_t comp_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, equal_b64, vector_length);
-            vuint64m1_t comp_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, equal_b64, vector_length);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + equal_offset), comp_pgrams_u64m1,
-                                  block_count_equal);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + equal_offset), comp_order_u64m1, block_count_equal);
-            equal_offset += block_count_equal;
-        }
-        if (block_count_greater) {
-            vuint64m1_t comp_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, greater_b64, vector_length);
-            vuint64m1_t comp_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, greater_b64, vector_length);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + greater_offset), comp_pgrams_u64m1,
-                                  block_count_greater);
-            __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + greater_offset), comp_order_u64m1,
-                                  block_count_greater);
-            greater_offset += block_count_greater;
-        }
+
+        vuint64m1_t comp_smaller_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, smaller_b64, vector_length);
+        vuint64m1_t comp_smaller_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, smaller_b64, vector_length);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + smaller_offset), comp_smaller_pgrams_u64m1,
+                              block_count_smaller);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + smaller_offset), comp_smaller_order_u64m1,
+                              block_count_smaller);
+        smaller_offset += block_count_smaller;
+
+        vuint64m1_t comp_equal_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, equal_b64, vector_length);
+        vuint64m1_t comp_equal_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, equal_b64, vector_length);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + equal_offset), comp_equal_pgrams_u64m1,
+                              block_count_equal);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + equal_offset), comp_equal_order_u64m1, block_count_equal);
+        equal_offset += block_count_equal;
+
+        vuint64m1_t comp_greater_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, greater_b64, vector_length);
+        vuint64m1_t comp_greater_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, greater_b64, vector_length);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + greater_offset), comp_greater_pgrams_u64m1,
+                              block_count_greater);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + greater_offset), comp_greater_order_u64m1,
+                              block_count_greater);
+        greater_offset += block_count_greater;
         block_index += vector_length;
     }
 

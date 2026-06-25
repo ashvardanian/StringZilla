@@ -80,37 +80,37 @@ SZ_INTERNAL void sz_sequence_argsort_sve_3way_partition_(
         svuint64_t order_u64x = svld1_u64(load_mask_b64x, (sz_u64_t const *)(initial_order + block_index));
 
         svbool_t smaller_b64x = svcmplt_u64(load_mask_b64x, pgrams_u64x, pivot_u64x);
-        svbool_t equal_b64x = svcmpeq_u64(load_mask_b64x, pgrams_u64x, pivot_u64x);
         svbool_t greater_b64x = svcmpgt_u64(load_mask_b64x, pgrams_u64x, pivot_u64x);
+        // The equal lanes are the active lanes that are neither smaller nor greater, so a zeroing NOR governed
+        // by the load mask derives them without a third compare (inactive lanes stay false).
+        svbool_t equal_b64x = svnor_b_z(load_mask_b64x, smaller_b64x, greater_b64x);
 
-        // Compress the elements that satisfy the predicate and store them contiguously.
+        // Compress the elements that satisfy the predicate and store them contiguously. A store masked to a
+        // zero count writes nothing, so no per-segment branch guards the stores.
         sz_size_t block_count_smaller = svcntp_b64(smaller_b64x, smaller_b64x);
         sz_size_t block_count_equal = svcntp_b64(equal_b64x, equal_b64x);
         sz_size_t block_count_greater = svcntp_b64(greater_b64x, greater_b64x);
-        if (block_count_smaller) {
-            svuint64_t comp_pgrams_u64x = svcompact_u64(smaller_b64x, pgrams_u64x);
-            svuint64_t comp_order_u64x = svcompact_u64(smaller_b64x, order_u64x);
-            svbool_t store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_smaller);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + smaller_offset), comp_pgrams_u64x);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_order + smaller_offset), comp_order_u64x);
-            smaller_offset += block_count_smaller;
-        }
-        if (block_count_equal) {
-            svuint64_t comp_pgrams_u64x = svcompact_u64(equal_b64x, pgrams_u64x);
-            svuint64_t comp_order_u64x = svcompact_u64(equal_b64x, order_u64x);
-            svbool_t store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_equal);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + equal_offset), comp_pgrams_u64x);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_order + equal_offset), comp_order_u64x);
-            equal_offset += block_count_equal;
-        }
-        if (block_count_greater) {
-            svuint64_t comp_pgrams_u64x = svcompact_u64(greater_b64x, pgrams_u64x);
-            svuint64_t comp_order_u64x = svcompact_u64(greater_b64x, order_u64x);
-            svbool_t store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_greater);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + greater_offset), comp_pgrams_u64x);
-            svst1_u64(store_mask_b64x, (sz_u64_t *)(partitioned_order + greater_offset), comp_order_u64x);
-            greater_offset += block_count_greater;
-        }
+
+        svuint64_t comp_smaller_pgrams_u64x = svcompact_u64(smaller_b64x, pgrams_u64x);
+        svuint64_t comp_smaller_order_u64x = svcompact_u64(smaller_b64x, order_u64x);
+        svbool_t smaller_store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_smaller);
+        svst1_u64(smaller_store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + smaller_offset), comp_smaller_pgrams_u64x);
+        svst1_u64(smaller_store_mask_b64x, (sz_u64_t *)(partitioned_order + smaller_offset), comp_smaller_order_u64x);
+        smaller_offset += block_count_smaller;
+
+        svuint64_t comp_equal_pgrams_u64x = svcompact_u64(equal_b64x, pgrams_u64x);
+        svuint64_t comp_equal_order_u64x = svcompact_u64(equal_b64x, order_u64x);
+        svbool_t equal_store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_equal);
+        svst1_u64(equal_store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + equal_offset), comp_equal_pgrams_u64x);
+        svst1_u64(equal_store_mask_b64x, (sz_u64_t *)(partitioned_order + equal_offset), comp_equal_order_u64x);
+        equal_offset += block_count_equal;
+
+        svuint64_t comp_greater_pgrams_u64x = svcompact_u64(greater_b64x, pgrams_u64x);
+        svuint64_t comp_greater_order_u64x = svcompact_u64(greater_b64x, order_u64x);
+        svbool_t greater_store_mask_b64x = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)block_count_greater);
+        svst1_u64(greater_store_mask_b64x, (sz_u64_t *)(partitioned_pgrams + greater_offset), comp_greater_pgrams_u64x);
+        svst1_u64(greater_store_mask_b64x, (sz_u64_t *)(partitioned_order + greater_offset), comp_greater_order_u64x);
+        greater_offset += block_count_greater;
     }
 
     // Copy back.

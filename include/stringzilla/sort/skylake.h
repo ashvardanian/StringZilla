@@ -96,8 +96,10 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
         order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_order + block_index);
 
         __mmask8 const smaller_mask = _mm512_mask_cmplt_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
-        __mmask8 const equal_mask = _mm512_mask_cmpeq_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
         __mmask8 const greater_mask = _mm512_mask_cmpgt_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
+        // The equal lanes are the active lanes that are neither smaller nor greater, so a NOR within the
+        // load mask derives them without a third masked compare.
+        __mmask8 const equal_mask = (__mmask8)(load_mask & ~(smaller_mask | greater_mask));
 
         // Compress the elements into the temporary buffer.
         _mm512_mask_compressstoreu_epi64(partitioned_pgrams + smaller_offset, smaller_mask, pgrams_vec.zmm);

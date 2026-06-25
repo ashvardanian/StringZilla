@@ -324,14 +324,28 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_byte_window_(                
         // Fill with zeros, export a slice, and mark the exported length.
         sz_pgram_t *target_pgram = &global_pgrams[sequence_index];
         sz_ptr_t target_str = (sz_ptr_t)target_pgram;
+#if !SZ_IS_BIG_ENDIAN_ && SZ_IS_64BIT_
+        // Fast path: when at least a full machine word remains, the slice fills the pgram to capacity. A single
+        // unaligned load plus a byte-reversal builds the big-endian key directly - the byte-reversed word holds
+        // `src[0]` in the most-significant byte down to `src[7]` in the least, so masking off that lowest byte
+        // and OR-ing in the length byte reproduces the scalar `[src[0..6], len]`-then-bswap result exactly.
+        if (remaining_length >= sizeof(sz_pgram_t)) {
+            sz_u64_t const loaded = sz_u64_load(source_str + start_character).u64;
+            *target_pgram = (sz_pgram_t)((sz_u64_bytes_reverse(loaded) & ~(sz_u64_t)0xFF) | (sz_u64_t)pgram_capacity);
+        }
+        else {
+            *target_pgram = 0;
+            for (sz_size_t character_index = 0; character_index < exported_length; ++character_index)
+                target_str[character_index] = source_str[character_index + start_character];
+            target_str[pgram_capacity] = (char)exported_length;
+            *target_pgram = sz_u64_bytes_reverse(*target_pgram);
+        }
+#else
         *target_pgram = 0;
         for (sz_size_t character_index = 0; character_index < exported_length; ++character_index)
             target_str[character_index] = source_str[character_index + start_character];
         target_str[pgram_capacity] = (char)exported_length;
 #if !SZ_IS_BIG_ENDIAN_
-#if SZ_IS_64BIT_
-        *target_pgram = sz_u64_bytes_reverse(*target_pgram);
-#else
         *target_pgram = sz_u32_bytes_reverse(*target_pgram);
 #endif
 #endif

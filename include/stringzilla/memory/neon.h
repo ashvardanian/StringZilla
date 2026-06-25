@@ -35,10 +35,29 @@ SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     //        vst4q_u8((sz_u8_t *)target, vld1q_u8_x4((sz_u8_t const *)source));
     //    for (; tail_length; target += 1, source += 1, tail_length -= 1) *target = *source;
     //
-    // Sadly, those instructions end up being 20% slower than the code processing 16 bytes at a time:
+    // Sadly, those instructions end up being 20% slower than the code processing 16 bytes at a time.
+    // We unroll to 64 bytes per iteration (4x 16-byte loads/stores) to lower loop overhead and then
+    // finish whatever is left with a single overlapping 16-byte store covering the trailing bytes.
+    // Tiny buffers (`< 16`) can't use the overlapping trick (no 16 bytes to reach back into), so the
+    // serial path handles them.
+    if (length < 16) {
+        if (length) sz_copy_serial(target, source, length);
+        return;
+    }
+    for (; length >= 64; target += 64, source += 64, length -= 64) {
+        vst1q_u8((sz_u8_t *)(target + 0), vld1q_u8((sz_u8_t const *)(source + 0)));
+        vst1q_u8((sz_u8_t *)(target + 16), vld1q_u8((sz_u8_t const *)(source + 16)));
+        vst1q_u8((sz_u8_t *)(target + 32), vld1q_u8((sz_u8_t const *)(source + 32)));
+        vst1q_u8((sz_u8_t *)(target + 48), vld1q_u8((sz_u8_t const *)(source + 48)));
+    }
     for (; length >= 16; target += 16, source += 16, length -= 16)
         vst1q_u8((sz_u8_t *)target, vld1q_u8((sz_u8_t const *)source));
-    if (length) sz_copy_serial(target, source, length);
+    // Tail of `[1, 15]` bytes: a single overlapping copy of the last 16 bytes avoids a scalar loop.
+    // This re-touches bytes already written for non-overlapping `copy`, which is harmless.
+    if (length) {
+        sz_size_t const back_step = 16 - length;
+        vst1q_u8((sz_u8_t *)(target - back_step), vld1q_u8((sz_u8_t const *)(source - back_step)));
+    }
 }
 
 SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -69,14 +88,22 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     uint8x16_t fill_u8x16 = vdupq_n_u8(value); // Broadcast the value across the register
 
-    while (length >= 16) {
-        vst1q_u8((sz_u8_t *)target, fill_u8x16);
-        target += 16;
-        length -= 16;
+    // Tiny buffers (`< 16`) can't use the overlapping trick, so the serial path handles them.
+    if (length < 16) {
+        if (length) sz_fill_serial(target, length, value);
+        return;
     }
 
-    // Handle remaining bytes
-    if (length) sz_fill_serial(target, length, value);
+    // Unroll to 64 bytes per iteration (4x 16-byte stores) to lower loop overhead.
+    for (; length >= 64; target += 64, length -= 64) {
+        vst1q_u8((sz_u8_t *)(target + 0), fill_u8x16);
+        vst1q_u8((sz_u8_t *)(target + 16), fill_u8x16);
+        vst1q_u8((sz_u8_t *)(target + 32), fill_u8x16);
+        vst1q_u8((sz_u8_t *)(target + 48), fill_u8x16);
+    }
+    for (; length >= 16; target += 16, length -= 16) vst1q_u8((sz_u8_t *)target, fill_u8x16);
+    // Tail of `[1, 15]` bytes: a single overlapping store of the last 16 bytes avoids a scalar loop.
+    if (length) vst1q_u8((sz_u8_t *)(target - (16 - length)), fill_u8x16);
 }
 
 SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
