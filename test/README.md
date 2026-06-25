@@ -1,44 +1,25 @@
-# StringZilla Scripts
+# StringZilla Tests
 
-This directory contains benchmarks, tests, and exploratory scripts for the StringZilla library, focused on internal functionality, rather than third-party alternatives.
+Unit tests that validate correctness across every SIMD backend and language binding against serial and STL baselines.
+Each C++ translation unit exercises one kernel family, and the Python suite mirrors it module-for-module.
 
-- For comparative performance analysis, please refer to [StringWars](https://github.com/ashvardanian/StringWars).
-- To understand the distributional properties of hash functions, see [HashEvals](https://github.com/ashvardanian/HashEvals).
+## C++ and CUDA
 
-## Benchmark Programs
+- `stringzilla.cpp` — C++ API against STL baselines.
+- `stringzillas.cpp` / `stringzillas.cu` — parallel CPU and CUDA backend tests.
+- `hash.cpp`, `find.cpp`, `sort.cpp`, `string.cpp`, `uncased.cpp` — per-family kernel tests.
+- `utf8_runes.cpp`, `utf8_words.cpp`, `utf8_graphemes.cpp`, `utf8_sentences.cpp`, `utf8_linewraps.cpp`, `utf8_norm.cpp`, `utf8_tokens.cpp` — UTF-8 decode and segmentation tests.
+- `stringzilla.hpp` and `utf8.hpp` are the shared harnesses; `fingerprints.cuh` and `similarities.cuh` are the CUDA harnesses.
 
-Benchmarks validate SIMD-accelerated backends against serial baselines and measure throughput on real-world workloads.
+## Python
 
-- `bench_find.cpp` - bidirectional substring search, byte search, and byteset search
-- `bench_token.cpp` - token-level operations: hashing, checksums, equality, and ordering
-- `bench_sequence.cpp` - sorting, partitioning, and set intersections of string arrays
-- `bench_memory.cpp` - memory operations: copies, moves, fills, and lookup table transformations
-- `bench_container.cpp` - STL associative containers (`std::map`, `std::unordered_map`) with string keys
-- `bench_similarities.cpp` - Levenshtein, Needleman-Wunsch, Smith-Waterman scoring on CPU
-- `bench_fingerprints.cpp` - MinHash rolling fingerprints and multi-pattern search on CPU
-- `bench_similarities.cu` - similarity scoring algorithms on CUDA GPUs
-- `bench_fingerprints.cu` - fingerprinting algorithms on CUDA GPUs
+The Python modules mirror the C++ translation units one-for-one and run under pytest.
 
-All benchmarks support environment variables for configuration.
-Check file headers for details.
+- `find.py`, `hash.py`, `sort.py`, `string.py`, `uncased.py`, `utf8_*.py`, `doctests.py`, `stringzilla.py`, `stringzillas.py` — per-family tests.
+- `helpers.py` and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
+- This directory is a Python package via `__init__.py`, so the prefix-less modules namespace as `test.*` and never shadow stdlib names.
+- Run the suite with `pytest test/`.
 
-## Test Programs
+## JavaScript
 
-Unit tests validate correctness across all backends and programming languages.
-
-- `test_stringzilla.cpp` - C++ API tests against STL baselines
-- `test_*.py` - Python API tests against native strings, split per kernel family (`test_string.py`,
-  `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`) mirroring the C++
-  translation units; shared helpers in `test_helpers.py` / `test_utf8_helpers.py`
-- `test_stringzillas.cpp` - parallel CPU backend tests
-- `test_stringzillas.cu` - CUDA backend tests
-- `test.js` - JavaScript API tests
-
-## Exploratory Notebooks
-
-Jupyter notebooks for algorithm visualization and analysis.
-
-- `explore_levenshtein.ipynb` - edit distance algorithms and diagonal traversal
-- `explore_fingerprint.ipynb` - MinHash and rolling fingerprints
-- `explore_unicode.ipynb` - UTF-8 handling and Unicode normalization
-
+- `stringzilla.js` — Node test runner, invoked with `node --test`.

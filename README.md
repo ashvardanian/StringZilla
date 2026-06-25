@@ -1,14 +1,11 @@
 # StringZilla 🦖
 
-![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v4.jpg?raw=true)
+![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v5.png?raw=true)
 
-Strings are the first fundamental data type every programming language implements in software rather than hardware, so dedicated CPU instructions are rare - and the few that exist are hardly ideal.
-That's why most languages lean on the C standard library (libc) for their string operations, which, despite its name, ships its hottest code in hand-tuned assembly.
-It does exploit SIMD, but it isn't perfect.
-1️⃣ Even on ubiquitous hardware - over a billion 64-bit ARM CPUs - routines such as `strstr` and `memmem` top out at roughly one-third of available throughput.
-2️⃣ SIMD coverage is uneven: fast forward scans don't guarantee speedy reverse searches, hashing and case-mapping is not even part of the standard.
-3️⃣ Many higher-level languages can't rely on libc at all because their strings aren't NUL-terminated - or may even contain embedded zeroes.
-That's why StringZilla exists: predictable, high performance on every modern platform, OS, and programming language.
+Strings are the first fundamental data type every programming language implements in software rather than hardware — no CPU ships a dedicated "find substring" or "compute string hash" instruction.
+So most string-processing code still looks like `for (i = 0; i < length; ++i) if (text[i] == 'x') …` — a tangle of loops, branches, and per-character lookups, where the surrounding control flow is easily 10-100x more expensive than the character-level logic itself, whether the text is ASCII or UTF-8 encoded Unicode.
+Worse, chewing through one byte or codepoint at a time squanders the hardware: a modern CPU carries dozens of 16-64 byte architectural registers, and hundreds of physical ones to feed out-of-order execution.
+StringZilla reaches for those [SIMD][faq-simd] and [SWAR][faq-swar] instructions directly, offering one of the widest, fastest, and most portable collections of text-processing primitives anywhere.
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
@@ -20,12 +17,14 @@ That's why StringZilla exists: predictable, high performance on every modern pla
 [![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 -->
 
-StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate binary and UTF-8 string operations on modern CPUs and GPUs.
-It delivers up to __10x higher CPU throughput in C, C++, Rust, Python__, and other languages, and can be __100x faster than existing GPU kernels__, covering a broad range of functionality.
-It __accelerates exact and fuzzy string matching, hashing, edit distance computations, sorting, provides allocation-free lazily-evaluated smart-iterators, and even random-string generators__.
+StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy matching, hashing, edit distances, sorting, segmentation, and even random-string generation, with allocation-free lazily-evaluated iterators throughout.
 
-[faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
-[faq-swar]: https://en.wikipedia.org/wiki/SWAR
+- It can be __3x faster than LibC__, the C standard library, doing substring search on Arm.
+- It can be __10-70x faster than ICU__ for C and its C rewrite in UTF-8 handling, case folding, segmentation, and tokenization.
+- It can be __100x faster than NVIDIA's own libraries__ for on-GPU Levenshtein, NW, and SW edit distances.
+- It comes with built-in custom __WebAssembly__ backend for sandboxed browser, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM mainframes, __LoongArch__ for Chinese domestic chips, and more!
+
+Reach for it from your language of choice:
 
 - 🐂 __[C](#basic-usage-with-c-99-and-newer):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
 - 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
@@ -41,9 +40,6 @@ It __accelerates exact and fuzzy string matching, hashing, edit distance computa
 - 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to set up the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
-[faq-shell]: https://github.com/ashvardanian/StringZilla-CLI
-[first-issues]: https://github.com/ashvardanian/StringZilla/issues
-
 __Who is this for?__
 
 - For data-engineers parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/), [RedPajama](https://github.com/togethercomputer/RedPajama-Data), or [LAION](https://laion.ai/blog/laion-5b/).
@@ -52,8 +48,6 @@ __Who is this for?__
 - For [DBMS][faq-dbms] devs, optimizing `LIKE`, `ORDER BY`, and `GROUP BY` operations.
 - For hardware designers, needing a SWAR baseline for string-processing functionality.
 - For students studying SIMD/SWAR applications to non-data-parallel operations.
-
-[faq-dbms]: https://en.wikipedia.org/wiki/Database
 
 ## Performance
 
@@ -357,6 +351,7 @@ Consider contributing if you need a feature that's not yet implemented.
 | Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| Set Intersection & Joins       |    🧐     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |
 | One-Shot & Streaming Hashes    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
 | Cryptographic Hashes           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
@@ -364,8 +359,13 @@ Consider contributing if you need a feature that's not yet implemented.
 | Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Uncased UTF-8 Search  |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ⚪    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| Uncased UTF-8 Search           |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ✅   |   ⚪   |
+| TR29 Grapheme Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| TR29 Sentence Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| UAX14 Line-Break Detection     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ✅   |   ⚪   |
+| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
@@ -2655,3 +2655,11 @@ If you are looking for more reading materials on this topic, consider the follow
 ## License 📜
 
 Feel free to use the project under Apache 2.0 or the Three-clause BSD license at your preference.
+
+<!-- Link references -->
+
+[faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
+[faq-swar]: https://en.wikipedia.org/wiki/SWAR
+[faq-shell]: https://github.com/ashvardanian/StringZilla-CLI
+[first-issues]: https://github.com/ashvardanian/StringZilla/issues
+[faq-dbms]: https://en.wikipedia.org/wiki/Database
