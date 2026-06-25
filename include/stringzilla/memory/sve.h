@@ -62,8 +62,8 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         svuint8_t source_u8x = svld1_u8(mask, (sz_u8_t *)source);
         svst1_u8(mask, (sz_u8_t *)target, source_u8x);
     }
-    // Slightly larger buffers
-    else if (2 * length <= vector_length) {
+    // Slightly larger buffers - between one and two vectors, copied as two predicated halves.
+    else if (length <= 2 * vector_length) {
         svbool_t mask_first = svptrue_b8();
         svbool_t mask_second = svwhilelt_b8((sz_u64_t)vector_length, (sz_u64_t)length);
         svuint8_t source_first_u8x = svld1_u8(mask_first, (sz_u8_t *)(source));
@@ -98,8 +98,8 @@ SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         svuint8_t source_u8x = svld1_u8(mask, (sz_u8_t *)source);
         svst1_u8(mask, (sz_u8_t *)target, source_u8x);
     }
-    // Slightly larger buffers
-    else if (2 * length <= vector_length) {
+    // Slightly larger buffers - between one and two vectors, copied as two predicated halves.
+    else if (length <= 2 * vector_length) {
         svbool_t mask_first = svptrue_b8();
         svbool_t mask_second = svwhilelt_b8((sz_u64_t)vector_length, (sz_u64_t)length);
         svuint8_t source_first_u8x = svld1_u8(mask_first, (sz_u8_t *)(source));
@@ -160,61 +160,56 @@ SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     }
 
     // SVE vector length in bytes
-    sz_size_t vector_length = svcntb();
+    sz_size_t const vector_length = svcntb();
 
-    // Load the 256-byte lookup table into 4 SVE vectors
-    svuint8_t lut_0_to_63_u8x = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 0));
-    svuint8_t lut_64_to_127_u8x = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 64));
-    svuint8_t lut_128_to_191_u8x = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 128));
-    svuint8_t lut_192_to_255_u8x = svld1_u8(svptrue_b8(), (sz_u8_t const *)(lut + 192));
+    /*  Hold the 256-entry table as sixteen 16-byte rows: the high nibble of a source byte picks the row, the
+     *  low nibble indexes within it. `svtbl_u8` only ever sees indices in [0, 16), so each lookup stays inside
+     *  one 16-lane row and is correct at every vector length. */
+    svbool_t const row_predicate = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)16);
+    svuint8_t const row_0_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x00));
+    svuint8_t const row_1_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x10));
+    svuint8_t const row_2_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x20));
+    svuint8_t const row_3_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x30));
+    svuint8_t const row_4_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x40));
+    svuint8_t const row_5_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x50));
+    svuint8_t const row_6_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x60));
+    svuint8_t const row_7_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x70));
+    svuint8_t const row_8_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x80));
+    svuint8_t const row_9_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0x90));
+    svuint8_t const row_10_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xA0));
+    svuint8_t const row_11_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xB0));
+    svuint8_t const row_12_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xC0));
+    svuint8_t const row_13_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xD0));
+    svuint8_t const row_14_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xE0));
+    svuint8_t const row_15_u8x = svld1_u8(row_predicate, (sz_u8_t const *)(lut + 0xF0));
 
-    svuint8_t low_6bits_mask_u8x = svdup_u8(0x3f);
+    /*  Single predicated stream: `svwhilelt` yields all-true for whole vectors and a partial mask for the final
+     *  stretch, so the tail folds into the loop with no separate peeled epilogue. */
+    for (sz_size_t byte_index = 0; byte_index < length; byte_index += vector_length) {
+        svbool_t const active = svwhilelt_b8_u64(byte_index, length);
+        svuint8_t const source_u8x = svld1_u8(active, (sz_u8_t const *)(source + byte_index));
+        svuint8_t const column_u8x = svand_n_u8_x(active, source_u8x, 0x0F);
+        svuint8_t const high_nibble_u8x = svlsr_n_u8_x(active, source_u8x, 4);
 
-    sz_size_t byte_index = 0;
+        // Flat 16-way select tree keyed on the high nibble; `row_0_u8x` is the default for high nibble 0.
+        svuint8_t result_u8x = svtbl_u8(row_0_u8x, column_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 1), svtbl_u8(row_1_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 2), svtbl_u8(row_2_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 3), svtbl_u8(row_3_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 4), svtbl_u8(row_4_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 5), svtbl_u8(row_5_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 6), svtbl_u8(row_6_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 7), svtbl_u8(row_7_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 8), svtbl_u8(row_8_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 9), svtbl_u8(row_9_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 10), svtbl_u8(row_10_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 11), svtbl_u8(row_11_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 12), svtbl_u8(row_12_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 13), svtbl_u8(row_13_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 14), svtbl_u8(row_14_u8x, column_u8x), result_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(active, high_nibble_u8x, 15), svtbl_u8(row_15_u8x, column_u8x), result_u8x);
 
-    // Main loop: process full vectors
-    while (byte_index + vector_length <= length) {
-        svuint8_t source_u8x = svld1_u8(svptrue_b8(), (sz_u8_t const *)(source + byte_index));
-
-        // Create predicates based on top 2 bits (which 64-byte range)
-        svbool_t pred_0_63 = svcmplt_n_u8(svptrue_b8(), source_u8x, 64);
-        svbool_t pred_64_127 = svcmpge_n_u8(svcmplt_n_u8(svptrue_b8(), source_u8x, 128), source_u8x, 64);
-        svbool_t pred_128_191 = svcmpge_n_u8(svcmplt_n_u8(svptrue_b8(), source_u8x, 192), source_u8x, 128);
-        svbool_t pred_192_255 = svcmpge_n_u8(svptrue_b8(), source_u8x, 192);
-
-        // Mask indices to bottom 6 bits for indexing within each 64-byte table
-        svuint8_t index_u8x = svand_u8_x(svptrue_b8(), source_u8x, low_6bits_mask_u8x);
-
-        // Perform lookups and blend results based on predicates
-        svuint8_t result_u8x = svsel_u8(pred_0_63, svtbl_u8(lut_0_to_63_u8x, index_u8x), svdup_u8(0));
-        result_u8x = svsel_u8(pred_64_127, svtbl_u8(lut_64_to_127_u8x, index_u8x), result_u8x);
-        result_u8x = svsel_u8(pred_128_191, svtbl_u8(lut_128_to_191_u8x, index_u8x), result_u8x);
-        result_u8x = svsel_u8(pred_192_255, svtbl_u8(lut_192_to_255_u8x, index_u8x), result_u8x);
-
-        svst1_u8(svptrue_b8(), (sz_u8_t *)target + byte_index, result_u8x);
-        byte_index += vector_length;
-    }
-
-    // Handle tail: process remaining elements with predicated operations
-    if (byte_index < length) {
-        svbool_t tail_pred = svwhilelt_b8_u64(byte_index, length);
-        svuint8_t source_u8x = svld1_u8(tail_pred, (sz_u8_t const *)(source + byte_index));
-
-        // Create predicates for each range (comparison already uses tail_pred as governing predicate)
-        svbool_t pred_0_63 = svcmplt_n_u8(tail_pred, source_u8x, 64);
-        svbool_t pred_64_127 = svcmpge_n_u8(svcmplt_n_u8(tail_pred, source_u8x, 128), source_u8x, 64);
-        svbool_t pred_128_191 = svcmpge_n_u8(svcmplt_n_u8(tail_pred, source_u8x, 192), source_u8x, 128);
-        svbool_t pred_192_255 = svcmpge_n_u8(tail_pred, source_u8x, 192);
-
-        // Mask indices to bottom 6 bits
-        svuint8_t index_u8x = svand_u8_x(tail_pred, source_u8x, low_6bits_mask_u8x);
-
-        svuint8_t result_u8x = svsel_u8(pred_0_63, svtbl_u8(lut_0_to_63_u8x, index_u8x), svdup_u8(0));
-        result_u8x = svsel_u8(pred_64_127, svtbl_u8(lut_64_to_127_u8x, index_u8x), result_u8x);
-        result_u8x = svsel_u8(pred_128_191, svtbl_u8(lut_128_to_191_u8x, index_u8x), result_u8x);
-        result_u8x = svsel_u8(pred_192_255, svtbl_u8(lut_192_to_255_u8x, index_u8x), result_u8x);
-
-        svst1_u8(tail_pred, (sz_u8_t *)target + byte_index, result_u8x);
+        svst1_u8(active, (sz_u8_t *)(target + byte_index), result_u8x);
     }
 }
 #if defined(__clang__)

@@ -62,39 +62,34 @@ SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
         sz_size_t body_length = length - head_length - tail_length; // Multiple of 32.
         sz_u64_t result = 0;
 
-        // Handle the tail before we start updating the `text` pointer
-        while (tail_length) result += text[length - (tail_length--)];
+        // Handle the tail before we start updating the `text` pointer. Read as `sz_u8_t`: a plain `char` is
+        // signed on x86, so a byte >= 0x80 would sign-extend to a negative `int` and wrongly subtract from the
+        // running sum (the SIMD body already accumulates unsigned via `_mm256_sad_epu8`).
+        while (tail_length) result += (sz_u8_t)text[length - (tail_length--)];
         // Handle the head
-        while (head_length--) result += *text++;
+        while (head_length--) result += (sz_u8_t)*text++;
 
+        // This branch is reached only when `is_huge` (the `!is_huge` body above handled the rest), so the
+        // buffer is traversed in two directions at once - touching both ends keeps neither cache-resident and
+        // avoids evicting the whole buffer through L1.
         sz_u256_vec_t text_vec, sums_vec;
+        sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
         sums_vec.ymm = _mm256_setzero_si256();
-        // Fill the aligned body of the buffer.
-        if (!is_huge) {
-            for (; body_length >= 32; text += 32, body_length -= 32) {
-                text_vec.ymm = _mm256_stream_load_si256((__m256i const *)text);
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-            }
+        sums_reversed_vec.ymm = _mm256_setzero_si256();
+        for (; body_length >= 64; text += 32, body_length -= 64) {
+            text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
+            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+            text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
+            sums_reversed_vec.ymm =
+                _mm256_add_epi64(sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
         }
-        // When the buffer is huge, we can traverse it in 2 directions.
-        else {
-            sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
-            sums_reversed_vec.ymm = _mm256_setzero_si256();
-            for (; body_length >= 64; text += 32, body_length -= 64) {
-                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-                text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
-                sums_reversed_vec.ymm = _mm256_add_epi64(
-                    sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
-            }
-            if (body_length >= 32) {
-                sz_assert_(body_length == 32);
-                text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
-                sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-                text += 32;
-            }
-            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
+        if (body_length >= 32) {
+            sz_assert_(body_length == 32);
+            text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
+            sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+            text += 32;
         }
+        sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
 
         // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);

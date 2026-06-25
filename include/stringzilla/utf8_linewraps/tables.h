@@ -1246,19 +1246,21 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_bmp_full_trie_leaf_[2496] 
     0,  0,
 };
 
-/** @brief palette index -> resolved LB class / engine side byte / DottedCircle bit, precomputed from the palette
+/** @brief Palette index → resolved LB class / engine side byte / DottedCircle bit, precomputed from the palette
  *  descriptor (LB1 resolution baked in). Lets the classifier resolve class+side with three vpermb instead of a u16
- *  descriptor permute + bitfield unpack. */
-sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_class_[64] = {
+ *  descriptor permute + bitfield unpack. Sized [256] (not [64]) for the Haswell/NEON 16×16 = 256-byte cascade
+ *  loader; the palette index is < 64 so the trailing 192 zero bytes are never selected — the padding only removes
+ *  an out-of-bounds read over the named object (Ice Lake loads exactly 64). */
+sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_class_[256] = {
     4,  12, 3,  1,  2,  10, 18, 22, 29, 26, 25, 21, 17, 23, 14, 27, 24, 16, 5,  9,  22, 13,
     22, 48, 35, 37, 38, 39, 20, 43, 47, 45, 36, 46, 8,  42, 11, 19, 7,  26, 36, 21, 16, 29,
     29, 31, 31, 12, 20, 4,  33, 34, 18, 19, 25, 15, 44, 9,  36, 40, 32, 29, 0,  0,
 };
-sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_side_[64] = {
+sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_side_[256] = {
     128, 0, 0, 0,   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 1, 0, 2, 0, 0, 4, 0,  0,  0, 0,  0, 0,
     0,   0, 0, 192, 0, 0, 0, 4, 4, 4, 4, 4, 0, 0, 4, 4, 4, 132, 4, 4, 4, 4, 4, 0, 0, 4, 24, 32, 4, 24, 0, 0,
 };
-sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[64] = {
+sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[256] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };

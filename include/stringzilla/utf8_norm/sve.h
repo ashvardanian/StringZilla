@@ -49,10 +49,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t lengt
     sz_size_t const step = svcntb();
 
     // Load the 64-byte LUT once into four sub-tables, each indexed by the bottom 4 bits of the index.
-    svuint8_t const lut_0_to_15 = svld1_u8(svptrue_b8(), sz_utf8_norm_lead_lut_ + 0);
-    svuint8_t const lut_16_to_31 = svld1_u8(svptrue_b8(), sz_utf8_norm_lead_lut_ + 16);
-    svuint8_t const lut_32_to_47 = svld1_u8(svptrue_b8(), sz_utf8_norm_lead_lut_ + 32);
-    svuint8_t const lut_48_to_63 = svld1_u8(svptrue_b8(), sz_utf8_norm_lead_lut_ + 48);
+    // Each load is bounded to its 16-lane row so wide vectors (VL >= 256) never over-read the 64-byte table.
+    svbool_t const lut_row = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)16);
+    svuint8_t const lut_0_to_15 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 0);
+    svuint8_t const lut_16_to_31 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 16);
+    svuint8_t const lut_32_to_47 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 32);
+    svuint8_t const lut_48_to_63 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 48);
 
     sz_u8_t previous_canonical_combining_class = 0;
     for (sz_size_t offset = 0; offset < length; offset += step) {

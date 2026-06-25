@@ -127,6 +127,9 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
             _mm512_stream_si512((__m512i *)(target + body_length - 64), _mm512_loadu_si512(source + body_length - 64));
         }
         if (body_length >= 64) _mm512_stream_si512((__m512i *)target, _mm512_loadu_si512(source));
+        // Non-temporal stores are weakly ordered; fence before returning so a later reader or an
+        // overlapping copy cannot observe stale data (glibc's non-temporal `memcpy` fences the same way).
+        _mm_sfence();
     }
 }
 
