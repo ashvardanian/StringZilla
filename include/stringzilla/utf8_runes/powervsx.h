@@ -449,7 +449,8 @@ SZ_INTERNAL sz_size_t sz_utf8_compress_starts_powervsx_( //
  *          16-byte registers) into sequential UTF-32 runes, the VSX sibling of
  *          @ref sz_utf8_rune_drain_icelake_. The start byte-offsets are
  *          left-packed by the shuffle-LUT, then a single 16-lane-block loop gathers the lead + up to three trailing
- *          bytes via @ref sz_utf8_gather16_powervsx_ and width-blends each codepoint branchlessly. Every
+ *          bytes via @ref sz_utf8_gather16_powervsx_ and width-blends each codepoint; the wider 3rd/4th trailing
+ *          bytes are gathered and blended CONDITIONALLY (@p has_three / @p has_four sibling `if`s). Every
  *          @p ill_formed start (its maximal ill-formed subpart) is overwritten with U+FFFD after the blend, and the
  *          resume cursor reads the last emitted start's offset + its compacted @p consumed_length (the maximal-subpart
  *          length), so an ill-formed trailing lane never skips bytes owed their own next U+FFFD.
@@ -521,25 +522,31 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
                        vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4));
             __vector unsigned int decoded_codepoint_u32x4 = vec_sel(lead_u32x4, two_byte_codepoint_u32x4,
                                                                     two_byte_mask_u32x4);
-            /*  3- and 4-byte blends run unconditionally: when no lane carries a 3-/4-byte lead the gathered
-             *  continuation bytes are zero AND the `cmpge` width masks are all-false, so every `vec_sel` is inert
-             *  and the result stays bit-exact with the gated form. */
-            __vector bool int const three_byte_mask_u32x4 =
-                vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4), vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
-            __vector unsigned int const three_byte_codepoint_u32x4 = vec_or(
-                vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x0F)), vec_splats((unsigned int)12)),
-                       vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6))),
-                vec_and(continuation_byte_2_u32x4, mask_word_3f_u32x4));
-            decoded_codepoint_u32x4 = vec_sel(decoded_codepoint_u32x4, three_byte_codepoint_u32x4,
-                                              three_byte_mask_u32x4);
-            __vector bool int const four_byte_mask_u32x4 = vec_cmpge(lead_u32x4, mask_word_f0_u32x4);
-            __vector unsigned int const four_byte_codepoint_u32x4 = vec_or(
-                vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x07)), vec_splats((unsigned int)18)),
-                       vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)12))),
-                vec_or(vec_sl(vec_and(continuation_byte_2_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6)),
-                       vec_and(continuation_byte_3_u32x4, mask_word_3f_u32x4)));
-            decoded_codepoint_u32x4 = vec_sel(decoded_codepoint_u32x4, four_byte_codepoint_u32x4,
-                                              four_byte_mask_u32x4);
+            /*  The 3-/4-byte width blends run CONDITIONALLY via two sibling (depth-1, NOT nested) `if`s gated by
+             *  `has_three` / `has_four`, mirroring the AVX2 sibling-if drain: the block-level gather of the 3rd byte
+             *  is skipped for ASCII/2-byte windows and the 4th-byte gather + 4-byte assembly is skipped for CJK
+             *  (3-byte-only) windows. `has_four ⟹ has_three`, so the 4-byte sibling always sees a populated 3rd byte.
+             *  Bit-exact with the gated form: a window with no 3-/4-byte lead carries an all-false width mask. */
+            if (has_three) {
+                __vector bool int const three_byte_mask_u32x4 =
+                    vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4), vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
+                __vector unsigned int const three_byte_codepoint_u32x4 = vec_or(
+                    vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x0F)), vec_splats((unsigned int)12)),
+                           vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6))),
+                    vec_and(continuation_byte_2_u32x4, mask_word_3f_u32x4));
+                decoded_codepoint_u32x4 = vec_sel(decoded_codepoint_u32x4, three_byte_codepoint_u32x4,
+                                                  three_byte_mask_u32x4);
+            }
+            if (has_four) { // SIBLING, not nested; has_four ⟹ has_three so the 3rd byte is already gathered.
+                __vector bool int const four_byte_mask_u32x4 = vec_cmpge(lead_u32x4, mask_word_f0_u32x4);
+                __vector unsigned int const four_byte_codepoint_u32x4 = vec_or(
+                    vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x07)), vec_splats((unsigned int)18)),
+                           vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)12))),
+                    vec_or(vec_sl(vec_and(continuation_byte_2_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6)),
+                           vec_and(continuation_byte_3_u32x4, mask_word_3f_u32x4)));
+                decoded_codepoint_u32x4 = vec_sel(decoded_codepoint_u32x4, four_byte_codepoint_u32x4,
+                                                  four_byte_mask_u32x4);
+            }
 
             sz_u128_vec_t lane_values_vec;
             lane_values_vec.vsx_u32 = decoded_codepoint_u32x4;
