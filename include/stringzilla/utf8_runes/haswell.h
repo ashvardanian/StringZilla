@@ -714,7 +714,7 @@ SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_t *
  */
 SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
     __m256i window, __m256i ill_formed_lanes, sz_u32_t emit_starts, //
-    int has_ill,                                                    //
+    int has_three, int has_four, int has_ill,                       //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_u8_t *last_off_out) {
 
     /*  Left-pack the emitted-start byte-offsets (ascending) into a dense array. On Intel Haswell single-uop
@@ -737,15 +737,10 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
             window_low_broadcast_u8x32, window_high_broadcast_u8x32,
             _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(1)));
 
-        /*  Width-blend 1/2/3/4-byte lead lanes on one uniform path. The trailing bytes come from the in-register
-         *  window (`vpshufb`, not a memory gather), so computing every width and selecting by the lead-byte range
-         *  keeps all lanes branch-free; lanes of a narrower lead just blend a value that is already inert. */
-        __m256i const third_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
-            window_low_broadcast_u8x32, window_high_broadcast_u8x32,
-            _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(2)));
-        __m256i const fourth_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
-            window_low_broadcast_u8x32, window_high_broadcast_u8x32,
-            _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(3)));
+        /*  Width-blend 1/2/3/4-byte lead lanes. The lead-byte-range predicates are cheap (from the lead byte alone),
+         *  so they stay unconditional; the 2-byte form needs only the second byte, also already gathered. The wider
+         *  trailing bytes are gathered CONDITIONALLY via two sibling `if`s so a CJK (3-byte-only) window never pays
+         *  for the 4th-byte gather + 4-byte assembly, and ASCII/2-byte windows skip both. */
         __m256i const is_greater_equal_0xc0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xC0 - 1));
         __m256i const is_greater_equal_0xe0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xE0 - 1));
         __m256i const is_greater_equal_0xf0_u32x8 = _mm256_cmpgt_epi32(lead_byte_u32x8, _mm256_set1_epi32(0xF0 - 1));
@@ -756,19 +751,32 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_haswell_(                  //
         __m256i const two_byte_codepoints_u32x8 = _mm256_or_si256(
             _mm256_slli_epi32(_mm256_and_si256(lead_byte_u32x8, _mm256_set1_epi32(0x1F)), 6),
             _mm256_and_si256(second_byte_u32x8, _mm256_set1_epi32(0x3F)));
-        __m256i const three_byte_codepoints_u32x8 = _mm256_or_si256(
-            _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(lead_byte_u32x8, _mm256_set1_epi32(0x0F)), 12),
-                            _mm256_slli_epi32(_mm256_and_si256(second_byte_u32x8, _mm256_set1_epi32(0x3F)), 6)),
-            _mm256_and_si256(third_byte_u32x8, _mm256_set1_epi32(0x3F)));
-        __m256i const four_byte_codepoints_u32x8 = _mm256_or_si256(
-            _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(lead_byte_u32x8, _mm256_set1_epi32(0x07)), 18),
-                            _mm256_slli_epi32(_mm256_and_si256(second_byte_u32x8, _mm256_set1_epi32(0x3F)), 12)),
-            _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(third_byte_u32x8, _mm256_set1_epi32(0x3F)), 6),
-                            _mm256_and_si256(fourth_byte_u32x8, _mm256_set1_epi32(0x3F))));
-        // ASCII / orphan-byte default kept by the lead byte.
+        // ASCII / orphan-byte default kept by the lead byte; 2-byte blends in next (lead + second only).
         __m256i codepoints_u32x8 = _mm256_blendv_epi8(lead_byte_u32x8, two_byte_codepoints_u32x8, is_two_byte_u32x8);
-        codepoints_u32x8 = _mm256_blendv_epi8(codepoints_u32x8, three_byte_codepoints_u32x8, is_three_byte_u32x8);
-        codepoints_u32x8 = _mm256_blendv_epi8(codepoints_u32x8, four_byte_codepoints_u32x8, is_greater_equal_0xf0_u32x8);
+
+        __m256i third_byte_u32x8 = _mm256_setzero_si256(); // hoisted so the 4-byte sibling reuses it.
+        if (has_three) {
+            third_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
+                window_low_broadcast_u8x32, window_high_broadcast_u8x32,
+                _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(2)));
+            __m256i const three_byte_codepoints_u32x8 = _mm256_or_si256(
+                _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(lead_byte_u32x8, _mm256_set1_epi32(0x0F)), 12),
+                                _mm256_slli_epi32(_mm256_and_si256(second_byte_u32x8, _mm256_set1_epi32(0x3F)), 6)),
+                _mm256_and_si256(third_byte_u32x8, _mm256_set1_epi32(0x3F)));
+            codepoints_u32x8 = _mm256_blendv_epi8(codepoints_u32x8, three_byte_codepoints_u32x8, is_three_byte_u32x8);
+        }
+        if (has_four) { // SIBLING, not nested; has_four ⟹ has_three so third_byte_u32x8 is already set.
+            __m256i const fourth_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
+                window_low_broadcast_u8x32, window_high_broadcast_u8x32,
+                _mm256_add_epi32(offsets_u32x8, _mm256_set1_epi32(3)));
+            __m256i const four_byte_codepoints_u32x8 = _mm256_or_si256(
+                _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(lead_byte_u32x8, _mm256_set1_epi32(0x07)), 18),
+                                _mm256_slli_epi32(_mm256_and_si256(second_byte_u32x8, _mm256_set1_epi32(0x3F)), 12)),
+                _mm256_or_si256(_mm256_slli_epi32(_mm256_and_si256(third_byte_u32x8, _mm256_set1_epi32(0x3F)), 6),
+                                _mm256_and_si256(fourth_byte_u32x8, _mm256_set1_epi32(0x3F))));
+            codepoints_u32x8 = _mm256_blendv_epi8(codepoints_u32x8, four_byte_codepoints_u32x8,
+                                                  is_greater_equal_0xf0_u32x8);
+        }
 
         // Ill-formed lanes collapse to U+FFFD; well-formed-only windows (the overwhelming common case) skip the gather.
         if (has_ill) {
@@ -958,9 +966,15 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_haswell_( //
     __m256i const ill_formed_lanes_u8x32 = has_ill ? sz_utf8_byte_mask_from_bits_haswell_(ill_formed)
                                                    : _mm256_setzero_si256();
 
+    // Gate the wide-byte gathers in the drain: a window with no 3-byte lead skips the 3rd-byte gather, and a window
+    // with no 4-byte lead skips the 4th. `has_four ⟹ has_three` (a 4-byte lead is also `len_ge_three`).
+    int const has_three = (len_ge_three | len_ge_four) != 0;
+    int const has_four = len_ge_four != 0;
+
     sz_u8_t last_off = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_haswell_(window_u8x32, ill_formed_lanes_u8x32, emit_starts, has_ill,
-                                                           emit_count, runes, runes_capacity, &last_off);
+    sz_size_t const produced =
+        sz_utf8_rune_drain_haswell_(window_u8x32, ill_formed_lanes_u8x32, emit_starts, has_three, has_four, has_ill,
+                                    emit_count, runes, runes_capacity, &last_off);
 
     // Resume cursor delta = last emitted start's offset + its maximal-subpart length (1 + the step slots it reached),
     // read scalar-ly from the bitmasks at that one lane - no per-lane length vector materialize/store/reload.
