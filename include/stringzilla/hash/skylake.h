@@ -219,8 +219,30 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_siz
 }
 
 SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
-    // The four-lane AES-NI absorb has no edge over Westmere here (no VAES); defer streaming to its full-clock kernel.
-    sz_hash_state_update_westmere(state_ptr, text, length);
+    // Skylake has AVX-512BW but neither VBMI (no `vpermb` byte slide) nor VAES, so the absorb stays the four-lane
+    // AES-NI Westmere kernel. What Westmere lacks is a masked load: it merges incoming bytes one at a time into
+    // `ins.u8s[...]`, then reads `ins` back as wide lanes - a ~12-cycle store-forwarding stall on every cross-call
+    // merge, the dominant cost for short streamed tokens. AVX-512 removes it without VBMI: a single fault-suppressed
+    // masked load from `text - buffered` lands the incoming bytes directly at their buffer offset. The masked-off
+    // low `buffered` lanes alias the bytes before `text` and are never accessed; the set lanes
+    // [buffered, buffered + to_copy) read exactly [text, text + to_copy). One `vpblendmb` drops them into `ins`;
+    // bit-identical digest to the per-byte copy.
+    sz_hash_state_aligned_t_ state = sz_hash_state_load_westmere_(state_ptr);
+    sz_size_t buffered = state.ins_length % 64;
+    if (buffered == 0 && state.ins_length) buffered = 64;
+    while (length) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
+            sz_hash_state_update_westmere_(&state);
+            state.ins.zmm = _mm512_setzero_si512();
+            buffered = 0;
+        }
+        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        __mmask64 const place_mask = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
+        __m512i const incoming = _mm512_maskz_loadu_epi8(place_mask, (void const *)(text - buffered));
+        state.ins.zmm = _mm512_mask_blend_epi8(place_mask, state.ins.zmm, incoming);
+        buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
+    }
+    sz_hash_state_store_westmere_(state_ptr, &state);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
