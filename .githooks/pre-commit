@@ -1,43 +1,71 @@
 #!/usr/bin/env bash
 #
-# StringZilla pre-commit hook.
-#
-# Rejects decorative comment separators - runs of three or more `-` or `=`
-# characters used purely as visual dividers inside C/C++ comments. Proper
-# sentences communicate structure better than attention-grabbing rules, so
-# the house style bans these banners outright.
-#
+# StringZilla pre-commit hook - house-style guards over staged C/C++/CUDA (and the public headers).
 # Install once per clone with:  git config core.hooksPath .githooks
 # Bypass in a genuine emergency with:  git commit --no-verify
 
 set -u
 
-# Only inspect C/C++ translation units and headers.
+# Decorative comment separators - runs of three or more `-` or `=` used purely as visual dividers inside
+# C/C++ comments. Proper sentences communicate structure better than attention-grabbing rules.
 mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM \
     -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl')
-
-[ "${#staged[@]}" -eq 0 ] && exit 0
-
-violations=0
+separators=0
 for file in "${staged[@]}"; do
     [ -f "$file" ] || continue
-    # Examine only the lines this commit adds (leading '+', excluding the
-    # '+++' file header), and flag any comment carrying a 3+ run of - or =.
     while IFS= read -r line; do
         added="${line#+}"
         if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}'; then
-            if [ "$violations" -eq 0 ]; then
+            if [ "$separators" -eq 0 ]; then
                 printf 'Decorative comment separators are not allowed (--- / ===):\n\n' >&2
             fi
             printf '  %s: %s\n' "$file" "$(printf '%s' "$added" | sed 's/^[[:space:]]*//')" >&2
-            violations=$((violations + 1))
+            separators=$((separators + 1))
         fi
     done < <(git diff --cached -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+')
 done
-
-if [ "$violations" -ne 0 ]; then
+if [ "$separators" -ne 0 ]; then
     printf '\nWrite a plain sentence instead, or bypass with --no-verify.\n' >&2
     exit 1
+fi
+
+# The `&*iterator` antipattern (iterator -> reference -> pointer laundering). Use the container's
+# `.data()`, `std::to_address(it)`, or a raw pointer directly instead.
+laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '&\*' || true)
+if [ -n "$laundering" ]; then
+  echo "pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):" >&2
+  echo "$laundering" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Dashes in `#pragma region` / `#pragma endregion` names: clang-format parses the trailing text as an
+# expression and rewrites `X-Y` into `X - Y`, desyncing region/endregion pairs. Use spaces in region names instead.
+pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '#pragma[[:space:]]+(region|endregion)' | grep -E '[A-Za-z0-9] *- *[A-Za-z0-9]' || true)
+if [ -n "$pragma_dashes" ]; then
+  echo "pre-commit: dash in a #pragma region/endregion name (clang-format rewrites 'X-Y' to 'X - Y'); use spaces:" >&2
+  echo "$pragma_dashes" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# LibC string/memory symbols under include/stringzilla/**: StringZilla supersedes LibC and cannot share a
+# translation unit with the compiler `__builtin_*` it emits. Use the project wrappers (`sz_copy`, `sz_fill`,
+# `sz_move`, `sz_equal`) or a `sz_u(128|256|512)_vec_t` union `.u8s[]` buffer for staging. The default allocator
+# and assert live in `types.h` (the sanctioned LibC touch-points) and are excluded; the `alloc->`/`allocator->`
+# callbacks are not LibC.
+libc=$(git diff --cached --no-color -U0 -- 'include/stringzilla' ':(exclude)include/stringzilla/types.h' \
+  | grep -nE '^\+' \
+  | grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' \
+  | grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
+if [ -n "$libc" ]; then
+  echo "pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC)." >&2
+  echo "Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:" >&2
+  echo "$libc" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
 fi
 
 exit 0
