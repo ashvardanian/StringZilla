@@ -614,7 +614,7 @@ struct ordering_from_sz {
         sz_ordering_t ab = func_(a.data(), a.size(), b.data(), b.size());
         sz_ordering_t aa = func_(a.data(), a.size(), a.data(), a.size());
         sz_ordering_t bb = func_(b.data(), b.size(), b.data(), b.size());
-        sz_ordering_t ba = func_(b.data(), a.size(), a.data(), a.size());
+        sz_ordering_t ba = func_(b.data(), b.size(), a.data(), a.size());
         std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
         check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
         do_not_optimize(ab);
