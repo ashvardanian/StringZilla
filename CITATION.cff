@@ -1,0 +1,61 @@
+cff-version: 1.2.0
+title: "StringZilla: Fast SIMD, SWAR, and GPGPU String Processing"
+message: "If you use this software, please cite it as below."
+type: software
+license: Apache-2.0
+version: 4.6.2
+repository-code: https://github.com/ashvardanian/StringZilla
+url: https://ashvardanian.com/posts/stringzilla/
+abstract: >-
+  Portable string-processing library accelerated with SWAR, SIMD, and GPGPU,
+  covering substring and byte-set search, non-cryptographic hashing and SHA-256 checksums,
+  sorting and set intersection of string collections,
+  Unicode case folding, UAX-29 and UAX-14 segmentation, and UAX-15 normalization,
+  plus batch and on-GPU fuzzy matching with Levenshtein, Needleman-Wunsch, Smith-Waterman, and MinHash,
+  exposed through allocation-free lazily-evaluated iterators,
+  across C, C++, Python, Rust, Go, Swift, and JavaScript,
+  and tuned for x86, Arm, RISC-V, LoongArch, Power, and WebAssembly.
+
+authors:
+  - family-names: Vardanian
+    given-names: Ash
+    alias: ashvardanian
+    orcid: https://orcid.org/0000-0002-4882-1815
+
+references:
+  - type: article
+    title: "5x Faster Strings with SIMD & SWAR"
+    url: https://ashvardanian.com/posts/stringzilla/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
+  - type: article
+    title: "The Painful Pitfalls of C++ STL Strings"
+    url: https://ashvardanian.com/posts/painful-strings/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
+  - type: article
+    title: "Faster Levenshtein Distances with a SIMD-friendly Traversal Order"
+    url: https://ashvardanian.com/posts/levenshtein-diagonal/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
+  - type: article
+    title: "Processing Strings 109x Faster than Nvidia on H100"
+    url: https://ashvardanian.com/posts/stringwars-on-gpus/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
+  - type: article
+    title: "How a String Library Beat OpenCV at Image Processing by 4x"
+    url: https://ashvardanian.com/posts/image-processing-with-strings/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
+  - type: article
+    title: "2x Faster Hashes on AWS Graviton: NEON to SVE2"
+    url: https://ashvardanian.com/posts/aws-graviton-checksums-on-neon-vs-sve/
+    authors:
+      - family-names: Vardanian
+        given-names: Ash
