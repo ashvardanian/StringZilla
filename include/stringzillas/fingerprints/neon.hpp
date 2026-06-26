@@ -221,7 +221,7 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         uint64x2_t negative_mask = vcltq_f64(results, vdupq_n_f64(0.0));
         results = vaddq_f64(results, vreinterpretq_f64_u64(vandq_u64(negative_mask, vreinterpretq_u64_f64(modulos))));
 
-#ifdef SZ_DEBUG
+#if SZ_DEBUG
         sz_u128_vec_t xs_vec, modulos_vec, results_vec;
         xs_vec.f64x2 = xs, modulos_vec.f64x2 = modulos, results_vec.f64x2 = results;
         sz_assert_(modulos_vec.f64s[0] == 0 ||

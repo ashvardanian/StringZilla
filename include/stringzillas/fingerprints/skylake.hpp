@@ -220,7 +220,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         __mmask8 negative_mask = _mm512_fpclass_pd_mask(results, 0x44); // Negative
         results = _mm512_mask_add_pd(results, negative_mask, results, modulos);
 
-#ifdef SZ_DEBUG
+#if SZ_DEBUG
         // Extract elements for assertions, as MSVC doesn't support [] operator on `__m512d`
         alignas(64) f64_t xs_arr[8];
         alignas(64) f64_t modulos_arr[8];
