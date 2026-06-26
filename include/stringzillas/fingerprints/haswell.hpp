@@ -24,14 +24,14 @@ namespace stringzillas {
 #pragma GCC target("avx2", "fma")
 #endif
 
-SZ_INLINE __m256d _mm256_floor_magic_pd(__m256d x) noexcept {
-    // Magic number rounding approach for fast floor
-    __m256d magic = _mm256_set1_pd(6755399441055744.0); // 2^52 + 2^51
-    __m256d rounded = _mm256_sub_pd(_mm256_add_pd(x, magic), magic);
-
-    // Handle negative numbers: if result > x, subtract 1
-    __m256d neg_mask_pd = _mm256_cmp_pd(rounded, x, _CMP_GT_OQ);
-    return _mm256_sub_pd(rounded, _mm256_and_pd(neg_mask_pd, _mm256_set1_pd(1.0)));
+/**
+ *  @brief Round-to-nearest-even via the "magic number" trick — ~2x faster than `_mm256_round_pd` / `std::floor`.
+ *  Adding 2^52 + 2^51 snaps any `|x| < 2^51` to an integer (its fraction falls off the mantissa); subtracting it
+ *  back leaves the rounded value. No floor/sign fixup — the caller only rounds small non-negative quotients (`< 2^10`).
+ */
+SZ_INLINE __m256d _mm256_round_magic_pd(__m256d x) noexcept {
+    __m256d const magic = _mm256_set1_pd(6755399441055744.0); // 2^52 + 2^51
+    return _mm256_sub_pd(_mm256_add_pd(x, magic), magic);
 }
 
 /**
@@ -203,15 +203,14 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
 
   private:
     SZ_INLINE __m256d barrett_mod(__m256d xs, __m256d modulos, __m256d inverse_modulos) const noexcept {
-        __m256d qs = _mm256_floor_magic_pd(_mm256_mul_pd(xs, inverse_modulos));
-        __m256d results = _mm256_fnmadd_pd(qs, modulos, xs);
-
-        // Clamp into the [0, modulo) range.
-        __m256d overflow_mask_pd = _mm256_cmp_pd(results, modulos, _CMP_GE_OQ);
-        results = _mm256_sub_pd(results, _mm256_and_pd(overflow_mask_pd, modulos));
-        __m256d negative_mask_pd = _mm256_cmp_pd(results, _mm256_setzero_pd(), _CMP_LT_OQ);
-        results = _mm256_add_pd(results, _mm256_and_pd(negative_mask_pd, modulos));
-
+        // Modular reduction with a rounded reciprocal. A round-to-nearest quotient keeps the residue within one
+        // modulus of zero: q = round(x / modulo) → r = x - q * modulo ∈ (-modulo, modulo), so one `r < 0` fixup
+        // suffices — cheaper than a floored quotient, which needs a floor fixup plus an `r ≥ modulo` fixup.
+        // Exact here: x < 2^52, modulo ≈ 2^42 → x / modulo < 2^10, well inside the ½-ULP budget.
+        __m256d qs = _mm256_round_magic_pd(_mm256_mul_pd(xs, inverse_modulos));
+        __m256d results = _mm256_fnmadd_pd(qs, modulos, xs); // r = x - q * modulo
+        __m256d negative_mask = _mm256_cmp_pd(results, _mm256_setzero_pd(), _CMP_LT_OQ);
+        results = _mm256_add_pd(results, _mm256_and_pd(negative_mask, modulos)); // r < 0 → r += modulo
         return results;
     }
 

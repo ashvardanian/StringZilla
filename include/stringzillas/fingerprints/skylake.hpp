@@ -28,18 +28,14 @@ namespace stringzillas {
 #endif
 
 /**
- *  @brief Alternative to `_mm512_roundscale_pd` and `std::floor`.
- *  Using `_mm512_roundscale_pd` drops throughput to 1/10th of `std::floor`,
- *  while this approach is about 2x faster than `std::floor`.
+ *  @brief Round-to-nearest-even via the "magic number" trick — ~2x faster than `std::floor`, far faster than
+ *  `_mm512_roundscale_pd` (~1/10th throughput). Adding 2^52 + 2^51 snaps any `|x| < 2^51` to an integer (its
+ *  fraction falls off the mantissa); subtracting it back leaves the rounded value. No floor/sign fixup — the
+ *  caller only rounds small non-negative quotients (`< 2^10`).
  */
-SZ_INLINE __m512d _mm512_floor_magic_pd(__m512d x) noexcept {
-    // Add magic number to force rounding, then subtract it back
-    __m512d magic = _mm512_set1_pd(6755399441055744.0); // 2^52 + 2^51
-    __m512d rounded = _mm512_sub_pd(_mm512_add_pd(x, magic), magic);
-
-    // Handle negative numbers: if result > x, subtract 1
-    __mmask8 neg_mask = _mm512_cmp_pd_mask(rounded, x, _CMP_GT_OQ);
-    return _mm512_mask_sub_pd(rounded, neg_mask, rounded, _mm512_set1_pd(1.0));
+SZ_INLINE __m512d _mm512_round_magic_pd(__m512d x) noexcept {
+    __m512d const magic = _mm512_set1_pd(6755399441055744.0); // 2^52 + 2^51
+    return _mm512_sub_pd(_mm512_add_pd(x, magic), magic);
 }
 
 /**
@@ -210,15 +206,14 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
   private:
     SZ_INLINE __m512d barrett_mod(__m512d xs, __m512d modulos, __m512d inverse_modulos) const noexcept {
 
-        // Use rounding SIMD arithmetic
-        __m512d qs = _mm512_floor_magic_pd(_mm512_mul_pd(xs, inverse_modulos));
-        __m512d results = _mm512_fnmadd_pd(qs, modulos, xs);
-
-        // Clamp into the [0, modulo) range.
-        __mmask8 overflow_mask = _mm512_cmp_pd_mask(results, modulos, _CMP_GE_OQ);
-        results = _mm512_mask_sub_pd(results, overflow_mask, results, modulos);
-        __mmask8 negative_mask = _mm512_fpclass_pd_mask(results, 0x44); // Negative
-        results = _mm512_mask_add_pd(results, negative_mask, results, modulos);
+        // Modular reduction with a rounded reciprocal. A round-to-nearest quotient keeps the residue within one
+        // modulus of zero: q = round(x / modulo) → r = x - q * modulo ∈ (-modulo, modulo), so one `r < 0` fixup
+        // suffices — cheaper than a floored quotient, which needs a floor fixup plus an `r ≥ modulo` fixup.
+        // Exact here: x < 2^52, modulo ≈ 2^42 → x / modulo < 2^10, well inside the ½-ULP budget.
+        __m512d qs = _mm512_round_magic_pd(_mm512_mul_pd(xs, inverse_modulos));
+        __m512d results = _mm512_fnmadd_pd(qs, modulos, xs); // r = x - q * modulo
+        __mmask8 negative_mask = _mm512_cmp_pd_mask(results, _mm512_setzero_pd(), _CMP_LT_OQ);
+        results = _mm512_mask_add_pd(results, negative_mask, results, modulos); // r < 0 → r += modulo
 
 #if SZ_DEBUG
         // Extract elements for assertions, as MSVC doesn't support [] operator on `__m512d`

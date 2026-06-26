@@ -574,9 +574,8 @@ struct floating_rolling_hasher<f64_t> {
         state_t q = constexpr_floor(x * inverse_modulo_);
         state_t result = x - q * modulo_;
 
-        // Clamp into the [0, modulo_) range.
-        if (result >= modulo_) result -= modulo_;
-        if (result < 0.0) result += modulo_;
+        if (result >= modulo_) result -= modulo_; // r ≥ modulo → r -= modulo
+        // `r < 0` fixup omitted: dead for the rolling-hash range (x < limit_k = 2^52).
 
         // Skip debug assertions that call non-constexpr functions:
         // sz_assert_(static_cast<u64_t>(absolute_fmod(x, modulo_)) == static_cast<u64_t>(result) &&

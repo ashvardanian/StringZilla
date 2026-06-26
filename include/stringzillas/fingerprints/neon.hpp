@@ -215,11 +215,10 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
         float64x2_t qs = vrndmq_f64(vmulq_f64(xs, inverse_modulos));
         float64x2_t results = vfmsq_f64(xs, qs, modulos); // xs - qs * modulos
 
-        // Clamp into the [0, modulo) range, branchlessly: subtract/add `modulos` under a compare mask.
+        // `vrndmq` is a native floor, so only the high-side fixup is kept (r ≥ modulo → r -= modulo).
         uint64x2_t overflow_mask = vcgeq_f64(results, modulos);
         results = vsubq_f64(results, vreinterpretq_f64_u64(vandq_u64(overflow_mask, vreinterpretq_u64_f64(modulos))));
-        uint64x2_t negative_mask = vcltq_f64(results, vdupq_n_f64(0.0));
-        results = vaddq_f64(results, vreinterpretq_f64_u64(vandq_u64(negative_mask, vreinterpretq_u64_f64(modulos))));
+        // `r < 0` fixup omitted: dead for the rolling-hash range (x < limit_k = 2^52).
 
 #if SZ_DEBUG
         sz_u128_vec_t xs_vec, modulos_vec, results_vec;
