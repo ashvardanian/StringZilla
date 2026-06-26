@@ -562,6 +562,9 @@ void test_utf8_linewraps_all();
 void test_utf8_norm_unit();
 void test_utf8_norm_safety();
 void test_utf8_norm_all();
+void test_utf8_delimiters_unit();
+void test_utf8_delimiters_safety();
+void test_utf8_delimiters_all();
 
 #pragma endregion // UTF-8
 

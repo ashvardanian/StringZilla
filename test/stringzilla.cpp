@@ -211,6 +211,9 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_norm_unit", test_utf8_norm_unit);
     failures += run_test("test_utf8_norm_safety", test_utf8_norm_safety);
     failures += run_test("test_utf8_norm_all", test_utf8_norm_all);
+    failures += run_test("test_utf8_delimiters_unit", test_utf8_delimiters_unit);
+    failures += run_test("test_utf8_delimiters_safety", test_utf8_delimiters_safety);
+    failures += run_test("test_utf8_delimiters_all", test_utf8_delimiters_all);
 
     std::printf("\n=== Uncased UTF-8 ===\n");
     failures += run_test("test_uncased_unit", test_uncased_unit);

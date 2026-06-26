@@ -35,6 +35,8 @@
 # * stringzilla_bench_memory_cpp20: A benchmark for LibC-style low-level memory operations.
 # * stringzilla_bench_utf8_uncased_cpp20: A benchmark for the `sz_utf8_uncased_*` folding/search family.
 # * stringzilla_bench_utf8_iterate_cpp20: A benchmark for the `sz_utf8_*` iteration/segmentation family.
+# * stringzilla_bench_utf8_norm_cpp20: A benchmark for the `sz_utf8_norm` normalization family.
+# * stringzilla_bench_utf8_delimiters_cpp20: A benchmark for the `sz_find_delimiter_utf8` family.
 #
 # Parallel Benchmarks:
 #
@@ -874,6 +876,8 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_token_cpp20 bench/token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_utf8_uncased_cpp20 bench/utf8_uncased.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_utf8_iterate_cpp20 bench/utf8_iterate.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_norm_cpp20 bench/utf8_norm.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_delimiters_cpp20 bench/utf8_delimiters.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container_cpp20 bench/container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory_cpp20 bench/memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
@@ -916,6 +920,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/utf8_sentences.cpp
         test/utf8_linewraps.cpp
         test/utf8_norm.cpp
+        test/utf8_delimiters.cpp
         test/uncased.cpp
         test/string.cpp
         test/find.cpp
