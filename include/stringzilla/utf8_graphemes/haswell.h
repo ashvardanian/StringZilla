@@ -250,10 +250,10 @@ SZ_INTERNAL sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell
     __m256i non_ascii_low_lo = _mm256_blendv_epi8(two_low_lo, three_low_lo, three_sel_lo);
     __m256i non_ascii_low_hi = _mm256_blendv_epi8(two_low_hi, three_low_hi, three_sel_hi);
     // high = ascii ? 0 : non_ascii_high; low = ascii ? raw : non_ascii_low.
-    __m256i const high_lo = _mm256_andnot_si256(ascii_sel_lo, non_ascii_high_lo);
-    __m256i const high_hi = _mm256_andnot_si256(ascii_sel_hi, non_ascii_high_hi);
-    __m256i const low_lo = _mm256_blendv_epi8(non_ascii_low_lo, raw_lo, ascii_sel_lo);
-    __m256i const low_hi = _mm256_blendv_epi8(non_ascii_low_hi, raw_hi, ascii_sel_hi);
+    __m256i high_lo = _mm256_andnot_si256(ascii_sel_lo, non_ascii_high_lo);
+    __m256i high_hi = _mm256_andnot_si256(ascii_sel_hi, non_ascii_high_hi);
+    __m256i low_lo = _mm256_blendv_epi8(non_ascii_low_lo, raw_lo, ascii_sel_lo);
+    __m256i low_hi = _mm256_blendv_epi8(non_ascii_low_hi, raw_hi, ascii_sel_hi);
 
     // Astral plane/mid/low (offset domain reconstruction): plane = ((b0&7)<<2)|((next1>>4)&3);
     // mid = ((next1&F)<<4)|((next2>>2)&F); lo = ((next2&3)<<6)|(next3&3F).
@@ -269,6 +269,21 @@ SZ_INTERNAL sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell
                                            _mm256_and_si256(next3_lo_p, c3f));
     __m256i const alo_hi = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi_p, c03), 6),
                                            _mm256_and_si256(next3_hi_p, c3f));
+
+    // A 4-byte lead's blind codepoint is `(plane << 16) | (mid << 8) | alo` (NOT the 2-byte fold the
+    // non-ASCII high/low computed above). Override its BMP high/low halves to `mid`/`alo` so an overlong
+    // 4-byte lead whose blind plane is 0 (e.g. `F0 80 8D A9` -> U+0369) resolves on the BMP path exactly as
+    // serial/icelake do — those backends carry the full 21-bit value and split BMP-vs-astral on `cp < 0x10000`,
+    // so a plane-0 4-byte lane is a BMP codepoint, not an astral one. (The astral overwrite below is then
+    // gated on a non-zero in-range plane, mirroring icelake's `is_astral`.)
+    {
+        __m256i const four_sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)decoded.four_byte_starts);
+        __m256i const four_sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(decoded.four_byte_starts >> 32));
+        high_lo = _mm256_blendv_epi8(high_lo, mid_lo, four_sel_lo);
+        high_hi = _mm256_blendv_epi8(high_hi, mid_hi, four_sel_hi);
+        low_lo = _mm256_blendv_epi8(low_lo, alo_lo, four_sel_lo);
+        low_hi = _mm256_blendv_epi8(low_hi, alo_hi, four_sel_hi);
+    }
 
     // ASCII descriptor (cp < 0x80) via a single 256-LUT over the raw byte — the cheap gated fast path so a pure-ASCII
     // window (the common English case) never pays the full BMP nibble cascade. Mirrors icelake's `ascii_desc` vpermb.
@@ -300,21 +315,36 @@ SZ_INTERNAL sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell
         desc_lo = _mm256_blendv_epi8(bmp_lo, ascii_desc_lo, ascii_sel2_lo);
         desc_hi = _mm256_blendv_epi8(bmp_hi, ascii_desc_hi, ascii_sel2_hi);
     }
-    // Astral lanes overwrite with the 4-byte descriptor. The astral cascade is addressed by offset = cp - 0x10000;
-    // the offset plane nibble is the reconstructed `plane` (already plane-domain since the 4-byte lead encodes
-    // cp directly and the reconstruction yields offset bits for plane>=1 paths). Gated behind any astral lane.
-    sz_u64_t const is_astral = four_byte & loaded_mask;
+    // A 4-byte lead splits three ways on its blind plane = bits[16..20] of cp, matching icelake's value dispatch
+    // (`is_bmp = cp < 0x10000`, `is_astral = 0x10000 <= cp < 0x110000`, else Other):
+    //   plane == 0      -> BMP codepoint (cp = (mid<<8)|alo); already resolved through the BMP path above, since the
+    //                      high/low override seated `mid`/`alo` for these lanes (e.g. overlong `F0 80 8D A9` -> U+0369).
+    //   plane in [1,16]  -> genuine astral (cp in 0x10000..0x10FFFF); overwrite with the 4-byte trie descriptor.
+    //   plane >= 17      -> cp >= 0x110000 (e.g. overlong `F4 90 80 80`); neither BMP nor astral, force Other (0).
+    // `plane_lo/hi` carry the 5-bit plane per 4-byte-lead lane (junk on other lanes, gated out by `four_byte`).
+    sz_u64_t const plane_nonzero = sz_utf8_mask_combine_haswell_(
+        _mm256_cmpgt_epi8(plane_lo, _mm256_setzero_si256()), _mm256_cmpgt_epi8(plane_hi, _mm256_setzero_si256()));
+    sz_u64_t const plane_le_16 = sz_utf8_mask_combine_haswell_(
+        sz_grapheme_cmpge_epu8_haswell_(_mm256_set1_epi8(0x10), plane_lo),
+        sz_grapheme_cmpge_epu8_haswell_(_mm256_set1_epi8(0x10), plane_hi));
+    sz_u64_t const is_astral = four_byte & plane_nonzero & plane_le_16 & loaded_mask;
+    sz_u64_t const is_overrange = four_byte & plane_nonzero & ~plane_le_16 & loaded_mask;
     if (is_astral) {
         // offset = cp - 0x10000; high16/low16 unchanged, plane nibble = cp_plane - 1. The reconstructed `plane`
         // holds bits [16..20] of cp; subtract 1 to get the offset plane nibble (matching the linewraps astral path).
-        __m256i const four_sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)four_byte);
-        __m256i const four_sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(four_byte >> 32));
-        __m256i const plane_off_lo = _mm256_sub_epi8(_mm256_and_si256(four_sel_lo, plane_lo), _mm256_set1_epi8(1));
-        __m256i const plane_off_hi = _mm256_sub_epi8(_mm256_and_si256(four_sel_hi, plane_hi), _mm256_set1_epi8(1));
+        __m256i const astral_sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)is_astral);
+        __m256i const astral_sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(is_astral >> 32));
+        __m256i const plane_off_lo = _mm256_sub_epi8(_mm256_and_si256(astral_sel_lo, plane_lo), _mm256_set1_epi8(1));
+        __m256i const plane_off_hi = _mm256_sub_epi8(_mm256_and_si256(astral_sel_hi, plane_hi), _mm256_set1_epi8(1));
         __m256i const astral_lo = sz_grapheme_astral_descriptor_haswell_(plane_off_lo, mid_lo, alo_lo);
         __m256i const astral_hi = sz_grapheme_astral_descriptor_haswell_(plane_off_hi, mid_hi, alo_hi);
-        desc_lo = _mm256_blendv_epi8(desc_lo, astral_lo, four_sel_lo);
-        desc_hi = _mm256_blendv_epi8(desc_hi, astral_hi, four_sel_hi);
+        desc_lo = _mm256_blendv_epi8(desc_lo, astral_lo, astral_sel_lo);
+        desc_hi = _mm256_blendv_epi8(desc_hi, astral_hi, astral_sel_hi);
+    }
+    if (is_overrange) {
+        // cp >= 0x110000: clear to Other (0), the BMP-path value seated on these lanes is meaningless.
+        desc_lo = _mm256_andnot_si256(sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)is_overrange), desc_lo);
+        desc_hi = _mm256_andnot_si256(sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(is_overrange >> 32)), desc_hi);
     }
 
     // `0xF8..0xFF` begin no valid sequence and match no lead-length mask; force their start lanes to the Other

@@ -110,41 +110,93 @@ SZ_INTERNAL __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane, 
  *          reads start lanes), so those lanes are never selected. */
 SZ_INTERNAL __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i window_high, __m256i window_low, __m256i raw, __m256i next1, __m256i next2, __m256i next3,
-    sz_u32_t ascii_bits, sz_u32_t four_byte_bits) {
+    sz_u32_t four_byte_bits) {
     __m256i const low_two_bits = _mm256_set1_epi8(0x03);
     __m256i const low_four_bits = _mm256_set1_epi8(0x0F);
     __m256i const low_six_bits = _mm256_set1_epi8(0x3F);
 
-    //  ASCII reconstruction: codepoint == raw byte (low = raw, high = 0). The decoded window's high/low only covers
-    //  2-/3-byte leads, so ASCII lanes carry stale two-byte arithmetic and must be overwritten.
-    __m256i const ascii_select = sz_utf8_byte_mask_from_bits_haswell_(ascii_bits);
-    __m256i low = _mm256_blendv_epi8(window_low, raw, ascii_select);
-    __m256i high = _mm256_andnot_si256(ascii_select, window_high);
+    //  Raw-byte reconstruction (codepoint == raw byte: low = raw, high = 0) for every lane that is NOT a 2-/3-/4-byte
+    //  lead: ASCII (`raw < 0x80`), continuation bytes `0x80..0xBF` (a lone continuation forced to a start at position 0
+    //  decodes to its raw value, e.g. `0x85` -> U+0085 NEL), and the non-lead bytes `0xF8..0xFF`. The decode window
+    //  pre-folds the 2-byte arithmetic into high/low on ALL lanes, so these must be overwritten — serial's blind
+    //  decode gives `rune = lead` for every such byte, matching icelake whose driver seats `low = raw`, `high = 0`
+    //  on every non-2/3/4-byte lane. The 2-/3-/4-byte leads are exactly `0xC0..0xF7`, so raw treatment is the
+    //  complement `raw < 0xC0 || raw >= 0xF8`.
+    __m256i const below_c0 = _mm256_cmpeq_epi8(_mm256_min_epu8(raw, _mm256_set1_epi8((char)0xC0)), raw);
+    __m256i const at_least_f8 = _mm256_cmpeq_epi8(_mm256_max_epu8(raw, _mm256_set1_epi8((char)0xF8)), raw);
+    __m256i const raw_select = _mm256_andnot_si256(_mm256_cmpeq_epi8(raw, _mm256_set1_epi8((char)0xC0)),
+                                                   _mm256_or_si256(below_c0, at_least_f8));
+    __m256i low = _mm256_blendv_epi8(window_low, raw, raw_select);
+    __m256i high = _mm256_andnot_si256(raw_select, window_high);
 
     if (four_byte_bits) {
-        //  4-byte: cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F). high/low mirror icelake's four_high /
-        //  four_low; the astral cascade is addressed by the offset plane nibble `plane - 1` (cp - 0x10000).
+        //  4-byte lead: reconstruct the blind codepoint's low-16 bits cp = (mid<<8)|alo with mid = ((b1&0xF)<<4) |
+        //  ((b2>>2)&0xF), alo = ((b2&0x3)<<6) | (b3&0x3F) — the cp's high/low bytes, NOT the offset domain (so a
+        //  4-byte lead whose blind plane is 0, e.g. the overlong `F0 80 8D A9` -> U+0369, lands on the BMP path with
+        //  the right value). Mirrors icelake's `four_high`/`four_low` exactly.
         __m256i const four_low = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2, low_two_bits), 6), _mm256_set1_epi8((char)0xC0)),
-            _mm256_and_si256(next3, low_six_bits));
+            _mm256_slli_epi16(_mm256_and_si256(next2, low_two_bits), 6), _mm256_and_si256(next3, low_six_bits));
         __m256i const four_high = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1, low_four_bits), 4),
-                             _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_srl8_haswell_(next2, 2, 0x0F));
+            _mm256_slli_epi16(_mm256_and_si256(next1, low_four_bits), 4), sz_utf8_srl8_haswell_(next2, 2, 0x0F));
         __m256i const four_select = sz_utf8_byte_mask_from_bits_haswell_(four_byte_bits);
         low = _mm256_blendv_epi8(low, four_low, four_select);
         high = _mm256_blendv_epi8(high, four_high, four_select);
 
+        //  Split the 4-byte lanes on their blind plane (cp bits[16..20]) by VALUE, matching serial/icelake:
+        //    plane == 0      -> BMP codepoint (cp = (mid<<8)|alo); resolved by the BMP cascade above.
+        //    plane in [1,16]  -> genuine astral (cp in 0x10000..0x10FFFF); routed to the astral cascade.
+        //    plane >= 17      -> cp >= 0x110000 (e.g. `F4 A0 ..`, `F5 ..`); neither BMP nor astral, class Other (0).
+        //  The astral cascade is addressed by the OFFSET plane nibble `plane - 1` (cp - 0x10000) and only its low
+        //  nibble is consumed, so a plane >= 17 lane would alias a valid offset — it MUST be excluded, not just
+        //  left to the cascade. `four_high`/`four_low` already carry the offset's low 16 bits (== cp's low 16 bits).
         __m256i const plane = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw, _mm256_set1_epi8(0x07)), 2),
-                             _mm256_set1_epi8(0x1C)),
-            sz_utf8_srl8_haswell_(next1, 4, 0x03));
-        __m256i const plane_off = _mm256_sub_epi8(_mm256_and_si256(four_select, plane), _mm256_set1_epi8(1));
+            _mm256_slli_epi16(_mm256_and_si256(raw, _mm256_set1_epi8(0x07)), 2), sz_utf8_srl8_haswell_(next1, 4, 0x03));
+        __m256i const plane_nonzero = _mm256_andnot_si256(_mm256_cmpeq_epi8(plane, _mm256_setzero_si256()), four_select);
+        //  plane <= 16 via the unsigned `max(16, plane) == 16` test (AVX2 has no unsigned byte compare).
+        __m256i const plane_le_16 = _mm256_cmpeq_epi8(_mm256_max_epu8(plane, _mm256_set1_epi8(0x10)),
+                                                      _mm256_set1_epi8(0x10));
+        __m256i const is_astral_lanes = _mm256_and_si256(plane_nonzero, plane_le_16);
+        __m256i const is_overrange_lanes = _mm256_andnot_si256(plane_le_16, plane_nonzero);
+        __m256i const plane_off = _mm256_sub_epi8(_mm256_and_si256(is_astral_lanes, plane), _mm256_set1_epi8(1));
         __m256i const bmp = sz_utf8_sentence_break_bmp_class_haswell_(high, low);
         __m256i const astral = sz_utf8_sentence_break_astral_class_haswell_(plane_off, high, low);
-        return _mm256_blendv_epi8(bmp, astral, four_select);
+        //  BMP for plane 0, astral for plane in [1,16], then force plane >= 17 lanes to Other (0).
+        __m256i const classed = _mm256_blendv_epi8(bmp, astral, is_astral_lanes);
+        return _mm256_andnot_si256(is_overrange_lanes, classed);
     }
     return sz_utf8_sentence_break_bmp_class_haswell_(high, low);
+}
+
+/** @brief  Reconstruct the BMP (2-/3-byte) codepoint high/low bytes for one 32-lane half from edge-masked forward
+ *          neighbours, matching the rune-window decode's arithmetic but with `next1`/`next2` already zeroed past the
+ *          loaded edge. Lanes that are neither a 2- nor a 3-byte lead keep `low = raw`, `high = 0` (the classifier
+ *          re-seats raw / 4-byte lanes anyway). Used by the sentence driver so a truncated trailing multi-byte lead
+ *          reads its missing continuations as zero, exactly like serial / icelake (no mod-64 wrap aliasing). */
+SZ_INTERNAL void sz_utf8_sentence_break_bmp_highlow_haswell_( //
+    __m256i raw, __m256i next1, __m256i next2, sz_u32_t two_byte_bits, sz_u32_t three_byte_bits, __m256i *out_high,
+    __m256i *out_low) {
+    __m256i const low_two_bits = _mm256_set1_epi8(0x03);
+    __m256i const low_four_bits = _mm256_set1_epi8(0x0F);
+    __m256i const low_five_bits = _mm256_set1_epi8(0x1F);
+    __m256i const low_six_bits = _mm256_set1_epi8(0x3F);
+    //  2-byte: high = (b0 & 0x1F) >> 2, low = ((b0 & 0x03) << 6) | (next1 & 0x3F).
+    __m256i const two_high = sz_utf8_srl8_haswell_(_mm256_and_si256(raw, low_five_bits), 2, 0x07);
+    __m256i const two_low = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(raw, low_two_bits), 6),
+                                            _mm256_and_si256(next1, low_six_bits));
+    //  3-byte: high = ((b0 & 0x0F) << 4) | ((next1 >> 2) & 0x0F), low = ((next1 & 0x03) << 6) | (next2 & 0x3F).
+    __m256i const three_high = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(raw, low_four_bits), 4),
+                                               sz_utf8_srl8_haswell_(next1, 2, 0x0F));
+    __m256i const three_low = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(next1, low_two_bits), 6),
+                                              _mm256_and_si256(next2, low_six_bits));
+    __m256i const two_select = sz_utf8_byte_mask_from_bits_haswell_(two_byte_bits);
+    __m256i const three_select = sz_utf8_byte_mask_from_bits_haswell_(three_byte_bits);
+    __m256i high = _mm256_setzero_si256();
+    __m256i low = raw;
+    high = _mm256_blendv_epi8(high, two_high, two_select);
+    low = _mm256_blendv_epi8(low, two_low, two_select);
+    high = _mm256_blendv_epi8(high, three_high, three_select);
+    low = _mm256_blendv_epi8(low, three_low, three_select);
+    *out_high = high, *out_low = low;
 }
 
 /** @brief  Third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the AVX2 twin of
@@ -251,27 +303,44 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(               //
         sz_u64_t const start_bytes = window.codepoint_starts | lead_continuation;
         sz_bool_t const more_text = (position + loaded < length) ? sz_true_k : sz_false_k;
 
-        //  Forward neighbours for the ASCII / 4-byte codepoint reconstruction inside the classifier.
+        //  Forward neighbours for the ASCII / 4-byte codepoint reconstruction inside the classifier. The AVX2
+        //  neighbour gathers wrap mod-64, so for a multi-byte lead whose continuations straddle the loaded edge
+        //  (the truncated trailing lead at end-of-input, where `complete_limit` does not trim because `!more_text`)
+        //  `next2`/`next3` would otherwise alias bytes from the window start. Zero the lanes at or past `loaded - k`,
+        //  matching icelake's `maskz_permutexvar` `keep1`/`keep2`/`keep3`, so the missing continuations read as zero
+        //  exactly like serial's blind decode (`text[start+k]` past the input reads 0).
         __m256i next1_lo, next1_hi, next2_lo, next2_hi, next3_lo, next3_hi;
         sz_utf8_forward_neighbours_haswell_(window.window_lo, window.window_hi, &next1_lo, &next1_hi, &next2_lo,
                                             &next2_hi);
         sz_utf8_sentence_break_next3_haswell_(window.window_lo, window.window_hi, &next3_lo, &next3_hi);
+        sz_u64_t const keep1 = sz_u64_mask_until_serial_(loaded >= 1 ? loaded - 1 : 0);
+        sz_u64_t const keep2 = sz_u64_mask_until_serial_(loaded >= 2 ? loaded - 2 : 0);
+        sz_u64_t const keep3 = sz_u64_mask_until_serial_(loaded >= 3 ? loaded - 3 : 0);
+        next1_lo = _mm256_and_si256(next1_lo, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)keep1));
+        next1_hi = _mm256_and_si256(next1_hi, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(keep1 >> 32)));
+        next2_lo = _mm256_and_si256(next2_lo, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)keep2));
+        next2_hi = _mm256_and_si256(next2_hi, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(keep2 >> 32)));
+        next3_lo = _mm256_and_si256(next3_lo, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)keep3));
+        next3_hi = _mm256_and_si256(next3_hi, sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(keep3 >> 32)));
 
-        //  ASCII start lanes (raw < 0x80 on a codepoint start) need the raw-byte codepoint reconstruction.
-        sz_u64_t const ascii_bits =
-            window.codepoint_starts &
-            sz_utf8_mask_combine_haswell_(
-                _mm256_cmpeq_epi8(_mm256_and_si256(window.window_lo, _mm256_set1_epi8((char)0x80)),
-                                  _mm256_setzero_si256()),
-                _mm256_cmpeq_epi8(_mm256_and_si256(window.window_hi, _mm256_set1_epi8((char)0x80)),
-                                  _mm256_setzero_si256()));
+        //  Re-derive the BMP (2-/3-byte) high/low from the edge-masked neighbours. The shared rune-window decode
+        //  built `window.{high,low}_{lo,hi}` from its own mod-64-wrapping neighbours, so a 3-byte lead straddling
+        //  the loaded edge would read a wrapped byte as its missing continuation (icelake recomputes high/low from
+        //  its `keep*`-masked neighbours for exactly this reason; here we patch the decoded pair to match).
+        __m256i high_lo, high_hi, low_lo, low_hi;
+        sz_utf8_sentence_break_bmp_highlow_haswell_(window.window_lo, next1_lo, next2_lo,
+                                                    (sz_u32_t)window.two_byte_starts, (sz_u32_t)window.three_byte_starts,
+                                                    &high_lo, &low_lo);
+        sz_utf8_sentence_break_bmp_highlow_haswell_(
+            window.window_hi, next1_hi, next2_hi, (sz_u32_t)(window.two_byte_starts >> 32),
+            (sz_u32_t)(window.three_byte_starts >> 32), &high_hi, &low_hi);
 
+        //  The classifier reconstructs the raw-byte (ASCII / continuation / `>= 0xF8`) and 4-byte codepoints from
+        //  the raw window bytes itself, so no per-half ASCII mask needs to be threaded in.
         __m256i const classes_lo = sz_utf8_sentence_break_classify_half_haswell_(
-            window.high_lo, window.low_lo, window.window_lo, next1_lo, next2_lo, next3_lo, (sz_u32_t)ascii_bits,
-            (sz_u32_t)window.four_byte_starts);
+            high_lo, low_lo, window.window_lo, next1_lo, next2_lo, next3_lo, (sz_u32_t)window.four_byte_starts);
         __m256i const classes_hi = sz_utf8_sentence_break_classify_half_haswell_(
-            window.high_hi, window.low_hi, window.window_hi, next1_hi, next2_hi, next3_hi, (sz_u32_t)(ascii_bits >> 32),
-            (sz_u32_t)(window.four_byte_starts >> 32));
+            high_hi, low_hi, window.window_hi, next1_hi, next2_hi, next3_hi, (sz_u32_t)(window.four_byte_starts >> 32));
 
         sz_size_t const complete_limit = sz_utf8_sentence_break_complete_limit_haswell_(
             window, text_u8 + position + loaded, more_text);
