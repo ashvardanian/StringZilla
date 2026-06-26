@@ -50,8 +50,16 @@ void test_utf8_sentences_unit() {
                              utf8_sentences_unit_cases_count); // Dispatched
     check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, utf8_sentences_unit_cases,
                              utf8_sentences_unit_cases_count);
+#if SZ_USE_HASWELL
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences_haswell, utf8_sentences_unit_cases,
+                             utf8_sentences_unit_cases_count);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_unit_("sentence", sz_utf8_sentences_icelake, utf8_sentences_unit_cases,
+                             utf8_sentences_unit_cases_count);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences_neon, utf8_sentences_unit_cases,
                              utf8_sentences_unit_cases_count);
 #endif
 
@@ -219,8 +227,18 @@ void test_utf8_sentences_rules() {
     char const *const required_rules[] = {
         "SB3", "SB4", "SB5", "SB6", "SB7", "SB8", "SB8a", "SB9", "SB10", "SB11", "SB998",
     };
+#if SZ_USE_HASWELL
+    check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, sz_utf8_sentences_haswell, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, sz_utf8_sentences_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+#if SZ_USE_NEON
+    check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, sz_utf8_sentences_neon, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
@@ -235,8 +253,14 @@ void test_utf8_sentences_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 sentence kernels...\n");
     check_utf8_segment_safety_("sentence (serial)", sz_utf8_sentences_serial);
     check_utf8_segment_safety_("sentence (dispatched)", sz_utf8_sentences);
+#if SZ_USE_HASWELL
+    check_utf8_segment_safety_("sentence (haswell)", sz_utf8_sentences_haswell);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_safety_("sentence (icelake)", sz_utf8_sentences_icelake);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_safety_("sentence (neon)", sz_utf8_sentences_neon);
 #endif
     std::printf("    sentence safety passed!\n");
 }
@@ -247,9 +271,16 @@ void test_utf8_sentences_safety() {
 
 /** @brief Serial-vs-ISA sentence differential over the hardened corpora (high-density + long-range). */
 void test_utf8_sentences_all() {
-#if SZ_USE_ICELAKE
     utf8_segment_corpora_t const corpora = utf8_sentences_corpora_();
+    sz_unused_(corpora);
+#if SZ_USE_HASWELL
+    test_utf8_segment_equivalence_(sz_utf8_sentences_serial, sz_utf8_sentences_haswell, corpora);
+#endif
+#if SZ_USE_ICELAKE
     test_utf8_segment_equivalence_(sz_utf8_sentences_serial, sz_utf8_sentences_icelake, corpora);
+#endif
+#if SZ_USE_NEON
+    test_utf8_segment_equivalence_(sz_utf8_sentences_serial, sz_utf8_sentences_neon, corpora);
 #endif
 }
 

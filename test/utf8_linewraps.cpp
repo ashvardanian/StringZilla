@@ -48,8 +48,16 @@ void test_utf8_linewraps_unit() {
                              utf8_linewraps_unit_cases_count); // Dispatched
     check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_serial, utf8_linewraps_unit_cases,
                              utf8_linewraps_unit_cases_count);
+#if SZ_USE_HASWELL
+    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_haswell, utf8_linewraps_unit_cases,
+                             utf8_linewraps_unit_cases_count);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_icelake, utf8_linewraps_unit_cases,
+                             utf8_linewraps_unit_cases_count);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_neon, utf8_linewraps_unit_cases,
                              utf8_linewraps_unit_cases_count);
 #endif
 
@@ -232,8 +240,18 @@ void test_utf8_linewraps_rules() {
         "LB15a", "LB15b", "LB16", "LB17", "LB18", "LB19", "LB20",  "LB20a", "LB21", "LB21a", "LB21b", "LB22", "LB23",
         "LB23a", "LB24",  "LB25", "LB26", "LB27", "LB28", "LB28a", "LB29",  "LB30", "LB30a", "LB30b", "LB31",
     };
+#if SZ_USE_HASWELL
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_haswell, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+#if SZ_USE_NEON
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_neon, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
@@ -248,8 +266,14 @@ void test_utf8_linewraps_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 line kernels...\n");
     check_utf8_segment_safety_("linewrap (serial)", sz_utf8_linewraps_serial);
     check_utf8_segment_safety_("linewrap (dispatched)", sz_utf8_linewraps);
+#if SZ_USE_HASWELL
+    check_utf8_segment_safety_("linewrap (haswell)", sz_utf8_linewraps_haswell);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_safety_("linewrap (icelake)", sz_utf8_linewraps_icelake);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_safety_("linewrap (neon)", sz_utf8_linewraps_neon);
 #endif
     std::printf("    linewrap safety passed!\n");
 }
@@ -260,9 +284,16 @@ void test_utf8_linewraps_safety() {
 
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linewraps_all() {
-#if SZ_USE_ICELAKE
     utf8_segment_corpora_t const corpora = utf8_linewraps_corpora_();
+    sz_unused_(corpora);
+#if SZ_USE_HASWELL
+    test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_haswell, corpora);
+#endif
+#if SZ_USE_ICELAKE
     test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake, corpora);
+#endif
+#if SZ_USE_NEON
+    test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_neon, corpora);
 #endif
 }
 

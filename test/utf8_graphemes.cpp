@@ -58,8 +58,16 @@ void test_utf8_graphemes_unit() {
                              utf8_graphemes_unit_cases_count); // Dispatched
     check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, utf8_graphemes_unit_cases,
                              utf8_graphemes_unit_cases_count);
+#if SZ_USE_HASWELL
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_haswell, utf8_graphemes_unit_cases,
+                             utf8_graphemes_unit_cases_count);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_icelake, utf8_graphemes_unit_cases,
+                             utf8_graphemes_unit_cases_count);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_neon, utf8_graphemes_unit_cases,
                              utf8_graphemes_unit_cases_count);
 #endif
 
@@ -265,8 +273,18 @@ void test_utf8_graphemes_rules() {
     char const *const required_rules[] = {
         "GB3", "GB4", "GB5", "GB6", "GB7", "GB8", "GB9", "GB9a", "GB9b", "GB9c", "GB11", "GB12", "GB13", "GB999",
     };
+#if SZ_USE_HASWELL
+    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_haswell, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake, rule_cases,
+                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                              sizeof(required_rules) / sizeof(required_rules[0]));
+#endif
+#if SZ_USE_NEON
+    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_neon, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
@@ -281,8 +299,14 @@ void test_utf8_graphemes_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 grapheme kernels...\n");
     check_utf8_segment_safety_("grapheme (serial)", sz_utf8_graphemes_serial);
     check_utf8_segment_safety_("grapheme (dispatched)", sz_utf8_graphemes);
+#if SZ_USE_HASWELL
+    check_utf8_segment_safety_("grapheme (haswell)", sz_utf8_graphemes_haswell);
+#endif
 #if SZ_USE_ICELAKE
     check_utf8_segment_safety_("grapheme (icelake)", sz_utf8_graphemes_icelake);
+#endif
+#if SZ_USE_NEON
+    check_utf8_segment_safety_("grapheme (neon)", sz_utf8_graphemes_neon);
 #endif
     std::printf("    grapheme safety passed!\n");
 }
@@ -293,9 +317,16 @@ void test_utf8_graphemes_safety() {
 
 /** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
-#if SZ_USE_ICELAKE
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
+    sz_unused_(corpora);
+#if SZ_USE_HASWELL
+    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_haswell, corpora);
+#endif
+#if SZ_USE_ICELAKE
     test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake, corpora);
+#endif
+#if SZ_USE_NEON
+    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_neon, corpora);
 #endif
 }
 

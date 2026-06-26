@@ -221,6 +221,36 @@ void test_utf8_runes_unit() {
                            sz_utf8_decode_icelake, // icelake
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
+#if SZ_USE_NEON
+    check_utf8_runes_unit_(sz_utf8_count_neon, sz_utf8_find_nth_neon,
+                           sz_utf8_decode_neon, // neon
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
+#if SZ_USE_SVE2
+    check_utf8_runes_unit_(sz_utf8_count_sve2, sz_utf8_find_nth_sve2,
+                           sz_utf8_decode_sve2, // sve2
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
+#if SZ_USE_V128
+    check_utf8_runes_unit_(sz_utf8_count_v128, sz_utf8_find_nth_v128,
+                           sz_utf8_decode_v128, // v128
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
+#if SZ_USE_RVV
+    check_utf8_runes_unit_(sz_utf8_count_rvv, sz_utf8_find_nth_rvv,
+                           sz_utf8_decode_rvv, // rvv
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
+#if SZ_USE_POWERVSX
+    check_utf8_runes_unit_(sz_utf8_count_powervsx, sz_utf8_find_nth_powervsx,
+                           sz_utf8_decode_powervsx, // powervsx
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
+#if SZ_USE_LASX
+    check_utf8_runes_unit_(sz_utf8_count_lasx, sz_utf8_find_nth_lasx,
+                           sz_utf8_decode_lasx, // lasx
+                           mixed, mixed_length, 3u, mixed_runes);
+#endif
 
     // C++ API: character counting vs byte length through the `sz::string_view` wrappers.
     assert(sz::string_view(mixed, mixed_length).utf8_count() == 3u);
@@ -682,6 +712,36 @@ void test_utf8_runes_all() {
     test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_icelake,       //
                                 sz_utf8_find_nth_serial, sz_utf8_find_nth_icelake, //
                                 sz_utf8_decode_serial, sz_utf8_decode_icelake, inputs);
+#endif
+#if SZ_USE_NEON
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_neon,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_neon, //
+                                sz_utf8_decode_serial, sz_utf8_decode_neon, inputs);
+#endif
+#if SZ_USE_SVE2
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_sve2,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_sve2, //
+                                sz_utf8_decode_serial, sz_utf8_decode_sve2, inputs);
+#endif
+#if SZ_USE_V128
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_v128,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_v128, //
+                                sz_utf8_decode_serial, sz_utf8_decode_v128, inputs);
+#endif
+#if SZ_USE_RVV
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_rvv,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_rvv, //
+                                sz_utf8_decode_serial, sz_utf8_decode_rvv, inputs);
+#endif
+#if SZ_USE_POWERVSX
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_powervsx,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_powervsx, //
+                                sz_utf8_decode_serial, sz_utf8_decode_powervsx, inputs);
+#endif
+#if SZ_USE_LASX
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_lasx,       //
+                                sz_utf8_find_nth_serial, sz_utf8_find_nth_lasx, //
+                                sz_utf8_decode_serial, sz_utf8_decode_lasx, inputs);
 #endif
 
     // Fold in the moved large-buffer count agreement (serial == dispatched == C++ wrapper == known total).

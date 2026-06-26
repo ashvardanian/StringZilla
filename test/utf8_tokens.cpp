@@ -176,6 +176,36 @@ void test_utf8_tokens_unit() {
                      mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
                      whitespace_length, whitespace_spans);
 #endif
+#if SZ_USE_NEON
+    check_utf8_unit_(sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon, // neon
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
+#if SZ_USE_SVE2
+    check_utf8_unit_(sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2, // sve2
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
+#if SZ_USE_V128
+    check_utf8_unit_(sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128, // v128
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
+#if SZ_USE_RVV
+    check_utf8_unit_(sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv, // rvv
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
+#if SZ_USE_POWERVSX
+    check_utf8_unit_(sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx, // powervsx
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
+#if SZ_USE_LASX
+    check_utf8_unit_(sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx, // lasx
+                     mixed, mixed_length, 3u, newline_text, newline_length, newline_spans, whitespace_text,
+                     whitespace_length, whitespace_spans);
+#endif
 
     // Split by Unicode newlines
     {

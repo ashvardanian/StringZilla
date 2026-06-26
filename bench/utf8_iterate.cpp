@@ -183,6 +183,9 @@ void bench_utf8_count(environment_t const &env) {
 #if SZ_USE_V128
     bench_unary(env, "sz_utf8_count_v128", base_v, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
 #endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_utf8_count_v128relaxed", base_v, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env}).log(base);
+#endif
 #if SZ_USE_RVV
     bench_unary(env, "sz_utf8_count_rvv", base_v, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
 #endif
@@ -213,6 +216,11 @@ void bench_utf8_find_nth(environment_t const &env) {
 #endif
 #if SZ_USE_V128
     bench_unary(env, "sz_utf8_find_nth_v128", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128> {env}).log(base);
+#endif
+#if SZ_USE_V128RELAXED
+    bench_unary(env, "sz_utf8_find_nth_v128relaxed", base_v,
+                utf8_find_nth_from_sz<sz_utf8_find_nth_v128relaxed> {env})
+        .log(base);
 #endif
 #if SZ_USE_RVV
     bench_unary(env, "sz_utf8_find_nth_rvv", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_rvv> {env}).log(base);
@@ -331,27 +339,48 @@ void bench_utf8_words(environment_t const &env) {
 void bench_utf8_graphemes(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_graphemes_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_graphemes_serial", base_v).log();
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_graphemes_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_haswell> {env})
+        .log(base);
+#endif
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_utf8_graphemes_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_icelake> {env})
         .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_graphemes_neon", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_neon> {env}).log(base);
 #endif
 }
 
 void bench_utf8_sentences(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_sentences_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_sentences_serial", base_v).log();
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_sentences_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_haswell> {env})
+        .log(base);
+#endif
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_utf8_sentences_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_icelake> {env})
         .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_sentences_neon", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_neon> {env}).log(base);
 #endif
 }
 
 void bench_utf8_linewraps(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_linewraps_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_linewraps_serial", base_v).log();
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_linewraps_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_haswell> {env})
+        .log(base);
+#endif
 #if SZ_USE_ICELAKE
     bench_unary(env, "sz_utf8_linewraps_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_icelake> {env})
         .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_linewraps_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_neon> {env}).log(base);
 #endif
 }
 
