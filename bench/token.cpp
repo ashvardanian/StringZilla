@@ -68,7 +68,7 @@ struct bytesum_from_sz {
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         sz_u64_t bytesum = func_(buffer.data(), buffer.size());
         do_not_optimize(bytesum);
-        return {buffer.size(), static_cast<check_value_t>(bytesum)};
+        return {buffer.size(), static_cast<check_value_t>(bytesum), 1};
     }
 };
 
@@ -85,7 +85,7 @@ struct bytesum_from_std_t {
             buffer.begin(), buffer.end(), (std::size_t)0,
             [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
         do_not_optimize(bytesum);
-        return {buffer.size(), static_cast<check_value_t>(bytesum)};
+        return {buffer.size(), static_cast<check_value_t>(bytesum), 1};
     }
 };
 
@@ -157,7 +157,7 @@ struct hash_from_sz {
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         sz_u64_t hash = func_(buffer.data(), buffer.size(), 0);
         do_not_optimize(hash);
-        return {buffer.size(), static_cast<check_value_t>(hash)};
+        return {buffer.size(), static_cast<check_value_t>(hash), 1};
     }
 };
 
@@ -172,7 +172,7 @@ struct hash_from_std_t {
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         std::size_t hash = std::hash<std::string_view> {}(buffer);
         do_not_optimize(hash); //! The used function is not documented and can't be tested against anything
-        return {buffer.size() /* static_cast<check_value_t>(hash) */};
+        return {buffer.size(), 0, 1};
     }
 };
 
@@ -193,7 +193,7 @@ struct hash_multiseed_loop_from_sz {
         sz_u64_t mixed = 0;
         for (sz_u64_t seed : seeds) mixed ^= func_(buffer.data(), buffer.size(), seed);
         do_not_optimize(mixed);
-        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed)};
+        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed), seeds.size()};
     }
 };
 
@@ -211,7 +211,7 @@ struct hash_multiseed_from_sz {
         sz_u64_t mixed = 0;
         for (sz_u64_t hash : hashes) mixed ^= hash;
         do_not_optimize(mixed);
-        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed)};
+        return {buffer.size() * seeds.size(), static_cast<check_value_t>(mixed), seeds.size()};
     }
 };
 
@@ -230,7 +230,7 @@ struct hash_stream_from_sz {
         stream_(&state, s.data(), s.size());
         sz_u64_t hash = fold_(&state);
         do_not_optimize(hash);
-        return {s.size(), static_cast<check_value_t>(hash)};
+        return {s.size(), static_cast<check_value_t>(hash), 1};
     }
 };
 
@@ -484,7 +484,7 @@ struct sha256_stream_from_sz {
         sz_u64_t check = 0;
         std::memcpy(&check, digest, sizeof(sz_u64_t));
         do_not_optimize(check);
-        return {s.size(), static_cast<check_value_t>(check)};
+        return {s.size(), static_cast<check_value_t>(check), 1};
     }
 };
 

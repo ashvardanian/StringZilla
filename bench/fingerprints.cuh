@@ -74,8 +74,7 @@ struct fingerprint_callable {
 
     fingerprint_callable(arrow_strings_tape_t const &tape, fingerprints_min_hashes_t &fingerprints_hashes,
                          fingerprints_min_counts_t &fingerprints_counts, engine_t &eng, extra_args_... args)
-        : tape//
-        ), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
+        : tape(tape), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
           extra_args(std::forward<extra_args_>(args)...) {}
 
     call_result_t operator()() noexcept(false) {
@@ -98,7 +97,7 @@ struct fingerprint_callable {
 
         call_result_t call_result;
         call_result.bytes_passed = bytes_passed;
-        call_result.operations = bytes_passed * default_embedding_dims_k;
+        call_result.operations = tape.size() * default_embedding_dims_k;
         call_result.inputs_processed = tape.size();
         call_result.check_value = reinterpret_cast<check_value_t>(&fingerprints_hashes);
         return call_result;

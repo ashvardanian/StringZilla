@@ -489,7 +489,7 @@ struct intersect_strings_via_std_t {
         // Prepare stats
         check_value_t checksum = static_cast<check_value_t>(intersections);
         std::size_t bytes_passed = accumulate_lengths(input_a) + accumulate_lengths(input_b);
-        return {bytes_passed, checksum};
+        return {bytes_passed, checksum, input_a.size() + input_b.size()};
     }
 };
 
@@ -527,7 +527,7 @@ struct intersect_strings_via_sz {
         // Prepare stats
         check_value_t checksum = static_cast<check_value_t>(intersections);
         std::size_t bytes_passed = accumulate_lengths(input_a) + accumulate_lengths(input_b);
-        return {bytes_passed, checksum};
+        return {bytes_passed, checksum, input_a.size() + input_b.size()};
     }
 };
 
