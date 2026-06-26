@@ -822,9 +822,7 @@ class find_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -950,9 +948,7 @@ class rfind_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1116,9 +1112,7 @@ class utf8_runes_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_), end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -2102,7 +2096,7 @@ class utf8_uncased_needle {
 
     char_type *data() const noexcept { return needle_; }
     std::size_t size() const noexcept { return length_; }
-    sz_utf8_uncased_needle_metadata_t const &metadata_ref() const noexcept { return metadata_; }
+    sz_utf8_uncased_needle_metadata_t &metadata_ref() const noexcept { return metadata_; }
 };
 
 #pragma endregion
@@ -2967,14 +2961,10 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
 
     using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -2989,14 +2979,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -5144,17 +5130,20 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
 /**
  *  @brief Computes the permutation of an array, that would lead to sorted order.
  *         The elements of the array must be convertible to a `string_view` with the given extractor.
- *         Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
+ *         Unlike the `sz_sequence_argsort` C interface, overwrites the output span.
  *  @sa sz_sequence_argsort
  *
- *  @param begin The pointer to the first element of the array.
- *  @param end The pointer to the element after the last element of the array.
+ *  @param container The array of string-like elements to sort.
  *  @param extractor The function object that extracts the string from the object.
- *  @param order The pointer to the output array of indices, that will be populated with the permutation.
+ *  @param order The caller-owned output span of indices, that will be populated with the permutation.
+ *               Must hold at least `container.size()` entries; the whole span receives a permutation.
+ *  @param top_count If non-zero, only the first `top_count` entries are guaranteed fully sorted (partial sort).
+ *  @param reverse If true, sorts in descending order.
  */
 template <typename container_type_, typename string_extractor_>
-status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor, sorted_idx_t *order,
+status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor, span<sorted_idx_t> order,
                      std::size_t top_count = 0, bool reverse = false) noexcept {
+    sz_assert_(order.size() >= container.size() && "The output span must hold the full permutation.");
 
     // Pack the arguments into a single structure to reference it from the callback.
     using args_t = sequence_args_<container_type_, string_extractor_>;
@@ -5167,7 +5156,7 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
+        return sz_sequence_argsort(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
                                    static_cast<sz_bool_t>(reverse));
     });
 }
@@ -5178,7 +5167,8 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
  */
 template <typename container_type_, typename string_extractor_>
 status_t try_argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
-                                  sorted_idx_t *order, std::size_t top_count = 0, bool reverse = false) noexcept {
+                                  span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false) noexcept {
+    sz_assert_(order.size() >= container.size() && "The output span must hold the full permutation.");
 
     using args_t = sequence_args_<container_type_, string_extractor_>;
     args_t args {container, extractor};
@@ -5190,7 +5180,7 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort_utf8_uncased(&sequence, &alloc, order, static_cast<sz_size_t>(top_count),
+        return sz_sequence_argsort_utf8_uncased(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
                                                 static_cast<sz_bool_t>(reverse));
     });
 }
@@ -5199,21 +5189,22 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
  *  @brief Locates the positions of the elements in 2 deduplicated string arrays that have identical values.
  *  @sa sz_sequence_intersect
  *
- *  @param first_begin The pointer to the first element of the first array.
- *  @param first_end The pointer to the element after the last element of the first array.
- *  @param second_begin The pointer to the first element of the second array.
- *  @param second_end The pointer to the element after the last element of the second array.
- *  @param first_positions The pointer to the output array of indices from the first array.
- *  @param second_positions The pointer to the output array of indices from the second array.
+ *  @param first_container The first array of string-like elements.
  *  @param first_extractor The function object that extracts the string from the object in the first array.
+ *  @param second_container The second array of string-like elements.
  *  @param second_extractor The function object that extracts the string from the object in the second array.
+ *  @param seed Randomizes the internal hash table to resist adversarial inputs.
+ *  @param first_positions The caller-owned output span of indices from the first array.
+ *  @param second_positions The caller-owned output span of indices from the second array.
+ *                          Each span must fit at least `min(first.size(), second.size())` entries.
+ *  @return The number of matched pairs paired with a `status_t`; the first @p N entries of each output span are valid.
  */
 template <typename first_container_, typename second_container_, typename first_extractor_, typename second_extractor_>
-status_t try_intersect(                                                                   //
+expected<std::size_t, status_t> try_intersect(                                            //
     first_container_ const &first_container, first_extractor_ const &first_extractor,     //
     second_container_ const &second_container, second_extractor_ const &second_extractor, //
-    std::uint64_t seed, std::size_t *intersection_size_ptr,                               //
-    sorted_idx_t *first_positions, sorted_idx_t *second_positions) noexcept {
+    std::uint64_t seed,                                                                   //
+    span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
     using first_t = sequence_args_<first_container_, first_extractor_>;
@@ -5229,13 +5220,15 @@ status_t try_intersect(                                                         
     second_sequence.get_start = call_sequence_member_start_<second_container_, second_extractor_>;
     second_sequence.get_length = call_sequence_member_length_<second_container_, second_extractor_>;
 
+    std::size_t intersection_size = 0;
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+    status_t status = _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
         static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");
         return sz_sequence_intersect(&first_sequence, &second_sequence, &alloc, static_cast<sz_u64_t>(seed),
-                                     reinterpret_cast<sz_size_t *>(intersection_size_ptr), first_positions,
-                                     second_positions);
+                                     reinterpret_cast<sz_size_t *>(&intersection_size), first_positions.data(),
+                                     second_positions.data());
     });
+    return {intersection_size, status};
 }
 
 #if !SZ_AVOID_STL
@@ -5285,7 +5278,7 @@ std::vector<sorted_idx_t> argsort( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
     bool reverse = false) noexcept(false) {
     std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort(container, extractor, order.data(), top_count, reverse);
+    status_t status = try_argsort(container, extractor, {order.data(), order.size()}, top_count, reverse);
     raise(status);
     return order;
 }
@@ -5314,7 +5307,7 @@ std::vector<sorted_idx_t> argsort_utf8_uncased( //
     container_type_ const &container, string_extractor_ const &extractor, std::size_t top_count = 0,
     bool reverse = false) noexcept(false) {
     std::vector<sorted_idx_t> order(container.size());
-    status_t status = try_argsort_utf8_uncased(container, extractor, order.data(), top_count, reverse);
+    status_t status = try_argsort_utf8_uncased(container, extractor, {order.data(), order.size()}, top_count, reverse);
     raise(status);
     return order;
 }
@@ -5348,14 +5341,13 @@ intersect_result_t intersect(first_type_ const &first, second_type_ const &secon
     std::size_t const max_count = (std::min)(first.size(), second.size());
     std::vector<sorted_idx_t> first_positions(max_count);
     std::vector<sorted_idx_t> second_positions(max_count);
-    std::size_t count = 0;
-    status_t status = try_intersect( //
-        first, first_extractor,      //
-        second, second_extractor,    //
-        seed, &count, first_positions.data(), second_positions.data());
-    raise(status);
-    first_positions.resize(count);
-    second_positions.resize(count);
+    expected<std::size_t, status_t> result = try_intersect( //
+        first, first_extractor,                             //
+        second, second_extractor,                           //
+        seed, {first_positions.data(), first_positions.size()}, {second_positions.data(), second_positions.size()});
+    raise(result.status);
+    first_positions.resize(result.value);
+    second_positions.resize(result.value);
     return {std::move(first_positions), std::move(second_positions)};
 }
 

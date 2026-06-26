@@ -233,6 +233,33 @@ void test_sort_unit() {
         assert(wrapper_pairs == expected_pairs);
     }
 
+    // Low-level `try_*` API takes sized `sz::span` outputs and returns the count via `sz::expected`.
+    {
+        auto as_view = [](std::string const &s) -> sz::string_view { return {s.data(), s.size()}; };
+
+        std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
+        order_t order(fruits.size());
+        assert(sz::try_argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        assert(order == order_t({1u, 0u, 2u}));
+        assert(sz::try_argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        assert(order == order_t({1u, 0u, 2u}));
+
+        std::vector<std::string> const first = {"apple", "banana", "cherry"};
+        std::vector<std::string> const second = {"cherry", "date", "banana"};
+        std::size_t const capacity = (std::min)(first.size(), second.size());
+        order_t first_positions(capacity), second_positions(capacity);
+        sz::expected<std::size_t, sz::status_t> const matched = sz::try_intersect( //
+            first, as_view, second, as_view, /*seed*/ 0u,                          //
+            {first_positions.data(), first_positions.size()}, {second_positions.data(), second_positions.size()});
+        assert(matched.status == sz::status_t::success_k);
+        assert(matched.value == 2u);
+        std::set<std::pair<std::size_t, std::size_t>> low_level_pairs;
+        for (std::size_t index = 0; index != matched.value; ++index)
+            low_level_pairs.insert({first_positions[index], second_positions[index]});
+        std::set<std::pair<std::size_t, std::size_t>> const expected_low_level = {{1u, 2u}, {2u, 0u}};
+        assert(low_level_pairs == expected_low_level);
+    }
+
     // Basic tests with predetermined orders.
     let_assert(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})), result == order_t({0u, 1u, 2u, 3u}));
     let_assert(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})), result == order_t({3u, 0u, 1u, 2u}));
