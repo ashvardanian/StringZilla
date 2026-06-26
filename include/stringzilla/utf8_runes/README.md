@@ -14,9 +14,9 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 
 | Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_find_nth` |
 | :--------------- | --------------: | ---------------: | -----------------: |
-| Serial @ Xeon4   |      172.5 MB/s |       223.1 MB/s |         233.0 MB/s |
-| Haswell @ Xeon4  |      210.3 MB/s |       144.6 MB/s |         207.1 MB/s |
-| Ice Lake @ Xeon4 |      248.8 MB/s |       256.0 MB/s |         224.3 MB/s |
+| Serial @ Xeon4   |      172.5 MB/s |       223.1 MB/s |         102.3 MB/s |
+| Haswell @ Xeon4  |      210.3 MB/s |       144.6 MB/s |         119.5 MB/s |
+| Ice Lake @ Xeon4 |      248.8 MB/s |       256.0 MB/s |         131.7 MB/s |
 | NEON @ Graviton4 |               … |                … |                  … |
 | SVE2 @ Graviton4 |               … |                … |                  … |
 | SVE @ Graviton3  |               … |                … |                  … |
@@ -28,8 +28,8 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_find_nth` |
 | :--------------- | --------------: | ---------------: | -----------------: |
 | Serial @ Xeon4   |       1.18 GB/s |        0.41 GB/s |          0.55 GB/s |
-| Haswell @ Xeon4  |       6.36 GB/s |        0.57 GB/s |          6.89 GB/s |
-| Ice Lake @ Xeon4 |       5.22 GB/s |        1.60 GB/s |          9.32 GB/s |
+| Haswell @ Xeon4  |       6.36 GB/s |        0.57 GB/s |          5.57 GB/s |
+| Ice Lake @ Xeon4 |       5.22 GB/s |        1.60 GB/s |          5.55 GB/s |
 | NEON @ Graviton4 |               … |                … |                  … |
 | SVE2 @ Graviton4 |               … |                … |                  … |
 | SVE @ Graviton3  |               … |                … |                  … |

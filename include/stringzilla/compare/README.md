@@ -15,11 +15,11 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 
 | Backend          | `sz_equal` | `sz_order` |
 | :--------------- | ---------: | ---------: |
-| Standard @ Xeon4 |  0.47 GB/s |            |
-| Serial @ Xeon4   |  0.68 GB/s |            |
-| Haswell @ Xeon4  |  0.26 GB/s |            |
-| Skylake @ Xeon4  |  0.57 GB/s |            |
-| Ice Lake @ Xeon4 |          ↑ |            |
+| Standard @ Xeon4 |  0.40 GB/s |  0.35 GB/s |
+| Serial @ Xeon4   |  0.57 GB/s |  0.53 GB/s |
+| Haswell @ Xeon4  |  0.26 GB/s |  0.50 GB/s |
+| Skylake @ Xeon4  |  0.47 GB/s |  0.34 GB/s |
+| Ice Lake @ Xeon4 |          ↑ |          ↑ |
 | NEON @ Graviton4 |          … |          … |
 | SVE @ Graviton3  |          … |          … |
 
@@ -29,11 +29,11 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 
 | Backend          | `sz_equal` | `sz_order` |
 | :--------------- | ---------: | ---------: |
-| Standard @ Xeon4 |  8.19 GB/s |            |
-| Serial @ Xeon4   | 14.81 GB/s |            |
-| Haswell @ Xeon4  |  6.22 GB/s |            |
-| Skylake @ Xeon4  |  8.51 GB/s |            |
-| Ice Lake @ Xeon4 |          ↑ |            |
+| Standard @ Xeon4 |  7.43 GB/s |  7.40 GB/s |
+| Serial @ Xeon4   | 13.41 GB/s | 12.30 GB/s |
+| Haswell @ Xeon4  |  5.78 GB/s | 13.89 GB/s |
+| Skylake @ Xeon4  |  7.72 GB/s |  5.77 GB/s |
+| Ice Lake @ Xeon4 |          ↑ |          ↑ |
 | NEON @ Graviton4 |          … |          … |
 | SVE @ Graviton3  |          … |          … |
 

@@ -651,7 +651,7 @@ struct ordering_from_memcmp_t {
     static int memcmp_for_ordering(std::string_view a, std::string_view b) noexcept {
         auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
         if (order == 0) return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
-        return order;
+        return order < 0 ? -1 : 1; // Normalize to sz_ordering_t's {-1,0,1}, not the raw memcmp delta.
     }
 };
 

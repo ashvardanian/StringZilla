@@ -80,7 +80,9 @@ struct utf8_find_nth_from_sz {
         sz_cptr_t located = func_(token.data(), token.size(), targets[i]);
         do_not_optimize(located);
         check_value_t offset = located ? static_cast<check_value_t>(located - token.data()) : (check_value_t)-1;
-        return {token.size(), offset};
+        // Throughput should reflect the bytes actually scanned to reach the Nth codepoint, not the whole token.
+        std::size_t scanned = located ? static_cast<std::size_t>(located - token.data()) : token.size();
+        return {scanned, offset};
     }
 };
 
@@ -184,7 +186,8 @@ void bench_utf8_count(environment_t const &env) {
     bench_unary(env, "sz_utf8_count_v128", base_v, utf8_count_from_sz<sz_utf8_count_v128> {env}).log(base);
 #endif
 #if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_count_v128relaxed", base_v, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env}).log(base);
+    bench_unary(env, "sz_utf8_count_v128relaxed", base_v, utf8_count_from_sz<sz_utf8_count_v128relaxed> {env})
+        .log(base);
 #endif
 #if SZ_USE_RVV
     bench_unary(env, "sz_utf8_count_rvv", base_v, utf8_count_from_sz<sz_utf8_count_rvv> {env}).log(base);
@@ -218,8 +221,7 @@ void bench_utf8_find_nth(environment_t const &env) {
     bench_unary(env, "sz_utf8_find_nth_v128", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128> {env}).log(base);
 #endif
 #if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_find_nth_v128relaxed", base_v,
-                utf8_find_nth_from_sz<sz_utf8_find_nth_v128relaxed> {env})
+    bench_unary(env, "sz_utf8_find_nth_v128relaxed", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128relaxed> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
@@ -348,7 +350,8 @@ void bench_utf8_graphemes(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_graphemes_neon", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_neon> {env}).log(base);
+    bench_unary(env, "sz_utf8_graphemes_neon", base_v, utf8_word_forward_from_sz<sz_utf8_graphemes_neon> {env})
+        .log(base);
 #endif
 }
 
@@ -364,7 +367,8 @@ void bench_utf8_sentences(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_sentences_neon", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_neon> {env}).log(base);
+    bench_unary(env, "sz_utf8_sentences_neon", base_v, utf8_word_forward_from_sz<sz_utf8_sentences_neon> {env})
+        .log(base);
 #endif
 }
 
@@ -380,7 +384,8 @@ void bench_utf8_linewraps(environment_t const &env) {
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_linewraps_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_neon> {env}).log(base);
+    bench_unary(env, "sz_utf8_linewraps_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_neon> {env})
+        .log(base);
 #endif
 }
 
