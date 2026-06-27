@@ -115,7 +115,7 @@ static PyTypeObject Utf8TokensType;
 static PyTypeObject Utf8WordsType;
 static PyTypeObject Utf8GraphemesType;
 static PyTypeObject Utf8SentencesType;
-static PyTypeObject Utf8LinewrapsType;
+static PyTypeObject Utf8LinebreaksType;
 static PyTypeObject Utf8CodepointsType;
 static PyTypeObject Utf8UncasedMatchesType;
 static PyTypeObject HasherType;
@@ -367,7 +367,7 @@ typedef struct {
 /**
  *  @brief  Iterator for finding line-break opportunities (soft wrap points) in UTF-8 text per Unicode UAX14.
  *
- *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_linewraps, yielding one
+ *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_linebreaks, yielding one
  *  @c Str view per @c __next__ for each UAX14 line-break-opportunity segment. The buffer lives in the iterator
  *  itself - no extra allocation. Forward only: @c start advances past each batch as it is consumed.
  */
@@ -388,7 +388,7 @@ typedef struct {
     sz_size_t batch_count; //< Number of line segments currently buffered.
     sz_size_t batch_index; //< Index of the next line segment to yield from the buffer.
 
-} Utf8Linewraps;
+} Utf8Linebreaks;
 
 /**
  *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
@@ -5653,8 +5653,8 @@ static PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_linewraps[] =                                             //
-    "utf8_linewraps(string, /, skip_empty=False)\n"                                  //
+static char const doc_utf8_linebreaks[] =                                            //
+    "utf8_linebreaks(string, /, skip_empty=False)\n"                                 //
     "\n"                                                                             //
     "Return an iterator yielding segments at line-break opportunities per UAX14.\n"  //
     "Each segment ends at a line-break opportunity (a soft wrap point).\n"           //
@@ -5669,14 +5669,14 @@ static char const doc_utf8_linewraps[] =                                        
     "\n"                                                                             //
     "Example:\n"                                                                     //
     "  >>> # Stream UAX14 line-break opportunities lazily:\n"                        //
-    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                             //
+    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                            //
     "  True";
 
-static PyObject *Str_like_utf8_linewraps(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *kwnames) {
+static PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *kwnames) {
     int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_linewraps() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_linebreaks() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5715,7 +5715,7 @@ static PyObject *Str_like_utf8_linewraps(PyObject *self, PyObject *const *args, 
         return NULL;
     }
 
-    Utf8Linewraps *iter = PyObject_New(Utf8Linewraps, &Utf8LinewrapsType);
+    Utf8Linebreaks *iter = PyObject_New(Utf8Linebreaks, &Utf8LinebreaksType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -6328,7 +6328,7 @@ static PyMethodDef Str_methods[] = {
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
     {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
+    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, SZ_METHOD_FLAGS, doc_utf8_linebreaks},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
@@ -7039,15 +7039,15 @@ static PyTypeObject Utf8SentencesType = {
 
 #pragma region UTF8 Line Boundary Iterator
 
-static PyObject *Utf8LinewrapsType_next(Utf8Linewraps *self) {
+static PyObject *Utf8LinebreaksType_next(Utf8Linebreaks *self) {
     // Refill the inline batch when drained. UAX14 never yields zero-length segments, so the `skip_empty` option is
     // a no-op for line segmentation and needs no special handling here. Batch offsets are always relative to
     // `self->start` (the not-yet-segmented suffix start); forward only, so `start` advances past each batch.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = sz_utf8_linewraps(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
-                                              self->batch_lengths, sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_linebreaks(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                               self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -7074,26 +7074,26 @@ static PyObject *Utf8LinewrapsType_next(Utf8Linewraps *self) {
     return (PyObject *)result_obj;
 }
 
-static void Utf8LinewrapsType_dealloc(Utf8Linewraps *self) {
+static void Utf8LinebreaksType_dealloc(Utf8Linebreaks *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8LinewrapsType_iter(PyObject *self) {
+static PyObject *Utf8LinebreaksType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8Linewraps[] =                                          //
-    "Utf8Linewraps(string, ...)\n"                                               //
+static char const doc_Utf8Linebreaks[] =                                         //
+    "Utf8Linebreaks(string, ...)\n"                                              //
     "\n"                                                                         //
     "UTF-8 aware line-break-opportunity iterator per Unicode UAX14 algorithm.\n" //
     "Yields Str views for each line-break-opportunity segment (a soft wrap).\n"  //
     "For hard-line splitting (str.splitlines()), use utf8_lines().\n"            //
     "\n"                                                                         //
     "Created by:\n"                                                              //
-    "  - Str.utf8_linewraps()\n"                                                 //
-    "  - sz.utf8_linewraps()\n"                                                  //
+    "  - Str.utf8_linebreaks()\n"                                                //
+    "  - sz.utf8_linebreaks()\n"                                                 //
     "\n"                                                                         //
     "UAX14 Line_Break rules implemented:\n"                                      //
     "  - LB4-LB6: Mandatory breaks (BK, CR, LF, NL)\n"                           //
@@ -7102,18 +7102,18 @@ static char const doc_Utf8Linewraps[] =                                         
     "  - LB15-LB31: Quotation, numbers, words, CJK rules\n\n"                    //
     "\n"                                                                         //
     "Example:\n"                                                                 //
-    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                         //
+    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                        //
     "  True";
 
-static PyTypeObject Utf8LinewrapsType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Linewraps",
-    .tp_basicsize = sizeof(Utf8Linewraps),
+static PyTypeObject Utf8LinebreaksType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Linebreaks",
+    .tp_basicsize = sizeof(Utf8Linebreaks),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8LinewrapsType_dealloc,
+    .tp_dealloc = (destructor)Utf8LinebreaksType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8Linewraps,
-    .tp_iter = Utf8LinewrapsType_iter,
-    .tp_iternext = (iternextfunc)Utf8LinewrapsType_next,
+    .tp_doc = doc_Utf8Linebreaks,
+    .tp_iter = Utf8LinebreaksType_iter,
+    .tp_iternext = (iternextfunc)Utf8LinebreaksType_next,
 };
 #pragma endregion
 
@@ -9460,7 +9460,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
     {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
+    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, SZ_METHOD_FLAGS, doc_utf8_linebreaks},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
     {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
@@ -9516,7 +9516,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&Utf8CodepointsType) < 0) return NULL;
     if (PyType_Ready(&Utf8GraphemesType) < 0) return NULL;
     if (PyType_Ready(&Utf8SentencesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8LinewrapsType) < 0) return NULL;
+    if (PyType_Ready(&Utf8LinebreaksType) < 0) return NULL;
     if (PyType_Ready(&Utf8UncasedMatchesType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;

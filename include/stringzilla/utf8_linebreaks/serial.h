@@ -1,13 +1,13 @@
 /**
  *  @brief Serial backend for UAX-14 line break boundaries.
- *  @file include/stringzilla/utf8_linewraps/serial.h
+ *  @file include/stringzilla/utf8_linebreaks/serial.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_
-#define STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_
+#ifndef STRINGZILLA_UTF8_LINEBREAKS_SERIAL_H_
+#define STRINGZILLA_UTF8_LINEBREAKS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_linewraps/tables.h"
+#include "stringzilla/utf8_linebreaks/tables.h"
 #include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
@@ -93,7 +93,7 @@ enum { sz_utf8_line_window_k = 1024 };
  *  `line_start` is bit-identical to the whole-text sweep. When the window fills before the input ends,
  *  `bytes_consumed` carries the resume offset (the open line's start) for the next call.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(        //
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
@@ -1446,4 +1446,4 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_(
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINEWRAPS_SERIAL_H_
+#endif // STRINGZILLA_UTF8_LINEBREAKS_SERIAL_H_

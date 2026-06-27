@@ -13,7 +13,7 @@
  *  - UAX-29 word-boundary segmentation - @b utf8_words.
  *  - UAX-29 grapheme-cluster segmentation - @b utf8_graphemes.
  *  - UAX-29 sentence-boundary segmentation - @b utf8_sentences.
- *  - UAX-14 line-break segmentation - @b utf8_linewraps.
+ *  - UAX-14 line-break segmentation - @b utf8_linebreaks.
  *  - UTF-8 -> UTF-32 transcoding - @b utf8_decode.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment variables are used:
@@ -42,12 +42,12 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-#include "stringzilla/utf8_runes.h"     // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
-#include "stringzilla/utf8_tokens.h"    // `sz_utf8_newlines`, `sz_utf8_whitespaces`
-#include "stringzilla/utf8_words.h"     // `sz_utf8_words`
-#include "stringzilla/utf8_graphemes.h" // `sz_utf8_graphemes`
-#include "stringzilla/utf8_sentences.h" // `sz_utf8_sentences`
-#include "stringzilla/utf8_linewraps.h" // `sz_utf8_linewraps`
+#include "stringzilla/utf8_runes.h"      // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
+#include "stringzilla/utf8_tokens.h"     // `sz_utf8_newlines`, `sz_utf8_whitespaces`
+#include "stringzilla/utf8_words.h"      // `sz_utf8_words`
+#include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
+#include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
+#include "stringzilla/utf8_linebreaks.h" // `sz_utf8_linebreaks`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -368,19 +368,19 @@ void bench_utf8_sentences(environment_t const &env) {
 #endif
 }
 
-void bench_utf8_linewraps(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_linewraps_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_linewraps_serial", base_v).log();
+void bench_utf8_linebreaks(environment_t const &env) {
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_linebreaks_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_linebreaks_serial", base_v).log();
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_linewraps_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_haswell> {env})
+    bench_unary(env, "sz_utf8_linebreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_linewraps_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_icelake> {env})
+    bench_unary(env, "sz_utf8_linebreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_linewraps_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linewraps_neon> {env})
+    bench_unary(env, "sz_utf8_linebreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_linebreaks_neon> {env})
         .log(base);
 #endif
 }
@@ -436,7 +436,7 @@ int main(int argc, char const **argv) {
     bench_utf8_words(env);
     bench_utf8_graphemes(env);
     bench_utf8_sentences(env);
-    bench_utf8_linewraps(env);
+    bench_utf8_linebreaks(env);
     bench_utf8_decode(env);
 
     std::printf("All benchmarks passed.\n");

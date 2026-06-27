@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-14 line-break (linewrap) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_linewraps.cpp
+ *  @file   scripts/test_utf8_linebreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -29,7 +29,7 @@
 #pragma region Unit
 
 /** @brief Hand-checked UAX-14 line-break golden vectors: each source text and its expected line segments. */
-static utf8_unit_case_t const utf8_linewraps_unit_cases[] = {
+static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
     {""_sv, {}},
     {"hello world"_sv, {"hello "_sv, "world"_sv}},          // soft wrap after the space
     {"a\nb"_sv, {"a\n"_sv, "b"_sv}},                        // LF hard break
@@ -37,34 +37,34 @@ static utf8_unit_case_t const utf8_linewraps_unit_cases[] = {
     {"a\xE2\x80\xA8" "b"_sv, {"a\xE2\x80\xA8"_sv, "b"_sv}}, // U+2028 LINE SEPARATOR
     {"a\xE2\x80\xA9" "b"_sv, {"a\xE2\x80\xA9"_sv, "b"_sv}}, // U+2029 PARAGRAPH SEPARATOR
 };
-static constexpr std::size_t utf8_linewraps_unit_cases_count = sizeof(utf8_linewraps_unit_cases) /
-                                                               sizeof(utf8_linewraps_unit_cases[0]);
+static constexpr std::size_t utf8_linebreaks_unit_cases_count = sizeof(utf8_linebreaks_unit_cases) /
+                                                                sizeof(utf8_linebreaks_unit_cases[0]);
 
 /** @brief Known-answer line-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
-void test_utf8_linewraps_unit() {
+void test_utf8_linebreaks_unit() {
     std::printf("  - testing UTF-8 line-break known-answer vectors...\n");
 
-    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps, utf8_linewraps_unit_cases,
-                             utf8_linewraps_unit_cases_count); // Dispatched
-    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_serial, utf8_linewraps_unit_cases,
-                             utf8_linewraps_unit_cases_count);
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks, utf8_linebreaks_unit_cases,
+                             utf8_linebreaks_unit_cases_count); // Dispatched
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_serial, utf8_linebreaks_unit_cases,
+                             utf8_linebreaks_unit_cases_count);
 #if SZ_USE_HASWELL
-    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_haswell, utf8_linewraps_unit_cases,
-                             utf8_linewraps_unit_cases_count);
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_haswell, utf8_linebreaks_unit_cases,
+                             utf8_linebreaks_unit_cases_count);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_icelake, utf8_linewraps_unit_cases,
-                             utf8_linewraps_unit_cases_count);
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_icelake, utf8_linebreaks_unit_cases,
+                             utf8_linebreaks_unit_cases_count);
 #endif
 #if SZ_USE_NEON
-    check_utf8_segment_unit_("linewrap", sz_utf8_linewraps_neon, utf8_linewraps_unit_cases,
-                             utf8_linewraps_unit_cases_count);
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_neon, utf8_linebreaks_unit_cases,
+                             utf8_linebreaks_unit_cases_count);
 #endif
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
-        sz::string_view("a\nb").utf8_linewraps().template to<std::vector<std::string>>();
-    assert(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linewraps range");
+        sz::string_view("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
+    assert(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linebreaks range");
 }
 
 #pragma endregion // Unit
@@ -72,7 +72,7 @@ void test_utf8_linewraps_unit() {
 #pragma region Equivalence
 
 /** @brief UAX-14 line-break corner motifs (sprinkled into the random corpus): mandatory breaks, OP/CL, HY, GL, NU. */
-static sz::string_view const utf8_linewraps_motifs[] = {
+static sz::string_view const utf8_linebreaks_motifs[] = {
     "a\nb"_sv,              // LF mandatory break
     "a\rb"_sv,              // CR mandatory break
     "a\r\nb"_sv,            // CRLF mandatory break (one segment)
@@ -98,11 +98,11 @@ static sz::string_view const utf8_linewraps_motifs[] = {
     "\xE3\x80\xAF\xE2\x80\x98" "a"_sv, // LB10/LB19: lone CM (U+302F, East-Asian) then Pi quote (U+2018) -- side bits cleared
     "\xCC\x88\xE2\x80\x9C"_sv,         // lone combining diaeresis (U+0308) then QU (U+201C)
 };
-static constexpr std::size_t utf8_linewraps_motifs_count = sizeof(utf8_linewraps_motifs) /
-                                                           sizeof(utf8_linewraps_motifs[0]);
+static constexpr std::size_t utf8_linebreaks_motifs_count = sizeof(utf8_linebreaks_motifs) /
+                                                            sizeof(utf8_linebreaks_motifs[0]);
 
 /** @brief Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5), into @p out. */
-static void utf8_linewraps_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
+static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         append_codepoint_(out, 0x0061); // 'a'
@@ -116,36 +116,36 @@ static void utf8_linewraps_dense_mandatory_breaks_(std::string &out, std::size_t
 }
 
 /** @brief OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency), into @p out. */
-static void utf8_linewraps_dense_nesting_(std::string &out, std::size_t link_count) {
+static void utf8_linebreaks_dense_nesting_(std::string &out, std::size_t link_count) {
     out.clear();
     static char const *cycle[] = {"(", "word", ")", "\"", "-", " ", "\xC2\xA0"}; // OP CL QU HY BA SP GL(NBSP)
     for (std::size_t index = 0; index != link_count; ++index) out.append(cycle[index % 7u]);
 }
 
 /** @brief Numeric `NU` runs interleaved with IS (`.`) and SY (`/`), @p link_count groups (LB25 numbers), into @p out. */
-static void utf8_linewraps_dense_numeric_(std::string &out, std::size_t link_count) {
+static void utf8_linebreaks_dense_numeric_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) out.append("1.234/56 ");
 }
 
 /** @brief Stream the linewrap family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_linewraps_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_linebreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
-    utf8_linewraps_dense_mandatory_breaks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_linewraps_dense_nesting_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_linewraps_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_linebreaks_dense_mandatory_breaks_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_linebreaks_dense_nesting_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_linebreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Stream the linewrap family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_linewraps_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_linebreaks_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    utf8_linewraps_dense_mandatory_breaks_(scratch, gap), sink(context, scratch.data(), scratch.size());
-    utf8_linewraps_dense_nesting_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_linebreaks_dense_mandatory_breaks_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_linebreaks_dense_nesting_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Linewrap-biased random-corpus snippets: mandatory breaks, separators, NBSP/GL, nesting, hyphen, numeric. */
-static char const *const utf8_linewraps_snippets[] = {
+static char const *const utf8_linebreaks_snippets[] = {
     "a\r\nb",        // mandatory break (CRLF)
     "a\x0C" "b",     // mandatory break (form feed, BK)
     "\xE2\x80\xA8",  // U+2028 LINE SEPARATOR
@@ -159,24 +159,24 @@ static char const *const utf8_linewraps_snippets[] = {
 };
 
 /** @brief Linewrap family alphabet: weights bias toward family snippets and motifs (LB mandatory/GL/HY/NU/nesting). */
-static utf8_corpus_alphabet_t const utf8_linewraps_alphabet = {
-    utf8_linewraps_snippets,
-    sizeof(utf8_linewraps_snippets) / sizeof(utf8_linewraps_snippets[0]),
+static utf8_corpus_alphabet_t const utf8_linebreaks_alphabet = {
+    utf8_linebreaks_snippets,
+    sizeof(utf8_linebreaks_snippets) / sizeof(utf8_linebreaks_snippets[0]),
     utf8_default_boundary_codepoints,
     sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
     {45, 15, 5, 30, 5}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the linewrap family's differential corpora (motifs + dense + straddle + alphabet). */
-static utf8_segment_corpora_t utf8_linewraps_corpora_() {
+static utf8_segment_corpora_t utf8_linebreaks_corpora_() {
     utf8_segment_corpora_t corpora = {"linewrap",
-                                      utf8_linewraps_motifs,
-                                      utf8_linewraps_motifs_count,
-                                      &utf8_linewraps_dense_runs_,
-                                      &utf8_linewraps_straddles_,
+                                      utf8_linebreaks_motifs,
+                                      utf8_linebreaks_motifs_count,
+                                      &utf8_linebreaks_dense_runs_,
+                                      &utf8_linebreaks_straddles_,
                                       nullptr,
                                       0,
-                                      &utf8_linewraps_alphabet};
+                                      &utf8_linebreaks_alphabet};
     return corpora;
 }
 
@@ -185,7 +185,7 @@ static utf8_segment_corpora_t utf8_linewraps_corpora_() {
 #pragma region Rule coverage
 
 /** @brief Rule-coverage gate: every LB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
-void test_utf8_linewraps_rules() {
+void test_utf8_linebreaks_rules() {
     std::printf("  - testing UTF-8 line-break rule-coverage matrix...\n");
 
     // One motif per UAX-14 Line_Break rule, tagged with the direction it demonstrates; rules with both senses also
@@ -241,17 +241,17 @@ void test_utf8_linewraps_rules() {
         "LB23a", "LB24",  "LB25", "LB26", "LB27", "LB28", "LB28a", "LB29",  "LB30", "LB30a", "LB30b", "LB31",
     };
 #if SZ_USE_HASWELL
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_haswell, rule_cases,
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_haswell, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake, rule_cases,
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_icelake, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
 #if SZ_USE_NEON
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linewraps_serial, sz_utf8_linewraps_neon, rule_cases,
+    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_neon, rule_cases,
                               sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                               sizeof(required_rules) / sizeof(required_rules[0]));
 #endif
@@ -262,18 +262,18 @@ void test_utf8_linewraps_rules() {
 #pragma region Safety
 
 /** @brief Malformed-input safety of the UTF-8 line kernels (serial / dispatched / icelake). */
-void test_utf8_linewraps_safety() {
+void test_utf8_linebreaks_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 line kernels...\n");
-    check_utf8_segment_safety_("linewrap (serial)", sz_utf8_linewraps_serial);
-    check_utf8_segment_safety_("linewrap (dispatched)", sz_utf8_linewraps);
+    check_utf8_segment_safety_("linewrap (serial)", sz_utf8_linebreaks_serial);
+    check_utf8_segment_safety_("linewrap (dispatched)", sz_utf8_linebreaks);
 #if SZ_USE_HASWELL
-    check_utf8_segment_safety_("linewrap (haswell)", sz_utf8_linewraps_haswell);
+    check_utf8_segment_safety_("linewrap (haswell)", sz_utf8_linebreaks_haswell);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("linewrap (icelake)", sz_utf8_linewraps_icelake);
+    check_utf8_segment_safety_("linewrap (icelake)", sz_utf8_linebreaks_icelake);
 #endif
 #if SZ_USE_NEON
-    check_utf8_segment_safety_("linewrap (neon)", sz_utf8_linewraps_neon);
+    check_utf8_segment_safety_("linewrap (neon)", sz_utf8_linebreaks_neon);
 #endif
     std::printf("    linewrap safety passed!\n");
 }
@@ -283,17 +283,17 @@ void test_utf8_linewraps_safety() {
 #pragma region Drivers
 
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
-void test_utf8_linewraps_all() {
-    utf8_segment_corpora_t const corpora = utf8_linewraps_corpora_();
+void test_utf8_linebreaks_all() {
+    utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
     sz_unused_(corpora);
 #if SZ_USE_HASWELL
-    test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_haswell, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_haswell, corpora);
 #endif
 #if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_icelake, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_icelake, corpora);
 #endif
 #if SZ_USE_NEON
-    test_utf8_segment_equivalence_(sz_utf8_linewraps_serial, sz_utf8_linewraps_neon, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_neon, corpora);
 #endif
 }
 

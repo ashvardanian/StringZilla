@@ -8,7 +8,7 @@ Each C++ translation unit exercises one kernel family, and the Python suite mirr
 - `stringzilla.cpp` — C++ API against STL baselines.
 - `stringzillas.cpp` / `stringzillas.cu` — parallel CPU and CUDA backend tests.
 - `hash.cpp`, `find.cpp`, `sort.cpp`, `string.cpp`, `uncased.cpp` — per-family kernel tests.
-- `utf8_runes.cpp`, `utf8_words.cpp`, `utf8_graphemes.cpp`, `utf8_sentences.cpp`, `utf8_linewraps.cpp`, `utf8_norm.cpp`, `utf8_tokens.cpp` — UTF-8 decode and segmentation tests.
+- `utf8_runes.cpp`, `utf8_words.cpp`, `utf8_graphemes.cpp`, `utf8_sentences.cpp`, `utf8_linebreaks.cpp`, `utf8_norm.cpp`, `utf8_tokens.cpp` — UTF-8 decode and segmentation tests.
 - `stringzilla.hpp` and `utf8.hpp` are the shared harnesses; `fingerprints.cuh` and `similarities.cuh` are the CUDA harnesses.
 
 ## Python

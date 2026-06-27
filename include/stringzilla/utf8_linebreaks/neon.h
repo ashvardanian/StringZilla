@@ -1,14 +1,14 @@
 /**
  *  @brief NEON (AArch64) backend for UAX-14 line break boundaries.
- *  @file include/stringzilla/utf8_linewraps/neon.h
+ *  @file include/stringzilla/utf8_linebreaks/neon.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINEWRAPS_NEON_H_
-#define STRINGZILLA_UTF8_LINEWRAPS_NEON_H_
+#ifndef STRINGZILLA_UTF8_LINEBREAKS_NEON_H_
+#define STRINGZILLA_UTF8_LINEBREAKS_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_linewraps/tables.h"
-#include "stringzilla/utf8_linewraps/serial.h"
+#include "stringzilla/utf8_linebreaks/tables.h"
+#include "stringzilla/utf8_linebreaks/serial.h"
 #include "stringzilla/utf8_runes/neon.h"
 
 #ifdef __cplusplus
@@ -449,11 +449,11 @@ SZ_INTERNAL sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neo
 
 /**
  *  @brief  Byte-level zero-scalar forward UAX-14 kernel (NEON AArch64): the overlap-free advancing driver, mirroring
- *          @ref sz_utf8_linewraps_haswell_bytes_ over the NEON window/classify/drain leaves.
+ *          @ref sz_utf8_linebreaks_haswell_bytes_ over the NEON window/classify/drain leaves.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon_bytes_( //
-    sz_cptr_t text, sz_size_t length,              //
-    sz_size_t *starts, sz_size_t *lengths,         //
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_neon_bytes_( //
+    sz_cptr_t text, sz_size_t length,               //
+    sz_size_t *starts, sz_size_t *lengths,          //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -494,14 +494,14 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon_bytes_( //
 }
 
 /**
- *  @brief  Forward UAX-14 line-break-opportunity kernel (NEON AArch64). Bit-exact with `sz_utf8_linewraps_serial`,
- *          `sz_utf8_linewraps_haswell`, and `sz_utf8_linewraps_icelake`.
+ *  @brief  Forward UAX-14 line-break-opportunity kernel (NEON AArch64). Bit-exact with `sz_utf8_linebreaks_serial`,
+ *          `sz_utf8_linebreaks_haswell`, and `sz_utf8_linebreaks_icelake`.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon( //
-    sz_cptr_t text, sz_size_t length,       //
-    sz_size_t *starts, sz_size_t *lengths,  //
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_neon( //
+    sz_cptr_t text, sz_size_t length,        //
+    sz_size_t *starts, sz_size_t *lengths,   //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
-    return sz_utf8_linewraps_neon_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
+    return sz_utf8_linebreaks_neon_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
 }
 
 #pragma endregion Forward driver
@@ -518,4 +518,4 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon( //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINEWRAPS_NEON_H_
+#endif // STRINGZILLA_UTF8_LINEBREAKS_NEON_H_

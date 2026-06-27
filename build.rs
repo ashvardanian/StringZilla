@@ -51,7 +51,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
             "c/stringzilla/utf8_words.c",
             "c/stringzilla/utf8_graphemes.c",
             "c/stringzilla/utf8_sentences.c",
-            "c/stringzilla/utf8_linewraps.c",
+            "c/stringzilla/utf8_linebreaks.c",
             "c/stringzilla/utf8_uncased_fold.c",
             "c/stringzilla/utf8_norm.c",
             "c/stringzilla/utf8_uncased.c",

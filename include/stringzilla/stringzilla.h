@@ -94,7 +94,7 @@
 #include "stringzilla/utf8_words.h"        // `sz_utf8_words`, `sz_rune_word_break_property`
 #include "stringzilla/utf8_graphemes.h"    // `sz_utf8_graphemes`
 #include "stringzilla/utf8_sentences.h"    // `sz_utf8_sentences`
-#include "stringzilla/utf8_linewraps.h"    // `sz_utf8_linewraps`
+#include "stringzilla/utf8_linebreaks.h"   // `sz_utf8_linebreaks`
 #include "stringzilla/utf8_uncased_fold.h" // `sz_utf8_uncased_fold`
 #include "stringzilla/utf8_uncased.h"      // `sz_utf8_uncased_search`, `sz_utf8_uncased_order`
 #include "stringzilla/utf8_norm.h"         // `sz_utf8_norm`, `sz_utf8_find_denormalized`

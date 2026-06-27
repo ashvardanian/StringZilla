@@ -1,5 +1,5 @@
 /**
- *  @brief  Shared harness for the UTF-8 segmentation family tests (words / graphemes / sentences / linewraps).
+ *  @brief  Shared harness for the UTF-8 segmentation family tests (words / graphemes / sentences / linebreaks).
  *  @file   scripts/test_utf8.hpp
  *  @author Ash Vardanian
  *

@@ -89,7 +89,7 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `Hasher` — an incremental AES-based 64-bit hasher implementing `core::hash::Hasher`.
 - `Sha256` — an incremental SHA-256 hasher with a one-shot convenience constructor.
 - `BuildSzHasher` — a `std::hash::BuildHasher`, gated on feature `std`, for using `Hasher` with `HashMap`/`HashSet`.
-- `Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linewraps` — lazy UTF-8 views and iterators.
+- `Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
 - `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `Utf8NormalForm` — uncased search and Unicode normalization helpers.
 - `SemVer`, `Status`, `SmallCString` — version, error, and capability-string types.
 - `ArgsortOptions` — knobs for sorting.
@@ -745,11 +745,11 @@ fn sz_utf8_tokens(&self) -> Utf8Tokens<'_>;    // split on Unicode whitespace
 fn sz_utf8_words(&self) -> Utf8Words<'_>;      // UAX-29 words
 fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;  // UAX-29 grapheme clusters
 fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;  // UAX-29 sentences
-fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_>;  // UAX-14 line-break opportunities
+fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;  // UAX-14 line-break opportunities
 ```
 
 Every member of this family is lazy and zero-copy.
-`Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, and `Utf8Linewraps`, together with the `sz_splits` / `sz_rsplits` iterators, all borrow from the source string and yield `&[u8]` or `&str` slices on demand without allocating.
+`Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, and `Utf8Linebreaks`, together with the `sz_splits` / `sz_rsplits` iterators, all borrow from the source string and yield `&[u8]` or `&str` slices on demand without allocating.
 There is no backing vector and no per-element heap buffer.
 Contrast this with the standard library, where collecting into a `Vec<String>` allocates the vector and a fresh heap buffer for every element, and even a `Vec<&str>` allocates the backing vector up front.
 Because these iterators borrow from the input, you can stream over millions of words or grapheme clusters of a large document with effectively zero per-element allocation, and the borrow lifetimes keep the yielded slices zero-copy.
@@ -766,7 +766,7 @@ let chars: Vec<char> = view.iter().collect();
 assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 ```
 
-The boundary iterators `words`, `graphemes`, `sentences`, and `linewraps` __tile__ the input — every byte belongs to exactly one segment, so consecutive segments are contiguous and no empty slices appear:
+The boundary iterators `words`, `graphemes`, `sentences`, and `linebreaks` __tile__ the input — every byte belongs to exactly one segment, so consecutive segments are contiguous and no empty slices appear:
 
 ```rust
 use stringzilla::sz::StringZillableUnary;

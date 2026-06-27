@@ -551,7 +551,7 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | `utf8_graphemes(string, skip_empty=False)`             | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
 | `utf8_words(string, skip_empty=False)`                 | TR29 word boundaries             | words across all Unicode scripts.                                                      |
 | `utf8_sentences(string, skip_empty=False)`             | TR29 sentence boundaries         | sentences.                                                                             |
-| `utf8_linewraps(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
+| `utf8_linebreaks(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
 | `utf8_lines(string, keepends=False, skip_empty=False)` | 7 Unicode newlines + CRLF        | hard lines on LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, and CRLF.                       |
 | `utf8_tokens(string, skip_empty=False)`                | 25 Unicode `"White_Space"` chars | whitespace-delimited tokens, like `str.split()` with no separator.                     |
 

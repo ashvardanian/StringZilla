@@ -516,7 +516,7 @@ extern "C" {
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_linewraps(
+    pub(crate) fn sz_utf8_linebreaks(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
@@ -3518,12 +3518,12 @@ impl<'a, const STEPS: usize> Iterator for Utf8Sentences<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Linewraps;
+/// use stringzilla::stringzilla::Utf8Linebreaks;
 ///
-/// let lines: Vec<&[u8]> = Utf8Linewraps::new(b"Hi\nBye").collect();
+/// let lines: Vec<&[u8]> = Utf8Linebreaks::new(b"Hi\nBye").collect();
 /// assert_eq!(lines, vec![&b"Hi\n"[..], &b"Bye"[..]]);
 /// ```
-pub struct Utf8Linewraps<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Linebreaks<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR14 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered line offsets, relative to `suffix`
@@ -3532,16 +3532,16 @@ pub struct Utf8Linewraps<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     index: usize,  // Index of the next line to yield from the buffer
 }
 
-impl<'a> Utf8Linewraps<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Linebreaks<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `Utf8Linewraps::<1>::with_steps(text)`.
+    /// `Utf8Linebreaks::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Linebreaks<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` lines per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3560,7 +3560,7 @@ impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_linewraps(
+            sz_utf8_linebreaks(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3573,7 +3573,7 @@ impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for Utf8Linewraps<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Linebreaks<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3826,7 +3826,7 @@ pub trait StringZillableUnary {
     /// Returns an iterator over UAX-14 line-break opportunities (Unicode TR14), in order. Linewrap segments tile the
     /// input contiguously, including soft break opportunities. For hard line splits only, use
     /// [`Self::sz_utf8_lines`].
-    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_>;
+    fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -4099,8 +4099,8 @@ where
         Utf8Sentences::new(self.as_ref())
     }
 
-    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_> {
-        Utf8Linewraps::new(self.as_ref())
+    fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_> {
+        Utf8Linebreaks::new(self.as_ref())
     }
 }
 
@@ -5143,10 +5143,10 @@ mod tests {
         // Linewrap segments tile the input, so the yielded segments must match regardless of
         // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line-break opportunity.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Linewraps::new(text).collect();
-        assert_eq!(Utf8Linewraps::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linewraps::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linewraps::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        let forward: Vec<&[u8]> = Utf8Linebreaks::new(text).collect();
+        assert_eq!(Utf8Linebreaks::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linebreaks::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linebreaks::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]

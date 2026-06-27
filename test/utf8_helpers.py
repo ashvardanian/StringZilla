@@ -171,7 +171,7 @@ def segment_bytes(segments: Iterable) -> bytes:
 def assert_segments_tile(segments: Iterable, original: Union[str, bytes]) -> None:
     """Metamorphic invariant: a boundary segmenter's output must reconstruct the input exactly.
 
-    Applies to words / graphemes / sentences / linewraps (which tile `[0, length)` contiguously), not to the
+    Applies to words / graphemes / sentences / linebreaks (which tile `[0, length)` contiguously), not to the
     delimiter splitters `utf8_tokens` / `utf8_lines`, which drop their separators.
     """
     original_bytes = original.encode("utf-8") if isinstance(original, str) else bytes(original)

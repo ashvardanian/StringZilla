@@ -626,7 +626,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/utf8_words.c
     c/stringzilla/utf8_graphemes.c
     c/stringzilla/utf8_sentences.c
-    c/stringzilla/utf8_linewraps.c
+    c/stringzilla/utf8_linebreaks.c
     c/stringzilla/utf8_uncased_fold.c
     c/stringzilla/utf8_uncased.c
 )
@@ -926,7 +926,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/utf8_words.cpp
         test/utf8_graphemes.cpp
         test/utf8_sentences.cpp
-        test/utf8_linewraps.cpp
+        test/utf8_linebreaks.cpp
         test/utf8_norm.cpp
         test/utf8_delimiters.cpp
         test/uncased.cpp

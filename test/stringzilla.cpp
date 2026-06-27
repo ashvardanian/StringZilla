@@ -204,10 +204,10 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_sentences_rules", test_utf8_sentences_rules);
     failures += run_test("test_utf8_sentences_safety", test_utf8_sentences_safety);
     failures += run_test("test_utf8_sentences_all", test_utf8_sentences_all);
-    failures += run_test("test_utf8_linewraps_unit", test_utf8_linewraps_unit);
-    failures += run_test("test_utf8_linewraps_rules", test_utf8_linewraps_rules);
-    failures += run_test("test_utf8_linewraps_safety", test_utf8_linewraps_safety);
-    failures += run_test("test_utf8_linewraps_all", test_utf8_linewraps_all);
+    failures += run_test("test_utf8_linebreaks_unit", test_utf8_linebreaks_unit);
+    failures += run_test("test_utf8_linebreaks_rules", test_utf8_linebreaks_rules);
+    failures += run_test("test_utf8_linebreaks_safety", test_utf8_linebreaks_safety);
+    failures += run_test("test_utf8_linebreaks_all", test_utf8_linebreaks_all);
     failures += run_test("test_utf8_norm_unit", test_utf8_norm_unit);
     failures += run_test("test_utf8_norm_safety", test_utf8_norm_safety);
     failures += run_test("test_utf8_norm_all", test_utf8_norm_all);

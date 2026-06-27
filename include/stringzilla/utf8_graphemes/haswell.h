@@ -322,8 +322,8 @@ SZ_INTERNAL sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell
     //   plane in [1,16]  -> genuine astral (cp in 0x10000..0x10FFFF); overwrite with the 4-byte trie descriptor.
     //   plane >= 17      -> cp >= 0x110000 (e.g. overlong `F4 90 80 80`); neither BMP nor astral, force Other (0).
     // `plane_lo/hi` carry the 5-bit plane per 4-byte-lead lane (junk on other lanes, gated out by `four_byte`).
-    sz_u64_t const plane_nonzero = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpgt_epi8(plane_lo, _mm256_setzero_si256()), _mm256_cmpgt_epi8(plane_hi, _mm256_setzero_si256()));
+    sz_u64_t const plane_nonzero = sz_utf8_mask_combine_haswell_(_mm256_cmpgt_epi8(plane_lo, _mm256_setzero_si256()),
+                                                                 _mm256_cmpgt_epi8(plane_hi, _mm256_setzero_si256()));
     sz_u64_t const plane_le_16 = sz_utf8_mask_combine_haswell_(
         sz_grapheme_cmpge_epu8_haswell_(_mm256_set1_epi8(0x10), plane_lo),
         sz_grapheme_cmpge_epu8_haswell_(_mm256_set1_epi8(0x10), plane_hi));
@@ -331,7 +331,7 @@ SZ_INTERNAL sz_grapheme_classified_haswell_t sz_grapheme_classify_window_haswell
     sz_u64_t const is_overrange = four_byte & plane_nonzero & ~plane_le_16 & loaded_mask;
     if (is_astral) {
         // offset = cp - 0x10000; high16/low16 unchanged, plane nibble = cp_plane - 1. The reconstructed `plane`
-        // holds bits [16..20] of cp; subtract 1 to get the offset plane nibble (matching the linewraps astral path).
+        // holds bits [16..20] of cp; subtract 1 to get the offset plane nibble (matching the linebreaks astral path).
         __m256i const astral_sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)is_astral);
         __m256i const astral_sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(is_astral >> 32));
         __m256i const plane_off_lo = _mm256_sub_epi8(_mm256_and_si256(astral_sel_lo, plane_lo), _mm256_set1_epi8(1));

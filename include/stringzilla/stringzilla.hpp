@@ -1664,12 +1664,12 @@ class utf8_sentences_view {
  *  Unlike whitespace splitting, the segments tile the input: every byte belongs to exactly one segment, so
  *  consecutive segments are contiguous and no empty segments are produced. Each segment ends at an allowed
  *  line break opportunity (both mandatory hard breaks and soft wrap points). Drives
- *  `sz_utf8_linewraps`. To split only on hard line breaks use `utf8_lines` instead.
+ *  `sz_utf8_linebreaks`. To split only on hard line breaks use `utf8_lines` instead.
  *
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class utf8_linewraps_view {
+class utf8_linebreaks_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1681,8 +1681,8 @@ class utf8_linewraps_view {
     string_type haystack_;
 
   public:
-    utf8_linewraps_view() noexcept = default;
-    utf8_linewraps_view(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_linebreaks_view() noexcept = default;
+    utf8_linebreaks_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
         char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
@@ -1694,8 +1694,8 @@ class utf8_linewraps_view {
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_linewraps(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                       &consumed);
+            count_ = sz_utf8_linebreaks(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
+                                        &consumed);
             index_ = 0;
         }
 
@@ -2828,7 +2828,7 @@ class basic_string_slice {
      *  every byte belongs to exactly one segment ending at an allowed line break opportunity, including both the
      *  mandatory hard breaks and the soft wrap points.
      */
-    utf8_linewraps_view<string_slice> utf8_linewraps() const noexcept { return {*this}; }
+    utf8_linebreaks_view<string_slice> utf8_linebreaks() const noexcept { return {*this}; }
 
 #pragma endregion
 #pragma region String Arguments
