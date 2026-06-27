@@ -903,6 +903,14 @@ if (STRINGZILLA_BUILD_BENCHMARK)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzillas_cuda_static)
         endif ()
+        # The host object pulls in `std::log` etc.; unlike the host-compiler driver used for the `cpp20`
+        # benches, nvcc's final link does not implicitly add libm. Link it only where it exists as a
+        # separate library (Linux/glibc); on macOS/MSVC the math symbols live in the C runtime.
+        find_library(STRINGZILLA_LIBM m)
+        if (STRINGZILLA_LIBM)
+            target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE ${STRINGZILLA_LIBM})
+            target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE ${STRINGZILLA_LIBM})
+        endif ()
     endif ()
 endif ()
 
