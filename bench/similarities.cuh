@@ -32,16 +32,24 @@ using ashvardanian::stringzillas::levenshtein_serial_t;
 using ashvardanian::stringzillas::levenshtein_utf8_icelake_t;
 using ashvardanian::stringzillas::levenshtein_utf8_serial_t;
 using ashvardanian::stringzillas::linear_gap_costs_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_haswell_t;
 using ashvardanian::stringzillas::affine_needleman_wunsch_icelake_t;
+using ashvardanian::stringzillas::affine_smith_waterman_haswell_t;
 using ashvardanian::stringzillas::affine_smith_waterman_icelake_t;
+using ashvardanian::stringzillas::needleman_wunsch_haswell_t;
 using ashvardanian::stringzillas::needleman_wunsch_icelake_t;
 using ashvardanian::stringzillas::needleman_wunsch_serial_t;
+using ashvardanian::stringzillas::smith_waterman_haswell_t;
 using ashvardanian::stringzillas::smith_waterman_icelake_t;
 using ashvardanian::stringzillas::smith_waterman_serial_t;
 using ashvardanian::stringzillas::uniform_substitution_costs_t;
 using ashvardanian::stringzillas::affine_levenshtein_neon_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_neon_t;
+using ashvardanian::stringzillas::affine_smith_waterman_neon_t;
 using ashvardanian::stringzillas::levenshtein_neon_t;
 using ashvardanian::stringzillas::levenshtein_utf8_neon_t;
+using ashvardanian::stringzillas::needleman_wunsch_neon_t;
+using ashvardanian::stringzillas::smith_waterman_neon_t;
 
 // StringZillas library symbols provided only by the CUDA backend:
 #if SZ_USE_CUDA
@@ -666,6 +674,40 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_result_t affine_local_baseline =
             bench_unary(env, name_affine_local_baseline, call_affine_local_baseline).log();
 
+#if SZ_USE_HASWELL
+        bench_unary(env, "needleman_wunsch_haswell:"s + shape_label, call_linear_global_baseline,
+                    similarities_callable<needleman_wunsch_haswell_t, fu::basic_pool_t &>(
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_global_baseline);
+        scramble_accelerated_results(results_linear_global_accelerated);
+
+        bench_unary(env, "smith_waterman_haswell:"s + shape_label, call_linear_local_baseline,
+                    similarities_callable<smith_waterman_haswell_t, fu::basic_pool_t &>(
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_local_baseline);
+        scramble_accelerated_results(results_linear_local_accelerated);
+
+        bench_unary(env, "affine_needleman_wunsch_haswell:"s + shape_label, call_affine_global_baseline,
+                    similarities_callable<affine_needleman_wunsch_haswell_t, fu::basic_pool_t &>(
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_global_baseline);
+        scramble_accelerated_results(results_affine_global_accelerated);
+
+        bench_unary(env, "affine_smith_waterman_haswell:"s + shape_label, call_affine_local_baseline,
+                    similarities_callable<affine_smith_waterman_haswell_t, fu::basic_pool_t &>(
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_local_baseline);
+        scramble_accelerated_results(results_affine_local_accelerated);
+#endif
+
 #if SZ_USE_ICELAKE
         bench_unary(env, "needleman_wunsch_icelake:"s + shape_label, call_linear_global_baseline,
                     similarities_callable<needleman_wunsch_icelake_t, fu::basic_pool_t &>(
@@ -693,6 +735,40 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_icelake:"s + shape_label, call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_icelake_t, fu::basic_pool_t &>(
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_local_baseline);
+        scramble_accelerated_results(results_affine_local_accelerated);
+#endif
+
+#if SZ_USE_NEON
+        bench_unary(env, "needleman_wunsch_neon:"s + shape_label, call_linear_global_baseline,
+                    similarities_callable<needleman_wunsch_neon_t, fu::basic_pool_t &>(
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_global_baseline);
+        scramble_accelerated_results(results_linear_global_accelerated);
+
+        bench_unary(env, "smith_waterman_neon:"s + shape_label, call_linear_local_baseline,
+                    similarities_callable<smith_waterman_neon_t, fu::basic_pool_t &>(
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_local_baseline);
+        scramble_accelerated_results(results_linear_local_accelerated);
+
+        bench_unary(env, "affine_needleman_wunsch_neon:"s + shape_label, call_affine_global_baseline,
+                    similarities_callable<affine_needleman_wunsch_neon_t, fu::basic_pool_t &>(
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_global_baseline);
+        scramble_accelerated_results(results_affine_global_accelerated);
+
+        bench_unary(env, "affine_smith_waterman_neon:"s + shape_label, call_affine_local_baseline,
+                    similarities_callable<affine_smith_waterman_neon_t, fu::basic_pool_t &>(
                         env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
