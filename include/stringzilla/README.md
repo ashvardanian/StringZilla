@@ -377,9 +377,9 @@ The full family of ranges, each borrowing from the source and yielding `sz::stri
 - `utf8_sentences()` — UAX-29 sentence boundaries.
 - `utf8_lines()` — all seven Unicode newline characters plus the CRLF pair.
 - `utf8_tokens()` — the Unicode "White_Space" set, skipping empty segments.
-- `utf8_linewraps()` — UAX-14 line-break opportunities, both hard breaks and soft wrap points.
+- `utf8_linebreaks()` — UAX-14 line-break opportunities, both hard breaks and soft wrap points.
 
-The `utf8_words`, `utf8_graphemes`, `utf8_sentences`, and `utf8_linewraps` ranges _tile_ the input — every byte belongs to exactly one segment, with no gaps and no empty slices.
+The `utf8_words`, `utf8_graphemes`, `utf8_sentences`, and `utf8_linebreaks` ranges _tile_ the input — every byte belongs to exactly one segment, with no gaps and no empty slices.
 Because every range borrows and walks the buffer once, segmenting a multi-megabyte document into graphemes or words allocates nothing.
 
 ## Case Insensitive Search and Folding
@@ -410,14 +410,14 @@ greeting.try_utf8_uncased_fold(); // in place; `ß` expands to `ss`
 assert(greeting == "grüsse");
 ```
 
-In C, `sz_utf8_uncased_find` takes a `sz_utf8_uncased_needle_metadata_t *` that it fills on the first call and reuses on later ones, so repeated searches for the same needle skip re-analysis:
+In C, `sz_utf8_uncased_search` takes a `sz_utf8_uncased_needle_metadata_t *` that it fills on the first call and reuses on later ones, so repeated searches for the same needle skip re-analysis:
 
 ```c
 #include <stringzilla/stringzilla.h>
 
 sz_utf8_uncased_needle_metadata_t needle = {0}; // cached across searches of the same pattern
 sz_size_t matched_length = 0;
-sz_cptr_t hit = sz_utf8_uncased_find(haystack, haystack_length, "café", 5, &needle, &matched_length);
+sz_cptr_t hit = sz_utf8_uncased_search(haystack, haystack_length, "café", 5, &needle, &matched_length);
 // `hit` points at the first case-insensitive match, or NULL; reuse `needle` for the next haystack.
 ```
 
@@ -791,3 +791,255 @@ int main(void) {
 ```
 
 You can also call any backend directly when you have already established the target supports it — for example `sz_find_haswell(...)` or `sz_hash_icelake(...)` — which is handy for benchmarking and for pinning a code path in a controlled environment.
+
+## Memory Ownership and Small String Optimization
+
+Most operations in StringZilla don't assume any memory ownership.
+But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
+Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] (SSO) to avoid heap allocations for short strings.
+The owning `sz_string_t` container, its union layout, and the full lifecycle API are documented under [Memory Operations](#memory-operations); this section covers the design rationale behind that layout.
+
+[faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
+
+A short string can be kept on the stack, if it fits within the inline character array.
+Before 2015 GCC string implementation was just 8 bytes, and could only fit 7 characters.
+Different STL implementations today have different thresholds for the Small String Optimization.
+Similar to GCC, StringZilla is 32 bytes in size, and similar to Clang it can fit 22 characters on stack.
+Our layout might be preferential, if you want to avoid branches.
+If you use a different compiler, you may want to check its SSO buffer size with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
+
+|                 | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
+| :-------------- | ---------------------: | -------------------: | ----------: |
+| String `sizeof` |                     32 |                   24 |          32 |
+| Inner Capacity  |                     15 |               __22__ |      __22__ |
+
+This design has been since ported to many high-level programming languages.
+Swift, for example, [can store 15 bytes](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion) in the `String` instance itself.
+StringZilla implements SSO at the C level, providing the `sz_string_t` union and a simple API for primary operations, covered with a worked example under [Memory Operations](#memory-operations).
+
+Unlike the conventional C strings, the `sz_string_t` is allowed to contain null characters.
+To safely print those, pass the unpacked length to `printf` as well.
+
+```c
+sz_ptr_t string_start;
+sz_size_t string_length;
+sz_string_range(&string, &string_start, &string_length);
+printf("%.*s\n", (int)string_length, string_start);
+```
+
+## What's Wrong with the C Standard Library?
+
+StringZilla is not a drop-in replacement for the C Standard Library.
+It's designed to be a safer and more modern alternative.
+Conceptually:
+
+1. LibC strings are expected to be null-terminated, so to use the efficient LibC implementations on slices of larger strings, you'd have to copy them, which is more expensive than the original string operation.
+2. LibC functionality is asymmetric — you can find the first and the last occurrence of a character within a string, but you can't find the last occurrence of a substring.
+3. LibC function names are typically very short and cryptic.
+4. LibC lacks crucial functionality like hashing and doesn't provide primitives for less critical but relevant operations like fuzzy matching.
+
+Something has to be said about its support for UTF-8.
+Aside from a single-byte `char` type, LibC provides `wchar_t`:
+
+- The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
+- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32). In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes. This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
+
+StringZilla [partially addresses those issues](#utf-8-segmentation).
+
+## What's Wrong with the C++ Standard Library?
+
+| C++ Code                             | Evaluation Result | Invoked Signature              |
+| :----------------------------------- | :---------------- | :----------------------------- |
+| `"Loose"s.replace(2, 2, "vath"s, 1)` | `"Loathe"` 🤢      | `(pos1, count1, str2, pos2)`   |
+| `"Loose"s.replace(2, 2, "vath", 1)`  | `"Love"` 🥰        | `(pos1, count1, str2, count2)` |
+
+StringZilla is designed to be a drop-in replacement for the C++ Standard Templates Library.
+That said, some of the design decisions of STL strings are highly controversial, error-prone, and expensive.
+Most notably:
+
+1. Argument order for `replace`, `insert`, `erase` and similar functions is impossible to guess.
+2. Bounds-checking exceptions for `substr`-like functions are only thrown for one side of the range.
+3. Returning string copies in `substr`-like functions results in absurd volume of allocations.
+4. Incremental construction via `push_back`-like functions goes through too many branches.
+5. Inconsistency between `string` and `string_view` methods, like the lack of `remove_prefix` and `remove_suffix`.
+
+Check the following set of asserts validating the `std::string` specification.
+It's not realistic to expect the average developer to remember the [14 overloads of `std::string::replace`][stl-replace].
+
+[stl-replace]: https://en.cppreference.com/w/cpp/string/basic_string/replace
+
+```cpp
+using str = std::string;
+
+assert(str("hello world").substr(6) == "world");
+assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
+assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
+assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
+assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
+
+assert(str("hello").replace(1, 2, "123") == "h123lo");
+assert(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
+assert(str("hello").replace(1, 2, "123", 1) == "h1lo");
+assert(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
+assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
+assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
+assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
+```
+
+To avoid those issues, StringZilla provides an alternative consistent interface.
+It supports signed arguments, and doesn't have more than 3 arguments per function or
+The standard API and our alternative can be conditionally disabled with `SZ_SAFETY_OVER_COMPATIBILITY=1`.
+When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will be disabled.
+
+```cpp
+using str = sz::string;
+
+str("a:b").front(1) == "a"; // no checks, unlike `substr`
+str("a:b").front(2) == "a:"; // take first 2 characters
+str("a:b").back(-1) == "b"; // accepting negative indices
+str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
+str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
+str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
+str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
+"a:b"_sv[{-2, -1}] == ":"; // works on views and overloads `operator[]`
+```
+
+Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
+Bonus - all the bound checking is branchless, so it has a constant cost and won't hurt your branch predictor.
+
+## Beyond the C++ Standard Library, Learning from Python
+
+Python is arguably the most popular programming language for data science.
+In part, that's due to the simplicity of its standard interfaces.
+StringZilla brings some of that functionality to C++.
+
+- Content checks: `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`, `isupper`.
+- Trimming character sets: `lstrip`, `rstrip`, `strip`.
+- Trimming string matches: `remove_prefix`, `remove_suffix`.
+- Ranges of search results: `splitlines`, `split`, `rsplit`.
+- Number of non-overlapping substring matches: `count`.
+- Partitioning: `partition`, `rpartition`.
+
+For example, when parsing documents, it is often useful to split it into substrings.
+Most often, after that, you would compute the length of the skipped part, the offset and the length of the remaining part.
+This results in a lot of pointer arithmetic and is error-prone.
+StringZilla provides a convenient `partition` function, which returns a tuple of three string views, making the code cleaner.
+
+```cpp
+auto parts = haystack.partition(':'); // Matching a character
+auto [before, match, after] = haystack.partition(':'); // Structure unpacking
+auto [before, match, after] = haystack.partition(sz::byteset(":;", 2)); // Character-set argument
+auto [before, match, after] = haystack.partition(" : "); // String argument
+auto [before, match, after] = haystack.rpartition(sz::whitespaces_set()); // Split around the last whitespace
+```
+
+Combining those with the `split` function, one can easily parse a CSV file or HTTP headers.
+
+```cpp
+for (auto line : haystack.split("\r\n")) {
+    auto [key, _, value] = line.partition(':');
+    headers[key.strip()] = value.strip();
+}
+```
+
+Some other extensions are not present in the Python standard library either.
+Let's go through the C++ functionality category by category.
+
+- [Splits and Ranges](#splitting-and-partitioning).
+- Concatenating strings without allocations.
+- Random generation.
+- Edit distances and fuzzy search.
+
+Some of the StringZilla interfaces are not available even Python's native `str` class.
+Here is a sneak peek of the most useful ones.
+
+```cpp
+text.hash(); // -> 64 bit unsigned integer 
+text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
+text.contains_only(sz::byteset(" \t", 2)); // == text.find_first_not_of(sz::byteset(" \t", 2)) == npos;
+text.contains(' '); // == text.find(' ') != npos;
+
+// Simpler slicing than `substr`
+text.front(10); // -> sz::string_view
+text.back(10); // -> sz::string_view
+
+// Safe variants, which clamp the range into the string bounds
+using sz::string::cap;
+text.front(10, cap) == text.front(std::min(10, text.size()));
+text.back(10, cap) == text.back(std::min(10, text.size()));
+
+// Character set filtering
+text.lstrip(sz::whitespaces_set()).rstrip(sz::newlines_set()); // like Python
+text.front(sz::whitespaces_set()); // all leading whitespaces
+text.back(sz::digits_set()); // all numerical symbols forming the suffix
+
+// Incremental construction
+using sz::string::unchecked;
+text.push_back('x'); // no surprises here
+text.push_back('x', unchecked); // no bounds checking, Rust style
+text.try_push_back('x'); // returns `false` if the string is full and the allocation failed
+
+sz::concatenate(text, "@", domain, ".", tld); // No allocations
+```
+
+## Compilation Settings and Debugging
+
+__`SZ_DEBUG`__:
+
+> For maximal performance, the C library does not perform any bounds checking in Release builds.
+> In C++, bounds checking happens only in places where the STL `std::string` would do it.
+> If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
+> If not explicitly set, it will be inferred from the build type.
+
+__`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICELAKE`, `SZ_USE_NEON`, `SZ_USE_NEONAES`, `SZ_USE_NEONSHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2AES`, `SZ_USE_V128`, `SZ_USE_V128RELAXED`, `SZ_USE_RVV`, `SZ_USE_LASX`, `SZ_USE_POWERVSX`__:
+
+> One can explicitly disable certain families of SIMD instructions for compatibility purposes.
+> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
+
+__`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
+
+> One can explicitly disable certain families of PTX instructions for compatibility purposes.
+> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
+
+__`SZ_ENFORCE_SVE_OVER_NEON`__:
+
+> SVE and SVE2 are expected to supersede NEON on ARM architectures.
+> Still, oftentimes the equivalent SVE kernels are slower due to equally small register files and higher complexity of the instructions.
+> By default, when both SVE and NEON are available, SVE is used selectively only for the algorithms that benefit from it.
+> If you want to enforce SVE usage everywhere, define this flag.
+
+__`SZ_DYNAMIC_DISPATCH`__:
+
+> By default, StringZilla is a header-only library.
+> But if you are running on different generations of devices, it makes sense to pre-compile the library for all supported generations at once, and dispatch at runtime.
+> This flag does just that and is used to produce the `stringzilla.so` shared library, as well as the Python bindings.
+
+__`SZ_USE_MISALIGNED_LOADS`__:
+
+> Default is platform-dependent: enabled on x86 (where unaligned accesses are fast), disabled on others by default.
+> When enabled, many byte-level operations use word-sized loads, which can significantly accelerate the serial (SWAR) backend.
+> Consider enabling it explicitly if you are targeting platforms that support fast unaligned loads.
+
+__`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
+
+> When using the C header-only library one can disable the use of LibC.
+> This may affect the type resolution system on obscure hardware platforms. 
+> Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
+> In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize its symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
+> It also adds a layer of security, as the `stringzilla` isn't [undefined for NULL inputs][redhat-memcpy-ub] like `memcpy(NULL, NULL, 0)`.
+
+[ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
+[redhat-memcpy-ub]: https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
+
+__`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
+
+> When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string` and back.
+> If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
+> Moreover, if STL compatibility is a low priority, one can make the API safer by disabling the overloads, which are subjectively error prone.
+
+__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+
+> When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
+> It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.
+> You can also disable the shared library build, if you don't need it.
