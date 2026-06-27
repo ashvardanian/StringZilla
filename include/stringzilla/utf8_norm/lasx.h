@@ -6,7 +6,7 @@
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  `sz_utf8_norm_classify_lasx_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_lasx` / `sz_utf8_norm_violation_lasx`) reuse the force-inlined engines
+ *  entry points (`sz_utf8_norm_lasx` / `sz_utf8_find_denormalized_lasx`) reuse the force-inlined engines
  *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
  *
  *  The scanner mirrors the Skylake structure at 256-bit width: a 32-byte all-ASCII gate via the
@@ -123,8 +123,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_nor
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_lasx_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_lasx_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_lasx_);
 }
 
 #endif // SZ_USE_LASX

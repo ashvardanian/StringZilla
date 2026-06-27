@@ -60,7 +60,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
 }
 
 /** @brief  Locate the @p n-th code-point start (a non-continuation byte) via a per-tile count + nth-set-bit. */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     // A continuation byte is exactly a value `< 0xC0` as a signed int8 (see `sz_utf8_count_v128`), so a single
     // signed compare flags continuation lanes; the code-point starts are the complement.
@@ -78,7 +78,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128(sz_cptr_t text, sz_size_t length, sz_s
         return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_bits, n));
     }
 
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 /*  Decodes UTF-8 into UTF-32 runes. The pure-ASCII prefix (every byte `< 0x80`) widens 16 bytes straight

@@ -6,7 +6,7 @@
  *
  *  Benchmarks include:
  *  - Case folding for Unicode text - @b utf8_uncased_fold.
- *  - Uncased substring search for Unicode text - @b utf8_uncased_find.
+ *  - Uncased substring search for Unicode text - @b utf8_uncased_search.
  *
  *  Its sibling @b `bench_utf8_iterate.cpp` covers the @b `sz_utf8_*` iteration/segmentation family
  *  (codepoint counting, Nth-codepoint, newline/whitespace scanning, UAX-29 word/grapheme/sentence boundaries,
@@ -119,12 +119,12 @@ void bench_utf8_uncased_fold(environment_t const &env) {
 #pragma region Uncased Find Functions
 
 /** @brief Wraps a hardware-specific UTF-8 uncased find backend. */
-template <sz_utf8_uncased_find_t func_>
-struct utf8_uncased_find_from_sz {
+template <sz_utf8_uncased_search_t func_>
+struct utf8_uncased_search_from_sz {
 
     environment_t const &env;
 
-    utf8_uncased_find_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_uncased_search_from_sz(environment_t const &env_) : env(env_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
         std::string_view haystack = env.dataset;
@@ -158,40 +158,44 @@ struct utf8_uncased_find_from_sz {
     }
 };
 
-void bench_utf8_uncased_find(environment_t const &env) {
+void bench_utf8_uncased_search(environment_t const &env) {
 
-    auto validator = utf8_uncased_find_from_sz<sz_utf8_uncased_find_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_uncased_find_serial", validator).log();
+    auto validator = utf8_uncased_search_from_sz<sz_utf8_uncased_search_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_uncased_search_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_uncased_find_icelake", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_icelake> {env})
+    bench_unary(env, "sz_utf8_uncased_search_icelake", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_uncased_find_haswell", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_haswell> {env})
+    bench_unary(env, "sz_utf8_uncased_search_haswell", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_uncased_find_neon", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_neon> {env})
+    bench_unary(env, "sz_utf8_uncased_search_neon", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_neon> {env})
         .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_uncased_find_v128", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_v128> {env})
+    bench_unary(env, "sz_utf8_uncased_search_v128", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_v128> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_uncased_find_rvv", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_rvv> {env})
+    bench_unary(env, "sz_utf8_uncased_search_rvv", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_rvv> {env})
         .log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_uncased_find_lasx", validator, utf8_uncased_find_from_sz<sz_utf8_uncased_find_lasx> {env})
+    bench_unary(env, "sz_utf8_uncased_search_lasx", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_uncased_find_powervsx", validator,
-                utf8_uncased_find_from_sz<sz_utf8_uncased_find_powervsx> {env})
+    bench_unary(env, "sz_utf8_uncased_search_powervsx", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_powervsx> {env})
         .log(base);
 #endif
 }
@@ -213,7 +217,7 @@ int main(int argc, char const **argv) {
 
     // Unicode operations
     bench_utf8_uncased_fold(env);
-    bench_utf8_uncased_find(env);
+    bench_utf8_uncased_search(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

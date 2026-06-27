@@ -822,7 +822,9 @@ class find_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -948,7 +950,9 @@ class rfind_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1073,7 +1077,7 @@ class utf8_runes_view {
         iterator &operator+=(size_type n) noexcept {
             if (n == 0 || octets_offset_ >= octets_length_) return *this;
 
-            sz_cptr_t ptr = sz_utf8_find_nth(octets_start_ + octets_offset_, octets_length_ - octets_offset_, n);
+            sz_cptr_t ptr = sz_utf8_seek(octets_start_ + octets_offset_, octets_length_ - octets_offset_, n);
             if (!ptr) {
                 // Past the end.
                 octets_offset_ = octets_length_;
@@ -1112,7 +1116,9 @@ class utf8_runes_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -2066,7 +2072,7 @@ struct concatenation {
  *  @code{.cpp}
  *  sz::utf8_uncased_needle pattern("hello");
  *  for (auto const& haystack : haystacks) {
- *      auto match = haystack.utf8_uncased_find(pattern);
+ *      auto match = haystack.utf8_uncased_search(pattern);
  *      if (match) { ... }
  *  }
  *  @endcode
@@ -2695,8 +2701,8 @@ class basic_string_slice {
      *  @return `SZ_NULL_CHAR` if the string is already in @p form; otherwise a pointer into this
      *          string at the first offending byte.
      */
-    sz_cptr_t utf8_norm_violation(sz_normal_form_t form) const noexcept {
-        return sz_utf8_norm_violation(start_, length_, form);
+    sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
+        return sz_utf8_find_denormalized(start_, length_, form);
     }
 
     /**
@@ -2705,15 +2711,15 @@ class basic_string_slice {
      *              or `sz_normal_form_nfkc_k`.
      *  @return `true` if the string is in @p form, `false` otherwise.
      */
-    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_norm_violation(form) == SZ_NULL_CHAR; }
+    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_find_denormalized(form) == SZ_NULL_CHAR; }
 
     /**
      *  @brief Find the byte offset of the Nth UTF-8 character.
      *  @param n Zero-indexed character position.
      *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
      */
-    size_type utf8_find_nth(size_type n) const noexcept {
-        auto ptr = sz_utf8_find_nth(start_, length_, n);
+    size_type utf8_seek(size_type n) const noexcept {
+        auto ptr = sz_utf8_seek(start_, length_, n);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2745,10 +2751,10 @@ class basic_string_slice {
      *  @brief Find the byte offset of the first occurrence of a substring.
      *  @return Offset of the first occurrence or @c npos if not found.
      */
-    sized_match_t utf8_uncased_find(string_view other) const noexcept {
+    sized_match_t utf8_uncased_search(string_view other) const noexcept {
         sz_utf8_uncased_needle_metadata_t metadata = {};
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_uncased_find(start_, length_, other.data(), other.size(), &metadata, &match_length);
+        auto ptr = sz_utf8_uncased_search(start_, length_, other.data(), other.size(), &metadata, &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
@@ -2759,10 +2765,10 @@ class basic_string_slice {
      *  @return Match info with offset and length, or @c npos offset if not found.
      */
     template <typename needle_char_type_>
-    sized_match_t utf8_uncased_find(utf8_uncased_needle<needle_char_type_> const &needle) const noexcept {
+    sized_match_t utf8_uncased_search(utf8_uncased_needle<needle_char_type_> const &needle) const noexcept {
         sz_size_t match_length = 0;
-        auto ptr = sz_utf8_uncased_find(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
-                                        &match_length);
+        auto ptr = sz_utf8_uncased_search(start_, length_, needle.data(), needle.size(), &needle.metadata_ref(),
+                                          &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
@@ -2961,10 +2967,14 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -2979,10 +2989,14 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -4600,11 +4614,11 @@ class basic_string {
      *  @param n The character index (0-based).
      *  @return The byte offset, or npos if n >= character count.
      */
-    size_type utf8_find_nth(size_type n) const noexcept {
+    size_type utf8_seek(size_type n) const noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        auto ptr = sz_utf8_find_nth(start, length, n);
+        auto ptr = sz_utf8_seek(start, length, n);
         return ptr ? ptr - start : npos;
     }
 
@@ -4668,11 +4682,11 @@ class basic_string {
      *  @return `SZ_NULL_CHAR` if the string is already in @p form; otherwise a pointer into this
      *          string at the first offending byte.
      */
-    sz_cptr_t utf8_norm_violation(sz_normal_form_t form) const noexcept {
+    sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_string_range(&string_, &string_start, &string_length);
-        return sz_utf8_norm_violation(string_start, string_length, form);
+        return sz_utf8_find_denormalized(string_start, string_length, form);
     }
 
     /**
@@ -4681,7 +4695,7 @@ class basic_string {
      *              or `sz_normal_form_nfkc_k`.
      *  @return `true` if the string is in @p form, `false` otherwise.
      */
-    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_norm_violation(form) == SZ_NULL_CHAR; }
+    bool is_normalized(sz_normal_form_t form) const noexcept { return utf8_find_denormalized(form) == SZ_NULL_CHAR; }
 
     /**
      *  @brief Transform the string in-place into the given Unicode normalization form.

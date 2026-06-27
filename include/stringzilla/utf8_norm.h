@@ -6,7 +6,7 @@
  *  Includes core APIs:
  *
  *  - `sz_utf8_norm` - transform UTF-8 text into a Unicode normalization form
- *  - `sz_utf8_norm_violation` - locate the first byte that breaks a normalization form (NULL if none)
+ *  - `sz_utf8_find_denormalized` - locate the first byte that breaks a normalization form (NULL if none)
  *
  *  Normalization is built from three UAX #15 primitives - decomposition, canonical ordering, and
  *  composition - sharing one ISA-agnostic table set (`utf8_norm/tables.h`, generated from the UCD by
@@ -57,15 +57,15 @@ SZ_DYNAMIC sz_size_t sz_utf8_norm(      //
  *  @note Malformed UTF-8 is treated losslessly: any byte that does not begin a well-formed codepoint is
  *        an opaque 1-byte barrier that is inert (never a violation), and the scan resyncs at the next byte.
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_norm_violation( //
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_denormalized( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 
 /** @copydoc sz_utf8_norm */
 SZ_PUBLIC sz_size_t sz_utf8_norm_serial( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_serial( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_serial( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 
 #if SZ_USE_SKYLAKE
@@ -73,8 +73,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_serial( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_skylake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_skylake( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_skylake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -83,8 +83,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_skylake( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_icelake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_icelake( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_icelake( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -93,8 +93,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_icelake( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_haswell( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_haswell( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_haswell( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -103,8 +103,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_haswell( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_neon( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_neon( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -113,8 +113,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_sve( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_sve( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -123,8 +123,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_sve2( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve2( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_sve2( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -133,8 +133,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve2( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_rvv( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_rvv( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_rvv( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -143,8 +143,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_rvv( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_v128( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -153,8 +153,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_v128relaxed( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128relaxed( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128relaxed( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -163,8 +163,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128relaxed( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_lasx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_lasx( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_lasx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -173,8 +173,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_lasx( //
 SZ_PUBLIC sz_size_t sz_utf8_norm_powervsx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination);
 
-/** @copydoc sz_utf8_norm_violation */
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_powervsx( //
+/** @copydoc sz_utf8_find_denormalized */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_powervsx( //
     sz_cptr_t source, sz_size_t length, sz_normal_form_t form);
 #endif
 
@@ -229,31 +229,31 @@ SZ_DYNAMIC sz_size_t sz_utf8_norm(sz_cptr_t source, sz_size_t length, sz_normal_
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_norm_violation(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_DYNAMIC sz_cptr_t sz_utf8_find_denormalized(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_norm_violation_icelake(source, length, form);
+    return sz_utf8_find_denormalized_icelake(source, length, form);
 #elif SZ_USE_SKYLAKE
-    return sz_utf8_norm_violation_skylake(source, length, form);
+    return sz_utf8_find_denormalized_skylake(source, length, form);
 #elif SZ_USE_HASWELL
-    return sz_utf8_norm_violation_haswell(source, length, form);
+    return sz_utf8_find_denormalized_haswell(source, length, form);
 #elif SZ_USE_SVE2
-    return sz_utf8_norm_violation_sve2(source, length, form);
+    return sz_utf8_find_denormalized_sve2(source, length, form);
 #elif SZ_USE_SVE
-    return sz_utf8_norm_violation_sve(source, length, form);
+    return sz_utf8_find_denormalized_sve(source, length, form);
 #elif SZ_USE_NEON
-    return sz_utf8_norm_violation_neon(source, length, form);
+    return sz_utf8_find_denormalized_neon(source, length, form);
 #elif SZ_USE_RVV
-    return sz_utf8_norm_violation_rvv(source, length, form);
+    return sz_utf8_find_denormalized_rvv(source, length, form);
 #elif SZ_USE_LASX
-    return sz_utf8_norm_violation_lasx(source, length, form);
+    return sz_utf8_find_denormalized_lasx(source, length, form);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_norm_violation_powervsx(source, length, form);
+    return sz_utf8_find_denormalized_powervsx(source, length, form);
 #elif SZ_USE_V128RELAXED
-    return sz_utf8_norm_violation_v128relaxed(source, length, form);
+    return sz_utf8_find_denormalized_v128relaxed(source, length, form);
 #elif SZ_USE_V128
-    return sz_utf8_norm_violation_v128(source, length, form);
+    return sz_utf8_find_denormalized_v128(source, length, form);
 #else
-    return sz_utf8_norm_violation_serial(source, length, form);
+    return sz_utf8_find_denormalized_serial(source, length, form);
 #endif
 }
 

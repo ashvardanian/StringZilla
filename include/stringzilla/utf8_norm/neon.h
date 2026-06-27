@@ -6,7 +6,7 @@
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  `sz_utf8_norm_classify_neon_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_neon` / `sz_utf8_norm_violation_neon`) reuse the force-inlined engines
+ *  entry points (`sz_utf8_norm_neon` / `sz_utf8_find_denormalized_neon`) reuse the force-inlined engines
  *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
  *
  *  The scanner is a clean port of the proven `utf8_tokens/sz_utf8_find_denormalized_neon` hot loop -
@@ -120,8 +120,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t length, sz_nor
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_neon_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_neon_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_neon_);
 }
 
 #if defined(__clang__)

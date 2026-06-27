@@ -354,7 +354,7 @@ extension StringZillaViewable {
     public func utf8NormalizationViolation(_ form: StringZillaNormalizationForm) -> Index? {
         var result: Index?
         withStringZillaScope { pointer, length in
-            if let violationPointer = sz_utf8_norm_violation(pointer, length, form.rawValue) {
+            if let violationPointer = sz_utf8_find_denormalized(pointer, length, form.rawValue) {
                 result = self.stringZillaByteOffset(forByte: violationPointer, after: pointer)
             }
         }
@@ -378,7 +378,7 @@ extension StringZillaViewable {
             needle.withStringZillaScope { nPointer, nLength in
                 var metadata = sz_utf8_uncased_needle_metadata_t()
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_uncased_find(
+                if let matchPointer = sz_utf8_uncased_search(
                     hPointer,
                     hLength,
                     nPointer,
@@ -594,7 +594,7 @@ public final class Utf8UncasedNeedle {
                 let nLength = sz_size_t(needleBuffer.count)
 
                 var matchedLength: sz_size_t = 0
-                if let matchPointer = sz_utf8_uncased_find(
+                if let matchPointer = sz_utf8_uncased_search(
                     hPointer,
                     hLength,
                     nPointer,

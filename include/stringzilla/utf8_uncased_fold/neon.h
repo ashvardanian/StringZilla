@@ -596,7 +596,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source
  *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII.
  *
  *  Armenian uppercase spans two lead bytes and folds into three target blocks, reusing the exact
- *  math verified in the NEON finder's `sz_utf8_uncased_find_neon_armenian_fold_u8x16x2_`:
+ *  math verified in the NEON finder's `sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_`:
  *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
  *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
  *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)

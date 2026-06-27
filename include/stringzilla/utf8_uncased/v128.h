@@ -470,7 +470,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, 
 typedef void (*sz_utf8_uncased_fold_strip_v128_t_)(sz_u8_t const *, sz_size_t, sz_u8_t *);
 typedef long (*sz_utf8_uncased_alarm_strip_v128_t_)(sz_u8_t const *, sz_size_t);
 
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                                    //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                                  //
     sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,       //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
@@ -507,7 +507,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
 
         if (alarm) {
             if (alarm(source, chunk_size) >= 0) {
-                sz_cptr_t match = sz_utf8_uncased_find_in_danger_zone_( //
+                sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
                     haystack, haystack_length, needle, needle_length, haystack_ptr, chunk_size,
                     needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, matched_length);
                 if (match) return match;
@@ -553,7 +553,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
     }
 
     if (alarm && haystack_ptr < haystack_end) {
-        sz_cptr_t match = sz_utf8_uncased_find_in_danger_zone_( //
+        sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
             haystack, haystack_length, needle, needle_length, haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr),
             needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, matched_length);
         if (match) return match;
@@ -563,9 +563,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_scripted_v128_(                      
 
 #pragma endregion // Scripted driver
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128(     //
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_v128(   //
     sz_cptr_t haystack, sz_size_t haystack_length, //
     sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
@@ -577,7 +577,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128(     //
 
     int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
     int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_uncased_violation_v128(needle, needle_length) == SZ_NULL_CHAR)) {
+    if (known_agnostic || (is_unknown && sz_utf8_find_cased_v128(needle, needle_length) == SZ_NULL_CHAR)) {
         sz_cptr_t result = sz_find_v128(haystack, haystack_length, needle, needle_length);
         *matched_length = result ? needle_length : 0;
         return result;
@@ -586,49 +586,49 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_v128(     //
     if (is_unknown) {
         sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
         if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                               matched_length);
+            return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                                 matched_length);
     }
 
     switch (needle_metadata->kernel_id) {
     case sz_utf8_uncased_rune_ascii_invariant_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, SZ_NULL, haystack,
-                                                   haystack_length, needle, needle_length, needle_metadata,
-                                                   matched_length);
+        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, SZ_NULL, haystack,
+                                                     haystack_length, needle, needle_length, needle_metadata,
+                                                     matched_length);
     case sz_utf8_uncased_rune_safe_western_europe_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_western_europe_strip_v128_, sz_utf8_uncased_alarm_western_europe_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_central_europe_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_central_europe_strip_v128_, sz_utf8_uncased_alarm_central_europe_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_cyrillic_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_cyrillic_strip_v128_, sz_utf8_uncased_alarm_cyrillic_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_greek_k:
-        return sz_utf8_uncased_find_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_,
-                                                   sz_utf8_uncased_alarm_greek_strip_v128_, haystack, haystack_length,
-                                                   needle, needle_length, needle_metadata, matched_length);
+        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_,
+                                                     sz_utf8_uncased_alarm_greek_strip_v128_, haystack, haystack_length,
+                                                     needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_armenian_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_armenian_strip_v128_, sz_utf8_uncased_alarm_armenian_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_vietnamese_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_vietnamese_strip_v128_, sz_utf8_uncased_alarm_vietnamese_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     case sz_utf8_uncased_rune_safe_georgian_k:
-        return sz_utf8_uncased_find_scripted_v128_(
+        return sz_utf8_uncased_search_scripted_v128_(
             sz_utf8_uncased_fold_ascii_strip_v128_, sz_utf8_uncased_alarm_georgian_strip_v128_, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     default: break;
     }
 
     needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-    return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                       matched_length);
+    return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                         matched_length);
 }
 
 #pragma region Case Invariance
@@ -638,7 +638,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low, v128_t high) {
     return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low) | ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high) << 16);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t length) {
+SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     while (length) {
         sz_size_t block_length = length < 29 ? length : 29;
@@ -654,7 +654,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                                                              sz_utf8_in_range_v128_(high, 'A', 26));
         sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'a', 26),
                                                              sz_utf8_in_range_v128_(high, 'a', 26));
-        if (is_upper | is_lower) return sz_utf8_uncased_violation_serial(str, length);
+        if (is_upper | is_lower) return sz_utf8_find_cased_serial(str, length);
 
         v128_t x80 = wasm_i8x16_splat((sz_i8_t)0x80);
         sz_u32_t is_non_ascii = sz_utf8_uncased_movemask_v128x2_(wasm_u8x16_ge(low, x80), wasm_u8x16_ge(high, x80)) &
@@ -678,7 +678,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                     v128_t b = wasm_i8x16_splat((sz_i8_t)seconds[value]);
                     hit |= sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, b), wasm_i8x16_eq(high, b));
                 }
-                if ((is_four << 1) & hit) return sz_utf8_uncased_violation_serial(str, length);
+                if ((is_four << 1) & hit) return sz_utf8_find_cased_serial(str, length);
             }
             if (is_two) {
                 sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xC3, 0x14),
@@ -689,23 +689,23 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                 if (is_c2) {
                     sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xb5),
                                                                       wasm_i8x16_eq(high, xb5));
-                    if ((is_c2 << 1) & is_b5) return sz_utf8_uncased_violation_serial(str, length);
+                    if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial(str, length);
                 }
-                if (is_bicameral & is_two) return sz_utf8_uncased_violation_serial(str, length);
+                if (is_bicameral & is_two) return sz_utf8_find_cased_serial(str, length);
             }
             if (is_three) {
                 v128_t xe1 = wasm_i8x16_splat((sz_i8_t)0xE1), xef = wasm_i8x16_splat((sz_i8_t)0xEF);
                 sz_u32_t is_e1 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe1), wasm_i8x16_eq(high, xe1));
-                if (is_e1 & is_three) return sz_utf8_uncased_violation_serial(str, length);
+                if (is_e1 & is_three) return sz_utf8_find_cased_serial(str, length);
                 sz_u32_t is_ef = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xef), wasm_i8x16_eq(high, xef));
-                if (is_ef & is_three) return sz_utf8_uncased_violation_serial(str, length);
+                if (is_ef & is_three) return sz_utf8_find_cased_serial(str, length);
                 v128_t xe2 = wasm_i8x16_splat((sz_i8_t)0xE2);
                 sz_u32_t is_e2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe2), wasm_i8x16_eq(high, xe2)) &
                                  is_three;
                 if (is_e2) {
                     sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x80, 0x04),
                                                                         sz_utf8_in_range_v128_(high, 0x80, 0x04));
-                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_uncased_violation_serial(str, length);
+                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial(str, length);
                 }
                 v128_t xea = wasm_i8x16_splat((sz_i8_t)0xEA);
                 sz_u32_t is_ea = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xea), wasm_i8x16_eq(high, xea)) &
@@ -715,7 +715,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_v128(sz_cptr_t str, sz_size_t leng
                                                                       sz_utf8_in_range_v128_(high, 0x99, 0x07));
                     sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xAC, 0x03),
                                                                       sz_utf8_in_range_v128_(high, 0xAC, 0x03));
-                    if ((is_ea << 1) & (is_99 | is_ac)) return sz_utf8_uncased_violation_serial(str, length);
+                    if ((is_ea << 1) & (is_99 | is_ac)) return sz_utf8_find_cased_serial(str, length);
                 }
             }
         }

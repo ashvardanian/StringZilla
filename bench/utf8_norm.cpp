@@ -6,7 +6,7 @@
  *
  *  Benchmarks include:
  *  - Unicode normalization for UTF-8 text - @b utf8_norm.
- *  - Normalization-form violation scanning (quick-check) - @b utf8_norm_violation.
+ *  - Normalization-form violation scanning (quick-check) - @b utf8_find_denormalized.
  *
  *  Both sections normalize to @b NFC, the most common interchange form.
  *
@@ -126,12 +126,12 @@ void bench_utf8_norm(environment_t const &env) {
 #pragma region Violation (Quick-Check) Functions
 
 /** @brief Wraps a hardware-specific UTF-8 normalization-violation backend (quick-check scan for NFC). */
-template <sz_utf8_norm_violation_t func_>
-struct utf8_norm_violation_from_sz {
+template <sz_utf8_find_denormalized_t func_>
+struct utf8_find_denormalized_from_sz {
 
     environment_t const &env;
 
-    utf8_norm_violation_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_find_denormalized_from_sz(environment_t const &env_) : env(env_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
         return operator()(env.tokens[token_index]);
@@ -148,64 +148,64 @@ struct utf8_norm_violation_from_sz {
     }
 };
 
-void bench_utf8_norm_violation(environment_t const &env) {
+void bench_utf8_find_denormalized(environment_t const &env) {
 
-    auto validator = utf8_norm_violation_from_sz<sz_utf8_norm_violation_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_norm_violation_serial", validator).log();
+    auto validator = utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_find_denormalized_serial", validator).log();
 
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_norm_violation_icelake", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_icelake> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_icelake", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_icelake> {env})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_utf8_norm_violation_skylake", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_skylake> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_skylake", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_skylake> {env})
         .log(base);
 #endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_norm_violation_haswell", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_haswell> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_haswell", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_haswell> {env})
         .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_norm_violation_neon", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_neon> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_neon", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_neon> {env})
         .log(base);
 #endif
 #if SZ_USE_SVE2
-    bench_unary(env, "sz_utf8_norm_violation_sve2", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_sve2> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_sve2", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve2> {env})
         .log(base);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_utf8_norm_violation_sve", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_sve> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_sve", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_sve> {env})
         .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_norm_violation_rvv", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_rvv> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_rvv", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_rvv> {env})
         .log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_norm_violation_lasx", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_lasx> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_lasx", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_lasx> {env})
         .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_norm_violation_powervsx", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_powervsx> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_powervsx", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_powervsx> {env})
         .log(base);
 #endif
 #if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_norm_violation_v128relaxed", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_v128relaxed> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_v128relaxed", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128relaxed> {env})
         .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_norm_violation_v128", validator,
-                utf8_norm_violation_from_sz<sz_utf8_norm_violation_v128> {env})
+    bench_unary(env, "sz_utf8_find_denormalized_v128", validator,
+                utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_v128> {env})
         .log(base);
 #endif
 }
@@ -227,7 +227,7 @@ int main(int argc, char const **argv) {
 
     // Unicode operations
     bench_utf8_norm(env);
-    bench_utf8_norm_violation(env);
+    bench_utf8_find_denormalized(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

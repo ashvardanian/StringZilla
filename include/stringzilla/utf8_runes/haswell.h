@@ -51,7 +51,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     // The logic of this function is similar to `sz_utf8_count_haswell`, but uses PDEP
     // instruction in the inner loop to locate Nth character start byte efficiently
     // without one more loop.
@@ -83,7 +83,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, s
     }
 
     // Process remaining bytes with serial
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #pragma region Shared SIMD leaf substrate

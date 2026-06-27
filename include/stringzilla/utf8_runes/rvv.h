@@ -485,7 +485,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
  *  (the lane that is a lead and whose prefix count equals the target). Runs at `e8m4` so the `vbool2`
  *  lead mask pairs with a `u16m8` iota whose lane count never overflows the prefix counts.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {

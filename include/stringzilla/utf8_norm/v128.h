@@ -6,7 +6,7 @@
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
  *  `sz_utf8_norm_classify_v128_`, which locates the first non-inert byte for a form. The two public
- *  entry points (`sz_utf8_norm_v128` / `sz_utf8_norm_violation_v128`) reuse the force-inlined engines
+ *  entry points (`sz_utf8_norm_v128` / `sz_utf8_find_denormalized_v128`) reuse the force-inlined engines
  *  from `serial.h`, passing this scanner as the constant function address that devirtualizes the call.
  *
  *  WASM SIMD128 is 16 bytes wide like NEON, but it has only a 16-entry `wasm_i8x16_swizzle`, so the
@@ -95,8 +95,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_v128(sz_cptr_t source, sz_size_t length, sz_nor
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_v128_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_v128_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_v128_);
 }
 
 #pragma endregion simd128

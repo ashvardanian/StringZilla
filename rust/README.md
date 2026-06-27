@@ -352,17 +352,17 @@ assert_eq!(spaced, b"abc");
 
 ### Case Folding and Normalization
 
-`utf8_uncased_fold` case-folds into a destination buffer, `utf8_norm` applies a Unicode normal form, and `utf8_norm_violation` checks conformance without rewriting.
+`utf8_uncased_fold` case-folds into a destination buffer, `utf8_norm` applies a Unicode normal form, and `utf8_find_denormalized` checks conformance without rewriting.
 
 ```rust
 pub fn utf8_uncased_fold<T: AsRef<[u8]>, D: AsMut<[u8]>>(source: T, destination: &mut D) -> usize;
 pub fn utf8_norm<T: AsRef<[u8]>, D: AsMut<[u8]>>(source: T, form: Utf8NormalForm, destination: &mut D) -> usize;
-pub fn utf8_norm_violation<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -> Option<usize>;
+pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -> Option<usize>;
 ```
 
 `utf8_uncased_fold` applies Unicode case folding, for example `ß` → `ss`, returning the number of bytes written.
 `utf8_norm` normalizes to one of the four `Utf8NormalForm` variants: `Nfd`, `Nfc`, `Nfkd`, and `Nfkc`.
-`utf8_norm_violation` is a fast check returning the byte offset of the first non-conforming byte, or `None` if already normalized:
+`utf8_find_denormalized` is a fast check returning the byte offset of the first non-conforming byte, or `None` if already normalized:
 
 ```rust
 use stringzilla::sz::{self, Utf8NormalForm};
@@ -372,8 +372,8 @@ let len = sz::utf8_uncased_fold("HELLO WORLD", &mut dest);
 assert_eq!(&dest[..len], b"hello world");
 
 // NFC check: a decomposed "café" (e + combining acute) violates NFC.
-assert!(sz::utf8_norm_violation("cafe\u{0301}", Utf8NormalForm::Nfc).is_some());
-assert!(sz::utf8_norm_violation("caf\u{00E9}", Utf8NormalForm::Nfc).is_none());
+assert!(sz::utf8_find_denormalized("cafe\u{0301}", Utf8NormalForm::Nfc).is_some());
+assert!(sz::utf8_find_denormalized("caf\u{00E9}", Utf8NormalForm::Nfc).is_none());
 
 let mut out = vec![0u8; "cafe\u{0301}".len() * 18];
 let n = sz::utf8_norm("cafe\u{0301}", Utf8NormalForm::Nfc, &mut out);
@@ -384,10 +384,10 @@ Destination buffers must be sized for worst-case expansion: `source.len() * 3` f
 
 ### Uncased UTF-8 Search
 
-`utf8_uncased_find` locates a needle in a haystack under Unicode case folding.
+`utf8_uncased_search` locates a needle in a haystack under Unicode case folding.
 
 ```rust
-pub fn utf8_uncased_find<H: AsRef<[u8]>, N: Utf8UncasedNeedleArg>(haystack: H, needle: N) -> Option<(usize, usize)>;
+pub fn utf8_uncased_search<H: AsRef<[u8]>, N: Utf8UncasedNeedleArg>(haystack: H, needle: N) -> Option<(usize, usize)>;
 ```
 
 Returns `Some((offset, matched_length))`, where the matched length may differ from the needle length due to case folding — `ß` matching `SS`, for instance.
@@ -396,10 +396,10 @@ A reusable `Utf8UncasedNeedle` caches needle metadata across searches, and `Utf8
 ```rust
 use stringzilla::sz::{self, Utf8UncasedNeedle, Utf8UncasedMatches, IndexSpan};
 
-assert_eq!(sz::utf8_uncased_find("Hello WORLD", "world"), Some((6, 5)));
+assert_eq!(sz::utf8_uncased_search("Hello WORLD", "world"), Some((6, 5)));
 
 let needle = Utf8UncasedNeedle::new(b"hello");
-assert_eq!(sz::utf8_uncased_find(b"HELLO there", &needle), Some((0, 5)));
+assert_eq!(sz::utf8_uncased_search(b"HELLO there", &needle), Some((0, 5)));
 
 let spans: Vec<IndexSpan> = Utf8UncasedMatches::new(b"Hello hello", b"hello").collect();
 assert_eq!(spans, vec![IndexSpan::new(0, 5), IndexSpan::new(6, 5)]);

@@ -60,7 +60,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
 
 /*  x86-`movemask`-equivalent for VSX: gathers the MSB of each of the 16 bytes into bit `i` (lowest-addressed
  *  byte → bit 0) via `vec_vbpermq`, identical to `sz_utf8_movemask_powervsx_` below but reachable before its
- *  first user (`sz_utf8_find_nth_powervsx` and the multistep iterators); distinctly named so both coexist in
+ *  first user (`sz_utf8_seek_powervsx` and the multistep iterators); distinctly named so both coexist in
  *  one translation unit. */
 SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
@@ -74,11 +74,11 @@ SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char c
 }
 
 /**
- *  @brief Locate the start byte of the n-th code-point (0-indexed), mirroring `sz_utf8_find_nth_serial`.
+ *  @brief Locate the start byte of the n-th code-point (0-indexed), mirroring `sz_utf8_seek_serial`.
  *         Per tile a code-point-start bitmask `~continuation_mask` is popcounted to skip whole tiles; the
  *         n-th start's lane comes from `sz_u32_nth_set_bit`. The `< 16` tail defers to the serial reference.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     __vector unsigned char const header_mask_u8x16 = vec_splats((unsigned char)0xC0);
@@ -99,7 +99,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_powervsx(sz_cptr_t text, sz_size_t length, 
         return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_bits, n));
     }
 
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #if !SZ_IS_BIG_ENDIAN_

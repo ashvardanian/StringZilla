@@ -392,7 +392,7 @@ typedef struct {
 
 /**
  *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
- *          Uses `sz_utf8_uncased_find` for Unicode-aware case folding.
+ *          Uses `sz_utf8_uncased_search` for Unicode-aware case folding.
  */
 typedef struct {
     PyObject ob_base;
@@ -4002,35 +4002,35 @@ static PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
     return result_bytes;
 }
 
-static char const doc_utf8_norm_violation[] =                                                   //
-    "Return the byte offset of the first normalization violation, or None.\n"                   //
-    "\n"                                                                                        //
-    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"               //
-    "that breaks the given normalization form (first non-Yes Quick-Check result\n"              //
-    "or canonical-ordering violation). Returns None when the string is already\n"               //
-    "fully normalized.\n"                                                                       //
-    "\n"                                                                                        //
-    "Args:\n"                                                                                   //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                                 //
-    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                    //
-    "\n"                                                                                        //
-    "Returns:\n"                                                                                //
-    "    int | None: Byte offset of first violation, or None if already normalized.\n"          //
-    "\n"                                                                                        //
-    "Example:\n"                                                                                //
-    "    >>> sz.utf8_norm_violation('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"           //
-    "    3\n"                                                                                   //
-    "    >>> sz.utf8_norm_violation('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
+static char const doc_utf8_find_denormalized[] =                                                   //
+    "Return the byte offset of the first normalization violation, or None.\n"                      //
+    "\n"                                                                                           //
+    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"                  //
+    "that breaks the given normalization form (first non-Yes Quick-Check result\n"                 //
+    "or canonical-ordering violation). Returns None when the string is already\n"                  //
+    "fully normalized.\n"                                                                          //
+    "\n"                                                                                           //
+    "Args:\n"                                                                                      //
+    "    text (Str or str or bytes): The input UTF-8 string.\n"                                    //
+    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                       //
+    "\n"                                                                                           //
+    "Returns:\n"                                                                                   //
+    "    int | None: Byte offset of first violation, or None if already normalized.\n"             //
+    "\n"                                                                                           //
+    "Example:\n"                                                                                   //
+    "    >>> sz.utf8_find_denormalized('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"           //
+    "    3\n"                                                                                      //
+    "    >>> sz.utf8_find_denormalized('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
     "    True";
 
-static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                              PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
+                                                 Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member + 1; // +1 for `form`
     PyObject *form_obj = NULL;
 
     if (positional_args_count < nargs_expected - 1 || positional_args_count > nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_norm_violation() takes %zd positional argument(s) (%zd given)",
+        PyErr_Format(PyExc_TypeError, "utf8_find_denormalized() takes %zd positional argument(s) (%zd given)",
                      nargs_expected, positional_args_count);
         return NULL;
     }
@@ -4044,20 +4044,21 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             if (PyUnicode_CompareWithASCIIString(key, "form") == 0) {
                 if (form_obj != NULL) {
-                    PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() got multiple values for argument 'form'");
+                    PyErr_SetString(PyExc_TypeError,
+                                    "utf8_find_denormalized() got multiple values for argument 'form'");
                     return NULL;
                 }
                 form_obj = args[positional_args_count + i];
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_norm_violation() got unexpected keyword argument '%U'", key);
+                PyErr_Format(PyExc_TypeError, "utf8_find_denormalized() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
     }
 
     if (form_obj == NULL) {
-        PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() missing required argument: 'form'");
+        PyErr_SetString(PyExc_TypeError, "utf8_find_denormalized() missing required argument: 'form'");
         return NULL;
     }
 
@@ -4066,7 +4067,7 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     Py_ssize_t form_len = 0;
     char const *form_str = PyUnicode_AsUTF8AndSize(form_obj, &form_len);
     if (!form_str) {
-        PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() argument 'form' must be a string");
+        PyErr_SetString(PyExc_TypeError, "utf8_find_denormalized() argument 'form' must be a string");
         return NULL;
     }
     if (strncmp(form_str, "NFD", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfd_k; }
@@ -4075,7 +4076,7 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     else if (strncmp(form_str, "NFKC", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkc_k; }
     else {
         PyErr_Format(PyExc_ValueError,
-                     "utf8_norm_violation() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'", form_str);
+                     "utf8_find_denormalized() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'", form_str);
         return NULL;
     }
 
@@ -4087,14 +4088,14 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
         return NULL;
     }
 
-    sz_cptr_t violation = sz_utf8_norm_violation(str.start, str.length, form);
+    sz_cptr_t violation = sz_utf8_find_denormalized(str.start, str.length, form);
     if (violation == SZ_NULL_CHAR) { Py_RETURN_NONE; }
 
     sz_size_t offset = (sz_size_t)(violation - str.start);
     return PyLong_FromSize_t(offset);
 }
 
-static char const doc_utf8_uncased_find[] =                                             //
+static char const doc_utf8_uncased_search[] =                                           //
     "Find substring using Unicode uncased matching.\n"                                  //
     "\n"                                                                                //
     "Performs a uncased search using Unicode case folding rules,\n"                     //
@@ -4115,15 +4116,15 @@ static char const doc_utf8_uncased_find[] =                                     
     "    int: Index of the first match, or -1 if not found.\n"                          //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_find('Hello World', 'WORLD')  # str: codepoint offset\n"   //
+    "    >>> sz.utf8_uncased_search('Hello World', 'WORLD')  # str: codepoint offset\n" //
     "    6\n"                                                                           //
-    "    >>> sz.utf8_uncased_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"          //
+    "    >>> sz.utf8_uncased_search('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
     "    0\n"                                                                           //
-    "    >>> sz.utf8_uncased_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"   //
+    "    >>> sz.utf8_uncased_search(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
     "    0";
 
-static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                            PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                              PyObject *args_names_tuple) {
     int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
     // Argument objects
@@ -4182,7 +4183,7 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
             if (validate < 0) return NULL;
         }
         else {
-            PyErr_Format(PyExc_TypeError, "utf8_uncased_find() got unexpected keyword argument '%U'", key);
+            PyErr_Format(PyExc_TypeError, "utf8_uncased_search() got unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
@@ -4236,14 +4237,14 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
 
         // Convert codepoint start to byte offset
         if (cp_start > 0) {
-            sz_cptr_t start_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_start);
+            sz_cptr_t start_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_start);
             byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
         }
 
         // Convert codepoint end to byte offset
         sz_size_t byte_offset_end = haystack_full.length;
         if (cp_end < total_codepoints) {
-            sz_cptr_t end_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_end);
+            sz_cptr_t end_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_end);
             byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
         }
 
@@ -4281,8 +4282,8 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
 
     sz_size_t matched_length = 0;
     sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
-    sz_cptr_t result = sz_utf8_uncased_find(haystack.start, haystack.length, needle.start, needle.length,
-                                            &needle_metadata, &matched_length);
+    sz_cptr_t result = sz_utf8_uncased_search(haystack.start, haystack.length, needle.start, needle.length,
+                                              &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
@@ -6330,8 +6331,9 @@ static PyMethodDef Str_methods[] = {
     {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
+    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
+     doc_utf8_find_denormalized},
+    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, SZ_METHOD_FLAGS, doc_utf8_uncased_search},
     {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
@@ -6821,7 +6823,7 @@ static PyObject *Utf8CodepointsType_next(Utf8Codepoints *self) {
         if (self->cursor >= self->end) return NULL;
         sz_size_t unpacked = 0;
         sz_cptr_t next = sz_utf8_decode(self->cursor, (sz_size_t)(self->end - self->cursor), self->batch_runes,
-                                              sz_iterators_default_steps_k, &unpacked);
+                                        sz_iterators_default_steps_k, &unpacked);
         // A well-formed but truncated trailing sequence yields nothing and does not advance; we own the whole text,
         // so finalize it as one U+FFFD (its maximal subpart) rather than silently dropping it.
         if (unpacked == 0 && next < self->end) {
@@ -7124,8 +7126,8 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
 
     // Search for next match
     sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_uncased_find(self->current, remaining, self->needle.start, self->needle.length,
-                                           &self->metadata, &matched_length);
+    sz_cptr_t match = sz_utf8_uncased_search(self->current, remaining, self->needle.start, self->needle.length,
+                                             &self->metadata, &matched_length);
 
     if (!match) return NULL;
 
@@ -9461,8 +9463,9 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
+    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
+     doc_utf8_find_denormalized},
+    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, SZ_METHOD_FLAGS, doc_utf8_uncased_search},
     {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 

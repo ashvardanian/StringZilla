@@ -7,7 +7,7 @@
  *
  *  Benchmarks include:
  *  - Codepoint counting - @b utf8_count.
- *  - Nth-codepoint location - @b utf8_find_nth (the BMI/PDEP "Nth set bit" kernel on x86).
+ *  - Nth-codepoint location - @b utf8_seek (the BMI/PDEP "Nth set bit" kernel on x86).
  *  - Newline enumeration - @b utf8_newlines.
  *  - Whitespace enumeration - @b utf8_whitespaces (Unicode White_Space property).
  *  - UAX-29 word-boundary segmentation - @b utf8_words.
@@ -42,7 +42,7 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-#include "stringzilla/utf8_runes.h"     // `sz_utf8_count`, `sz_utf8_find_nth`, `sz_utf8_decode`
+#include "stringzilla/utf8_runes.h"     // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
 #include "stringzilla/utf8_tokens.h"    // `sz_utf8_newlines`, `sz_utf8_whitespaces`
 #include "stringzilla/utf8_words.h"     // `sz_utf8_words`
 #include "stringzilla/utf8_graphemes.h" // `sz_utf8_graphemes`
@@ -68,10 +68,10 @@ struct utf8_count_from_sz {
 
 /** @brief  Locates the middle codepoint of each token; checksum = byte offset of the located codepoint. */
 template <auto func_>
-struct utf8_find_nth_from_sz {
+struct utf8_seek_from_sz {
     environment_t const &env;
     std::vector<sz_size_t> targets; // Nth codepoint to locate per token, precomputed outside the timed call.
-    utf8_find_nth_from_sz(environment_t const &env_) : env(env_) {
+    utf8_seek_from_sz(environment_t const &env_) : env(env_) {
         targets.reserve(env.tokens.size());
         for (auto const &token : env.tokens) targets.push_back(sz_utf8_count_serial(token.data(), token.size()) / 2);
     }
@@ -200,39 +200,35 @@ void bench_utf8_count(environment_t const &env) {
 #endif
 }
 
-void bench_utf8_find_nth(environment_t const &env) {
-    auto base_v = utf8_find_nth_from_sz<sz_utf8_find_nth_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_find_nth_serial", base_v).log();
+void bench_utf8_seek(environment_t const &env) {
+    auto base_v = utf8_seek_from_sz<sz_utf8_seek_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_seek_serial", base_v).log();
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_find_nth_haswell", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_haswell> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_seek_haswell", base_v, utf8_seek_from_sz<sz_utf8_seek_haswell> {env}).log(base);
 #endif
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_find_nth_icelake", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_icelake> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_seek_icelake", base_v, utf8_seek_from_sz<sz_utf8_seek_icelake> {env}).log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_find_nth_neon", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_neon> {env}).log(base);
+    bench_unary(env, "sz_utf8_seek_neon", base_v, utf8_seek_from_sz<sz_utf8_seek_neon> {env}).log(base);
 #endif
 #if SZ_USE_SVE2
-    bench_unary(env, "sz_utf8_find_nth_sve2", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_sve2> {env}).log(base);
+    bench_unary(env, "sz_utf8_seek_sve2", base_v, utf8_seek_from_sz<sz_utf8_seek_sve2> {env}).log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_find_nth_v128", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128> {env}).log(base);
+    bench_unary(env, "sz_utf8_seek_v128", base_v, utf8_seek_from_sz<sz_utf8_seek_v128> {env}).log(base);
 #endif
 #if SZ_USE_V128RELAXED
-    bench_unary(env, "sz_utf8_find_nth_v128relaxed", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_v128relaxed> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_seek_v128relaxed", base_v, utf8_seek_from_sz<sz_utf8_seek_v128relaxed> {env}).log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_find_nth_rvv", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_rvv> {env}).log(base);
+    bench_unary(env, "sz_utf8_seek_rvv", base_v, utf8_seek_from_sz<sz_utf8_seek_rvv> {env}).log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_find_nth_powervsx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_powervsx> {env})
-        .log(base);
+    bench_unary(env, "sz_utf8_seek_powervsx", base_v, utf8_seek_from_sz<sz_utf8_seek_powervsx> {env}).log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_find_nth_lasx", base_v, utf8_find_nth_from_sz<sz_utf8_find_nth_lasx> {env}).log(base);
+    bench_unary(env, "sz_utf8_seek_lasx", base_v, utf8_seek_from_sz<sz_utf8_seek_lasx> {env}).log(base);
 #endif
 }
 
@@ -434,7 +430,7 @@ int main(int argc, char const **argv) {
     std::printf("Starting UTF-8 benchmarks...\n");
 
     bench_utf8_count(env);
-    bench_utf8_find_nth(env);
+    bench_utf8_seek(env);
     bench_utf8_newlines(env);
     bench_utf8_whitespaces(env);
     bench_utf8_words(env);

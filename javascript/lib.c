@@ -121,8 +121,7 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     if (argc < 2) {
-        napi_throw_error(env, NULL,
-                         "utf8UncasedFind(haystack, needle, validate?) expects at least 2 arguments");
+        napi_throw_error(env, NULL, "utf8UncasedFind(haystack, needle, validate?) expects at least 2 arguments");
         return NULL;
     }
 
@@ -149,8 +148,8 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
 
     sz_utf8_uncased_needle_metadata_t metadata = {0};
     sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_uncased_find((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle_data,
-                                                    needle_length, &metadata, &matched_length);
+    sz_cptr_t match = sz_utf8_uncased_search((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle_data,
+                                             needle_length, &metadata, &matched_length);
 
     if (!match) return makeFindResultObject(env, -1, 0);
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
@@ -252,9 +251,8 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
     }
 
     sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_uncased_find((sz_cptr_t)haystack_data, haystack_length,
-                                                    (sz_cptr_t)needle->needle_data, needle->needle_length,
-                                                    &needle->metadata, &matched_length);
+    sz_cptr_t match = sz_utf8_uncased_search((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle->needle_data,
+                                             needle->needle_length, &needle->metadata, &matched_length);
     if (!match) return makeFindResultObject(env, -1, 0);
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
 }
@@ -859,12 +857,10 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor compareDesc = {"compare", 0, compareAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8UncasedFoldDesc = {"utf8UncasedFold", 0, utf8UncasedFoldAPI, 0, 0, 0, napi_default, 0};
-    napi_property_descriptor utf8UncasedFindDesc = {
-        "utf8UncasedFind", 0, utf8UncasedFindAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8UncasedFindDesc = {"utf8UncasedFind", 0, utf8UncasedFindAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
     napi_property_descriptor sha256HasherDesc = {"Sha256", 0, 0, 0, 0, sha256HasherClass, napi_default, 0};
-    napi_property_descriptor utf8NeedleDesc = {
-        "Utf8UncasedNeedle", 0, 0, 0, 0, utf8NeedleClass, napi_default, 0};
+    napi_property_descriptor utf8NeedleDesc = {"Utf8UncasedNeedle", 0, 0, 0, 0, utf8NeedleClass, napi_default, 0};
 
     // Export the `capabilities` string for debugging
     napi_value caps_str_value;
@@ -873,15 +869,24 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor capabilitiesDesc = {"capabilities", 0, 0, 0, 0, caps_str_value, napi_default, 0};
 
     napi_property_descriptor properties[] = {
-        findDesc,         findLastDesc,
-        findByteDesc,     findLastByteDesc,
-        findByteFromDesc, findLastByteFromDesc,
-        countDesc,        hashDesc,
-        sha256Desc,       equalDesc,
-        compareDesc,      byteSumDesc,
-        utf8UncasedFoldDesc, utf8UncasedFindDesc,
-        hasherDesc,       sha256HasherDesc,
-        utf8NeedleDesc,   capabilitiesDesc,
+        findDesc,
+        findLastDesc,
+        findByteDesc,
+        findLastByteDesc,
+        findByteFromDesc,
+        findLastByteFromDesc,
+        countDesc,
+        hashDesc,
+        sha256Desc,
+        equalDesc,
+        compareDesc,
+        byteSumDesc,
+        utf8UncasedFoldDesc,
+        utf8UncasedFindDesc,
+        hasherDesc,
+        sha256HasherDesc,
+        utf8NeedleDesc,
+        capabilitiesDesc,
     };
 
     // Define the properties on the `exports` object

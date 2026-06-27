@@ -557,8 +557,8 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
  *  benign segments and back up to the same boundary), and it carries the clean guarantee that every
  *  byte before the returned pointer is provably in @p form.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_violation_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                     sz_utf8_norm_scan_t scan) {
+SZ_INTERNAL sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
+                                                        sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 
@@ -603,8 +603,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_lengt
     return sz_utf8_norm_engine_(source, source_length, form, destination, &sz_utf8_norm_classify_serial_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
 }
 
 #ifdef __cplusplus
