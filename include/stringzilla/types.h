@@ -181,7 +181,19 @@
 #define SZ_INTERNAL __attribute__((always_inline)) SZ_C_INLINE
 #endif // _WIN32 || __CYGWIN__
 #else
+// Compile-time dispatch resolves each public function to a single ISA tier in the headers (no table).
+// They are `inline static` for header-only inclusion; defining `SZ_EXPORT` instead emits them as external
+// symbols from one amalgamation translation unit, so the result links like a normal C library (used by the
+// Rust binding without the `dynamic-dispatch` feature). Only ever compile one such TU to avoid duplicate symbols.
+#if defined(SZ_EXPORT) && SZ_EXPORT
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define SZ_DYNAMIC __declspec(dllexport)
+#else
+#define SZ_DYNAMIC extern __attribute__((visibility("default")))
+#endif // _WIN32 || __CYGWIN__
+#else
 #define SZ_DYNAMIC SZ_C_INLINE
+#endif // SZ_EXPORT
 #define SZ_EXTERNAL extern
 #define SZ_PUBLIC SZ_C_INLINE
 #define SZ_INTERNAL SZ_C_INLINE

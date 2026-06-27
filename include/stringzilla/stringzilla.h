@@ -638,20 +638,23 @@ SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
 
 #else
 
+// These public entry points are `SZ_DYNAMIC` so they export as external symbols when this header is
+// compiled into the amalgamation TU with `SZ_EXPORT` (compile-time dispatch as a linkable library);
+// for plain header-only inclusion `SZ_DYNAMIC` is `inline static`, same as the rest of the API.
 SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 0; }
-SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_PUBLIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
-SZ_PUBLIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
-SZ_PUBLIC sz_capability_t sz_capabilities(void) {
+SZ_DYNAMIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_DYNAMIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_DYNAMIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
+SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
+SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
-SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
-SZ_PUBLIC void sz_dispatch_table_init(void) {}
-SZ_PUBLIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
+SZ_DYNAMIC void sz_dispatch_table_init(void) {}
+SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
 
 #endif
 

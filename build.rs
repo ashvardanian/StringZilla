@@ -21,24 +21,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let mut flags = HashMap::<String, bool>::new();
     let mut build = cc::Build::new();
     build
-        .files([
-            "c/stringzilla/runtime.c",
-            "c/stringzilla/compare.c",
-            "c/stringzilla/memory.c",
-            "c/stringzilla/hash.c",
-            "c/stringzilla/find.c",
-            "c/stringzilla/sort.c",
-            "c/stringzilla/intersect.c",
-            "c/stringzilla/utf8_codepoints.c",
-            "c/stringzilla/utf8_tokens.c",
-            "c/stringzilla/utf8_words.c",
-            "c/stringzilla/utf8_graphemes.c",
-            "c/stringzilla/utf8_sentences.c",
-            "c/stringzilla/utf8_linewraps.c",
-            "c/stringzilla/utf8_uncased_fold.c",
-            "c/stringzilla/utf8_norm.c",
-            "c/stringzilla/utf8_uncased.c",
-        ])
         .include("include")
         .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
@@ -47,6 +29,43 @@ fn build_stringzilla() -> HashMap<String, bool> {
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
+
+    // Dispatch model, selected by the `dynamic-dispatch` feature:
+    //  - ON  (default): compile the per-domain dispatch shims into a runtime table that picks the best ISA
+    //    tier at load - mirrors CMake's `stringzilla_shared`. Flexible, one indirection per call.
+    //  - OFF: compile a single amalgamation TU (`#include <stringzilla/stringzilla.h>`) that resolves each
+    //    public function to one ISA tier at compile time and exports it via `SZ_EXPORT` (see `types.h`).
+    //    No table/indirection; the tier is baked in (less portable, faster on some workloads).
+    if env::var("CARGO_FEATURE_DYNAMIC_DISPATCH").is_ok() {
+        build.define("SZ_DYNAMIC_DISPATCH", "1");
+        build.files([
+            "c/stringzilla/runtime.c",
+            "c/stringzilla/compare.c",
+            "c/stringzilla/memory.c",
+            "c/stringzilla/hash.c",
+            "c/stringzilla/find.c",
+            "c/stringzilla/sort.c",
+            "c/stringzilla/intersect.c",
+            "c/stringzilla/utf8_runes.c",
+            "c/stringzilla/utf8_tokens.c",
+            "c/stringzilla/utf8_words.c",
+            "c/stringzilla/utf8_graphemes.c",
+            "c/stringzilla/utf8_sentences.c",
+            "c/stringzilla/utf8_linewraps.c",
+            "c/stringzilla/utf8_uncased_fold.c",
+            "c/stringzilla/utf8_norm.c",
+            "c/stringzilla/utf8_uncased.c",
+        ]);
+    } else {
+        // One translation unit includes the umbrella header once; generated into `OUT_DIR` so there is no
+        // checked-in source (same pattern as the relaxed-SIMD probe). Exactly one TU avoids duplicate symbols.
+        build.define("SZ_DYNAMIC_DISPATCH", "0");
+        build.define("SZ_EXPORT", "1");
+        let amalgam_path =
+            std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_stringzilla.c");
+        std::fs::write(&amalgam_path, "#include <stringzilla/stringzilla.h>\n").expect("write amalgamation TU");
+        build.file(&amalgam_path);
+    }
 
     // Cargo will set different environment variables that we can use to properly configure the build.
     // https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
@@ -81,18 +100,15 @@ fn build_stringzilla() -> HashMap<String, bool> {
         flags.insert("SZ_IS_64BIT_ARM_".to_string(), false);
     }
 
-    // WebAssembly has no runtime CPU probe, so SIMD is selected at compile time. SIMD128 is the
-    // baseline; relaxed-SIMD sits one tier above and is enabled only when the compiler accepts
-    // `-mrelaxed-simd` (probed below) and `SZ_USE_V128RELAXED` is not forced off. We pass the
-    // instruction flags here (which define `__wasm_simd128__` / `__wasm_relaxed_simd__`, the macros
-    // `types.h` keys off) and switch to compile-time dispatch so `sz_find`, `sz_hash`, ... resolve
-    // through the `#if SZ_USE_V128RELAXED #elif SZ_USE_V128` paths with no constructor/table.
+    // WebAssembly selects SIMD through instruction flags (native ISAs use per-function `target`
+    // attributes instead). `-msimd128` is the baseline; relaxed-SIMD is one tier up, enabled only when a
+    // tiny probe confirms the toolchain emits the relaxed intrinsics and `SZ_USE_V128RELAXED` is not
+    // forced off. The flags define `__wasm_simd128__` / `__wasm_relaxed_simd__`, which `types.h` maps to
+    // `SZ_USE_V128` / `SZ_USE_V128RELAXED` (kept in `flags_to_try` below for the env override + fallback).
     let is_wasm = target_arch == "wasm32" || target_arch == "wasm64";
     let wasm_relaxed = is_wasm
         && env::var("SZ_USE_V128RELAXED").map_or(true, |v| v != "0" && v.to_lowercase() != "false")
         && wasm_relaxed_simd_supported();
-    // Native targets use the runtime dispatch table; wasm resolves SIMD at compile time.
-    build.define("SZ_DYNAMIC_DISPATCH", if is_wasm { "0" } else { "1" });
     if is_wasm {
         build.flag("-msimd128");
         if wasm_relaxed {
@@ -179,29 +195,43 @@ fn build_stringzilla() -> HashMap<String, bool> {
     for flag in flags_to_try.iter() {
         println!("cargo:rerun-if-env-changed={}", flag);
     }
-    // Track the wasm SIMD toggles even when relaxed is currently OFF (so it is absent from
-    // `flags_to_try`): otherwise toggling `SZ_USE_V128RELAXED` between builds that share a target
-    // directory - e.g. the relaxed-on and relaxed-off CI steps - would not rebuild the C objects.
+    // `SZ_USE_V128RELAXED` decides the wasm relaxed tier before `flags_to_try` is built, so when relaxed
+    // is off it is absent from the loop above; track it (and its baseline `SZ_USE_V128`) explicitly so
+    // toggling either between builds that share a target directory rebuilds the C objects.
     println!("cargo:rerun-if-env-changed=SZ_USE_V128");
     println!("cargo:rerun-if-env-changed=SZ_USE_V128RELAXED");
 
     flags
 }
 
-/// Probe whether the C compiler can target WebAssembly relaxed-SIMD (`-mrelaxed-simd`).
-/// Compiles `probes/wasm_relaxed_simd.c` into a throwaway object; success means the relaxed
-/// intrinsics and the `__wasm_relaxed_simd__` macro are available for the v128relaxed backend.
+/// Probe whether the toolchain can emit WebAssembly relaxed-SIMD (`-mrelaxed-simd`). Compiles a tiny
+/// snippet that uses the relaxed intrinsics the v128relaxed kernels depend on; success means the flag and
+/// the `__wasm_relaxed_simd__` builtins are available. The snippet is embedded and written into `OUT_DIR`
+/// (the `cc` crate compiles files, not in-memory strings), so there is no checked-in probe source.
 fn wasm_relaxed_simd_supported() -> bool {
+    let probe_source = concat!(
+        "#include <wasm_simd128.h>\n",
+        "v128_t sz_probe_swizzle(v128_t a, v128_t b) { return wasm_i8x16_relaxed_swizzle(a, b); }\n",
+        "v128_t sz_probe_dot(v128_t a, v128_t b, v128_t c) {\n",
+        "    return wasm_i32x4_relaxed_dot_i8x16_i7x16_add(a, b, c);\n",
+        "}\n",
+    );
+    let probe_path =
+        std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_wasm_relaxed_probe.c");
+    if std::fs::write(&probe_path, probe_source).is_err() {
+        return false;
+    }
+
     let mut probe = cc::Build::new();
     probe
-        .file("probes/wasm_relaxed_simd.c")
+        .file(&probe_path)
         .flag("-msimd128")
         .flag("-mrelaxed-simd")
         .warnings(false)
         .cargo_metadata(false);
     let supported = probe.try_compile("sz_wasm_relaxed_probe").is_ok();
     if !supported {
-        println!("cargo:warning=WASM relaxed-SIMD unsupported by compiler; using baseline SIMD128");
+        println!("cargo:warning=WASM relaxed-SIMD unsupported by toolchain; using baseline SIMD128");
     }
     supported
 }

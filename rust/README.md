@@ -28,12 +28,13 @@ The crate ships the C/C++ sources and compiles them through a `build.rs` via `cc
 
 ### Feature Flags
 
-| Feature | Default | Effect                           |
-| ------- | ------- | -------------------------------- |
-| `std`   | yes     | `std` support, else `no_std`     |
-| `cpus`  | no      | Multi-threaded CPU backend       |
-| `cuda`  | no      | CUDA GPU backend; implies `cpus` |
-| `rocm`  | no      | ROCm GPU backend; implies `cpus` |
+| Feature            | Default | Effect                                             |
+| ------------------ | ------- | -------------------------------------------------- |
+| `std`              | yes     | `std` support, else `no_std`                       |
+| `dynamic-dispatch` | yes     | Runtime SIMD dispatch; disable to bake in one tier |
+| `cpus`             | no      | Multi-threaded CPU backend                         |
+| `cuda`             | no      | CUDA GPU backend; implies `cpus`                   |
+| `rocm`             | no      | ROCm GPU backend; implies `cpus`                   |
 
 Without `std` the crate is `no_std`; `std` is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
 The `cpus` backend compiles the `stringzillas` module and pulls in `allocator-api2` and `stringtape`.
@@ -53,6 +54,31 @@ use stringzilla::sz::StringZillableBinary; // search/split extension methods
 use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension methods
 use stringzilla::szs;                      // batch engines (needs cpus/cuda/rocm)
 ```
+
+### Dynamic vs Compile-Time Dispatch
+
+The `dynamic-dispatch` feature (on by default) controls how the C kernels select a SIMD backend, mirroring the C library's `SZ_DYNAMIC_DISPATCH` macro:
+
+- __On (default):__ every ISA tier is compiled and the best one is chosen _at load_ through a dispatch table — the same model as the precompiled `stringzilla_shared` C library.
+  One binary runs optimally on any CPU of the target architecture, at the cost of one indirect call per operation.
+- __Off:__ each function is resolved _at compile time_ to the single newest tier the toolchain supports (for WebAssembly: `v128relaxed` when available, else `v128`).
+  There is no table and no constructor, the unused tiers are dead-code-stripped, and the call goes straight to the kernel — the analog of including the header-only `stringzilla_header` in your own translation unit.
+
+Removing the indirection trades flexibility for speed.
+The resulting binary __bakes in one ISA tier__, so it is not portable across CPUs (a build that selected AVX-512 will fault on an older host) — it is intended for WebAssembly and for "build where you run" deployments.
+In exchange, call-bound operations get faster: a short-input `sz_find` microbenchmark on this machine ran ~15% more calls per second without the table (≈205 → ≈240 Mcalls/s for 8–64 B inputs).
+The win shrinks as inputs grow and the SIMD kernel, rather than the call overhead, dominates.
+
+Disable it by opting out of default features (re-adding the ones you still want):
+
+```toml
+[dependencies]
+# Compile-time dispatch: smaller, faster, but pinned to this machine's best ISA.
+stringzilla = { version = "4", default-features = false, features = ["std"] }
+```
+
+`sz::dynamic_dispatch()` reports which mode the crate was built with.
+This setting applies to the single-string `sz` library; the batch `stringzillas` engines (`cpus`/`cuda`/`rocm`) always use runtime dispatch.
 
 ## Types
 

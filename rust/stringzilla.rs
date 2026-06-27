@@ -4177,7 +4177,9 @@ mod tests {
 
     #[test]
     fn metadata() {
-        assert!(sz::dynamic_dispatch());
+        // Runtime dispatch is on with the `dynamic-dispatch` feature (default) and off for the
+        // compile-time-dispatch build, where the best ISA tier is baked in instead of table-routed.
+        assert_eq!(sz::dynamic_dispatch(), cfg!(feature = "dynamic-dispatch"));
         assert!(sz::capabilities().as_str().len() > 0);
     }
 
