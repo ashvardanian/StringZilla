@@ -30,10 +30,12 @@
  *  5.  Visualize the results differently, with a compact output for both generic workloads and special cases.
  */
 #pragma once
+#include <cctype>  // `std::isalnum`
+#include <clocale> // `std::setlocale`
+#include <cstring> // `std::memcpy`
+
 #include <algorithm>
 #include <chrono>     // `std::chrono::high_resolution_clock`
-#include <clocale>    // `std::setlocale`
-#include <cstring>    // `std::memcpy`
 #include <exception>  // `std::invalid_argument`
 #include <functional> // `std::equal_to`
 #include <limits>     // `std::numeric_limits`
@@ -524,7 +526,12 @@ inline void log_failure(                                              //
     std::optional<std::size_t> token_index) noexcept(false) {
 
     std::string timestamp = std::to_string(std::time(nullptr));
-    std::string file_name = "failed_" + timestamp + "_" + name + "_" + ".txt";
+    // Benchmark names embed shape labels like `...:q4xc4:allpairs`; `:` and `/` are invalid in path
+    // components on common filesystems, so map every non-portable character to `_` before composing the path.
+    std::string safe_name = name;
+    for (char &c : safe_name)
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '.' || c == '_')) c = '_';
+    std::string file_name = "failed_" + timestamp + "_" + safe_name + "_" + ".txt";
     std::string file_path = env.stress_dir + "/" + file_name;
     std::FILE *file = std::fopen(file_path.c_str(), "w");
     if (!file) throw std::runtime_error("Failed to open file for writing: " + file_name);
