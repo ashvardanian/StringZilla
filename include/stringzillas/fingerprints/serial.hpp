@@ -873,7 +873,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    SZ_NOINLINE status_t operator()(                                                                      //
+    SZ_NOIPA status_t operator()(                                                                         //
         texts_type_ const &texts,                                                                         //
         min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
         executor_type_ &&executor = {}, cpu_specs_t specs = {}) const noexcept {
@@ -1299,9 +1299,9 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_, void> {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
-                                    min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
-                                    cpu_specs_t specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
+                                 min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
+                                 cpu_specs_t specs = {}) noexcept {
         return floating_rolling_hashers_in_parallel_(            //
             *this, texts,                                        //
             std::forward<min_hashes_per_text_type_>(min_hashes), //

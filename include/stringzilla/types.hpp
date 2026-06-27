@@ -102,6 +102,19 @@
 #endif
 
 /**
+ *  `noipa` disables interprocedural optimization across the function boundary - strictly stronger than
+ *  `noinline`, which only forbids inlining. It is the durable guard against GCC's `-O3` miscompile of a
+ *  by-value return that gets folded into a same-TU caller (observed: a `status_t` engine return read back as
+ *  garbage when the callee is folded into a large benchmark TU). clang has no such miscompile and no `noipa`
+ *  attribute, and nvcc rejects it on device code, so both fall back to `noinline`.
+ */
+#if defined(__GNUC__) && !defined(__clang__) && !defined(__CUDACC__)
+#define SZ_NOIPA __attribute__((noipa))
+#else
+#define SZ_NOIPA SZ_NOINLINE
+#endif
+
+/**
  *  MSVC and NVCC have a hard time with concepts.
  */
 #if defined(__NVCC__)
@@ -121,6 +134,24 @@
 
 namespace ashvardanian {
 namespace stringzilla {
+
+/**
+ *  @brief Forces the compiler to materialize @p value rather than fold or elide it across an optimization
+ *         boundary - the read-side companion to `SZ_NOIPA`. Mirrors Google Benchmark's `DoNotOptimize`; use
+ *         it on a status/result just before returning it from a `SZ_NOIPA` public entry point so the value
+ *         survives a same-TU caller's interprocedural rewrite.
+ */
+template <typename value_type_>
+SZ_INLINE void sz_do_not_optimize(value_type_ &value) noexcept {
+#if defined(__clang__)
+    asm volatile("" : "+r,m"(value) : : "memory");
+#elif defined(__GNUC__)
+    asm volatile("" : "+m,r"(value) : : "memory");
+#else
+    volatile value_type_ sink = value;
+    sz_unused_(sink);
+#endif
+}
 
 using i8_t = sz_i8_t;
 using u8_t = sz_u8_t;

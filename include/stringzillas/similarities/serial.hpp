@@ -3702,31 +3702,31 @@ struct levenshtein_distances {
     // The concrete `strided_rows<value_type_>` parameter disambiguates the two-set and symmetric overloads by type
     // alone, since `SZ_HAS_CONCEPTS_` is off repo-wide for the GCC concepts bug.
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                            cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                            cross_similarities_t::symmetric_k, scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
@@ -3762,31 +3762,31 @@ struct levenshtein_distances_utf8 {
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                            cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                           cross_similarities_t::all_pairs_k, scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                            cross_similarities_t::symmetric_k, scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                           cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
@@ -3823,31 +3823,31 @@ struct needleman_wunsch_scores {
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                             cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                            cross_similarities_t::all_pairs_k, scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                             cross_similarities_t::symmetric_k, scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                            cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }
@@ -3884,31 +3884,31 @@ struct smith_waterman_scores {
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                             cross_similarities_t::all_pairs_k, scratch_, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                            cross_similarities_t::all_pairs_k, scratch_, executor, specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_sequentially_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                             cross_similarities_t::symmetric_k, scratch_, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_in_parallel_<ssize_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                            cross_similarities_t::symmetric_k, scratch_, executor, specs);
     }

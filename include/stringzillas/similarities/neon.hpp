@@ -5788,8 +5788,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_()) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
@@ -5813,9 +5813,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_()) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
@@ -5831,8 +5831,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_()) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
@@ -5856,8 +5856,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_()) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
@@ -5963,8 +5963,8 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -5980,9 +5980,9 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -5994,8 +5994,8 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6011,8 +6011,8 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6110,8 +6110,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6127,9 +6127,9 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6141,8 +6141,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6158,8 +6158,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6260,8 +6260,8 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6277,9 +6277,9 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6291,8 +6291,8 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6308,8 +6308,8 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6410,8 +6410,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6427,9 +6427,9 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6441,8 +6441,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6458,8 +6458,8 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6561,8 +6561,8 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6578,9 +6578,9 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6592,8 +6592,8 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -6609,8 +6609,8 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -7153,8 +7153,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 #pragma region Public Cross Product Overloads
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_())
             return cross_via_lanes_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
@@ -7166,9 +7166,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_())
             return cross_via_lanes_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
                                              std::forward<executor_type_>(executor), specs);
@@ -7178,8 +7178,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_())
             return cross_via_lanes_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
@@ -7191,8 +7191,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         if (!is_unit_cost_())
             return cross_via_lanes_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                              std::forward<executor_type_>(executor), specs);
@@ -7382,29 +7382,29 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
 #pragma region Public Cross Product Overloads
 
     template <typename queries_type_, typename candidates_type_, typename value_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
         return cross_via_lanes_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                        strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_via_lanes_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
                                          std::forward<executor_type_>(executor), specs);
     }
 
     /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
     template <typename sequences_type_, typename value_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
         return cross_via_lanes_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
-    status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results, executor_type_ &&executor,
-                        cpu_specs_t const &specs = {}) noexcept {
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
         return cross_via_lanes_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                          std::forward<executor_type_>(executor), specs);
     }
