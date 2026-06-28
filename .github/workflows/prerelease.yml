@@ -2,9 +2,9 @@ name: "Pre-Release"
 
 on:
   push:
-    branches: ["main-dev"]
+    branches: ["main*"]
   pull_request:
-    branches: ["main-dev"]
+    branches: ["main*"]
 
 env:
   BUILD_TYPE: Release
