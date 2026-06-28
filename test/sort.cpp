@@ -619,7 +619,7 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
 /** @brief Runs `test_sort_equivalence` (serial reference vs. every enabled SIMD backend candidate). */
 void test_sort_all() {
-    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial> reference;
+    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial> reference {};
     // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
     constexpr sz_size_t repetitions = 1;
 #if SZ_USE_HASWELL

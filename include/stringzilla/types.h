@@ -794,16 +794,16 @@ typedef enum sz_capability_t {
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
-        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
+                     sz_cap_icelake_k,                                  ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
-        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
-        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_rvvcrypto_k |
-        sz_cap_lasx_k | sz_cap_powervsx_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
+                     sz_cap_rvv_k | sz_cap_rvvcrypto_k | sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -1318,6 +1318,9 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #ifdef __GNUG__
 #define SZ_NULL __null
 #define SZ_NULL_CHAR __null
+#elif defined(__cplusplus)
+#define SZ_NULL nullptr
+#define SZ_NULL_CHAR nullptr
 #else
 #define SZ_NULL ((void *)0)
 #define SZ_NULL_CHAR ((char *)0)

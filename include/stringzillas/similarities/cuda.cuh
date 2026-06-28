@@ -4140,7 +4140,7 @@ cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_, allocator_
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
-                             std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+                             std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
 
     using char_t = char;
     using gap_costs_t = gap_costs_type_;
@@ -4605,7 +4605,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
 
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
-                                    std::enable_if_t<capability_ & sz_cap_cuda_k>>::run_trampoline_( //
+                                    std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>>::run_trampoline_( //
     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
@@ -4933,7 +4933,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
-                                  std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+                                  std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
 
     using char_t = char;
     using gap_costs_t = gap_costs_type_;
@@ -6128,7 +6128,7 @@ cuda_status_t cuda_weighted_cross_(                                             
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
-                               std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+                               std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
 
     using char_t = char;
     using substituter_t = error_costs_32x32_t;
@@ -6197,7 +6197,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_type_, capability_,
-                             std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+                             std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
 
     using char_t = char;
     using substituter_t = error_costs_32x32_t;

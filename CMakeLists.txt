@@ -22,9 +22,9 @@
 #
 # Tests for parallel algorithms:
 #
-# * stringzillas_test_cpp17 / stringzillas_test_cpp20: Parallel-algorithm tests for the host's best CPU backend.
-# * stringzillas_test_cu17 / stringzillas_test_cu20: Parallel-algorithm tests on CUDA-capable GPUs (base SIMT, Kepler,
-#   and Hopper tiers selected at runtime).
+# * stringzillas_test_cpp20 / stringzillas_test_cpp23: Parallel-algorithm tests for the host's best CPU backend.
+# * stringzillas_test_cu20 (and stringzillas_test_cu23 on CMake 3.30+): Parallel-algorithm tests on CUDA-capable GPUs
+#   (base SIMT, Kepler, and Hopper tiers selected at runtime).
 #
 # Serial Benchmarks:
 #
@@ -1006,22 +1006,26 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzilla_test_cpp17 "${STRINGZILLA_TEST_SOURCES}" 17 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
 
-    # Test parallel algorithms separately; link the static archive when the libraries are built.
-    define_launcher(stringzillas_test_cpp17 test/stringzillas.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    # Test parallel algorithms separately; link the static archive when the libraries are built. StringZillas requires
+    # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We test both
+    # C++20 and C++23 to validate forward compatibility.
     define_launcher(stringzillas_test_cpp20 test/stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_test_cpp23 test/stringzillas.cpp 23 "${STRINGZILLA_TARGET_ARCH}")
     if (STRINGZILLAS_BUILD_SHARED)
-        target_link_libraries(stringzillas_test_cpp17 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
+        target_link_libraries(stringzillas_test_cpp23 PRIVATE stringzillas_cpus_static)
     endif ()
 
-    # We only target C++14 and newer so `constexpr` functions compile on both host and device without `__device__`
-    # annotations, and C++17 and newer so the `if constexpr` compile-time SIMD dispatch works.
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzillas_test_cu17 test/stringzillas.cu 17 "${STRINGZILLA_TARGET_ARCH}")
         define_gpu_launcher(stringzillas_test_cu20 test/stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.30")
+            define_gpu_launcher(stringzillas_test_cu23 test/stringzillas.cu 23 "${STRINGZILLA_TARGET_ARCH}")
+        endif ()
         if (STRINGZILLAS_BUILD_SHARED)
-            target_link_libraries(stringzillas_test_cu17 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)
+            if (TARGET stringzillas_test_cu23)
+                target_link_libraries(stringzillas_test_cu23 PRIVATE stringzillas_cuda_static)
+            endif ()
         endif ()
     endif ()
 endif ()

@@ -115,12 +115,12 @@
 #endif
 
 /**
- *  MSVC and NVCC have a hard time with concepts.
+ *  C++20 concepts: enabled when both the language standard and the compiler
+ *  feature-test macro confirm support.  NVCC defers to the host compiler,
+ *  so the __cpp_concepts check covers MSVC, GCC, and Clang under nvcc alike.
  */
-#if defined(__NVCC__)
-#define SZ_HAS_CONCEPTS_ 0
-#elif defined(__cpp_concepts)
-#define SZ_HAS_CONCEPTS_ 0 // TODO: Fix concepts compilation with GCC
+#if __cplusplus > 201703L && defined(__cpp_concepts) && __cpp_concepts >= 201907L
+#define SZ_HAS_CONCEPTS_ 1
 #else
 #define SZ_HAS_CONCEPTS_ 0
 #endif

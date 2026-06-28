@@ -3497,7 +3497,7 @@ status_t cross_product_candidate_lanes_range_( //
     auto const emit_block = [&](auto &chosen_kernel, size_t lanes_count, size_t block_longest) noexcept {
         using chosen_t = remove_cvref<decltype(chosen_kernel)>;
         constexpr size_t lane_capacity = chosen_t::candidate_lanes_k;
-        typename chosen_t::score_t result_lanes[narrow_lanes_k];
+        typename chosen_t::score_t result_lanes[narrow_t::candidate_lanes_k];
         for (size_t position = 0; position != lane_capacity * block_longest; ++position) transposed[position] = 0;
         for (size_t lane_index = 0; lane_index != lanes_count; ++lane_index) {
             auto const lane_candidate = to_view(candidates[block_candidates[lane_index]]);

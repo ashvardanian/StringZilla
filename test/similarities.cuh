@@ -18,7 +18,9 @@
 
 #include "stringzilla.hpp" // `arrow_strings_view_t`
 
+#ifndef _WIN32
 #include <sys/resource.h> // `getrusage`, `RUSAGE_SELF` for the coarse CPU peak-RSS backstop
+#endif
 
 namespace ashvardanian {
 namespace stringzilla {

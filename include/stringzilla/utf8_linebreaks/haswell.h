@@ -352,8 +352,8 @@ SZ_INTERNAL sz_u64_t sz_line_break_side_mask_haswell_(__m256i side_lo, __m256i s
     __m256i const m = _mm256_set1_epi8((char)bit);
     __m256i const masked_lo = _mm256_and_si256(side_lo, m), masked_hi = _mm256_and_si256(side_hi, m);
     return sz_utf8_mask_combine_haswell_(
-        _mm256_cmpgt_epi8(masked_lo, _mm256_setzero_si256()) | _mm256_cmpeq_epi8(masked_lo, m),
-        _mm256_cmpgt_epi8(masked_hi, _mm256_setzero_si256()) | _mm256_cmpeq_epi8(masked_hi, m));
+        _mm256_or_si256(_mm256_cmpgt_epi8(masked_lo, _mm256_setzero_si256()), _mm256_cmpeq_epi8(masked_lo, m)),
+        _mm256_or_si256(_mm256_cmpgt_epi8(masked_hi, _mm256_setzero_si256()), _mm256_cmpeq_epi8(masked_hi, m)));
 }
 
 /** @brief Byte-lane gate/base derivation (LB9/LB10) — the AVX2 twin of @ref sz_line_break_byte_frame_icelake_. */
