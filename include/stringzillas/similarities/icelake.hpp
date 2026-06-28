@@ -2910,10 +2910,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
      *      writes it into the strided @p results matrix (plus the mirror slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -3065,9 +3064,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into a per-worker slice; `for_slices` invokes the body at most `threads_count`
         // times, and the atomic counter hands each invocation a disjoint slice (no aliasing, no per-worker alloc).
@@ -4232,10 +4231,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
      *      slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -4445,9 +4443,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into a per-worker slice; `for_slices` invokes the body at most `threads_count`
         // times, and the atomic counter hands each invocation a disjoint slice (no aliasing, no per-worker alloc).

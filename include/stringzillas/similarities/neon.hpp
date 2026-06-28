@@ -4723,9 +4723,7 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i16` recurrence hardcodes `vmaxq_s16`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -4965,9 +4963,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i32` recurrence hardcodes `vmaxq_s32`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -5635,10 +5631,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
      *      word count and `distances_2xN_<words_count>` can be selected at compile time.
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -5741,9 +5736,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
         size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
@@ -6835,10 +6830,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
      *      @p results matrix (plus the mirror slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -7048,9 +7042,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
         size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);

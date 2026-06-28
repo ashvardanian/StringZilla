@@ -114,7 +114,7 @@ struct engine_timing_t {
  *        fields, so the kernel time is pulled from the same defended copy as the status.
  */
 template <typename status_type_>
-[[gnu::noinline]] engine_timing_t read_engine_timing_(status_type_ const &engine_result) noexcept {
+SZ_NOINLINE engine_timing_t read_engine_timing_(status_type_ const &engine_result) noexcept {
     status_type_ materialized;
     std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_type_));
     engine_timing_t timing;
@@ -133,10 +133,9 @@ template <typename status_type_>
  *        call, which the library validates as correct in isolation.
  */
 template <typename engine_type_, typename queries_type_, typename candidates_type_, typename... rest_types_>
-[[gnu::noinline]] engine_timing_t invoke_engine_timed_(engine_type_ &engine, queries_type_ const &queries,
-                                                       candidates_type_ const &candidates,
-                                                       strided_rows<sz_ssize_t> results,
-                                                       rest_types_ &...rest) noexcept {
+SZ_NOINLINE engine_timing_t invoke_engine_timed_(engine_type_ &engine, queries_type_ const &queries,
+                                                 candidates_type_ const &candidates, strided_rows<sz_ssize_t> results,
+                                                 rest_types_ &...rest) noexcept {
     auto status = engine(queries, candidates, results, rest...);
     do_not_optimize(status);
     return read_engine_timing_(status);
