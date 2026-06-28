@@ -387,9 +387,12 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_neon_(sz
                                                                               sz_u64_t valid, int at_end_of_text) {
     uint8x16_t const *raw = window.window;
     sz_u64_t const real_continuation = window.continuation & valid;
+    // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict
+    // `two`/`three_byte_starts` masks already match 0xC0-0xDF and 0xE0-0xEF; only `length_four` needs widening to fold
+    // the ill-formed leads 0xF8-0xFF so they collapse to U+FFFD like serial/Haswell instead of leaking as a class.
     sz_u64_t const length_two = window.two_byte_starts & valid;
     sz_u64_t const length_three = window.three_byte_starts & valid;
-    sz_u64_t const length_four = window.four_byte_starts & valid;
+    sz_u64_t const length_four = (window.four_byte_starts | sz_utf8_word_break_byte_ge_neon_(raw, 0xF8)) & valid;
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
