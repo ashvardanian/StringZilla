@@ -254,6 +254,11 @@
 #endif
 
 /**
+ *  @brief Largest value that fits into 16 bits.
+ */
+#define SZ_U16_MAX (65535u)
+
+/**
  *  @brief Largest prime number that fits into 16 bits.
  */
 #define SZ_U16_MAX_PRIME (65521u)
@@ -652,8 +657,20 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 
 /**
  *  @brief Compile-time assert macro similar to `static_assert` in C++.
+ *  Uses `_Static_assert` when available (C11+, or as a compiler extension)
+ *  so the macro works inside function bodies without -Wunused-local-typedef.
  */
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define sz_static_assert(condition, name) static_assert(condition, #name)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define sz_static_assert(condition, name) _Static_assert(condition, #name)
+#elif defined(__GNUC__) || defined(__clang__)
+#define sz_static_assert(condition, name) _Static_assert(condition, #name)
+#elif defined(_MSC_VER)
+#define sz_static_assert(condition, name) static_assert(condition, #name)
+#else
 #define sz_static_assert(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
+#endif
 
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);

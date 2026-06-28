@@ -105,7 +105,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
     }
 
     sz_u16_t codepoint_byte_starts_buffer[sz_utf8_line_window_k];
-    sz_static_assert(sz_utf8_line_window_k * 4 <= 65535, line_window_fits_u16_relative_offsets);
+    sz_static_assert(sz_utf8_line_window_k * 4 <= SZ_U16_MAX, line_window_fits_u16_relative_offsets);
     sz_u16_t codepoint_descriptors_buffer[sz_utf8_line_window_k];
     sz_u8_t raw_classes_buffer[sz_utf8_line_window_k];
     sz_u8_t effective_classes_buffer[sz_utf8_line_window_k];
