@@ -7682,7 +7682,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
 /** @brief Dispatches to the byte-wise or Unicode case-folded argsort backend. */
 static sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
                                      sz_size_t top, sz_bool_t reverse) {
-    return uncased ? sz_sequence_argsort_utf8_uncased(sequence, NULL, order, top, reverse)
+    return uncased ? sz_sequence_argsort_uncased(sequence, NULL, order, top, reverse)
                    : sz_sequence_argsort(sequence, NULL, order, top, reverse);
 }
 

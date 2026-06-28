@@ -114,7 +114,8 @@ SZ_INTERNAL void sz_sequence_argsort_rvv_3way_partition_(
         vuint64m1_t comp_equal_order_u64m1 = __riscv_vcompress_vm_u64m1(order_u64m1, equal_b64, vector_length);
         __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_pgrams + equal_offset), comp_equal_pgrams_u64m1,
                               block_count_equal);
-        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + equal_offset), comp_equal_order_u64m1, block_count_equal);
+        __riscv_vse64_v_u64m1((sz_u64_t *)(partitioned_order + equal_offset), comp_equal_order_u64m1,
+                              block_count_equal);
         equal_offset += block_count_equal;
 
         vuint64m1_t comp_greater_pgrams_u64m1 = __riscv_vcompress_vm_u64m1(pgrams_u64m1, greater_b64, vector_length);
@@ -335,7 +336,7 @@ SZ_PUBLIC void sz_sequence_argsort_rvv_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_rvv(      //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_rvv(           //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

@@ -1071,7 +1071,7 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
-/** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_utf8_uncased`. */
+/** @brief Signature of `sz_sequence_argsort` and `sz_sequence_argsort_uncased`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
                                              sz_size_t, sz_bool_t);
 

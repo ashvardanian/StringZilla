@@ -41,11 +41,11 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_intersect_update_(caps);
     sz_dispatch_utf8_norm_update_(caps);
     sz_dispatch_utf8_runes_update_(caps);
-    sz_dispatch_utf8_delimiters_update_(caps);
+    sz_dispatch_utf8_tokens_update_(caps);
     sz_dispatch_utf8_words_update_(caps);
     sz_dispatch_utf8_graphemes_update_(caps);
     sz_dispatch_utf8_sentences_update_(caps);
-    sz_dispatch_utf8_lines_update_(caps);
+    sz_dispatch_utf8_linebreaks_update_(caps);
     sz_dispatch_utf8_uncased_fold_update_(caps);
     sz_dispatch_utf8_uncased_update_(caps);
 }

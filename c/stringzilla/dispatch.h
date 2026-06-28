@@ -78,7 +78,7 @@ typedef struct sz_implementations_t {
     sz_utf8_uncased_order_t utf8_uncased_order;
 
     sz_sequence_argsort_t sequence_argsort;
-    sz_sequence_argsort_t sequence_argsort_utf8_uncased;
+    sz_sequence_argsort_t sequence_argsort_uncased;
     sz_sequence_intersect_t sequence_intersect;
 
 } sz_implementations_t;
@@ -99,11 +99,11 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_words_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_lines_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);

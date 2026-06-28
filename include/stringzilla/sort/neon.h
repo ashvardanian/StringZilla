@@ -377,7 +377,7 @@ SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_utf8_uncased_neon(     //
+SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_neon(          //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

@@ -324,36 +324,33 @@ void bench_sequencing_strings_uncased(environment_t const &env) {
 
     // First, benchmark the STL-based case-folded reference
     auto base_call = argsort_ci_strings_via_std_t {env.tokens, folded, permute_buffer};
-    bench_result_t base = bench_nullary(env, "sequence_argsort_utf8_uncased<std::stable_sort>", base_call).log();
-    auto serial_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_serial> {env.tokens, folded,
-                                                                                           permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_serial", base_call, serial_call).log(base);
+    bench_result_t base = bench_nullary(env, "sequence_argsort_uncased<std::stable_sort>", base_call).log();
+    auto serial_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_serial> {env.tokens, folded,
+                                                                                      permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_HASWELL
-    auto haswell_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_haswell> {env.tokens, folded,
-                                                                                             permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_haswell", base_call, haswell_call).log(base);
+    auto haswell_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_haswell> {env.tokens, folded,
+                                                                                        permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_haswell", base_call, haswell_call).log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    auto skylake_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_skylake> {env.tokens, folded,
-                                                                                             permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_skylake", base_call, skylake_call).log(base);
+    auto skylake_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_skylake> {env.tokens, folded,
+                                                                                        permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
-    auto sve_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_sve> {env.tokens, folded,
-                                                                                     permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_sve", base_call, sve_call).log(base);
+    auto sve_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_sve> {env.tokens, folded, permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_sve", base_call, sve_call).log(base);
 #endif
 #if SZ_USE_NEON
-    auto neon_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_neon> {env.tokens, folded,
-                                                                                       permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_neon", base_call, neon_call).log(base);
+    auto neon_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_neon> {env.tokens, folded, permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_neon", base_call, neon_call).log(base);
 #endif
 #if SZ_USE_RVV
-    auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_utf8_uncased_rvv> {env.tokens, folded,
-                                                                                     permute_buffer};
-    bench_nullary(env, "sz_sequence_argsort_utf8_uncased_rvv", base_call, rvv_call).log(base);
+    auto rvv_call = argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_rvv> {env.tokens, folded, permute_buffer};
+    bench_nullary(env, "sz_sequence_argsort_uncased_rvv", base_call, rvv_call).log(base);
 #endif
 }
 

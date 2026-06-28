@@ -6,7 +6,7 @@
 #include "dispatch.h"
 #include <stringzilla/utf8_tokens.h>
 
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps) {
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;
     sz_unused_(caps);
 

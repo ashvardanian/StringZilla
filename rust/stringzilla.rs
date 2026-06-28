@@ -553,7 +553,7 @@ extern "C" {
         reverse: i32,
     ) -> Status;
 
-    pub(crate) fn sz_sequence_argsort_utf8_uncased(
+    pub(crate) fn sz_sequence_argsort_uncased(
         //
         sequence: *const _SzSequence,
         alloc: *const c_void,
@@ -2437,7 +2437,7 @@ where
     let reverse = options.reverse as i32;
     let status = unsafe {
         if options.uncased {
-            sz_sequence_argsort_utf8_uncased(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
+            sz_sequence_argsort_uncased(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
         } else {
             sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr(), top_count, reverse)
         }

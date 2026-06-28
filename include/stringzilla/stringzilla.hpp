@@ -5177,7 +5177,7 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
 
 /**
  *  @brief Uncased (Unicode case-folded) counterpart of `try_argsort`.
- *  @sa sz_sequence_argsort_utf8_uncased
+ *  @sa sz_sequence_argsort_uncased
  */
 template <typename container_type_, typename string_extractor_>
 status_t try_argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
@@ -5194,8 +5194,8 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
-        return sz_sequence_argsort_utf8_uncased(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
-                                                static_cast<sz_bool_t>(reverse));
+        return sz_sequence_argsort_uncased(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
+                                           static_cast<sz_bool_t>(reverse));
     });
 }
 

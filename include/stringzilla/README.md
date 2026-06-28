@@ -563,12 +563,12 @@ sz_status_t sz_sequence_argsort(
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
-sz_status_t sz_sequence_argsort_utf8_uncased(
+sz_status_t sz_sequence_argsort_uncased(
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 ```
 
-`sz_sequence_argsort` orders byte-lexicographically; `sz_sequence_argsort_utf8_uncased` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
+`sz_sequence_argsort` orders byte-lexicographically; `sz_sequence_argsort_uncased` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
 The `alloc` argument may be `NULL` to use the default allocator.
 The integer-sort core that backs these — `sz_pgrams_sort_serial` and its per-ISA variants — is exposed for benchmarking but is not part of the stable, runtime-dispatched contract.
 

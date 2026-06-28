@@ -185,22 +185,22 @@ void test_sort_unit() {
         sz_sequence_t const sequence = sort_sequence_from_(words);
         std::vector<sz_sorted_idx_t> const expected = {1u, 0u};
 
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased, &sequence, expected);        // Dispatched (automatic kernel)
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_serial, &sequence, expected); // Manual: serial kernel
+        check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);        // Dispatched (automatic kernel)
+        check_sort_unit_(sz_sequence_argsort_uncased_serial, &sequence, expected); // Manual: serial kernel
 #if SZ_USE_HASWELL
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_haswell, &sequence, expected); // Manual: haswell kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_haswell, &sequence, expected); // Manual: haswell kernel
 #endif
 #if SZ_USE_SKYLAKE
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_skylake, &sequence, expected); // Manual: skylake kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_skylake, &sequence, expected); // Manual: skylake kernel
 #endif
 #if SZ_USE_SVE
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_sve, &sequence, expected); // Manual: sve kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_sve, &sequence, expected); // Manual: sve kernel
 #endif
 #if SZ_USE_NEON
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_neon, &sequence, expected); // Manual: neon kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_neon, &sequence, expected); // Manual: neon kernel
 #endif
 #if SZ_USE_RVV
-        check_sort_unit_(sz_sequence_argsort_utf8_uncased_rvv, &sequence, expected); // Manual: rvv kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_rvv, &sequence, expected); // Manual: rvv kernel
 #endif
 
         // C++ wrapper must agree on the case-folded ordering.
@@ -619,33 +619,30 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
 /** @brief Runs `test_sort_equivalence` (serial reference vs. every enabled SIMD backend candidate). */
 void test_sort_all() {
-    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_utf8_uncased_serial> reference;
+    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial> reference;
     // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
     constexpr sz_size_t repetitions = 1;
 #if SZ_USE_HASWELL
-    test_sort_equivalence(
-        reference, sequence_sort_from_sz_<sz_sequence_argsort_haswell, sz_sequence_argsort_utf8_uncased_haswell> {},
-        repetitions);
+    test_sort_equivalence(reference,
+                          sequence_sort_from_sz_<sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell> {},
+                          repetitions);
 #endif
 #if SZ_USE_SKYLAKE
-    test_sort_equivalence(
-        reference, sequence_sort_from_sz_<sz_sequence_argsort_skylake, sz_sequence_argsort_utf8_uncased_skylake> {},
-        repetitions);
+    test_sort_equivalence(reference,
+                          sequence_sort_from_sz_<sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake> {},
+                          repetitions);
 #endif
 #if SZ_USE_SVE
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_sve, sz_sequence_argsort_utf8_uncased_sve> {},
-                          repetitions);
+    test_sort_equivalence(
+        reference, sequence_sort_from_sz_<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve> {}, repetitions);
 #endif
 #if SZ_USE_NEON
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_neon, sz_sequence_argsort_utf8_uncased_neon> {},
-                          repetitions);
+    test_sort_equivalence(
+        reference, sequence_sort_from_sz_<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon> {}, repetitions);
 #endif
 #if SZ_USE_RVV
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_rvv, sz_sequence_argsort_utf8_uncased_rvv> {},
-                          repetitions);
+    test_sort_equivalence(
+        reference, sequence_sort_from_sz_<sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv> {}, repetitions);
 #endif
 }
 

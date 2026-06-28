@@ -1,6 +1,6 @@
 # Sort: Argsort, Uncased Argsort, and Pgram Sort
 
-This directory holds the sorting kernels behind `sz_sequence_argsort`, `sz_sequence_argsort_utf8_uncased`, and `sz_pgrams_sort`.
+This directory holds the sorting kernels behind `sz_sequence_argsort`, `sz_sequence_argsort_uncased`, and `sz_pgrams_sort`.
 Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86.
 The dispatcher picks the fastest one available on the running CPU.
 
@@ -15,7 +15,7 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so the dispat
 
 ## Short Words
 
-| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_utf8_uncased` |
+| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
 | :--------------- | --------------------: | ---------------------------------: |
 | Standard @ Xeon4 |             22 Mcmp/s |                          27 Mcmp/s |
 | Serial @ Xeon4   |             96 Mcmp/s |                          28 Mcmp/s |
@@ -28,7 +28,7 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so the dispat
 
 ## Long Lines
 
-| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_utf8_uncased` |
+| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
 | :--------------- | --------------------: | ---------------------------------: |
 | Standard @ Xeon4 |             64 Mcmp/s |                          70 Mcmp/s |
 | Serial @ Xeon4   |            148 Mcmp/s |                          30 Mcmp/s |
