@@ -155,15 +155,15 @@ static void collect_unpacked_runes_(sz_utf8_decode_t unpack, sz_cptr_t text, sz_
  *  @param expected_count  Expected codepoint count of @p text.
  *  @param expected_runes  Expected decoded codepoints, in order.
  */
-static void check_utf8_runes_unit_(                                              //
-    sz_utf8_count_t count, sz_utf8_find_nth_t find_nth, sz_utf8_decode_t unpack, //
-    sz_cptr_t text, sz_size_t length, sz_size_t expected_count,                  //
+static void check_utf8_runes_unit_(                                          //
+    sz_utf8_count_t count, sz_utf8_seek_t find_nth, sz_utf8_decode_t unpack, //
+    sz_cptr_t text, sz_size_t length, sz_size_t expected_count,              //
     std::vector<sz_rune_t> const &expected_runes) {
 
     // Codepoint count is the external ground truth - not derived from a sibling kernel.
     assert(count(text, length) == expected_count);
 
-    // `sz_utf8_find_nth`: codepoint starts land at the byte offset of each rune; the one-past-the-end
+    // `sz_utf8_seek`: codepoint starts land at the byte offset of each rune; the one-past-the-end
     // index returns the NUL sentinel.
     sz_size_t byte_offset = 0;
     for (sz_size_t rune_index = 0; rune_index != expected_count; ++rune_index) {
@@ -193,7 +193,7 @@ static void check_utf8_runes_unit_(                                             
  *  natively-compiled backend kernels directly (manual propagation to a specific kernel), and through
  *  the C++ `sz::string_view` wrappers, so a regression that the serial-vs-SIMD agreement tests would
  *  miss - because both share a wrong constant - is still caught against an external ground truth. This
- *  is the isolated coverage for `sz_utf8_find_nth` and `sz_utf8_decode`, whose SIMD variants are
+ *  is the isolated coverage for `sz_utf8_seek` and `sz_utf8_decode`, whose SIMD variants are
  *  otherwise only fuzzed against serial.
  */
 void test_utf8_runes_unit() {
@@ -207,47 +207,47 @@ void test_utf8_runes_unit() {
     std::vector<sz_rune_t> const mixed_runes = {0x61u, 0xDFu, 0x4E2Du};
 
     // Drive the count + find-nth + unpack known-answer through the dispatched, serial, and native kernels.
-    check_utf8_runes_unit_(sz_utf8_count, sz_utf8_find_nth, sz_utf8_decode, // Dispatched
+    check_utf8_runes_unit_(sz_utf8_count, sz_utf8_seek, sz_utf8_decode, // Dispatched
                            mixed, mixed_length, 3u, mixed_runes);
-    check_utf8_runes_unit_(sz_utf8_count_serial, sz_utf8_find_nth_serial, sz_utf8_decode_serial, // serial
+    check_utf8_runes_unit_(sz_utf8_count_serial, sz_utf8_seek_serial, sz_utf8_decode_serial, // serial
                            mixed, mixed_length, 3u, mixed_runes);
 #if SZ_USE_HASWELL
-    check_utf8_runes_unit_(sz_utf8_count_haswell, sz_utf8_find_nth_haswell,
+    check_utf8_runes_unit_(sz_utf8_count_haswell, sz_utf8_seek_haswell,
                            sz_utf8_decode_haswell, // haswell
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_runes_unit_(sz_utf8_count_icelake, sz_utf8_find_nth_icelake,
+    check_utf8_runes_unit_(sz_utf8_count_icelake, sz_utf8_seek_icelake,
                            sz_utf8_decode_icelake, // icelake
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_NEON
-    check_utf8_runes_unit_(sz_utf8_count_neon, sz_utf8_find_nth_neon,
+    check_utf8_runes_unit_(sz_utf8_count_neon, sz_utf8_seek_neon,
                            sz_utf8_decode_neon, // neon
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_SVE2
-    check_utf8_runes_unit_(sz_utf8_count_sve2, sz_utf8_find_nth_sve2,
+    check_utf8_runes_unit_(sz_utf8_count_sve2, sz_utf8_seek_sve2,
                            sz_utf8_decode_sve2, // sve2
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_V128
-    check_utf8_runes_unit_(sz_utf8_count_v128, sz_utf8_find_nth_v128,
+    check_utf8_runes_unit_(sz_utf8_count_v128, sz_utf8_seek_v128,
                            sz_utf8_decode_v128, // v128
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_RVV
-    check_utf8_runes_unit_(sz_utf8_count_rvv, sz_utf8_find_nth_rvv,
+    check_utf8_runes_unit_(sz_utf8_count_rvv, sz_utf8_seek_rvv,
                            sz_utf8_decode_rvv, // rvv
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_POWERVSX
-    check_utf8_runes_unit_(sz_utf8_count_powervsx, sz_utf8_find_nth_powervsx,
+    check_utf8_runes_unit_(sz_utf8_count_powervsx, sz_utf8_seek_powervsx,
                            sz_utf8_decode_powervsx, // powervsx
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
 #if SZ_USE_LASX
-    check_utf8_runes_unit_(sz_utf8_count_lasx, sz_utf8_find_nth_lasx,
+    check_utf8_runes_unit_(sz_utf8_count_lasx, sz_utf8_seek_lasx,
                            sz_utf8_decode_lasx, // lasx
                            mixed, mixed_length, 3u, mixed_runes);
 #endif
@@ -270,26 +270,26 @@ void test_utf8_runes_unit() {
     // C++ API: byte offset of the nth character (and the npos beyond-end sentinel).
     {
         sz::string_view text = "Hello";
-        assert(text.utf8_find_nth(0) == 0);
-        assert(text.utf8_find_nth(1) == 1);
-        assert(text.utf8_find_nth(4) == 4);
-        assert(text.utf8_find_nth(5) == sz::string_view::npos);
-        assert(text.utf8_find_nth(100) == sz::string_view::npos);
+        assert(text.utf8_seek(0) == 0);
+        assert(text.utf8_seek(1) == 1);
+        assert(text.utf8_seek(4) == 4);
+        assert(text.utf8_seek(5) == sz::string_view::npos);
+        assert(text.utf8_seek(100) == sz::string_view::npos);
     }
     {
         sz::string_view text = "Hello \xE4\xB8\x96\xE7\x95\x8C";
-        assert(text.utf8_find_nth(0) == 0); // 'H' at byte 0
-        assert(text.utf8_find_nth(5) == 5); // ' ' at byte 5
-        assert(text.utf8_find_nth(6) == 6); // '世' at byte 6
-        assert(text.utf8_find_nth(7) == 9); // '界' at byte 9
-        assert(text.utf8_find_nth(8) == sz::string_view::npos);
+        assert(text.utf8_seek(0) == 0); // 'H' at byte 0
+        assert(text.utf8_seek(5) == 5); // ' ' at byte 5
+        assert(text.utf8_seek(6) == 6); // '世' at byte 6
+        assert(text.utf8_seek(7) == 9); // '界' at byte 9
+        assert(text.utf8_seek(8) == sz::string_view::npos);
     }
     {
         sz::string_view text = "\xF0\x9F\x98\x80\xF0\x9F\x98\x81\xF0\x9F\x98\x82";
-        assert(text.utf8_find_nth(0) == 0); // First emoji at byte 0
-        assert(text.utf8_find_nth(1) == 4); // Second emoji at byte 4
-        assert(text.utf8_find_nth(2) == 8); // Third emoji at byte 8
-        assert(text.utf8_find_nth(3) == sz::string_view::npos);
+        assert(text.utf8_seek(0) == 0); // First emoji at byte 0
+        assert(text.utf8_seek(1) == 4); // Second emoji at byte 4
+        assert(text.utf8_seek(2) == 8); // Third emoji at byte 8
+        assert(text.utf8_seek(3) == sz::string_view::npos);
     }
 
     // C++ API: codepoint (rune) iteration materialized as a vector - never a range-for over the view range,
@@ -484,7 +484,7 @@ void test_utf8_runes_unit() {
  *         well-formed inputs: the chunk-unpacked runes, the nth-codepoint byte offsets, and the count.
  *
  *  The known-answer anchors live in `test_utf8_runes_unit`; this is the serial-vs-ISA differential,
- *  the only coverage that exercises the SIMD `sz_utf8_decode` and `sz_utf8_find_nth` variants.
+ *  the only coverage that exercises the SIMD `sz_utf8_decode` and `sz_utf8_seek` variants.
  *
  *  @param count_serial      Reference (serial) codepoint counter.
  *  @param count_candidate   Candidate codepoint counter to validate against the reference.
@@ -494,10 +494,10 @@ void test_utf8_runes_unit() {
  *  @param unpack_candidate  Candidate streaming chunk decoder (or NULL when the backend has none).
  *  @param inputs            Number of random inputs to fuzz, scaled by the global multiplier.
  */
-static void test_utf8_runes_equivalence(                                       //
-    sz_utf8_count_t count_serial, sz_utf8_count_t count_candidate,             //
-    sz_utf8_find_nth_t find_nth_serial, sz_utf8_find_nth_t find_nth_candidate, //
-    sz_utf8_decode_t unpack_serial, sz_utf8_decode_t unpack_candidate,         //
+static void test_utf8_runes_equivalence(                               //
+    sz_utf8_count_t count_serial, sz_utf8_count_t count_candidate,     //
+    sz_utf8_seek_t find_nth_serial, sz_utf8_seek_t find_nth_candidate, //
+    sz_utf8_decode_t unpack_serial, sz_utf8_decode_t unpack_candidate, //
     sz_size_t inputs) {
 
     auto &rng = global_random_generator();
@@ -511,7 +511,7 @@ static void test_utf8_runes_equivalence(                                       /
         sz_size_t const count_reference = count_serial(data, length);
         assert(count_candidate(data, length) == count_reference);
 
-        // `sz_utf8_find_nth`: sweep every codepoint index plus a couple past the end.
+        // `sz_utf8_seek`: sweep every codepoint index plus a couple past the end.
         for (sz_size_t n = 0; n <= count_reference + 2u; ++n)
             assert(find_nth_candidate(data, length, n) == find_nth_serial(data, length, n));
 
@@ -570,7 +570,7 @@ static void test_utf8_runes_large_count() {
  *
  *  Counting is bounds-safe on arbitrary bytes, so it faces the full malformed battery: it must merely
  *  survive. `sz_utf8_decode` documents a valid-UTF-8 precondition (the decoder "performs no
- *  validity checks") and asserts internally on garbage, so it is only exercised on the `sz_utf8_valid`
+ *  validity checks") and asserts internally on garbage, so it is only exercised on the `sz_utf8_find_malformed`
  *  subset; each call must report no more runes than the destination holds and never let its cursor run
  *  past the input.
  *
@@ -704,43 +704,43 @@ void test_utf8_runes_all() {
     sz_unused_(inputs);
 
 #if SZ_USE_HASWELL
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_haswell,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_haswell, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_haswell, //
+                                sz_utf8_seek_serial, sz_utf8_seek_haswell,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_haswell, inputs);
 #endif
 #if SZ_USE_ICELAKE
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_icelake,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_icelake, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_icelake, //
+                                sz_utf8_seek_serial, sz_utf8_seek_icelake,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_icelake, inputs);
 #endif
 #if SZ_USE_NEON
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_neon,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_neon, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_neon, //
+                                sz_utf8_seek_serial, sz_utf8_seek_neon,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_neon, inputs);
 #endif
 #if SZ_USE_SVE2
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_sve2,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_sve2, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_sve2, //
+                                sz_utf8_seek_serial, sz_utf8_seek_sve2,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_sve2, inputs);
 #endif
 #if SZ_USE_V128
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_v128,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_v128, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_v128, //
+                                sz_utf8_seek_serial, sz_utf8_seek_v128,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_v128, inputs);
 #endif
 #if SZ_USE_RVV
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_rvv,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_rvv, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_rvv, //
+                                sz_utf8_seek_serial, sz_utf8_seek_rvv,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_rvv, inputs);
 #endif
 #if SZ_USE_POWERVSX
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_powervsx,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_powervsx, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_powervsx, //
+                                sz_utf8_seek_serial, sz_utf8_seek_powervsx,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_powervsx, inputs);
 #endif
 #if SZ_USE_LASX
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_lasx,       //
-                                sz_utf8_find_nth_serial, sz_utf8_find_nth_lasx, //
+    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_lasx, //
+                                sz_utf8_seek_serial, sz_utf8_seek_lasx,   //
                                 sz_utf8_decode_serial, sz_utf8_decode_lasx, inputs);
 #endif
 

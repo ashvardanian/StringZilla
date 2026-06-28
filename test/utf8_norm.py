@@ -81,44 +81,44 @@ def test_utf8_norm_expansions(input_str, form, expected):
     assert sz.utf8_norm(input_str, form) == expected
 
 
-def test_unit_utf8_norm_violation():
+def test_unit_utf8_find_denormalized():
     """Test normalization violation detection."""
     # Pure ASCII is always normalized in every form
     for form in ("NFC", "NFD", "NFKC", "NFKD"):
-        assert sz.utf8_norm_violation("hello", form) is None
-        assert sz.utf8_norm_violation("", form) is None
+        assert sz.utf8_find_denormalized("hello", form) is None
+        assert sz.utf8_find_denormalized("", form) is None
 
     # A precomposed character (U+00E9 é) is valid NFC but is a violation for NFD
     precomposed = "café"  # NFC: already composed
-    assert sz.utf8_norm_violation(precomposed, "NFC") is None
-    nfd_violation = sz.utf8_norm_violation(precomposed, "NFD")
+    assert sz.utf8_find_denormalized(precomposed, "NFC") is None
+    nfd_violation = sz.utf8_find_denormalized(precomposed, "NFD")
     assert nfd_violation is not None
     assert isinstance(nfd_violation, int)
     assert nfd_violation >= 0
 
     # A decomposed sequence (e + combining accent) is valid NFD but violates NFC
     decomposed = "café"  # NFD: e + combining acute
-    assert sz.utf8_norm_violation(decomposed, "NFD") is None
-    nfc_violation = sz.utf8_norm_violation(decomposed, "NFC")
+    assert sz.utf8_find_denormalized(decomposed, "NFD") is None
+    nfc_violation = sz.utf8_find_denormalized(decomposed, "NFC")
     assert nfc_violation is not None
     assert isinstance(nfc_violation, int)
 
     # Method form on Str
-    assert sz.Str("hello").utf8_norm_violation("NFC") is None
+    assert sz.Str("hello").utf8_find_denormalized("NFC") is None
 
     # Bytes input
-    assert sz.utf8_norm_violation(b"hello", "NFD") is None
+    assert sz.utf8_find_denormalized(b"hello", "NFD") is None
 
     # fi ligature (U+FB01) is not NFKD-normalized
-    assert sz.utf8_norm_violation("ﬁ", "NFKD") is not None
+    assert sz.utf8_find_denormalized("ﬁ", "NFKD") is not None
     # But "fi" as two plain ASCII chars IS NFKD-normalized
-    assert sz.utf8_norm_violation("fi", "NFKD") is None
+    assert sz.utf8_find_denormalized("fi", "NFKD") is None
 
     # ValueError on unknown form
     import pytest as _pytest
 
     with _pytest.raises(ValueError, match="unknown form"):
-        sz.utf8_norm_violation("hello", "XYZ")
+        sz.utf8_find_denormalized("hello", "XYZ")
 
 
 #  region Exhaustive ICU cross-check

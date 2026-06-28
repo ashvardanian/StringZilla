@@ -73,8 +73,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_r
         it->ptr += rune_length;
         // Pre-fill pending buffer with sentinel values to prevent stale data from causing false matches.
         // The fold function will overwrite positions it uses; unused positions keep the sentinel.
-        // This follows the same pattern as sz_utf8_uncased_find_2folded_serial_ and
-        // sz_utf8_uncased_find_3folded_serial_.
+        // This follows the same pattern as sz_utf8_uncased_search_2folded_serial_ and
+        // sz_utf8_uncased_search_3folded_serial_.
         it->pending[0] = 0xFFFFFFFFu;
         it->pending[1] = 0xFFFFFFFEu;
         it->pending[2] = 0xFFFFFFFDu;
@@ -198,8 +198,8 @@ SZ_INTERNAL sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_i
  *  @param rune Unicode codepoint to check.
  *  @return sz_true_k if the codepoint is case-agnostic, sz_false_k otherwise.
  *
- *  @warning This is an internal function. Use sz_utf8_uncased_violation_serial() for string checking.
- *  @see sz_utf8_uncased_violation_serial
+ *  @warning This is an internal function. Use sz_utf8_find_cased_serial() for string checking.
+ *  @see sz_utf8_find_cased_serial
  *  @see sz_unicode_fold_codepoint_
  */
 SZ_INTERNAL sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
@@ -282,7 +282,7 @@ SZ_INTERNAL sz_bool_t sz_rune_is_uncased_(sz_rune_t rune) {
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_serial(sz_cptr_t str, sz_size_t length) {
+SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_serial(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     sz_u8_t const *text_end = text_cursor + length;
 
@@ -484,8 +484,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_verify_match_(                      //
  *  @param match_length Output: length of the matched rune in haystack bytes on success.
  *  @return Pointer to the first matching rune, or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_1folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_1folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
     sz_rune_t needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -547,12 +547,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_1folded_serial_( //
  *  @param match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start, or SZ_NULL_CHAR if not found in this region.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
-    sz_cptr_t needle, sz_size_t needle_length,              //
-    sz_cptr_t danger_cursor, sz_size_t danger_length,       //
-    sz_rune_t needle_first_safe_folded_rune,                //
-    sz_size_t needle_first_safe_folded_rune_offset,         //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
+    sz_cptr_t needle, sz_size_t needle_length,                //
+    sz_cptr_t danger_cursor, sz_size_t danger_length,         //
+    sz_rune_t needle_first_safe_folded_rune,                  //
+    sz_size_t needle_first_safe_folded_rune_offset,           //
     sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -568,7 +568,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
             continue;
         }
 
-        // The following part is practically the unpacked variant of `sz_utf8_uncased_find_1folded_serial_`,
+        // The following part is practically the unpacked variant of `sz_utf8_uncased_search_1folded_serial_`,
         // that finds the first occurrence of the `needle_first_safe_folded_rune` haystack. The issue is that each one
         // `haystack_rune` may unpack into multiple `haystack_folded_runes`.
         sz_rune_t haystack_rune;
@@ -771,8 +771,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_in_danger_zone_( //
  *  @param match_length Output: length of the matched region in haystack bytes on success.
  *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_2folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_size_t *match_length) {
 
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -857,8 +857,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_2folded_serial_( //
  *  @param match_length Output: length of the matched region in haystack bytes on success.
  *  @return Pointer to the first match, or SZ_NULL_CHAR if not found.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,          //
+SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_3folded_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
     sz_rune_t first_needle_folded, sz_rune_t second_needle_folded, sz_rune_t third_needle_folded,
     sz_size_t *match_length) {
 
@@ -949,7 +949,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_find_3folded_serial_( //
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial(   //
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_serial( //
     sz_cptr_t haystack, sz_size_t haystack_length, //
     sz_cptr_t needle, sz_size_t needle_length,     //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
@@ -961,7 +961,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial(   //
         return haystack;
     }
 
-    if (sz_utf8_uncased_violation_serial(needle, needle_length) == SZ_NULL_CHAR) {
+    if (sz_utf8_find_cased_serial(needle, needle_length) == SZ_NULL_CHAR) {
         sz_cptr_t result = sz_find_serial(haystack, haystack_length, needle, needle_length);
         if (result) {
             *match_length = needle_length;
@@ -985,16 +985,16 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_serial(   //
         // Dispatch based on folded rune count
         switch (folded_count) {
         case 1:
-            return sz_utf8_uncased_find_1folded_serial_( //
-                haystack, haystack_length,               //
+            return sz_utf8_uncased_search_1folded_serial_( //
+                haystack, haystack_length,                 //
                 folded_runes[0], match_length);
         case 2:
-            return sz_utf8_uncased_find_2folded_serial_( //
-                haystack, haystack_length,               //
+            return sz_utf8_uncased_search_2folded_serial_( //
+                haystack, haystack_length,                 //
                 folded_runes[0], folded_runes[1], match_length);
         case 3:
-            return sz_utf8_uncased_find_3folded_serial_( //
-                haystack, haystack_length,               //
+            return sz_utf8_uncased_search_3folded_serial_( //
+                haystack, haystack_length,                 //
                 folded_runes[0], folded_runes[1], folded_runes[2], match_length);
         default: break; // 4+ folded runes: fall through to Rabin-Karp
         }
@@ -1428,7 +1428,7 @@ SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_p
         // Latin Extended-B (C6 lead byte) - for vietnamese (supports ơ/ư)
         if (lead == 0xC6) { safety |= (1 << sz_utf8_uncased_rune_safe_vietnamese_k); }
 
-        // Cyrillic - check exact ranges handled by sz_utf8_uncased_find_icelake_cyrillic_fold_zmm_
+        // Cyrillic - check exact ranges handled by sz_utf8_uncased_search_icelake_cyrillic_fold_zmm_
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
         // D1 80-9F: U+0440-U+045F (lowercase continuation)
         // Note: D2/D3 Extended Cyrillic BANNED from SIMD kernel - needles with D2/D3 use serial fallback
@@ -1437,7 +1437,7 @@ SZ_INTERNAL sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_p
             safety |= (1 << sz_utf8_uncased_rune_safe_cyrillic_k);
         }
 
-        // Greek - check exact ranges handled by sz_utf8_uncased_find_icelake_greek_fold_zmm_
+        // Greek - check exact ranges handled by sz_utf8_uncased_search_icelake_greek_fold_zmm_
         // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
         //   - EXCLUDE CE 90: 'ΐ' (U+0390) expands to 3 codepoints
         // CE 91-A9: basic uppercase Α-Ω
@@ -1719,7 +1719,7 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
     // A needle containing any byte that does not begin a well-formed codepoint cannot be window-analyzed by the
     // unchecked decode below; route it to the serial kernel, which handles malformed bytes losslessly (each is
     // folded to itself and resyncs by one byte), keeping SIMD and serial results identical.
-    if (sz_utf8_valid(needle, needle_length) == sz_false_k) {
+    if (sz_utf8_find_malformed(needle, needle_length) != SZ_NULL_CHAR) {
         refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
         refined->offset_in_unfolded = 0;
         refined->length_in_unfolded = 0;

@@ -551,7 +551,7 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | `utf8_graphemes(string, skip_empty=False)`             | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
 | `utf8_words(string, skip_empty=False)`                 | TR29 word boundaries             | words across all Unicode scripts.                                                      |
 | `utf8_sentences(string, skip_empty=False)`             | TR29 sentence boundaries         | sentences.                                                                             |
-| `utf8_linewraps(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
+| `utf8_linebreaks(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
 | `utf8_lines(string, keepends=False, skip_empty=False)` | 7 Unicode newlines + CRLF        | hard lines on LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, and CRLF.                       |
 | `utf8_tokens(string, skip_empty=False)`                | 25 Unicode `"White_Space"` chars | whitespace-delimited tokens, like `str.split()` with no separator.                     |
 
@@ -585,7 +585,7 @@ assert len(sz.Str("é")) == 2      # bytes
 These apply Unicode case folding, correctly handling one-to-many expansions such as German `ß` matching `SS`.
 
 - `utf8_uncased_fold(text, validate=False)` — return the case-folded UTF-8 string as `bytes`.
-- `utf8_uncased_find(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`. For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
+- `utf8_uncased_search(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`. For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
 - `utf8_uncased_order(a, b, validate=False)` — uncased lexicographic comparison: negative, zero, or positive `int`.
 - `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `Str` view whose length may differ from `needle` due to folding expansions.
 
@@ -596,7 +596,7 @@ import stringzilla as sz
 
 assert sz.utf8_uncased_fold("HELLO") == b"hello"
 assert sz.utf8_uncased_fold("Straße") == b"strasse"
-assert sz.utf8_uncased_find("Hello World", "WORLD") == 6
+assert sz.utf8_uncased_search("Hello World", "WORLD") == 6
 assert sz.utf8_uncased_order("hello", "HELLO") == 0
 assert [str(m) for m in sz.utf8_uncased_matches("Hello HELLO hello", "hello")] == ["Hello", "HELLO", "hello"]
 ```
@@ -606,14 +606,14 @@ assert [str(m) for m in sz.utf8_uncased_matches("Hello HELLO hello", "hello")] =
 These mirror `unicodedata.normalize` but operate on raw UTF-8 bytes.
 
 - `utf8_norm(text, form, validate=False)` — normalize to one of `'NFC'`, `'NFD'`, `'NFKC'`, `'NFKD'`; returns `bytes`.
-- `utf8_norm_violation(text, form)` — return the byte offset of the first codepoint that breaks the given normalization form, or `None` if the string is already fully normalized.
+- `utf8_find_denormalized(text, form)` — return the byte offset of the first codepoint that breaks the given normalization form, or `None` if the string is already fully normalized.
 
 ```python
 import stringzilla as sz
 
 assert sz.utf8_norm("café", "NFD") == b"cafe\xcc\x81"   # decomposed
 assert sz.utf8_norm("ﬁ", "NFKD") == b"fi"   # ligature expanded
-assert sz.utf8_norm_violation("café", "NFC") is None   # already NFC
+assert sz.utf8_find_denormalized("café", "NFC") is None   # already NFC
 ```
 
 ## Runtime Dispatch and Capabilities

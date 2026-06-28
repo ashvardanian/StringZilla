@@ -28,8 +28,8 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) 
     return sz_utf8_count_v128(text, length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    return sz_utf8_find_nth_v128(text, length, n);
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+    return sz_utf8_seek_v128(text, length, n);
 }
 
 #if defined(__clang__)

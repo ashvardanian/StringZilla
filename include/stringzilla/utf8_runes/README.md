@@ -1,6 +1,6 @@
 # UTF-8 Runes: Codepoint Counting, Decoding, and Indexing
 
-This directory holds the kernels behind `sz_utf8_count`, `sz_utf8_decode`, and `sz_utf8_find_nth`, the low-level rune operations that count the codepoints in a UTF-8 string, decode each variable-length byte sequence into its 32-bit codepoint, and locate the byte offset of the Nth codepoint.
+This directory holds the kernels behind `sz_utf8_count`, `sz_utf8_decode`, and `sz_utf8_seek`, the low-level rune operations that count the codepoints in a UTF-8 string, decode each variable-length byte sequence into its 32-bit codepoint, and locate the byte offset of the Nth codepoint.
 Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends on x86, and the dispatcher picks the fastest one available on the running CPU.
 
 ## Methodology
@@ -12,7 +12,7 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 
 ## Short Words
 
-| Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_find_nth` |
+| Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_seek` |
 | :--------------- | --------------: | ---------------: | -----------------: |
 | Serial @ Xeon4   |      172.5 MB/s |       223.1 MB/s |         102.3 MB/s |
 | Haswell @ Xeon4  |      210.3 MB/s |       144.6 MB/s |         119.5 MB/s |
@@ -25,7 +25,7 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 
 ## Long Lines
 
-| Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_find_nth` |
+| Backend          | `sz_utf8_count` | `sz_utf8_decode` | `sz_utf8_seek` |
 | :--------------- | --------------: | ---------------: | -----------------: |
 | Serial @ Xeon4   |       1.18 GB/s |        0.41 GB/s |          0.55 GB/s |
 | Haswell @ Xeon4  |       6.36 GB/s |        0.57 GB/s |          5.57 GB/s |

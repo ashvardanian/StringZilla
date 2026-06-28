@@ -991,8 +991,8 @@ typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_utf8_count`. */
 typedef sz_size_t (*sz_utf8_count_t)(sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_find_nth`. */
-typedef sz_cptr_t (*sz_utf8_find_nth_t)(sz_cptr_t, sz_size_t, sz_size_t);
+/** @brief Signature of `sz_utf8_seek`. */
+typedef sz_cptr_t (*sz_utf8_seek_t)(sz_cptr_t, sz_size_t, sz_size_t);
 
 /** @brief Signature of `sz_utf8_decode`. */
 typedef sz_cptr_t (*sz_utf8_decode_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *);
@@ -1011,30 +1011,26 @@ typedef enum sz_normal_form_t {
 /** @brief Signature of `sz_utf8_norm` (single-pass normalizer). */
 typedef sz_size_t (*sz_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_ptr_t);
 
-/** @brief Signature of `sz_utf8_norm_violation`. */
-typedef sz_cptr_t (*sz_utf8_norm_violation_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
+/** @brief Signature of `sz_utf8_find_denormalized`. */
+typedef sz_cptr_t (*sz_utf8_find_denormalized_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
 
 /** @brief Forward declaration for uncased needle metadata. */
 struct sz_utf8_uncased_needle_metadata_t;
 
-/** @brief Signature of `sz_utf8_uncased_find`. */
-typedef sz_cptr_t (*sz_utf8_uncased_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
-                                            struct sz_utf8_uncased_needle_metadata_t *, sz_size_t *);
+/** @brief Signature of `sz_utf8_uncased_search`. */
+typedef sz_cptr_t (*sz_utf8_uncased_search_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t,
+                                              struct sz_utf8_uncased_needle_metadata_t *, sz_size_t *);
 
 /** @brief Signature of `sz_utf8_uncased_order`. */
 typedef sz_ordering_t (*sz_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_utf8_uncased_agnostic`. */
-typedef sz_cptr_t (*sz_utf8_uncased_violation_t)(sz_cptr_t, sz_size_t);
+/** @brief Signature of `sz_utf8_find_cased`. */
+typedef sz_cptr_t (*sz_utf8_find_cased_t)(sz_cptr_t, sz_size_t);
 
 /** @brief Signature of every UTF-8 "find boundaries" kernel - words (forward/reverse), graphemes, sentences,
- *         lines, newlines, whitespace. Emits parallel (offset, length) arrays for each segment/delimiter plus a
- *         resume `bytes_consumed`. */
+ *         lines, newlines, whitespace, delimiters. Emits parallel (offset, length) arrays for each
+ *         segment/delimiter plus a resume `bytes_consumed`. */
 typedef sz_size_t (*sz_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *);
-
-/** @brief Signature of `sz_find_delimiter_utf8` and its per-ISA `sz_find_delimiters_utf8_*` backends: scan to the
- *         first delimiter codepoint, write its byte length, return its pointer (or NULL if none). */
-typedef sz_cptr_t (*sz_find_delimiter_utf8_t)(sz_cptr_t, sz_size_t, sz_size_t *);
 
 /** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);

@@ -33,8 +33,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t length,
     return sz_utf8_norm_v128(source, length, form, destination);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_v128(source, length, form);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_v128(source, length, form);
 }
 
 #pragma endregion relaxed_simd

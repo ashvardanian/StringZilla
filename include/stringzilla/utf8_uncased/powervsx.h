@@ -24,16 +24,16 @@ extern "C" {
 /*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_find_powervsx( //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
+SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_powervsx( //
+    sz_cptr_t haystack, sz_size_t haystack_length,   //
+    sz_cptr_t needle, sz_size_t needle_length,       //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-    return sz_utf8_uncased_find_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                       matched_length);
+    return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                         matched_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_violation_powervsx(sz_cptr_t str, sz_size_t length) {
-    return sz_utf8_uncased_violation_serial(str, length);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_powervsx(sz_cptr_t str, sz_size_t length) {
+    return sz_utf8_find_cased_serial(str, length);
 }
 
 SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,

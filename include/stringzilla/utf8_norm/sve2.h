@@ -40,8 +40,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_sve2(sz_cptr_t source, sz_size_t length, sz_nor
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_sve2_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_sve2(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_sve2_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_sve2(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_sve2_);
 }
 
 #if defined(__clang__)

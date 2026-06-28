@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""UAX-14 line-break tests: utf8_linewraps behavior, strict official LineBreakTest conformance (bit-exact
+"""UAX-14 line-break tests: utf8_linebreaks behavior, strict official LineBreakTest conformance (bit-exact
 19338/19338), and an agreement-gated differential against uniseg. Adds malformed/seam sweeps.
 
-Mirrors the C++ scripts/test_utf8_linewraps.cpp translation unit.
+Mirrors the C++ scripts/test_utf8_linebreaks.cpp translation unit.
 """
 
 from random import Random, choice, randint, seed
@@ -36,51 +36,51 @@ _SEGMENTATION_PALETTE = SEGMENTATION_PALETTE
 #  region Line iterator
 
 
-def test_utf8_linewraps_basic():
+def test_utf8_linebreaks_basic():
     """Test basic line iteration yielding line-break-opportunity Str segments."""
-    result = [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
+    result = [str(seg) for seg in sz.utf8_linebreaks("first\nsecond")]
     assert "".join(result) == "first\nsecond"  # Segments tile the input.
 
     # Empty string yields nothing.
-    assert [str(seg) for seg in sz.utf8_linewraps("")] == []
+    assert [str(seg) for seg in sz.utf8_linebreaks("")] == []
 
     # A single short line still tiles back to the input.
-    result = [str(seg) for seg in sz.utf8_linewraps("just one line")]
+    result = [str(seg) for seg in sz.utf8_linebreaks("just one line")]
     assert "".join(result) == "just one line"
 
 
-def test_utf8_linewraps_tiling():
+def test_utf8_linebreaks_tiling():
     """Linewrap is forward-only; its segments tile the input contiguously."""
     text = "alpha\nbeta\ngamma"
-    forward = [str(seg) for seg in sz.utf8_linewraps(text)]
+    forward = [str(seg) for seg in sz.utf8_linebreaks(text)]
     assert "".join(forward) == text
 
 
-def test_utf8_linewraps_skip_empty():
+def test_utf8_linebreaks_skip_empty():
     """Test skip_empty parameter for line iteration."""
-    result = [str(seg) for seg in sz.utf8_linewraps("a\n\nb", skip_empty=True)]
+    result = [str(seg) for seg in sz.utf8_linebreaks("a\n\nb", skip_empty=True)]
     assert len(result) > 0
     assert all(len(seg) > 0 for seg in result)
 
 
-def test_utf8_linewraps_unicode():
+def test_utf8_linebreaks_unicode():
     """Test UTF-8 multi-byte / Unicode coverage."""
-    result = [str(seg) for seg in sz.utf8_linewraps("Größe\u2028привет")]
+    result = [str(seg) for seg in sz.utf8_linebreaks("Größe\u2028привет")]
     assert "".join(result) == "Größe\u2028привет"
     # Segments tile the input.
 
     # CRLF is a single break opportunity, not two.
-    result = [str(seg) for seg in sz.utf8_linewraps("a\r\nb")]
+    result = [str(seg) for seg in sz.utf8_linebreaks("a\r\nb")]
     assert "".join(result) == "a\r\nb"
 
 
-def test_utf8_linewraps_str_method():
-    """The Str.utf8_linewraps() method must agree with the module function."""
+def test_utf8_linebreaks_str_method():
+    """The Str.utf8_linebreaks() method must agree with the module function."""
     s = Str("first\nsecond")
-    method_result = [str(seg) for seg in s.utf8_linewraps(s)]
-    module_result = [str(seg) for seg in sz.utf8_linewraps(s)]
+    method_result = [str(seg) for seg in s.utf8_linebreaks(s)]
+    module_result = [str(seg) for seg in sz.utf8_linebreaks(s)]
     assert method_result == module_result
-    assert method_result == [str(seg) for seg in sz.utf8_linewraps("first\nsecond")]
+    assert method_result == [str(seg) for seg in sz.utf8_linebreaks("first\nsecond")]
 
 
 def test_utf8_linewrap_boundary_official_conformance():
@@ -102,7 +102,7 @@ def test_utf8_linewrap_boundary_official_conformance():
     for test_str, expected_byte_boundaries in test_cases:
         if not test_str:
             continue
-        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(test_str))[1:]
+        sz_boundaries = _byte_boundaries(sz.utf8_linebreaks(test_str))[1:]
         if sz_boundaries != expected_byte_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in test_str)
             failures.append(f"  {cps}: expected {expected_byte_boundaries}, got {sz_boundaries}")
@@ -124,7 +124,7 @@ def test_utf8_linewrap_differential_uniseg(seed_value: int):
     failures = []
     for _ in range(2000):
         text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
-        sz_boundaries = _byte_boundaries(sz.utf8_linewraps(text))
+        sz_boundaries = _byte_boundaries(sz.utf8_linebreaks(text))
         ref_boundaries = _byte_boundaries(ref_segments(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)
@@ -149,7 +149,7 @@ def test_utf8_linewrap_safety(seed_value: int):
     """Adversarial-byte safety: the linewrap iterator must survive the malformed battery and still tile its input."""
     rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
-        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+        assert_segments_tile(sz.utf8_linebreaks(raw), raw)
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
@@ -159,13 +159,13 @@ def test_utf8_linewrap_seam(seed_value: int):
     rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
-        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+        assert_segments_tile(sz.utf8_linebreaks(raw), raw)
     # Phase sweep: shift a fixed corpus by every byte offset 0..63 so its content lands at every alignment
     # relative to the 64-byte window — exhaustive deterministic complement to the length sweep.
     body = corpus_of_byte_length(96, rng)
     for phase in range(64):
         raw = b"a" * phase + body
-        assert_segments_tile(sz.utf8_linewraps(raw), raw)
+        assert_segments_tile(sz.utf8_linebreaks(raw), raw)
 
 
 #  endregion Synthetic corner cases (safety / seam)
@@ -190,7 +190,7 @@ def test_utf8_linewrap_class_adjacency():
 
     failures = []
     for text in cases:
-        sz_boundaries = byte_boundaries(sz.utf8_linewraps(text))
+        sz_boundaries = byte_boundaries(sz.utf8_linebreaks(text))
         reference_boundaries = byte_boundaries(list(uniseg_linebreak.line_break_units(text)))
         if sz_boundaries != reference_boundaries:
             codepoints = " ".join(f"{ord(character):04X}" for character in text)

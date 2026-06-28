@@ -115,7 +115,7 @@ static PyTypeObject Utf8TokensType;
 static PyTypeObject Utf8WordsType;
 static PyTypeObject Utf8GraphemesType;
 static PyTypeObject Utf8SentencesType;
-static PyTypeObject Utf8LinewrapsType;
+static PyTypeObject Utf8LinebreaksType;
 static PyTypeObject Utf8CodepointsType;
 static PyTypeObject Utf8UncasedMatchesType;
 static PyTypeObject HasherType;
@@ -367,7 +367,7 @@ typedef struct {
 /**
  *  @brief  Iterator for finding line-break opportunities (soft wrap points) in UTF-8 text per Unicode UAX14.
  *
- *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_linewraps, yielding one
+ *  Streams linewrap segments by refilling a small inline buffer with @c sz_utf8_linebreaks, yielding one
  *  @c Str view per @c __next__ for each UAX14 line-break-opportunity segment. The buffer lives in the iterator
  *  itself - no extra allocation. Forward only: @c start advances past each batch as it is consumed.
  */
@@ -388,11 +388,11 @@ typedef struct {
     sz_size_t batch_count; //< Number of line segments currently buffered.
     sz_size_t batch_index; //< Index of the next line segment to yield from the buffer.
 
-} Utf8Linewraps;
+} Utf8Linebreaks;
 
 /**
  *  @brief  Iterator that yields all uncased matches of a needle in a haystack.
- *          Uses `sz_utf8_uncased_find` for Unicode-aware case folding.
+ *          Uses `sz_utf8_uncased_search` for Unicode-aware case folding.
  */
 typedef struct {
     PyObject ob_base;
@@ -3850,7 +3850,7 @@ static PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *arg
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && !sz_utf8_valid(str.start, str.length)) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
@@ -3973,7 +3973,7 @@ static PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && !sz_utf8_valid(str.start, str.length)) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
@@ -4002,35 +4002,35 @@ static PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
     return result_bytes;
 }
 
-static char const doc_utf8_norm_violation[] =                                                   //
-    "Return the byte offset of the first normalization violation, or None.\n"                   //
-    "\n"                                                                                        //
-    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"               //
-    "that breaks the given normalization form (first non-Yes Quick-Check result\n"              //
-    "or canonical-ordering violation). Returns None when the string is already\n"               //
-    "fully normalized.\n"                                                                       //
-    "\n"                                                                                        //
-    "Args:\n"                                                                                   //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                                 //
-    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                    //
-    "\n"                                                                                        //
-    "Returns:\n"                                                                                //
-    "    int | None: Byte offset of first violation, or None if already normalized.\n"          //
-    "\n"                                                                                        //
-    "Example:\n"                                                                                //
-    "    >>> sz.utf8_norm_violation('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"           //
-    "    3\n"                                                                                   //
-    "    >>> sz.utf8_norm_violation('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
+static char const doc_utf8_find_denormalized[] =                                                   //
+    "Return the byte offset of the first normalization violation, or None.\n"                      //
+    "\n"                                                                                           //
+    "Scans the UTF-8 string and returns the byte offset of the first codepoint\n"                  //
+    "that breaks the given normalization form (first non-Yes Quick-Check result\n"                 //
+    "or canonical-ordering violation). Returns None when the string is already\n"                  //
+    "fully normalized.\n"                                                                          //
+    "\n"                                                                                           //
+    "Args:\n"                                                                                      //
+    "    text (Str or str or bytes): The input UTF-8 string.\n"                                    //
+    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                       //
+    "\n"                                                                                           //
+    "Returns:\n"                                                                                   //
+    "    int | None: Byte offset of first violation, or None if already normalized.\n"             //
+    "\n"                                                                                           //
+    "Example:\n"                                                                                   //
+    "    >>> sz.utf8_find_denormalized('cafe\\u0301', 'NFC')  # 'e' + combining acute\n"           //
+    "    3\n"                                                                                      //
+    "    >>> sz.utf8_find_denormalized('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n" //
     "    True";
 
-static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                              PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
+                                                 Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs_expected = !is_member + 1; // +1 for `form`
     PyObject *form_obj = NULL;
 
     if (positional_args_count < nargs_expected - 1 || positional_args_count > nargs_expected) {
-        PyErr_Format(PyExc_TypeError, "utf8_norm_violation() takes %zd positional argument(s) (%zd given)",
+        PyErr_Format(PyExc_TypeError, "utf8_find_denormalized() takes %zd positional argument(s) (%zd given)",
                      nargs_expected, positional_args_count);
         return NULL;
     }
@@ -4044,20 +4044,21 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             if (PyUnicode_CompareWithASCIIString(key, "form") == 0) {
                 if (form_obj != NULL) {
-                    PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() got multiple values for argument 'form'");
+                    PyErr_SetString(PyExc_TypeError,
+                                    "utf8_find_denormalized() got multiple values for argument 'form'");
                     return NULL;
                 }
                 form_obj = args[positional_args_count + i];
             }
             else {
-                PyErr_Format(PyExc_TypeError, "utf8_norm_violation() got unexpected keyword argument '%U'", key);
+                PyErr_Format(PyExc_TypeError, "utf8_find_denormalized() got unexpected keyword argument '%U'", key);
                 return NULL;
             }
         }
     }
 
     if (form_obj == NULL) {
-        PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() missing required argument: 'form'");
+        PyErr_SetString(PyExc_TypeError, "utf8_find_denormalized() missing required argument: 'form'");
         return NULL;
     }
 
@@ -4066,7 +4067,7 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     Py_ssize_t form_len = 0;
     char const *form_str = PyUnicode_AsUTF8AndSize(form_obj, &form_len);
     if (!form_str) {
-        PyErr_SetString(PyExc_TypeError, "utf8_norm_violation() argument 'form' must be a string");
+        PyErr_SetString(PyExc_TypeError, "utf8_find_denormalized() argument 'form' must be a string");
         return NULL;
     }
     if (strncmp(form_str, "NFD", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfd_k; }
@@ -4075,7 +4076,7 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
     else if (strncmp(form_str, "NFKC", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkc_k; }
     else {
         PyErr_Format(PyExc_ValueError,
-                     "utf8_norm_violation() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'", form_str);
+                     "utf8_find_denormalized() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'", form_str);
         return NULL;
     }
 
@@ -4087,14 +4088,14 @@ static PyObject *Str_like_utf8_norm_violation(PyObject *self, PyObject *const *a
         return NULL;
     }
 
-    sz_cptr_t violation = sz_utf8_norm_violation(str.start, str.length, form);
+    sz_cptr_t violation = sz_utf8_find_denormalized(str.start, str.length, form);
     if (violation == SZ_NULL_CHAR) { Py_RETURN_NONE; }
 
     sz_size_t offset = (sz_size_t)(violation - str.start);
     return PyLong_FromSize_t(offset);
 }
 
-static char const doc_utf8_uncased_find[] =                                             //
+static char const doc_utf8_uncased_search[] =                                           //
     "Find substring using Unicode uncased matching.\n"                                  //
     "\n"                                                                                //
     "Performs a uncased search using Unicode case folding rules,\n"                     //
@@ -4115,15 +4116,15 @@ static char const doc_utf8_uncased_find[] =                                     
     "    int: Index of the first match, or -1 if not found.\n"                          //
     "\n"                                                                                //
     "Example:\n"                                                                        //
-    "    >>> sz.utf8_uncased_find('Hello World', 'WORLD')  # str: codepoint offset\n"   //
+    "    >>> sz.utf8_uncased_search('Hello World', 'WORLD')  # str: codepoint offset\n" //
     "    6\n"                                                                           //
-    "    >>> sz.utf8_uncased_find('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"          //
+    "    >>> sz.utf8_uncased_search('Straße', 'STRASSE')  # 'ß' = 1 codepoint\n"        //
     "    0\n"                                                                           //
-    "    >>> sz.utf8_uncased_find(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"   //
+    "    >>> sz.utf8_uncased_search(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n" //
     "    0";
 
-static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                            PyObject *args_names_tuple) {
+static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                              PyObject *args_names_tuple) {
     int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
     // Argument objects
@@ -4182,7 +4183,7 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
             if (validate < 0) return NULL;
         }
         else {
-            PyErr_Format(PyExc_TypeError, "utf8_uncased_find() got unexpected keyword argument '%U'", key);
+            PyErr_Format(PyExc_TypeError, "utf8_uncased_search() got unexpected keyword argument '%U'", key);
             return NULL;
         }
     }
@@ -4236,14 +4237,14 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
 
         // Convert codepoint start to byte offset
         if (cp_start > 0) {
-            sz_cptr_t start_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_start);
+            sz_cptr_t start_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_start);
             byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
         }
 
         // Convert codepoint end to byte offset
         sz_size_t byte_offset_end = haystack_full.length;
         if (cp_end < total_codepoints) {
-            sz_cptr_t end_ptr = sz_utf8_find_nth(haystack_full.start, haystack_full.length, cp_end);
+            sz_cptr_t end_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_end);
             byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
         }
 
@@ -4269,11 +4270,11 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (!sz_utf8_valid(haystack.start, haystack.length)) {
+        if (sz_utf8_find_malformed(haystack.start, haystack.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Haystack is not valid UTF-8");
             return NULL;
         }
-        if (!sz_utf8_valid(needle.start, needle.length)) {
+        if (sz_utf8_find_malformed(needle.start, needle.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Needle is not valid UTF-8");
             return NULL;
         }
@@ -4281,8 +4282,8 @@ static PyObject *Str_like_utf8_uncased_find(PyObject *self, PyObject *const *arg
 
     sz_size_t matched_length = 0;
     sz_utf8_uncased_needle_metadata_t needle_metadata = {0}; // Zero-init triggers analysis
-    sz_cptr_t result = sz_utf8_uncased_find(haystack.start, haystack.length, needle.start, needle.length,
-                                            &needle_metadata, &matched_length);
+    sz_cptr_t result = sz_utf8_uncased_search(haystack.start, haystack.length, needle.start, needle.length,
+                                              &needle_metadata, &matched_length);
 
     if (result == NULL) { return PyLong_FromSsize_t(-1); }
 
@@ -4363,11 +4364,11 @@ static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *ar
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (!sz_utf8_valid(a.start, a.length)) {
+        if (sz_utf8_find_malformed(a.start, a.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "First argument is not valid UTF-8");
             return NULL;
         }
-        if (!sz_utf8_valid(b.start, b.length)) {
+        if (sz_utf8_find_malformed(b.start, b.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Second argument is not valid UTF-8");
             return NULL;
         }
@@ -5652,8 +5653,8 @@ static PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, 
     return (PyObject *)iter;
 }
 
-static char const doc_utf8_linewraps[] =                                             //
-    "utf8_linewraps(string, /, skip_empty=False)\n"                                  //
+static char const doc_utf8_linebreaks[] =                                            //
+    "utf8_linebreaks(string, /, skip_empty=False)\n"                                 //
     "\n"                                                                             //
     "Return an iterator yielding segments at line-break opportunities per UAX14.\n"  //
     "Each segment ends at a line-break opportunity (a soft wrap point).\n"           //
@@ -5668,14 +5669,14 @@ static char const doc_utf8_linewraps[] =                                        
     "\n"                                                                             //
     "Example:\n"                                                                     //
     "  >>> # Stream UAX14 line-break opportunities lazily:\n"                        //
-    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                             //
+    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                            //
     "  True";
 
-static PyObject *Str_like_utf8_linewraps(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *kwnames) {
+static PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *kwnames) {
     int min_args = 1, max_args = 2;
     if (positional_args_count < min_args || positional_args_count > max_args) {
-        PyErr_Format(PyExc_TypeError, "utf8_linewraps() requires %zd to %zd arguments", min_args, max_args);
+        PyErr_Format(PyExc_TypeError, "utf8_linebreaks() requires %zd to %zd arguments", min_args, max_args);
         return NULL;
     }
 
@@ -5714,7 +5715,7 @@ static PyObject *Str_like_utf8_linewraps(PyObject *self, PyObject *const *args, 
         return NULL;
     }
 
-    Utf8Linewraps *iter = PyObject_New(Utf8Linewraps, &Utf8LinewrapsType);
+    Utf8Linebreaks *iter = PyObject_New(Utf8Linebreaks, &Utf8LinebreaksType);
     if (!iter) return PyErr_NoMemory();
 
     iter->text_obj = text_obj;
@@ -6327,11 +6328,12 @@ static PyMethodDef Str_methods[] = {
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
     {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
+    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, SZ_METHOD_FLAGS, doc_utf8_linebreaks},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
+    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
+     doc_utf8_find_denormalized},
+    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, SZ_METHOD_FLAGS, doc_utf8_uncased_search},
     {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
@@ -6821,7 +6823,7 @@ static PyObject *Utf8CodepointsType_next(Utf8Codepoints *self) {
         if (self->cursor >= self->end) return NULL;
         sz_size_t unpacked = 0;
         sz_cptr_t next = sz_utf8_decode(self->cursor, (sz_size_t)(self->end - self->cursor), self->batch_runes,
-                                              sz_iterators_default_steps_k, &unpacked);
+                                        sz_iterators_default_steps_k, &unpacked);
         // A well-formed but truncated trailing sequence yields nothing and does not advance; we own the whole text,
         // so finalize it as one U+FFFD (its maximal subpart) rather than silently dropping it.
         if (unpacked == 0 && next < self->end) {
@@ -7037,15 +7039,15 @@ static PyTypeObject Utf8SentencesType = {
 
 #pragma region UTF8 Line Boundary Iterator
 
-static PyObject *Utf8LinewrapsType_next(Utf8Linewraps *self) {
+static PyObject *Utf8LinebreaksType_next(Utf8Linebreaks *self) {
     // Refill the inline batch when drained. UAX14 never yields zero-length segments, so the `skip_empty` option is
     // a no-op for line segmentation and needs no special handling here. Batch offsets are always relative to
     // `self->start` (the not-yet-segmented suffix start); forward only, so `start` advances past each batch.
     if (self->batch_index >= self->batch_count) {
         if (self->start >= self->end) return NULL;
         sz_size_t consumed = 0;
-        self->batch_count = sz_utf8_linewraps(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
-                                              self->batch_lengths, sz_iterators_default_steps_k, &consumed);
+        self->batch_count = sz_utf8_linebreaks(self->start, (sz_size_t)(self->end - self->start), self->batch_starts,
+                                               self->batch_lengths, sz_iterators_default_steps_k, &consumed);
         self->batch_index = 0;
         if (self->batch_count == 0) return NULL;
     }
@@ -7072,26 +7074,26 @@ static PyObject *Utf8LinewrapsType_next(Utf8Linewraps *self) {
     return (PyObject *)result_obj;
 }
 
-static void Utf8LinewrapsType_dealloc(Utf8Linewraps *self) {
+static void Utf8LinebreaksType_dealloc(Utf8Linebreaks *self) {
     Py_XDECREF(self->text_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Utf8LinewrapsType_iter(PyObject *self) {
+static PyObject *Utf8LinebreaksType_iter(PyObject *self) {
     Py_INCREF(self);
     return self;
 }
 
-static char const doc_Utf8Linewraps[] =                                          //
-    "Utf8Linewraps(string, ...)\n"                                               //
+static char const doc_Utf8Linebreaks[] =                                         //
+    "Utf8Linebreaks(string, ...)\n"                                              //
     "\n"                                                                         //
     "UTF-8 aware line-break-opportunity iterator per Unicode UAX14 algorithm.\n" //
     "Yields Str views for each line-break-opportunity segment (a soft wrap).\n"  //
     "For hard-line splitting (str.splitlines()), use utf8_lines().\n"            //
     "\n"                                                                         //
     "Created by:\n"                                                              //
-    "  - Str.utf8_linewraps()\n"                                                 //
-    "  - sz.utf8_linewraps()\n"                                                  //
+    "  - Str.utf8_linebreaks()\n"                                                //
+    "  - sz.utf8_linebreaks()\n"                                                 //
     "\n"                                                                         //
     "UAX14 Line_Break rules implemented:\n"                                      //
     "  - LB4-LB6: Mandatory breaks (BK, CR, LF, NL)\n"                           //
@@ -7100,18 +7102,18 @@ static char const doc_Utf8Linewraps[] =                                         
     "  - LB15-LB31: Quotation, numbers, words, CJK rules\n\n"                    //
     "\n"                                                                         //
     "Example:\n"                                                                 //
-    "  >>> len(list(sz.utf8_linewraps('a\\nb'))) >= 2\n"                         //
+    "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                        //
     "  True";
 
-static PyTypeObject Utf8LinewrapsType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Linewraps",
-    .tp_basicsize = sizeof(Utf8Linewraps),
+static PyTypeObject Utf8LinebreaksType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Linebreaks",
+    .tp_basicsize = sizeof(Utf8Linebreaks),
     .tp_itemsize = 0,
-    .tp_dealloc = (destructor)Utf8LinewrapsType_dealloc,
+    .tp_dealloc = (destructor)Utf8LinebreaksType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8Linewraps,
-    .tp_iter = Utf8LinewrapsType_iter,
-    .tp_iternext = (iternextfunc)Utf8LinewrapsType_next,
+    .tp_doc = doc_Utf8Linebreaks,
+    .tp_iter = Utf8LinebreaksType_iter,
+    .tp_iternext = (iternextfunc)Utf8LinebreaksType_next,
 };
 #pragma endregion
 
@@ -7124,8 +7126,8 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
 
     // Search for next match
     sz_size_t matched_length = 0;
-    sz_cptr_t match = sz_utf8_uncased_find(self->current, remaining, self->needle.start, self->needle.length,
-                                           &self->metadata, &matched_length);
+    sz_cptr_t match = sz_utf8_uncased_search(self->current, remaining, self->needle.start, self->needle.length,
+                                             &self->metadata, &matched_length);
 
     if (!match) return NULL;
 
@@ -8170,7 +8172,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     *did_fit = 1;
 
     // Validate UTF-8 first
-    if (!sz_utf8_valid(cstr, cstr_length)) {
+    if (sz_utf8_find_malformed(cstr, cstr_length) != SZ_NULL_CHAR) {
         *did_fit = -1; // Signal UTF-8 error
         return buffer_ptr;
     }
@@ -8297,7 +8299,7 @@ static PyObject *Strs_repr(Strs *self) {
 
         // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = sz_utf8_valid(cstr_start, cstr_length)
+        repr_buffer_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
                               ? export_escaped_unquoted_to_utf8_buffer(
                                     cstr_start, cstr_length, repr_buffer_ptr,
                                     repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
@@ -8342,7 +8344,7 @@ static PyObject *Strs_str(Strs *self) {
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
-        if (sz_utf8_valid(cstr_start, cstr_length)) {
+        if (sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR) {
             // Valid UTF-8: format as '...' with escaped quotes
             total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
@@ -8387,7 +8389,7 @@ static PyObject *Strs_str(Strs *self) {
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
         int did_fit;
         // Check if the string contains valid UTF-8 and export appropriately
-        result_ptr = sz_utf8_valid(cstr_start, cstr_length)
+        result_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
                          ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
                                                                   total_bytes - (result_ptr - result_buffer), &did_fit)
                          : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,
@@ -9458,11 +9460,12 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
     {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, SZ_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linewraps", (PyCFunction)Str_like_utf8_linewraps, SZ_METHOD_FLAGS, doc_utf8_linewraps},
+    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, SZ_METHOD_FLAGS, doc_utf8_linebreaks},
     {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, SZ_METHOD_FLAGS, doc_utf8_uncased_fold},
     {"utf8_norm", (PyCFunction)Str_like_utf8_norm, SZ_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_norm_violation", (PyCFunction)Str_like_utf8_norm_violation, SZ_METHOD_FLAGS, doc_utf8_norm_violation},
-    {"utf8_uncased_find", (PyCFunction)Str_like_utf8_uncased_find, SZ_METHOD_FLAGS, doc_utf8_uncased_find},
+    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, SZ_METHOD_FLAGS,
+     doc_utf8_find_denormalized},
+    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, SZ_METHOD_FLAGS, doc_utf8_uncased_search},
     {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, SZ_METHOD_FLAGS, doc_utf8_uncased_matches},
     {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, SZ_METHOD_FLAGS, doc_utf8_uncased_order},
 
@@ -9513,7 +9516,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&Utf8CodepointsType) < 0) return NULL;
     if (PyType_Ready(&Utf8GraphemesType) < 0) return NULL;
     if (PyType_Ready(&Utf8SentencesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8LinewrapsType) < 0) return NULL;
+    if (PyType_Ready(&Utf8LinebreaksType) < 0) return NULL;
     if (PyType_Ready(&Utf8UncasedMatchesType) < 0) return NULL;
     if (PyType_Ready(&HasherType) < 0) return NULL;
     if (PyType_Ready(&Sha256Type) < 0) return NULL;

@@ -587,7 +587,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n) {
 
     // The logic of this function is similar to `sz_utf8_count_icelake`, but uses PDEP to locate the Nth start byte
     // within a window in one step. The start-byte test is the same shared one-op `vpcmpgtb(-65)` form.
@@ -615,7 +615,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, s
     }
 
     // Process remaining bytes with serial
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 /**

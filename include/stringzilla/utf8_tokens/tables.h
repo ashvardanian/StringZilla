@@ -1,6 +1,6 @@
 /**
  *  @brief UTF-8 delimiter membership tables (General_Category Punctuation/Symbol/Separator union White_Space).
- *  @file include/stringzilla/utf8_delimiters/tables.h
+ *  @file include/stringzilla/utf8_tokens/delimiters_tables.h
  *  @author Ash Vardanian
  *
  *  A "delimiter" is any codepoint whose Unicode General_Category is one of
@@ -46,8 +46,8 @@
  *      l1.append(gseen[grp])                         # -> _astral_l1_ / _astral_l2_ / _astral_bitmaps_
  *  @endcode
  */
-#ifndef STRINGZILLA_UTF8_DELIMITERS_TABLES_H_
-#define STRINGZILLA_UTF8_DELIMITERS_TABLES_H_
+#ifndef STRINGZILLA_UTF8_TOKENS_TABLES_H_
+#define STRINGZILLA_UTF8_TOKENS_TABLES_H_
 
 #include "stringzilla/types.h"
 
@@ -471,4 +471,4 @@ SZ_INTERNAL int sz_rune_is_delimiter_(sz_rune_t codepoint) {
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_DELIMITERS_TABLES_H_
+#endif // STRINGZILLA_UTF8_TOKENS_TABLES_H_

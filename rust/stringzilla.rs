@@ -190,15 +190,15 @@ impl Default for Utf8UncasedNeedleMetadata {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_uncased_find, Utf8UncasedNeedle};
+/// use stringzilla::stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
 ///
 /// let needle = Utf8UncasedNeedle::new(b"hello");
 /// let haystack1 = b"Hello World";
 /// let haystack2 = b"HELLO there";
 ///
 /// // Metadata is computed once on first search, reused for subsequent searches
-/// let result1 = utf8_uncased_find(haystack1, &needle);
-/// let result2 = utf8_uncased_find(haystack2, &needle);
+/// let result1 = utf8_uncased_search(haystack1, &needle);
+/// let result2 = utf8_uncased_search(haystack2, &needle);
 ///
 /// assert!(result1.is_some());
 /// assert!(result2.is_some());
@@ -449,7 +449,7 @@ extern "C" {
     ) -> *const c_void;
 
     pub(crate) fn sz_utf8_count(text: *const c_void, length: usize) -> usize;
-    pub(crate) fn sz_utf8_find_nth(text: *const c_void, length: usize, n: usize) -> *const c_void;
+    pub(crate) fn sz_utf8_seek(text: *const c_void, length: usize, n: usize) -> *const c_void;
     pub(crate) fn sz_utf8_decode(
         text: *const c_void,
         length: usize,
@@ -480,8 +480,8 @@ extern "C" {
         form: i32,
         destination: *mut c_void,
     ) -> usize;
-    pub(crate) fn sz_utf8_norm_violation(source: *const c_void, source_length: usize, form: i32) -> *const c_void;
-    pub(crate) fn sz_utf8_uncased_find(
+    pub(crate) fn sz_utf8_find_denormalized(source: *const c_void, source_length: usize, form: i32) -> *const c_void;
+    pub(crate) fn sz_utf8_uncased_search(
         haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
@@ -516,7 +516,7 @@ extern "C" {
         cap: usize,
         consumed: *mut usize,
     ) -> usize;
-    pub(crate) fn sz_utf8_linewraps(
+    pub(crate) fn sz_utf8_linebreaks(
         text: *const c_void,
         length: usize,
         starts: *mut usize,
@@ -1193,16 +1193,16 @@ where
 /// use sz::Utf8NormalForm;
 /// // NFD string (decomposed): base 'e' + combining acute U+0301
 /// let nfd = "cafe\u{0301}";
-/// assert!(sz::utf8_norm_violation(nfd, Utf8NormalForm::Nfc).is_some());
-/// assert!(sz::utf8_norm_violation("café", Utf8NormalForm::Nfc).is_none());
+/// assert!(sz::utf8_find_denormalized(nfd, Utf8NormalForm::Nfc).is_some());
+/// assert!(sz::utf8_find_denormalized("café", Utf8NormalForm::Nfc).is_none());
 /// ```
 ///
-pub fn utf8_norm_violation<T>(source: T, form: Utf8NormalForm) -> Option<usize>
+pub fn utf8_find_denormalized<T>(source: T, form: Utf8NormalForm) -> Option<usize>
 where
     T: AsRef<[u8]>,
 {
     let source_ref = source.as_ref();
-    let ptr = unsafe { sz_utf8_norm_violation(source_ref.as_ptr() as *const c_void, source_ref.len(), form as i32) };
+    let ptr = unsafe { sz_utf8_find_denormalized(source_ref.as_ptr() as *const c_void, source_ref.len(), form as i32) };
     if ptr.is_null() {
         None
     } else {
@@ -1236,7 +1236,7 @@ where
 /// ```
 /// use stringzilla::stringzilla as sz;
 /// let haystack = "Hello WORLD";
-/// if let Some((offset, len)) = sz::utf8_uncased_find(haystack, "world") {
+/// if let Some((offset, len)) = sz::utf8_uncased_search(haystack, "world") {
 ///     assert_eq!(offset, 6);
 ///     assert_eq!(len, 5);
 /// }
@@ -1245,19 +1245,19 @@ where
 /// With a pre-compiled needle for repeated searches:
 ///
 /// ```
-/// use stringzilla::stringzilla::{utf8_uncased_find, Utf8UncasedNeedle};
+/// use stringzilla::stringzilla::{utf8_uncased_search, Utf8UncasedNeedle};
 ///
 /// let needle = Utf8UncasedNeedle::new(b"hello");
 ///
 /// // Metadata is computed once, reused for subsequent searches
-/// let result1 = utf8_uncased_find(b"Hello World", &needle);
-/// let result2 = utf8_uncased_find(b"HELLO there", &needle);
+/// let result1 = utf8_uncased_search(b"Hello World", &needle);
+/// let result2 = utf8_uncased_search(b"HELLO there", &needle);
 ///
 /// assert_eq!(result1, Some((0, 5)));
 /// assert_eq!(result2, Some((0, 5)));
 /// ```
 ///
-pub fn utf8_uncased_find<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
+pub fn utf8_uncased_search<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
 where
     H: AsRef<[u8]>,
     N: Utf8UncasedNeedleArg,
@@ -1282,7 +1282,7 @@ impl<T: AsRef<[u8]>> Utf8UncasedNeedleArg for T {
         let mut needle_metadata = Utf8UncasedNeedleMetadata::default();
 
         let result = unsafe {
-            sz_utf8_uncased_find(
+            sz_utf8_uncased_search(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_ref.as_ptr() as *const c_void,
@@ -1307,7 +1307,7 @@ impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
         let mut matched_length: usize = 0;
 
         let result = unsafe {
-            sz_utf8_uncased_find(
+            sz_utf8_uncased_search(
                 haystack.as_ptr() as *const c_void,
                 haystack.len(),
                 needle_bytes.as_ptr() as *const c_void,
@@ -2051,7 +2051,7 @@ where
     let text_pointer = text_ref.as_ptr() as *const c_void;
     let text_length = text_ref.len();
 
-    let result = unsafe { sz_utf8_find_nth(text_pointer, text_length, n) };
+    let result = unsafe { sz_utf8_seek(text_pointer, text_length, n) };
 
     if result.is_null() {
         None
@@ -3518,12 +3518,12 @@ impl<'a, const STEPS: usize> Iterator for Utf8Sentences<'a, STEPS> {
 /// # Examples
 ///
 /// ```
-/// use stringzilla::stringzilla::Utf8Linewraps;
+/// use stringzilla::stringzilla::Utf8Linebreaks;
 ///
-/// let lines: Vec<&[u8]> = Utf8Linewraps::new(b"Hi\nBye").collect();
+/// let lines: Vec<&[u8]> = Utf8Linebreaks::new(b"Hi\nBye").collect();
 /// assert_eq!(lines, vec![&b"Hi\n"[..], &b"Bye"[..]]);
 /// ```
-pub struct Utf8Linewraps<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Linebreaks<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR14 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered line offsets, relative to `suffix`
@@ -3532,16 +3532,16 @@ pub struct Utf8Linewraps<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     index: usize,  // Index of the next line to yield from the buffer
 }
 
-impl<'a> Utf8Linewraps<'a, ITERATORS_DEFAULT_STEPS> {
+impl<'a> Utf8Linebreaks<'a, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
-    /// `Utf8Linewraps::<1>::with_steps(text)`.
+    /// `Utf8Linebreaks::<1>::with_steps(text)`.
     pub fn new(text: &'a [u8]) -> Self {
         Self::with_steps(text)
     }
 }
 
-impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
+impl<'a, const STEPS: usize> Utf8Linebreaks<'a, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` lines per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3560,7 +3560,7 @@ impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            sz_utf8_linewraps(
+            sz_utf8_linebreaks(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3573,7 +3573,7 @@ impl<'a, const STEPS: usize> Utf8Linewraps<'a, STEPS> {
     }
 }
 
-impl<'a, const STEPS: usize> Iterator for Utf8Linewraps<'a, STEPS> {
+impl<'a, const STEPS: usize> Iterator for Utf8Linebreaks<'a, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3668,7 +3668,7 @@ impl<'a> Iterator for Utf8UncasedMatches<'a> {
         let mut matched_length: usize = 0;
 
         let result = unsafe {
-            sz_utf8_uncased_find(
+            sz_utf8_uncased_search(
                 remaining.as_ptr() as *const c_void,
                 remaining.len(),
                 self.needle.as_ptr() as *const c_void,
@@ -3826,7 +3826,7 @@ pub trait StringZillableUnary {
     /// Returns an iterator over UAX-14 line-break opportunities (Unicode TR14), in order. Linewrap segments tile the
     /// input contiguously, including soft break opportunities. For hard line splits only, use
     /// [`Self::sz_utf8_lines`].
-    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_>;
+    fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;
 }
 
 /// Trait for binary string operations that take a needle parameter.
@@ -4099,8 +4099,8 @@ where
         Utf8Sentences::new(self.as_ref())
     }
 
-    fn sz_utf8_linewraps(&self) -> Utf8Linewraps<'_> {
-        Utf8Linewraps::new(self.as_ref())
+    fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_> {
+        Utf8Linebreaks::new(self.as_ref())
     }
 }
 
@@ -5143,10 +5143,10 @@ mod tests {
         // Linewrap segments tile the input, so the yielded segments must match regardless of
         // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line-break opportunity.
         let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Linewraps::new(text).collect();
-        assert_eq!(Utf8Linewraps::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linewraps::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linewraps::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        let forward: Vec<&[u8]> = Utf8Linebreaks::new(text).collect();
+        assert_eq!(Utf8Linebreaks::<1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linebreaks::<3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Linebreaks::<65>::with_steps(text).collect::<Vec<_>>(), forward);
     }
 
     #[test]
@@ -5276,7 +5276,7 @@ mod tests {
     }
 
     #[test]
-    fn utf8_uncased_find_crossing_expansions() {
+    fn utf8_uncased_search_crossing_expansions() {
         // Curated cross-expansion cases where folding changes byte counts and matches can
         // straddle multiple expanding codepoints. Swept across prefix paddings so the match
         // lands at varied alignments relative to the SIMD window boundaries.
@@ -5299,7 +5299,7 @@ mod tests {
                 }
                 haystack.push_str(haystack_core);
 
-                let actual = sz::utf8_uncased_find(haystack.as_bytes(), needle.as_bytes());
+                let actual = sz::utf8_uncased_search(haystack.as_bytes(), needle.as_bytes());
                 let expected = reference_uncased_find(&haystack, needle);
                 assert_eq!(
                     actual, expected,
@@ -5379,13 +5379,13 @@ mod tests {
     }
 
     #[test]
-    fn utf8_norm_violation() {
+    fn utf8_find_denormalized() {
         use sz::Utf8NormalForm;
 
         // NFC string: precomposed é — no violation.
         let nfc_str = "caf\u{00E9}";
         assert_eq!(
-            sz::utf8_norm_violation(nfc_str, Utf8NormalForm::Nfc),
+            sz::utf8_find_denormalized(nfc_str, Utf8NormalForm::Nfc),
             None,
             "NFC string has no NFC violation"
         );
@@ -5393,7 +5393,7 @@ mod tests {
         // NFD string: decomposed e + combining acute U+0301.
         // The combining mark violates NFC (it should be composed with the preceding base).
         let nfd_str = "cafe\u{0301}";
-        let violation = sz::utf8_norm_violation(nfd_str, Utf8NormalForm::Nfc);
+        let violation = sz::utf8_find_denormalized(nfd_str, Utf8NormalForm::Nfc);
         assert!(violation.is_some(), "NFD string must report an NFC violation");
         // The violation may point to the base 'e' (byte 3) or to the combining mark (byte 4);
         // either is within the suffix that must change during composition.
@@ -5405,7 +5405,7 @@ mod tests {
         // NFC string has no NFD violation only if it contains no precomposed characters.
         // ASCII is valid NFD.
         assert_eq!(
-            sz::utf8_norm_violation("hello", Utf8NormalForm::Nfd),
+            sz::utf8_find_denormalized("hello", Utf8NormalForm::Nfd),
             None,
             "pure ASCII has no NFD violation"
         );

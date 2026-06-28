@@ -131,7 +131,7 @@ def _reference_uncased_find(haystack_bytes: bytes, needle_folded: bytes, unicode
     return -1
 
 
-def test_utf8_uncased_find_preimages():
+def test_utf8_uncased_search_preimages():
     """Adversarial probes from Unicode 17.0 CaseFolding.txt: for every codepoint whose
     fold differs from itself, the fold OUTPUT is what a user types as the needle — and
     the PREIMAGE is what hides in the haystack, placed at chunk-boundary offsets.
@@ -153,7 +153,7 @@ def test_utf8_uncased_find_preimages():
         for offset in (0, 30, 62, 63, 64):
             haystack = b"y" * offset + preimage_bytes + b"tail"
             expected = _reference_uncased_find(haystack, folded_bytes, unicode_folds)
-            actual = sz.utf8_uncased_find(haystack, folded_bytes)
+            actual = sz.utf8_uncased_search(haystack, folded_bytes)
             if actual != expected:
                 mismatches.append((f"U+{codepoint:04X}", offset, expected, actual))
 
@@ -164,7 +164,7 @@ def test_utf8_uncased_find_preimages():
 
 
 def _reference_uncased_find_subset(haystack_bytes: bytes, needle_folded: bytes, unicode_folds: dict) -> int:
-    """Independent fold-subset reference matching `sz.utf8_uncased_find`'s documented semantics:
+    """Independent fold-subset reference matching `sz.utf8_uncased_search`'s documented semantics:
     fold every haystack codepoint, concatenate into one folded blob, and find the earliest byte
     offset at which `needle_folded` appears as a substring. The match neither needs to start nor end
     on a codepoint boundary -- it may begin or end mid-expansion. The returned value is the byte
@@ -188,7 +188,7 @@ def _reference_uncased_find_subset(haystack_bytes: bytes, needle_folded: bytes, 
     return source_byte_offset_for_folded_byte[match_position]
 
 
-def test_utf8_uncased_find_crossing_expansions():
+def test_utf8_uncased_search_crossing_expansions():
     """Crossing-expansion probes: matches whose folded runes span the boundary between two
     adjacent expanding codepoints. For example needle `ſß` folds to "sss" and must be found
     inside haystack `ßß` (folding to "ssss") at offset 0; the match is not contained within a
@@ -230,7 +230,7 @@ def test_utf8_uncased_find_crossing_expansions():
             haystack_bytes = haystack_str_padded.encode("utf-8")
             needle_bytes = needle_str.encode("utf-8")
             expected = _reference_uncased_find_subset(haystack_bytes, needle_folded, unicode_folds)
-            actual = sz.utf8_uncased_find(haystack_bytes, needle_bytes)
+            actual = sz.utf8_uncased_search(haystack_bytes, needle_bytes)
             if actual != expected:
                 mismatches.append((haystack_str, needle_str, padding, expected, actual))
 
@@ -310,65 +310,65 @@ def test_utf8_uncased_fold_random_strings(seed_value: int):
         ("A", "a", 0),
     ],
 )
-def test_utf8_uncased_find(haystack, needle, expected):
+def test_utf8_uncased_search(haystack, needle, expected):
     """Test uncased UTF-8 substring search with various scripts."""
-    assert sz.utf8_uncased_find(haystack, needle) == expected
+    assert sz.utf8_uncased_search(haystack, needle) == expected
 
 
-def test_utf8_uncased_find_method():
+def test_utf8_uncased_search_method():
     """Test uncased find as a method on Str objects."""
     s = sz.Str("Hello World")
-    assert s.utf8_uncased_find("WORLD") == 6
-    assert s.utf8_uncased_find("hello") == 0
-    assert s.utf8_uncased_find("xyz") == -1
+    assert s.utf8_uncased_search("WORLD") == 6
+    assert s.utf8_uncased_search("hello") == 0
+    assert s.utf8_uncased_search("xyz") == -1
 
 
-def test_utf8_uncased_find_offsets():
+def test_utf8_uncased_search_offsets():
     """Test that str returns codepoint offsets and bytes returns byte offsets."""
     # str: codepoint offsets
     # 'Hëllo' = 5 codepoints, 'Wörld' starts at codepoint 6
-    assert sz.utf8_uncased_find("Hëllo Wörld", "WÖRLD") == 6
-    assert sz.utf8_uncased_find("Café", "FÉ") == 2  # C, a = 2 codepoints
+    assert sz.utf8_uncased_search("Hëllo Wörld", "WÖRLD") == 6
+    assert sz.utf8_uncased_search("Café", "FÉ") == 2  # C, a = 2 codepoints
 
     # bytes: byte offsets
     # 'Hëllo' = H(1) + ë(2) + l(1) + l(1) + o(1) + space(1) = 7 bytes
-    assert sz.utf8_uncased_find("Hëllo Wörld".encode(), "WÖRLD".encode()) == 7
-    assert sz.utf8_uncased_find("Café".encode(), "FÉ".encode()) == 2
+    assert sz.utf8_uncased_search("Hëllo Wörld".encode(), "WÖRLD".encode()) == 7
+    assert sz.utf8_uncased_search("Café".encode(), "FÉ".encode()) == 2
 
 
-def test_utf8_uncased_find_start_end():
+def test_utf8_uncased_search_start_end():
     """Test start/end parameters with codepoint and byte offsets."""
     # str: codepoint offsets
     text = "Hëllo Hëllo"  # 11 codepoints, 13 bytes
-    assert sz.utf8_uncased_find(text, "HËLLO", 0) == 0
-    assert sz.utf8_uncased_find(text, "HËLLO", 1) == 6  # Skip first
-    assert sz.utf8_uncased_find(text, "HËLLO", 0, 5) == 0  # Within range
-    assert sz.utf8_uncased_find(text, "HËLLO", 0, 4) == -1  # Too short
+    assert sz.utf8_uncased_search(text, "HËLLO", 0) == 0
+    assert sz.utf8_uncased_search(text, "HËLLO", 1) == 6  # Skip first
+    assert sz.utf8_uncased_search(text, "HËLLO", 0, 5) == 0  # Within range
+    assert sz.utf8_uncased_search(text, "HËLLO", 0, 4) == -1  # Too short
 
     # bytes: byte offsets
     text_bytes = text.encode()
-    assert sz.utf8_uncased_find(text_bytes, "HËLLO".encode(), 0) == 0
-    assert sz.utf8_uncased_find(text_bytes, "HËLLO".encode(), 1) == 7
-    assert sz.utf8_uncased_find(text_bytes, "HËLLO".encode(), 0, 7) == 0
-    assert sz.utf8_uncased_find(text_bytes, "HËLLO".encode(), 0, 5) == -1
+    assert sz.utf8_uncased_search(text_bytes, "HËLLO".encode(), 0) == 0
+    assert sz.utf8_uncased_search(text_bytes, "HËLLO".encode(), 1) == 7
+    assert sz.utf8_uncased_search(text_bytes, "HËLLO".encode(), 0, 7) == 0
+    assert sz.utf8_uncased_search(text_bytes, "HËLLO".encode(), 0, 5) == -1
 
 
-def test_utf8_uncased_find_bytes():
+def test_utf8_uncased_search_bytes():
     """Test uncased find with bytes input."""
-    assert sz.utf8_uncased_find(b"Hello World", b"WORLD") == 6
-    assert sz.utf8_uncased_find(b"Strasse", b"STRASSE") == 0
-    assert sz.utf8_uncased_find("Straße".encode(), b"STRASSE") == 0
-    assert sz.utf8_uncased_find("XXStraße".encode(), b"STRASSE") == 2
+    assert sz.utf8_uncased_search(b"Hello World", b"WORLD") == 6
+    assert sz.utf8_uncased_search(b"Strasse", b"STRASSE") == 0
+    assert sz.utf8_uncased_search("Straße".encode(), b"STRASSE") == 0
+    assert sz.utf8_uncased_search("XXStraße".encode(), b"STRASSE") == 2
 
 
-def test_utf8_uncased_find_slicing():
+def test_utf8_uncased_search_slicing():
     """Verify returned index works correctly for slicing."""
     text = "Café au lait"
-    idx = sz.utf8_uncased_find(text, "AU")
+    idx = sz.utf8_uncased_search(text, "AU")
     assert text[idx : idx + 2].lower() == "au"
 
     text_bytes = text.encode()
-    idx = sz.utf8_uncased_find(text_bytes, b"AU")
+    idx = sz.utf8_uncased_search(text_bytes, b"AU")
     assert text_bytes[idx : idx + 2].lower() == b"au"
 
 

@@ -60,9 +60,9 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
 
 /**
  *  @brief  Locate the start byte of the @p n -th codepoint (0-indexed) in @p text, or `SZ_NULL_CHAR` if
- *          @p n is past the codepoint count. Byte-exact to `sz_utf8_find_nth_serial`.
+ *          @p n is past the codepoint count. Byte-exact to `sz_utf8_seek_serial`.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
 
@@ -81,7 +81,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_s
         return (sz_cptr_t)(text_u8 + (sz_u64_nth_set_bit(start_bits, n) >> 2));
     }
 
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 #pragma endregion Multistep newline and whitespace iteration

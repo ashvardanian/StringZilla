@@ -1,10 +1,10 @@
 /**
  *  @brief Hardware-accelerated UAX-14 line break segmentation.
- *  @file utf8_linewraps.h
+ *  @file utf8_linebreaks.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINEWRAPS_H_
-#define STRINGZILLA_UTF8_LINEWRAPS_H_
+#ifndef STRINGZILLA_UTF8_LINEBREAKS_H_
+#define STRINGZILLA_UTF8_LINEBREAKS_H_
 
 #include "stringzilla/types.h"
 
@@ -38,7 +38,7 @@ extern "C" {
  *
  *  @note No zero-length segments are emitted; @p length == 0 returns 0. Line segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_linewraps(              //
+SZ_DYNAMIC sz_size_t sz_utf8_linebreaks(             //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed);
@@ -47,54 +47,54 @@ SZ_DYNAMIC sz_size_t sz_utf8_linewraps(              //
 
 #pragma region Platform Specific Backends
 
-/** @copydoc sz_utf8_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                             sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                             sz_size_t *bytes_consumed);
-
-#if SZ_USE_HASWELL
-/** @copydoc sz_utf8_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+/** @copydoc sz_utf8_linebreaks */
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
                                               sz_size_t *line_lengths, sz_size_t lines_capacity,
                                               sz_size_t *bytes_consumed);
+
+#if SZ_USE_HASWELL
+/** @copydoc sz_utf8_linebreaks */
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                               sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_utf8_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                           sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                           sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_linebreaks */
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_linewraps */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                              sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_linebreaks */
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                               sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
-#include "stringzilla/utf8_linewraps/serial.h"
-#include "stringzilla/utf8_linewraps/haswell.h"
-#include "stringzilla/utf8_linewraps/neon.h"
-#include "stringzilla/utf8_linewraps/icelake.h"
+#include "stringzilla/utf8_linebreaks/serial.h"
+#include "stringzilla/utf8_linebreaks/haswell.h"
+#include "stringzilla/utf8_linebreaks/neon.h"
+#include "stringzilla/utf8_linebreaks/icelake.h"
 
 #pragma region Dynamic Dispatch
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_linewraps(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                       sz_size_t *line_lengths, sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
+SZ_DYNAMIC sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                        sz_size_t *line_lengths, sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_linewraps_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linebreaks_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_linewraps_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linebreaks_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_linewraps_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linebreaks_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else
-    return sz_utf8_linewraps_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    return sz_utf8_linebreaks_serial(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #endif
 }
 
@@ -106,4 +106,4 @@ SZ_DYNAMIC sz_size_t sz_utf8_linewraps(sz_cptr_t text, sz_size_t length, sz_size
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINEWRAPS_H_
+#endif // STRINGZILLA_UTF8_LINEBREAKS_H_

@@ -34,9 +34,10 @@
 # * stringzilla_bench_container_cpp20: A benchmark for STL containers powered by StringZilla.
 # * stringzilla_bench_memory_cpp20: A benchmark for LibC-style low-level memory operations.
 # * stringzilla_bench_utf8_uncased_cpp20: A benchmark for the `sz_utf8_uncased_*` folding/search family.
-# * stringzilla_bench_utf8_iterate_cpp20: A benchmark for the `sz_utf8_*` iteration/segmentation family.
+# * stringzilla_bench_utf8_traverse_cpp20: A benchmark for the `sz_utf8_*` traversal/transcode family (count/seek/decode).
+# * stringzilla_bench_utf8_scan_cpp20: A benchmark for the `sz_utf8_*` class-scan family (newlines/whitespaces/delimiters).
+# * stringzilla_bench_utf8_segment_cpp20: A benchmark for the `sz_utf8_*` boundary-segmentation family (words/graphemes/sentences/linebreaks).
 # * stringzilla_bench_utf8_norm_cpp20: A benchmark for the `sz_utf8_norm` normalization family.
-# * stringzilla_bench_utf8_delimiters_cpp20: A benchmark for the `sz_find_delimiter_utf8` family.
 #
 # Parallel Benchmarks:
 #
@@ -626,7 +627,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/utf8_words.c
     c/stringzilla/utf8_graphemes.c
     c/stringzilla/utf8_sentences.c
-    c/stringzilla/utf8_linewraps.c
+    c/stringzilla/utf8_linebreaks.c
     c/stringzilla/utf8_uncased_fold.c
     c/stringzilla/utf8_uncased.c
 )
@@ -875,9 +876,10 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_sequence_cpp20 bench/sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token_cpp20 bench/token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_utf8_uncased_cpp20 bench/utf8_uncased.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_iterate_cpp20 bench/utf8_iterate.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_traverse_cpp20 bench/utf8_traverse.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_scan_cpp20 bench/utf8_scan.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_utf8_segment_cpp20 bench/utf8_segment.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_utf8_norm_cpp20 bench/utf8_norm.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_delimiters_cpp20 bench/utf8_delimiters.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container_cpp20 bench/container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory_cpp20 bench/memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
@@ -926,9 +928,8 @@ if (STRINGZILLA_BUILD_TEST)
         test/utf8_words.cpp
         test/utf8_graphemes.cpp
         test/utf8_sentences.cpp
-        test/utf8_linewraps.cpp
+        test/utf8_linebreaks.cpp
         test/utf8_norm.cpp
-        test/utf8_delimiters.cpp
         test/uncased.cpp
         test/string.cpp
         test/find.cpp

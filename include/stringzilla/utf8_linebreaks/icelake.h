@@ -1,14 +1,14 @@
 /**
  *  @brief Ice Lake backend for UAX-14 line break boundaries.
- *  @file include/stringzilla/utf8_linewraps/icelake.h
+ *  @file include/stringzilla/utf8_linebreaks/icelake.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_LINEWRAPS_ICELAKE_H_
-#define STRINGZILLA_UTF8_LINEWRAPS_ICELAKE_H_
+#ifndef STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_
+#define STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_linewraps/tables.h"
-#include "stringzilla/utf8_linewraps/serial.h"
+#include "stringzilla/utf8_linebreaks/tables.h"
+#include "stringzilla/utf8_linebreaks/serial.h"
 #include "stringzilla/utf8_runes/icelake.h"
 
 #ifdef __cplusplus
@@ -574,9 +574,9 @@ SZ_INTERNAL sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window
  *          re-read (no `start_at_or_before_`, no left-context back-walk): the carry alone supplies lane-0 left context.
  *          `bytes_consumed` is always a confirmed break (`line_start`), so resume is bit-identical and capacity-free.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake_bytes_( //
-    sz_cptr_t text, sz_size_t length,                 //
-    sz_size_t *starts, sz_size_t *lengths,            //
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *starts, sz_size_t *lengths,             //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -626,18 +626,18 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake_bytes_( //
 /**
  *  @brief  Forward UAX-14 line-break-opportunity kernel (Ice Lake AVX-512).
  *
- *  Bit-exact with `sz_utf8_linewraps_serial`. Emits every UAX-14 break opportunity (no per-segment
+ *  Bit-exact with `sz_utf8_linebreaks_serial`. Emits every UAX-14 break opportunity (no per-segment
  *  mandatory flag). The classifier and rule engine are fully vectorized (no per-lane scalar loop, no `vpgather`,
  *  no serial-oracle deferral); the 64-codepoint block engine threads cross-block state through a register carry
  *  (no halo back-scan), so throughput is flat in run length. Emits at most @p capacity segments; sets
  *  *@p bytes_consumed to the resume.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake( //
-    sz_cptr_t text, sz_size_t length,          //
-    sz_size_t *starts, sz_size_t *lengths,     //
+SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake( //
+    sz_cptr_t text, sz_size_t length,           //
+    sz_size_t *starts, sz_size_t *lengths,      //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
-    return sz_utf8_linewraps_icelake_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
+    return sz_utf8_linebreaks_icelake_bytes_(text, length, starts, lengths, capacity, bytes_consumed);
 }
 
 #pragma endregion Forward driver
@@ -654,4 +654,4 @@ SZ_PUBLIC sz_size_t sz_utf8_linewraps_icelake( //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_LINEWRAPS_ICELAKE_H_
+#endif // STRINGZILLA_UTF8_LINEBREAKS_ICELAKE_H_

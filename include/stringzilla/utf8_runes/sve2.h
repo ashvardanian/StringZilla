@@ -41,7 +41,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
  *  Single-window O(1) locate mirroring the RVV backend: each window zero-extends `svcntw()` bytes into 32-bit
  *  lanes (SVE2 has no `svcompact_u8`, so the index domain is 32-bit), skips whole windows by lead popcount, then
  *  `svcompact_u32` packs the lead-lane iota and `svlastb` reads the `n`-th packed lane. Byte-exact to serial. */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const window_bytes = svcntw(); // one byte per 32-bit lane
     svuint32_t const lane_iota = svindex_u32(0, 1);

@@ -104,8 +104,8 @@ SZ_PUBLIC sz_size_t sz_utf8_norm_haswell(sz_cptr_t source, sz_size_t length, sz_
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_haswell_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_norm_violation_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
-    return sz_utf8_norm_violation_engine_(source, length, form, &sz_utf8_norm_classify_haswell_);
+SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_haswell_);
 }
 
 #if defined(__clang__)

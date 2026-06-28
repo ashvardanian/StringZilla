@@ -8,6 +8,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes/serial.h"
+#include "stringzilla/utf8_tokens/tables.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,6 +124,51 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_serial(         //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     return sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 }
+
+#pragma region Serial
+
+/**
+ *  @brief Reference scan emitting every delimiter codepoint into parallel offset/length arrays.
+ *
+ *  Decodes each codepoint with the bounds-checked `sz_rune_decode`, so a truncated trailing UTF-8
+ *  sequence never over-reads past @p text + @p length. A byte that does not begin a well-formed
+ *  codepoint (lone continuation, overlong, surrogate, truncated tail) is skipped one byte at a time
+ *  and is never reported as a delimiter. `base` is added to every emitted offset and to
+ *  `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
+ */
+SZ_INTERNAL sz_size_t sz_utf8_delimiters_serial_(       //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_cptr_t const start = text;
+    sz_cptr_t const end = text + length;
+    sz_cptr_t position = text;
+    sz_size_t match_count = 0;
+    while (position < end && match_count < matches_capacity) {
+        sz_rune_t rune;
+        sz_rune_length_t const rune_length = sz_rune_decode(position, end, &rune);
+        if (rune_length == sz_rune_invalid_k) { position += 1; }
+        else if (sz_rune_is_delimiter_(rune)) {
+            match_offsets[match_count] = base + (sz_size_t)(position - start);
+            match_lengths[match_count] = (sz_size_t)rune_length;
+            ++match_count;
+            position += rune_length;
+        }
+        else { position += rune_length; }
+    }
+    if (bytes_consumed) *bytes_consumed = base + (sz_size_t)(position - start);
+    return match_count;
+}
+
+SZ_PUBLIC sz_size_t sz_utf8_delimiters_serial(          //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+}
+
+#pragma endregion // Serial
 
 #ifdef __cplusplus
 }

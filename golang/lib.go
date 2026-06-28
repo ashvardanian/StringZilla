@@ -35,10 +35,10 @@ package sz
 // #cgo nocallback sz_bytesum
 // #cgo noescape sz_hash
 // #cgo nocallback sz_hash
-// #cgo noescape sz_utf8_case_fold
-// #cgo nocallback sz_utf8_case_fold
-// #cgo noescape sz_utf8_case_insensitive_find
-// #cgo nocallback sz_utf8_case_insensitive_find
+// #cgo noescape sz_utf8_uncased_fold
+// #cgo nocallback sz_utf8_uncased_fold
+// #cgo noescape sz_utf8_uncased_search
+// #cgo nocallback sz_utf8_uncased_search
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
@@ -186,7 +186,7 @@ func isValidUTF8String(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	return C.sz_utf8_valid((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.ulong(len(s))) == C.sz_true_k
+	return C.sz_utf8_find_malformed((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.ulong(len(s))) == nil
 }
 
 // Utf8CaseFold applies full Unicode case folding to a UTF-8 string.
@@ -202,7 +202,7 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 	srcPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	srcLen := C.ulong(len(str))
 	dst := make([]byte, len(str)*3)
-	outLen := int(C.sz_utf8_case_fold(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0]))))
+	outLen := int(C.sz_utf8_uncased_fold(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0]))))
 	return string(dst[:outLen]), nil
 }
 
@@ -223,9 +223,9 @@ func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int6
 	nPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(needle)))
 	nLen := C.ulong(len(needle))
 
-	var meta C.sz_utf8_case_insensitive_needle_metadata_t
+	var meta C.sz_utf8_uncased_needle_metadata_t
 	var matchedLen C.ulong
-	matchPtr := unsafe.Pointer(C.sz_utf8_case_insensitive_find(hPtr, hLen, nPtr, nLen, &meta, (*C.ulong)(unsafe.Pointer(&matchedLen))))
+	matchPtr := unsafe.Pointer(C.sz_utf8_uncased_search(hPtr, hLen, nPtr, nLen, &meta, (*C.ulong)(unsafe.Pointer(&matchedLen))))
 	if matchPtr == nil {
 		return -1, 0, nil
 	}
@@ -236,7 +236,7 @@ func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int6
 // Note: this type is not safe for concurrent use, because the internal metadata is computed lazily and mutated.
 type Utf8CaseInsensitiveNeedle struct {
 	needle   string
-	metadata C.sz_utf8_case_insensitive_needle_metadata_t
+	metadata C.sz_utf8_uncased_needle_metadata_t
 }
 
 // NewUtf8CaseInsensitiveNeedle constructs a reusable case-insensitive needle.
@@ -269,7 +269,7 @@ func (n *Utf8CaseInsensitiveNeedle) FindIn(haystack string, validate bool) (inde
 
 	var matchedLen C.ulong
 	matchPtr := unsafe.Pointer(
-		C.sz_utf8_case_insensitive_find(hPtr, hLen, nPtr, nLen, &n.metadata, (*C.ulong)(unsafe.Pointer(&matchedLen))),
+		C.sz_utf8_uncased_search(hPtr, hLen, nPtr, nLen, &n.metadata, (*C.ulong)(unsafe.Pointer(&matchedLen))),
 	)
 
 	if matchPtr == nil {

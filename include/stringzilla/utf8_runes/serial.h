@@ -89,7 +89,7 @@ SZ_INTERNAL sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8_en
 /** @brief Decode the 1-4 byte sequence the lead byte declares, with NO bounds check and NO validation; returns
  *         the byte length and stores the codepoint in @p rune.
  *  @warning Assumes valid, complete UTF-8 (a truncated trailing sequence over-reads). Use `sz_rune_decode` for the
- *           bounds-checked + validating variant, or `sz_utf8_valid()` first. */
+ *           bounds-checked + validating variant, or `sz_utf8_find_malformed()` first. */
 SZ_INTERNAL sz_rune_length_t sz_rune_decode_unchecked(sz_cptr_t utf8, sz_rune_t *rune) {
     sz_u8_t const *u8s = (sz_u8_t const *)utf8;
     sz_u8_t lead = *u8s++;
@@ -133,17 +133,17 @@ SZ_INTERNAL sz_rune_length_t sz_rune_encode(sz_rune_t rune, sz_u8_t *utf8s) {
     return sz_rune_invalid_k;
 }
 
-/** @brief Whether `[text, text+length)` is entirely well-formed UTF-8. */
-SZ_PUBLIC sz_bool_t sz_utf8_valid(sz_cptr_t text, sz_size_t length) {
+/** @brief Locate the first ill-formed byte in `[text, text+length)`; `SZ_NULL_CHAR` if entirely well-formed UTF-8. */
+SZ_PUBLIC sz_cptr_t sz_utf8_find_malformed(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *end_u8 = text_u8 + length;
     while (text_u8 < end_u8) {
         sz_rune_t rune;
         sz_rune_length_t const consumed = sz_rune_decode((sz_cptr_t)text_u8, (sz_cptr_t)end_u8, &rune);
-        if (consumed == sz_rune_invalid_k) return sz_false_k;
+        if (consumed == sz_rune_invalid_k) return (sz_cptr_t)text_u8;
         text_u8 += consumed;
     }
-    return sz_true_k;
+    return SZ_NULL_CHAR;
 }
 
 /** @brief Whether `[text, end)` is a well-formed but @b truncated multi-byte prefix: a valid lead followed only by
@@ -190,7 +190,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length) {
     return char_count;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *end_u8 = text_u8 + length;
     sz_size_t char_count = 0;

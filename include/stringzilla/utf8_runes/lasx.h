@@ -746,7 +746,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
 
 /** @brief  Same block logic as `sz_utf8_count_lasx`, but locating the Nth start byte. LASX has no `PDEP`, so the
  *          start-byte bitmask is fed to `sz_u32_nth_set_bit` to land on the Nth set bit. */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     __m256i continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i const one_byte_u8x32 = __lasx_xvreplgr2vr_b(1);
@@ -774,7 +774,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_lasx(sz_cptr_t text, sz_size_t length, sz_s
         return (sz_cptr_t)(text_u8 + sz_u32_nth_set_bit(start_byte_mask, n));
     }
 
-    return sz_utf8_find_nth_serial((sz_cptr_t)text_u8, length, n);
+    return sz_utf8_seek_serial((sz_cptr_t)text_u8, length, n);
 }
 
 /*  UAX-29 word boundary detection (forward & reverse).

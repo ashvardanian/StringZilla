@@ -43,7 +43,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
  *
  *  @example Skip to character 1000 (e.g., pagination):
  *  @code
- *      char const *pos = sz_utf8_find_nth(text, length, 1000);
+ *      char const *pos = sz_utf8_seek(text, length, 1000);
  *      if (!pos) {
  *          // String has fewer than 1000 characters
  *      }
@@ -51,11 +51,11 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
  *
  *  @example Truncate to 280 characters (Twitter-style):
  *  @code
- *      char const *end = sz_utf8_find_nth(text, length, 280);
+ *      char const *end = sz_utf8_seek(text, length, 280);
  *      size_t truncated_bytes = end ? (end - text) : length;
  *  @endcode
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n);
 
 /**
  *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
@@ -104,8 +104,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_decode(            //
 
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
-/** @copydoc sz_utf8_find_nth */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_seek */
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
 SZ_PUBLIC sz_cptr_t sz_utf8_decode_serial(      //
     sz_cptr_t text, sz_size_t length,           //
@@ -115,8 +115,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_serial(      //
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
-/** @copydoc sz_utf8_find_nth */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_seek */
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
 SZ_PUBLIC sz_cptr_t sz_utf8_decode_haswell( //
     sz_cptr_t text, sz_size_t length,       //
@@ -126,8 +126,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_haswell( //
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
-/** @copydoc sz_utf8_find_nth */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_seek */
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
 SZ_PUBLIC sz_cptr_t sz_utf8_decode_icelake( //
     sz_cptr_t text, sz_size_t length,       //
@@ -137,8 +137,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_icelake( //
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
-/** @copydoc sz_utf8_find_nth */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_seek */
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
 SZ_PUBLIC sz_cptr_t sz_utf8_decode_neon( //
     sz_cptr_t text, sz_size_t length,    //
@@ -148,8 +148,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_neon( //
 #if SZ_USE_SVE2
 /** @copydoc sz_utf8_count */
 SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
-/** @copydoc sz_utf8_find_nth */
-SZ_PUBLIC sz_cptr_t sz_utf8_find_nth_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_seek */
+SZ_PUBLIC sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
 SZ_PUBLIC sz_cptr_t sz_utf8_decode_sve2( //
     sz_cptr_t text, sz_size_t length,    //
@@ -198,27 +198,27 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_find_nth(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
 #if SZ_USE_V128RELAXED
-    return sz_utf8_find_nth_v128relaxed(text, length, n);
+    return sz_utf8_seek_v128relaxed(text, length, n);
 #elif SZ_USE_V128
-    return sz_utf8_find_nth_v128(text, length, n);
+    return sz_utf8_seek_v128(text, length, n);
 #elif SZ_USE_RVV
-    return sz_utf8_find_nth_rvv(text, length, n);
+    return sz_utf8_seek_rvv(text, length, n);
 #elif SZ_USE_LASX
-    return sz_utf8_find_nth_lasx(text, length, n);
+    return sz_utf8_seek_lasx(text, length, n);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_find_nth_powervsx(text, length, n);
+    return sz_utf8_seek_powervsx(text, length, n);
 #elif SZ_USE_ICELAKE
-    return sz_utf8_find_nth_icelake(text, length, n);
+    return sz_utf8_seek_icelake(text, length, n);
 #elif SZ_USE_HASWELL
-    return sz_utf8_find_nth_haswell(text, length, n);
+    return sz_utf8_seek_haswell(text, length, n);
 #elif SZ_USE_SVE2
-    return sz_utf8_find_nth_sve2(text, length, n);
+    return sz_utf8_seek_sve2(text, length, n);
 #elif SZ_USE_NEON
-    return sz_utf8_find_nth_neon(text, length, n);
+    return sz_utf8_seek_neon(text, length, n);
 #else
-    return sz_utf8_find_nth_serial(text, length, n);
+    return sz_utf8_seek_serial(text, length, n);
 #endif
 }
 

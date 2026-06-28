@@ -85,28 +85,29 @@ static void print_utf8_test_bytes_(char const *label, char const *bytes, std::si
  *
  *  Exercises the normalizer and the normalization-violation finder through the dispatched C API (automatic
  *  kernel resolution) and through the natively-compiled backend kernels directly, plus the C++
- *  `sz::string`/`sz::string_view` wrappers (`try_utf8_normalize`, `is_normalized`, `utf8_norm_violation`),
+ *  `sz::string`/`sz::string_view` wrappers (`try_utf8_normalize`, `is_normalized`, `utf8_find_denormalized`),
  *  so a regression that the serial-vs-SIMD agreement tests would miss - because both share a wrong constant -
  *  is still caught against an external ground truth.
  */
 void test_utf8_norm_unit() {
     std::printf("  - testing UTF-8 normalization known-answer vectors...\n");
 
-    // `sz_utf8_norm` / `sz_utf8_norm_violation`: "café" with a precomposed é (U+00E9) is already NFC, but
+    // `sz_utf8_norm` / `sz_utf8_find_denormalized`: "café" with a precomposed é (U+00E9) is already NFC, but
     // breaks NFD (é decomposes into e + U+0301). NFC normalization is a no-op; NFD expands it to 5 bytes.
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
     sz_size_t const cafe_length = (sz_size_t)(sizeof(cafe_nfc) - 1);
-    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    assert(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Dispatched: already NFC
-    assert(sz_utf8_norm_violation(cafe_nfc, cafe_length, sz_normal_form_nfd_k) != SZ_NULL_CHAR); // Dispatched: not NFD
-    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    assert(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+           SZ_NULL_CHAR); // Dispatched: not NFD
+    assert(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Manual: serial
-    assert(sz_utf8_norm_violation_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+    assert(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Manual: serial
 #if SZ_USE_ICELAKE
-    assert(sz_utf8_norm_violation_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    assert(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Manual: icelake
-    assert(sz_utf8_norm_violation_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+    assert(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Manual: icelake
 #endif
     {
@@ -141,9 +142,9 @@ void test_utf8_norm_unit() {
     assert(nfc_own.is_normalized(sz_normal_form_nfc_k));
     assert(!nfc_own.is_normalized(sz_normal_form_nfd_k));
 
-    // utf8_norm_violation returns non-null for a non-normalized string.
-    assert(nfc_view.utf8_norm_violation(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
-    assert(nfc_own.utf8_norm_violation(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+    // utf8_find_denormalized returns non-null for a non-normalized string.
+    assert(nfc_view.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+    assert(nfc_own.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
 
     // NFKD of "ﬁ" (U+FB01 LATIN SMALL LIGATURE FI) decomposes to "fi".
     char const ligature_fi[] = "\xEF\xAC\x81"; // U+FB01
@@ -160,7 +161,7 @@ void test_utf8_norm_unit() {
 #pragma region Equivalence
 
 /** @brief Wraps the UTF-8 normalization and normalization-violation kernels of one backend by their pointers. */
-template <sz_utf8_norm_t norm_, sz_utf8_norm_violation_t violation_>
+template <sz_utf8_norm_t norm_, sz_utf8_find_denormalized_t violation_>
 struct norm_from_sz_ {
     sz_size_t form(sz_cptr_t text, sz_size_t length, sz_normal_form_t normal_form, sz_ptr_t output) const noexcept {
         return norm_(text, length, normal_form, output);
@@ -233,11 +234,11 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
 /**
  *  @brief Drives the normalization-violation finder and the normalizer through the malformed-byte battery.
  *
- *  `sz_utf8_norm_violation` is bounds-safe on arbitrary bytes, so it faces the full malformed battery: the
+ *  `sz_utf8_find_denormalized` is bounds-safe on arbitrary bytes, so it faces the full malformed battery: the
  *  only requirements are that it survives and that any returned violation pointer stays inside
  *  `[text, text + length]`. `sz_utf8_norm` instead documents a valid-UTF-8 precondition (the decoder
  *  "performs no validity checks") and asserts internally on garbage, so it is only exercised on the
- *  `sz_utf8_valid` subset of the same adversarial shapes - the normalizer's output must stay within its
+ *  `sz_utf8_find_malformed` subset of the same adversarial shapes - the normalizer's output must stay within its
  *  documented 18x bound; `with_guarded_buffer_` brackets the destination with canaries and asserts they
  *  survive, like `test_uncased_safety`.
  *
@@ -245,7 +246,7 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
  *  @param violation        Normalization-violation finder under test.
  *  @param random_inputs    Number of random garbage buffers to fuzz on top of the exhaustive byte sweeps.
  */
-static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_norm_violation_t violation,
+static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormalized_t violation,
                                     std::size_t random_inputs = scale_iterations(10000)) {
 
     std::size_t const max_input_length = 70;
@@ -270,10 +271,10 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_norm_violation_
         }
 
         // Normalization: unlike the violation finder, `sz_utf8_norm` documents a valid-UTF-8 precondition and
-        // asserts internally on malformed bytes, so it is only driven on inputs that pass `sz_utf8_valid`. The
+        // asserts internally on malformed bytes, so it is only driven on inputs that pass `sz_utf8_find_malformed`. The
         // output must still stay within the bound; `with_guarded_buffer_` brackets the destination with
         // canaries and asserts they survive, like `test_uncased_safety`.
-        if (sz_utf8_valid(input, (sz_size_t)input_length) == sz_true_k) {
+        if (sz_utf8_find_malformed(input, (sz_size_t)input_length) == SZ_NULL_CHAR) {
             with_guarded_buffer_(norm_bound, [&](sz_ptr_t output, std::size_t) {
                 sz_size_t const normalized = norm(input, (sz_size_t)input_length, sz_normal_form_nfkd_k, output);
                 if (normalized > norm_bound) {
@@ -327,41 +328,41 @@ void test_utf8_norm_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 normalization kernels...\n");
 
     // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
-    check_utf8_norm_safety_(sz_utf8_norm_serial, sz_utf8_norm_violation_serial);
-    check_utf8_norm_safety_(sz_utf8_norm, sz_utf8_norm_violation);
+    check_utf8_norm_safety_(sz_utf8_norm_serial, sz_utf8_find_denormalized_serial);
+    check_utf8_norm_safety_(sz_utf8_norm, sz_utf8_find_denormalized);
 
 #if SZ_USE_HASWELL
-    check_utf8_norm_safety_(sz_utf8_norm_haswell, sz_utf8_norm_violation_haswell);
+    check_utf8_norm_safety_(sz_utf8_norm_haswell, sz_utf8_find_denormalized_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    check_utf8_norm_safety_(sz_utf8_norm_skylake, sz_utf8_norm_violation_skylake);
+    check_utf8_norm_safety_(sz_utf8_norm_skylake, sz_utf8_find_denormalized_skylake);
 #endif
 #if SZ_USE_ICELAKE
-    check_utf8_norm_safety_(sz_utf8_norm_icelake, sz_utf8_norm_violation_icelake);
+    check_utf8_norm_safety_(sz_utf8_norm_icelake, sz_utf8_find_denormalized_icelake);
 #endif
 #if SZ_USE_NEON
-    check_utf8_norm_safety_(sz_utf8_norm_neon, sz_utf8_norm_violation_neon);
+    check_utf8_norm_safety_(sz_utf8_norm_neon, sz_utf8_find_denormalized_neon);
 #endif
 #if SZ_USE_SVE
-    check_utf8_norm_safety_(sz_utf8_norm_sve, sz_utf8_norm_violation_sve);
+    check_utf8_norm_safety_(sz_utf8_norm_sve, sz_utf8_find_denormalized_sve);
 #endif
 #if SZ_USE_SVE2
-    check_utf8_norm_safety_(sz_utf8_norm_sve2, sz_utf8_norm_violation_sve2);
+    check_utf8_norm_safety_(sz_utf8_norm_sve2, sz_utf8_find_denormalized_sve2);
 #endif
 #if SZ_USE_RVV
-    check_utf8_norm_safety_(sz_utf8_norm_rvv, sz_utf8_norm_violation_rvv);
+    check_utf8_norm_safety_(sz_utf8_norm_rvv, sz_utf8_find_denormalized_rvv);
 #endif
 #if SZ_USE_V128
-    check_utf8_norm_safety_(sz_utf8_norm_v128, sz_utf8_norm_violation_v128);
+    check_utf8_norm_safety_(sz_utf8_norm_v128, sz_utf8_find_denormalized_v128);
 #endif
 #if SZ_USE_V128RELAXED
-    check_utf8_norm_safety_(sz_utf8_norm_v128relaxed, sz_utf8_norm_violation_v128relaxed);
+    check_utf8_norm_safety_(sz_utf8_norm_v128relaxed, sz_utf8_find_denormalized_v128relaxed);
 #endif
 #if SZ_USE_LASX
-    check_utf8_norm_safety_(sz_utf8_norm_lasx, sz_utf8_norm_violation_lasx);
+    check_utf8_norm_safety_(sz_utf8_norm_lasx, sz_utf8_find_denormalized_lasx);
 #endif
 #if SZ_USE_POWERVSX
-    check_utf8_norm_safety_(sz_utf8_norm_powervsx, sz_utf8_norm_violation_powervsx);
+    check_utf8_norm_safety_(sz_utf8_norm_powervsx, sz_utf8_find_denormalized_powervsx);
 #endif
 
     std::printf("    normalization safety passed!\n");
@@ -373,40 +374,40 @@ void test_utf8_norm_safety() {
 
 /** @brief Run the normalization differential fuzz against every compiled SIMD backend. */
 void test_utf8_norm_all() {
-    using reference_t = norm_from_sz_<sz_utf8_norm_serial, sz_utf8_norm_violation_serial>;
+    using reference_t = norm_from_sz_<sz_utf8_norm_serial, sz_utf8_find_denormalized_serial>;
 #if SZ_USE_HASWELL
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_haswell, sz_utf8_norm_violation_haswell> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_haswell, sz_utf8_find_denormalized_haswell> {});
 #endif
 #if SZ_USE_SKYLAKE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_skylake, sz_utf8_norm_violation_skylake> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_skylake, sz_utf8_find_denormalized_skylake> {});
 #endif
 #if SZ_USE_ICELAKE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_icelake, sz_utf8_norm_violation_icelake> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_icelake, sz_utf8_find_denormalized_icelake> {});
 #endif
 #if SZ_USE_NEON
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_neon, sz_utf8_norm_violation_neon> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_neon, sz_utf8_find_denormalized_neon> {});
 #endif
 #if SZ_USE_SVE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve, sz_utf8_norm_violation_sve> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve, sz_utf8_find_denormalized_sve> {});
 #endif
 #if SZ_USE_SVE2
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve2, sz_utf8_norm_violation_sve2> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve2, sz_utf8_find_denormalized_sve2> {});
 #endif
 #if SZ_USE_RVV
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_rvv, sz_utf8_norm_violation_rvv> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_rvv, sz_utf8_find_denormalized_rvv> {});
 #endif
 #if SZ_USE_V128
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_v128, sz_utf8_norm_violation_v128> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_v128, sz_utf8_find_denormalized_v128> {});
 #endif
 #if SZ_USE_V128RELAXED
     test_norm_equivalence(reference_t {},
-                          norm_from_sz_<sz_utf8_norm_v128relaxed, sz_utf8_norm_violation_v128relaxed> {});
+                          norm_from_sz_<sz_utf8_norm_v128relaxed, sz_utf8_find_denormalized_v128relaxed> {});
 #endif
 #if SZ_USE_LASX
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_lasx, sz_utf8_norm_violation_lasx> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_lasx, sz_utf8_find_denormalized_lasx> {});
 #endif
 #if SZ_USE_POWERVSX
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_powervsx, sz_utf8_norm_violation_powervsx> {});
+    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_powervsx, sz_utf8_find_denormalized_powervsx> {});
 #endif
 }
 

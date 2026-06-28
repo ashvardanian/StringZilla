@@ -764,3 +764,221 @@ void test_utf8_tokens_all() {
 }
 
 #pragma endregion // Drivers
+
+#pragma region Delimiters
+
+/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
+static void append_codepoint_(std::string &text, sz_rune_t codepoint) {
+    sz_u8_t bytes[4];
+    sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
+    if (length == sz_rune_invalid_k) return;
+    text.append((char const *)bytes, (std::size_t)length);
+}
+
+/**
+ *  @brief Builds a random, well-formed UTF-8 string whose codepoints span all four byte-widths and every
+ *         1->2->3->4 transition, mixing delimiter and non-delimiter codepoints so the scan kernels hit their
+ *         mixed-width paths and resolve a match at every alignment.
+ */
+static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &rng) {
+    static struct {
+        sz_rune_t low, high;
+    } const ranges[] = {
+        {0x000020u, 0x00007Eu}, // 1-byte ASCII printable (space + punctuation + letters + digits)
+        {0x0000A1u, 0x0007FFu}, // 2-byte (Latin-1 symbols, Greek/Cyrillic letters)
+        {0x000800u, 0x00CFFFu}, // 3-byte (general punctuation, CJK; stays below U+D800 surrogates)
+        {0x010000u, 0x0EFFFFu}, // 4-byte (symbols, emoji; avoids the plane-ender noncharacters)
+    };
+    std::uniform_int_distribution<int> width_pick(0, 3);
+    std::string text;
+    text.reserve(target_codepoints * 4);
+    for (std::size_t index = 0; index != target_codepoints; ++index) {
+        int const width = width_pick(rng);
+        std::uniform_int_distribution<sz_rune_t> codepoint(ranges[width].low, ranges[width].high);
+        std::size_t const before = text.size();
+        while (text.size() == before) append_codepoint_(text, codepoint(rng));
+    }
+    return text;
+}
+
+/**
+ *  @brief Drain every delimiter a segmenter emits over the whole input, resuming via `bytes_consumed` so an
+ *         arbitrarily small @p capacity yields the identical full match list. Offsets are absolute.
+ */
+static void drain_delimiters_(sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length, sz_size_t capacity,
+                              std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
+    offsets.clear(), lengths.clear();
+    std::vector<sz_size_t> offset_batch(capacity ? capacity : 1), length_batch(capacity ? capacity : 1);
+    sz_size_t position = 0;
+    while (position < length) {
+        sz_size_t consumed = 0;
+        sz_size_t const emitted = finder(text + position, length - position, offset_batch.data(), length_batch.data(),
+                                         capacity, &consumed);
+        for (sz_size_t index = 0; index != emitted; ++index)
+            offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
+        if (consumed == 0) break; // No forward progress: stop rather than spin.
+        position += consumed;
+    }
+}
+
+/** @brief Known-answer unit tests for the UTF-8 delimiter segmenter on simple, hand-verifiable inputs. */
+void test_utf8_delimiters_unit() {
+    std::printf("  - testing UTF-8 delimiter known-answer vectors...\n");
+
+    struct {
+        char const *text;
+        sz_size_t length, expected_offset, expected_length, expected_count;
+    } const cases[] = {
+        {"abc def", 7, 3, 1, 1},               // ASCII space (Zs) at byte 3
+        {"hello", 5, 0, 0, 0},                 // all letters, no delimiter
+        {"ab,", 3, 2, 1, 1},                   // ASCII comma (Po) at byte 2
+        {"ab\xC2\xA0", 4, 2, 2, 1},            // U+00A0 NO-BREAK SPACE (Zs), 2 bytes at byte 2
+        {"ab\xE2\x80\x94", 5, 2, 3, 1},        // U+2014 EM DASH (Pd), 3 bytes at byte 2
+        {"ab\xF0\x9F\x98\x80", 6, 2, 4, 1},    // U+1F600 GRINNING FACE (So), 4 bytes at byte 2
+        {"a\xC3\x9F\xE4\xB8\xAD", 6, 0, 0, 0}, // a + U+00DF + U+4E2D, all letters
+        {"", 0, 0, 0, 0},                      // empty input
+    };
+
+    struct {
+        sz_utf8_segmenter_t finder;
+        char const *name;
+    } const backends[] = {
+        {sz_utf8_delimiters, "dispatched"},      {sz_utf8_delimiters_serial, "serial"},
+#if SZ_USE_HASWELL
+        {sz_utf8_delimiters_haswell, "haswell"},
+#endif
+#if SZ_USE_ICELAKE
+        {sz_utf8_delimiters_icelake, "icelake"},
+#endif
+#if SZ_USE_NEON
+        {sz_utf8_delimiters_neon, "neon"},
+#endif
+    };
+
+    std::vector<sz_size_t> offsets, lengths;
+    for (auto const &backend : backends) {
+        sz_unused_(backend.name);
+        for (auto const &one : cases) {
+            drain_delimiters_(backend.finder, one.text, one.length, one.length + 1, offsets, lengths);
+            assert(offsets.size() == one.expected_count && "Delimiter count mismatch");
+            if (one.expected_count) {
+                assert(offsets[0] == one.expected_offset && "Delimiter offset mismatch");
+                assert(lengths[0] == one.expected_length && "Delimiter length mismatch");
+            }
+        }
+    }
+}
+
+/**
+ *  @brief Cross-checks the serial UTF-8 delimiter segmenter against a candidate SIMD backend on random,
+ *         well-formed inputs: the full (offset, length) match list must agree, both in one shot and when the
+ *         candidate is drained through a tiny capacity so its `bytes_consumed` resume path is exercised.
+ */
+static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, sz_utf8_segmenter_t finder_candidate,
+                                             sz_size_t inputs) {
+    auto &rng = global_random_generator();
+    std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
+        resumed_lengths;
+
+    auto check = [&](std::string const &text) {
+        sz_cptr_t const data = text.data();
+        sz_size_t const length = (sz_size_t)text.size();
+        drain_delimiters_(finder_serial, data, length, length + 1, serial_offsets, serial_lengths);
+        drain_delimiters_(finder_candidate, data, length, length + 1, candidate_offsets, candidate_lengths);
+        assert(candidate_offsets == serial_offsets && "Mismatch in delimiter offsets");
+        assert(candidate_lengths == serial_lengths && "Mismatch in delimiter lengths");
+        // Resume path: a capacity of 3 forces repeated re-entry; the accumulated list must still match.
+        drain_delimiters_(finder_candidate, data, length, 3u, resumed_offsets, resumed_lengths);
+        assert(resumed_offsets == serial_offsets && "Resume-path delimiter offsets diverged");
+        assert(resumed_lengths == serial_lengths && "Resume-path delimiter lengths diverged");
+    };
+
+    sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
+    for (sz_size_t codepoints : ladder) check(random_valid_utf8_(codepoints, rng));
+
+    std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 96);
+    for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
+        std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
+            std::memcpy(buffer, text.data(), text.size());
+            check(std::string(buffer, text.size()));
+        });
+    }
+}
+
+/** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
+static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
+                                          std::size_t random_inputs = scale_iterations(10000)) {
+    std::size_t const max_input_length = 70;
+    std::vector<sz_size_t> offsets, lengths;
+
+    auto check = [&](char const *input, std::size_t input_length) {
+        drain_delimiters_(finder, input, (sz_size_t)input_length, (sz_size_t)input_length + 1, offsets, lengths);
+        sz_size_t previous_end = 0;
+        for (std::size_t index = 0; index != offsets.size(); ++index) {
+            assert(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
+            assert(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
+            assert(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
+            previous_end = offsets[index] + lengths[index];
+        }
+    };
+
+    char input[max_input_length];
+    check("\x80", 1);              // Lone continuation byte
+    check("\xC0\x80", 2);          // Overlong encoding of NUL
+    check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
+    check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
+
+    for (std::size_t byte = 0; byte != 256; ++byte) { input[0] = (char)byte, check(input, 1); }
+    for (std::size_t first_byte = 0; first_byte != 256; ++first_byte)
+        for (std::size_t second_byte = 0; second_byte != 256; ++second_byte) {
+            input[0] = (char)first_byte, input[1] = (char)second_byte;
+            check(input, 2);
+        }
+
+    auto &rng = global_random_generator();
+    std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
+    std::uniform_int_distribution<int> byte_distribution(0, 255);
+    for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
+        std::size_t const input_length = length_distribution(rng);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
+            std::memcpy(buffer, input, input_length);
+            check(buffer, input_length);
+        });
+    }
+}
+
+/** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
+void test_utf8_delimiters_safety() {
+    std::printf("  - testing malformed-input safety of UTF-8 delimiter kernels...\n");
+    check_utf8_delimiters_safety_(sz_utf8_delimiters_serial);
+    check_utf8_delimiters_safety_(sz_utf8_delimiters);
+#if SZ_USE_HASWELL
+    check_utf8_delimiters_safety_(sz_utf8_delimiters_haswell);
+#endif
+#if SZ_USE_ICELAKE
+    check_utf8_delimiters_safety_(sz_utf8_delimiters_icelake);
+#endif
+#if SZ_USE_NEON
+    check_utf8_delimiters_safety_(sz_utf8_delimiters_neon);
+#endif
+    std::printf("    malformed-input safety passed!\n");
+}
+
+/** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */
+void test_utf8_delimiters_all() {
+    sz_size_t const inputs = (sz_size_t)scale_iterations(200);
+    sz_unused_(inputs);
+#if SZ_USE_HASWELL
+    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_haswell, inputs);
+#endif
+#if SZ_USE_ICELAKE
+    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_icelake, inputs);
+#endif
+#if SZ_USE_NEON
+    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_neon, inputs);
+#endif
+}
+
+#pragma endregion // Delimiters
