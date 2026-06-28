@@ -39,6 +39,10 @@ package sz
 // #cgo nocallback sz_utf8_uncased_fold
 // #cgo noescape sz_utf8_uncased_search
 // #cgo nocallback sz_utf8_uncased_search
+// #cgo noescape sz_utf8_count
+// #cgo nocallback sz_utf8_count
+// #cgo noescape sz_utf8_norm
+// #cgo nocallback sz_utf8_norm
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
@@ -204,6 +208,44 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 	dst := make([]byte, len(str)*3)
 	outLen := int(C.sz_utf8_uncased_fold(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0]))))
 	return string(dst[:outLen]), nil
+}
+
+// Utf8Count returns the number of Unicode codepoints in a UTF-8 string, SIMD-accelerated.
+// Malformed bytes are each counted as a single codepoint, matching utf8.RuneCount semantics.
+func Utf8Count(str string) int {
+	if len(str) == 0 {
+		return 0
+	}
+	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+	return int(C.sz_utf8_count(strPtr, C.ulong(len(str))))
+}
+
+// NormalForm selects a Unicode normalization form for Utf8Normalize.
+type NormalForm int
+
+const (
+	// NFD is canonical decomposition.
+	NFD NormalForm = C.sz_normal_form_nfd_k
+	// NFC is canonical decomposition followed by canonical composition.
+	NFC NormalForm = C.sz_normal_form_nfc_k
+	// NFKD is compatibility decomposition.
+	NFKD NormalForm = C.sz_normal_form_nfkd_k
+	// NFKC is compatibility decomposition followed by canonical composition.
+	NFKC NormalForm = C.sz_normal_form_nfkc_k
+)
+
+// Utf8Normalize returns the string normalized to the requested Unicode form.
+// Malformed bytes pass through unchanged. The destination is sized for the worst-case
+// compatibility decomposition (18x); composing forms never exceed that bound.
+func Utf8Normalize(str string, form NormalForm) string {
+	if len(str) == 0 {
+		return ""
+	}
+	srcPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+	dst := make([]byte, len(str)*18)
+	outLen := int(C.sz_utf8_norm(srcPtr, C.ulong(len(str)),
+		C.sz_normal_form_t(form), (*C.char)(unsafe.Pointer(&dst[0]))))
+	return string(dst[:outLen])
 }
 
 // Utf8CaseInsensitiveFind finds the first case-insensitive occurrence of `needle` in `haystack`
