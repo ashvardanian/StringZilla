@@ -1,5 +1,5 @@
 /**
- *  @brief Hardware-accelerated UTF-8 newline and whitespace delimiter scanning.
+ *  @brief Hardware-accelerated UTF-8 newline, whitespace, and general delimiter scanning.
  *  @file utf8_tokens.h
  *  @author Ash Vardanian
  */
@@ -117,6 +117,28 @@ SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_si
                                          sz_size_t *match_lengths, sz_size_t matches_capacity,
                                          sz_size_t *bytes_consumed);
 
+/**
+ *  @brief Enumerates every UTF-8 delimiter codepoint (punctuation, symbol, separator, whitespace).
+ *
+ *  The general superset of `sz_utf8_newlines` / `sz_utf8_whitespaces`: every codepoint whose Unicode
+ *  general category is a punctuation (P*), symbol (S*), or separator (Z*) is a delimiter. Shares the
+ *  segmenter contract: writes the byte offset and byte length of each match into the parallel
+ *  `match_offsets` / `match_lengths` arrays, returns the count, and sets `*bytes_consumed` to the resume
+ *  offset (always a fresh codepoint boundary) when the output fills before the input is exhausted. A byte
+ *  that does not begin a well-formed codepoint is skipped and never reported.
+ *
+ *  @param text String to be scanned.
+ *  @param length Number of bytes in the string.
+ *  @param match_offsets Output array of delimiter start offsets (at least @p matches_capacity entries).
+ *  @param match_lengths Output array of delimiter byte lengths (at least @p matches_capacity entries).
+ *  @param matches_capacity Capacity of the output arrays.
+ *  @param bytes_consumed Output: byte offset to resume scanning from.
+ *  @return Number of delimiters written to the output arrays.
+ */
+SZ_DYNAMIC sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                        sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                        sz_size_t *bytes_consumed);
+
 #pragma endregion
 
 #pragma region Platform Specific Backends
@@ -129,6 +151,10 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_serial(sz_cptr_t text, sz_size_t length, sz
 SZ_PUBLIC sz_size_t sz_utf8_whitespaces_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                                sz_size_t *match_lengths, sz_size_t matches_capacity,
                                                sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_delimiters */
+SZ_PUBLIC sz_size_t sz_utf8_delimiters_serial(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                              sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_newlines */
@@ -139,6 +165,10 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_haswell(sz_cptr_t text, sz_size_t length, s
 SZ_PUBLIC sz_size_t sz_utf8_whitespaces_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                                 sz_size_t *match_lengths, sz_size_t matches_capacity,
                                                 sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_delimiters */
+SZ_PUBLIC sz_size_t sz_utf8_delimiters_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
@@ -150,6 +180,10 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_icelake(sz_cptr_t text, sz_size_t length, s
 SZ_PUBLIC sz_size_t sz_utf8_whitespaces_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                                 sz_size_t *match_lengths, sz_size_t matches_capacity,
                                                 sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_delimiters */
+SZ_PUBLIC sz_size_t sz_utf8_delimiters_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                               sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
@@ -161,6 +195,10 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_neon(sz_cptr_t text, sz_size_t length, sz_s
 SZ_PUBLIC sz_size_t sz_utf8_whitespaces_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                              sz_size_t *match_lengths, sz_size_t matches_capacity,
                                              sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_delimiters */
+SZ_PUBLIC sz_size_t sz_utf8_delimiters_neon(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_SVE2
@@ -279,6 +317,20 @@ SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_si
     return sz_utf8_whitespaces_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else
     return sz_utf8_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+#endif
+}
+
+SZ_DYNAMIC sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                        sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                        sz_size_t *bytes_consumed) {
+#if SZ_USE_ICELAKE
+    return sz_utf8_delimiters_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+#elif SZ_USE_HASWELL
+    return sz_utf8_delimiters_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+#elif SZ_USE_NEON
+    return sz_utf8_delimiters_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+#else
+    return sz_utf8_delimiters_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #endif
 }
 

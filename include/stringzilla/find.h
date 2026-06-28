@@ -217,8 +217,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, s
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
-/*  `sz_find_delimiter_utf8` (UTF-8 punctuation/symbol/separator/whitespace scan) now lives in
- *  "stringzilla/utf8_delimiters.h" alongside its per-ISA backends and property tables. */
+/*  `sz_utf8_delimiters` (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
+ *  "stringzilla/utf8_tokens.h" alongside its per-ISA backends and property tables. */
 
 #pragma endregion // Core API
 

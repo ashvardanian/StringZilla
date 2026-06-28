@@ -89,8 +89,7 @@
 #include "stringzilla/intersect.h" // `sz_sequence_intersect`
 
 #include "stringzilla/utf8_runes.h"        // `sz_utf8_count`, `sz_utf8_seek`, `sz_utf8_decode`
-#include "stringzilla/utf8_tokens.h"       // `sz_utf8_newlines`, `sz_utf8_whitespaces`
-#include "stringzilla/utf8_delimiters.h"   // `sz_find_delimiter_utf8`
+#include "stringzilla/utf8_tokens.h"       // `sz_utf8_newlines`, `sz_utf8_whitespaces`, `sz_utf8_delimiters`
 #include "stringzilla/utf8_words.h"        // `sz_utf8_words`, `sz_rune_word_break_property`
 #include "stringzilla/utf8_graphemes.h"    // `sz_utf8_graphemes`
 #include "stringzilla/utf8_sentences.h"    // `sz_utf8_sentences`

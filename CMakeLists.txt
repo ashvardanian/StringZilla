@@ -928,7 +928,6 @@ if (STRINGZILLA_BUILD_TEST)
         test/utf8_sentences.cpp
         test/utf8_linebreaks.cpp
         test/utf8_norm.cpp
-        test/utf8_delimiters.cpp
         test/uncased.cpp
         test/string.cpp
         test/find.cpp

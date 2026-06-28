@@ -1,11 +1,10 @@
 /**
  *  @file c/stringzilla/utf8_tokens.c
- *  @brief Per-domain dispatch shim for UTF-8 newline and whitespace delimiter scanning.
+ *  @brief Per-domain dispatch shim for UTF-8 newline, whitespace, and general delimiter scanning.
  *  @author Ash Vardanian
  */
 #include "dispatch.h"
 #include <stringzilla/utf8_tokens.h>
-#include <stringzilla/utf8_delimiters.h>
 
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;
@@ -13,13 +12,13 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t ca
 
     impl->utf8_newlines = sz_utf8_newlines_serial;
     impl->utf8_whitespaces = sz_utf8_whitespaces_serial;
-    impl->find_delimiter_utf8 = sz_find_delimiters_utf8_serial;
+    impl->utf8_delimiters = sz_utf8_delimiters_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
         impl->utf8_newlines = sz_utf8_newlines_haswell;
         impl->utf8_whitespaces = sz_utf8_whitespaces_haswell;
-        impl->find_delimiter_utf8 = sz_find_delimiters_utf8_haswell;
+        impl->utf8_delimiters = sz_utf8_delimiters_haswell;
     }
 #endif
 
@@ -27,7 +26,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t ca
     if (caps & sz_cap_icelake_k) {
         impl->utf8_newlines = sz_utf8_newlines_icelake;
         impl->utf8_whitespaces = sz_utf8_whitespaces_icelake;
-        impl->find_delimiter_utf8 = sz_find_delimiters_utf8_icelake;
+        impl->utf8_delimiters = sz_utf8_delimiters_icelake;
     }
 #endif
 
@@ -35,7 +34,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_delimiters_update_(sz_capability_t ca
     if (caps & sz_cap_neon_k) {
         impl->utf8_newlines = sz_utf8_newlines_neon;
         impl->utf8_whitespaces = sz_utf8_whitespaces_neon;
-        impl->find_delimiter_utf8 = sz_find_delimiters_utf8_neon;
+        impl->utf8_delimiters = sz_utf8_delimiters_neon;
     }
 #endif
 
@@ -90,6 +89,9 @@ SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_si
                                               bytes_consumed);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_delimiter_utf8(sz_cptr_t text, sz_size_t length, sz_size_t *matched_length) {
-    return sz_dispatch_table.find_delimiter_utf8(text, length, matched_length);
+SZ_DYNAMIC sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                        sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                        sz_size_t *bytes_consumed) {
+    return sz_dispatch_table.utf8_delimiters(text, length, match_offsets, match_lengths, matches_capacity,
+                                             bytes_consumed);
 }
