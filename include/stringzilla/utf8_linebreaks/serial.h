@@ -104,12 +104,13 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
         return 0;
     }
 
-    sz_size_t codepoint_byte_starts_buffer[sz_utf8_line_window_k];
+    sz_u16_t codepoint_byte_starts_buffer[sz_utf8_line_window_k];
+    sz_static_assert(sz_utf8_line_window_k * 4 <= 65535, line_window_fits_u16_relative_offsets);
     sz_u16_t codepoint_descriptors_buffer[sz_utf8_line_window_k];
     sz_u8_t raw_classes_buffer[sz_utf8_line_window_k];
     sz_u8_t effective_classes_buffer[sz_utf8_line_window_k];
     sz_u8_t prev_zwj_buffer[sz_utf8_line_window_k];
-    sz_size_t *codepoint_byte_starts = codepoint_byte_starts_buffer;
+    sz_u16_t *codepoint_byte_starts = codepoint_byte_starts_buffer;
     sz_u16_t *codepoint_descriptors = codepoint_descriptors_buffer;
     sz_u8_t *raw_classes = raw_classes_buffer;
     sz_u8_t *effective_classes = effective_classes_buffer;
@@ -140,7 +141,7 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
                      line_break_class == sz_line_break_xx_k)
                 line_break_class = sz_line_break_al_k;
             else if (line_break_class == sz_line_break_cj_k) line_break_class = sz_line_break_ns_k;
-            codepoint_byte_starts[count] = position; // absolute byte offset
+            codepoint_byte_starts[count] = (sz_u16_t)(position - line_start);
             codepoint_descriptors[count] = cp_descriptor;
             raw_classes[count] = line_break_class;
             effective_classes[count] = line_break_class;
@@ -551,10 +552,11 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
                     hit_capacity = sz_true_k;
                     break;
                 }
+                sz_size_t const break_offset = line_start + codepoint_byte_starts[codepoint_index];
                 line_starts[lines] = local_line_start;
-                line_lengths[lines] = codepoint_byte_starts[codepoint_index] - local_line_start;
+                line_lengths[lines] = break_offset - local_line_start;
                 ++lines;
-                local_line_start = codepoint_byte_starts[codepoint_index];
+                local_line_start = break_offset;
             }
 
             // Advance the forward-carried run state by the right cluster (codepoint_index) for the next iteration,
