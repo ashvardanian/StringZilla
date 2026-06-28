@@ -47,7 +47,9 @@ extern "C" {
  *  port from the AVX2 driver unchanged.
  */
 SZ_INTERNAL sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t low_cmp_u8x16, uint8x16_t high_cmp_u8x16) {
-    uint8x16_t const bit_weights_u8x16 = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    // MSVC's ARM64 `uint8x16_t` is a `__n128` struct that rejects scalar brace-init, so load from `.rodata`.
+    static sz_u8_t const bit_weights[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    uint8x16_t const bit_weights_u8x16 = vld1q_u8(bit_weights);
     uint8x16_t low_bits_u8x16 = vandq_u8(low_cmp_u8x16, bit_weights_u8x16);
     uint8x16_t high_bits_u8x16 = vandq_u8(high_cmp_u8x16, bit_weights_u8x16);
     sz_u32_t low_mask = (sz_u32_t)vaddv_u8(vget_low_u8(low_bits_u8x16)) |
@@ -269,7 +271,8 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
     // window edge never borrows fold context from haystack bytes outside the window
     sz_u32_t const folded_window_mask = sz_utf8_uncased_neon_mask_until_(folded_window_length);
     uint8x16_t const needle_window_u8x16 = vld1q_u8((sz_u8_t const *)needle_metadata->folded_slice);
-    uint8x16_t const lane_indices_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    static sz_u8_t const lane_indices[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const lane_indices_u8x16 = vld1q_u8(lane_indices);
     uint8x16_t const window_keep_u8x16 = vcltq_u8(lane_indices_u8x16, vdupq_n_u8((sz_u8_t)folded_window_length));
 
     // 4 probe positions
@@ -680,7 +683,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_(uint
     uint8x16x2_t next_bytes_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
 
     // Second-byte offsets keyed by the high nibble: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0)
-    uint8x16_t const cyrillic_offset_lut_u8x16 = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    static sz_u8_t const cyrillic_offset_lut[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    uint8x16_t const cyrillic_offset_lut_u8x16 = vld1q_u8(cyrillic_offset_lut);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
