@@ -15,8 +15,6 @@
 #include <cub/device/device_radix_sort.cuh>        // `cub::DeviceRadixSort` — single-pass device tier sort
 #include <cub/device/device_reduce.cuh>            // `cub::DeviceReduce` — device-tier shape maxima
 #include <cub/device/device_run_length_encode.cuh> // `cub::DeviceRunLengthEncode` — dense tier counts
-#include <cub/iterator/counting_input_iterator.cuh>
-#include <cub/iterator/transform_input_iterator.cuh>
 
 #include "stringzillas/types.cuh"
 #include "stringzillas/similarities/serial.hpp"
@@ -2076,9 +2074,9 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, //
     // whole sort / gather / RLE pipeline is skipped - drained by the single synchronize this probe already needs.
     {
         dense_tier_functor.tasks = buffers.tasks_.data();
-        cub::CountingInputIterator<size_t> counting_iterator(0);
-        cub::TransformInputIterator<u32_t, dense_tier_functor_type_, cub::CountingInputIterator<size_t>> tier_iterator(
-            counting_iterator, dense_tier_functor);
+        counting_iterator<size_t> iota(0);
+        transform_input_iterator<u32_t, dense_tier_functor_type_, counting_iterator<size_t>> tier_iterator(
+            iota, dense_tier_functor);
         u32_t *const min_tier_out = unique_tiers;
         u32_t *const max_tier_out = unique_tiers + 1;
         size_t min_bytes = 0, max_bytes = 0;
@@ -2156,9 +2154,9 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, //
 
     // One run-length encode over the dense tier id of the (now reordered) tasks.
     dense_tier_functor.tasks = buffers.tasks_.data();
-    cub::CountingInputIterator<size_t> counting_iterator(0);
-    cub::TransformInputIterator<u32_t, dense_tier_functor_type_, cub::CountingInputIterator<size_t>> tier_iterator(
-        counting_iterator, dense_tier_functor);
+    counting_iterator<size_t> iota(0);
+    transform_input_iterator<u32_t, dense_tier_functor_type_, counting_iterator<size_t>> tier_iterator(
+        iota, dense_tier_functor);
     {
         size_t rle_bytes = 0;
         if (cub::DeviceRunLengthEncode::Encode(nullptr, rle_bytes, tier_iterator, unique_tiers, tier_run_lengths,
@@ -2256,11 +2254,11 @@ cuda_status_t reduce_device_tier_maxima_(span<cuda_similarity_task<char_type_> c
     u32_t *const max_bytes_per_cell_out = max_shorter_out + 2;
 
     using task_t = cuda_similarity_task<char_type_>;
-    cub::TransformInputIterator<u32_t, task_shorter_length_functor<char_type_>, task_t const *> shorter_iterator(
+    transform_input_iterator<u32_t, task_shorter_length_functor<char_type_>, task_t const *> shorter_iterator(
         tasks.data(), task_shorter_length_functor<char_type_> {});
-    cub::TransformInputIterator<u32_t, task_longer_length_functor<char_type_>, task_t const *> longer_iterator(
+    transform_input_iterator<u32_t, task_longer_length_functor<char_type_>, task_t const *> longer_iterator(
         tasks.data(), task_longer_length_functor<char_type_> {});
-    cub::TransformInputIterator<u32_t, task_bytes_per_cell_functor<char_type_>, task_t const *> bytes_per_cell_iterator(
+    transform_input_iterator<u32_t, task_bytes_per_cell_functor<char_type_>, task_t const *> bytes_per_cell_iterator(
         tasks.data(), task_bytes_per_cell_functor<char_type_> {});
 
     auto const reduce_max = [&](auto input_iterator, u32_t *output) -> cuda_status_t {
@@ -2306,9 +2304,9 @@ cuda_status_t reduce_device_tier_rune_maxima_(span<cuda_similarity_task<char_typ
     u32_t *const max_longer_out = max_shorter_out + 1;
 
     using task_t = cuda_similarity_task<char_type_>;
-    cub::TransformInputIterator<u32_t, task_shorter_runes_functor<char_type_>, task_t const *> shorter_iterator(
+    transform_input_iterator<u32_t, task_shorter_runes_functor<char_type_>, task_t const *> shorter_iterator(
         tasks.data(), task_shorter_runes_functor<char_type_> {});
-    cub::TransformInputIterator<u32_t, task_longer_runes_functor<char_type_>, task_t const *> longer_iterator(
+    transform_input_iterator<u32_t, task_longer_runes_functor<char_type_>, task_t const *> longer_iterator(
         tasks.data(), task_longer_runes_functor<char_type_> {});
 
     auto const reduce_max = [&](auto input_iterator, u32_t *output) -> cuda_status_t {
