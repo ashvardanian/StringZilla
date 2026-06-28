@@ -80,7 +80,7 @@ SZ_INTERNAL sz_size_t sz_line_break_cluster_base_(sz_u8_t const *raw_classes, sz
 }
 
 /** @brief Per-call internal window: codepoints buffered on the stack before the LB1-LB31 sweep runs. */
-enum { sz_utf8_line_window_k = 1024 };
+enum { sz_utf8_line_window_k = 128 };
 
 /**
  *  @brief Plural UAX-14 line-break segmentation: one forward sweep emits every UAX-14 break opportunity
