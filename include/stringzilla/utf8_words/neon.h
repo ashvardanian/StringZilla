@@ -119,8 +119,8 @@ SZ_INTERNAL uint8x16_t sz_utf8_word_break_astral_class_neon_(uint8x16_t plane_of
  *          Addresses ONE quarter. */
 SZ_INTERNAL uint8x16_t sz_utf8_word_break_ascii_class_neon_(uint8x16_t bytes) {
     uint8x16_t const index_low6 = vandq_u8(bytes, vdupq_n_u8(0x3F));
-    uint8x16_t const low_half = sz_utf8_rune_lut256_neon_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
-    uint8x16_t const high_half = sz_utf8_rune_lut256_neon_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
+    uint8x16_t const low_half = sz_utf8_rune_lut64_neon_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
+    uint8x16_t const high_half = sz_utf8_rune_lut64_neon_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
     uint8x16_t const bit6 = vdupq_n_u8(0x40);
     uint8x16_t const high_bit = vceqq_u8(vandq_u8(bytes, bit6), bit6);
     return vbslq_u8(high_bit, high_half, low_half);

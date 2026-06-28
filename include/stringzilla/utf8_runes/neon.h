@@ -303,6 +303,14 @@ SZ_INTERNAL uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint
     return result_u8x16;
 }
 
+/** @brief  64-entry byte LUT addressed by a per-lane index in `[0,64)`: a single `vqtbl4q_u8` over the 64-byte
+ *          table (zero for indices >= 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for callers whose
+ *          table is only one quad wide - e.g. a 128-entry property table read as two 64-byte halves - so the load
+ *          never over-reads past the array. @p group_base must point to at least 64 valid bytes. */
+SZ_INTERNAL uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index) {
+    return vqtbl4q_u8(vld1q_u8_x4(group_base), index);
+}
+
 #pragma endregion Shared SIMD leaf substrate
 
 #pragma region Drains
