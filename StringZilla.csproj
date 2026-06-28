@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Repo convention: the build manifest lives at the root (like Cargo.toml, package.json,
+       Package.swift); the C# sources live under csharp/. -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsAotCompatible>true</IsAotCompatible>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <AssemblyName>StringZilla</AssemblyName>
+    <RootNamespace>StringZilla</RootNamespace>
+    <PackageId>StringZilla</PackageId>
+    <Version>4.6.2</Version>
+    <Authors>Ash Vardanian</Authors>
+    <Description>Zero-copy .NET bindings for StringZilla: SIMD-accelerated search, compare, and hash over UTF-8 byte spans.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/ashvardanian/StringZilla</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ashvardanian/StringZilla</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="csharp/StringZilla.cs" />
+  </ItemGroup>
+
+  <!-- Native libs are CI/pack-time artifacts (gitignored under csharp/runtimes/). Pack under the
+       standard runtimes/{rid}/native/ layout and copy to build output so the resolver finds them. -->
+  <ItemGroup>
+    <None Include="csharp/runtimes/**/*" Pack="true" PackagePath="runtimes/%(RecursiveDir)"
+          CopyToOutputDirectory="PreserveNewest" Link="runtimes/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

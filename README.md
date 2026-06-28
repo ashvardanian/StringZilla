@@ -498,6 +498,21 @@ sz.Hash("hello", 0)                      // fast 64-bit hash
 ```
 
 The cgo module exposes byte-level search, counting, checksums, SHA-256, and UTF-8 case-folding to Go.
+
+### C#
+
+`dotnet add package StringZilla` &centerdot; guide: [`csharp/README.md`](csharp/README.md)
+
+```csharp
+using StringZilla;
+
+Sz.IndexOf("the quick brown fox"u8, "brown"u8); // 10
+Sz.Hash("hello"u8);                             // fast 64-bit hash
+```
+
+Zero-copy over `ReadOnlySpan<byte>` (and Unity's `NativeArray<byte>`); `net8.0`, NativeAOT-friendly.
+Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, and sorting.
+
 ### Java
 
 Maven `com.github.ashvardanian:stringzilla` &centerdot; guide: [`java/README.md`](java/README.md)
