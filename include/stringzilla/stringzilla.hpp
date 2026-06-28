@@ -602,7 +602,7 @@ class find_matches_view {
     /** @brief Copies the matches into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the matches into a consumed container, returning it at the end. */
@@ -706,7 +706,7 @@ class rfind_matches_view {
     /** @brief Copies the matches into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the matches into a consumed container, returning it at the end. */
@@ -832,13 +832,13 @@ class find_splits_view {
     /** @brief Copies the matches into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the matches into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -960,13 +960,13 @@ class rfind_splits_view {
     /** @brief Copies the matches into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the matches into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto match : *this) container.push_back(match);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1133,13 +1133,13 @@ class utf8_runes_view {
     /** @brief Copies the characters into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto ch : *this) container.push_back(ch);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the characters into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto ch : *this) container.push_back(ch);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1260,13 +1260,13 @@ class utf8_lines_view {
     /** @brief Copies the lines into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto line : *this) container.push_back(line);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the lines into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto line : *this) container.push_back(line);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1381,13 +1381,13 @@ class utf8_tokens_view {
     /** @brief Copies the words into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto word : *this) container.push_back(word);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the words into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto word : *this) container.push_back(word);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1469,13 +1469,13 @@ class utf8_words_view {
     /** @brief Copies the words into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto word : *this) container.push_back(word);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the words into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto word : *this) container.push_back(word);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1558,13 +1558,13 @@ class utf8_graphemes_view {
     /** @brief Copies the graphemes into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto grapheme : *this) container.push_back(grapheme);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the graphemes into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto grapheme : *this) container.push_back(grapheme);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1647,13 +1647,13 @@ class utf8_sentences_view {
     /** @brief Copies the sentences into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto sentence : *this) container.push_back(sentence);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the sentences into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto sentence : *this) container.push_back(sentence);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -1737,13 +1737,13 @@ class utf8_linebreaks_view {
     /** @brief Copies the segments into a container. */
     template <typename container_>
     void to(container_ &container) {
-        for (auto segment : *this) container.push_back(segment);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
     /** @brief Copies the segments into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
-        for (auto segment : *this) container.push_back(segment);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
         return std::move(container);
     }
 };
@@ -3022,7 +3022,7 @@ class basic_string_slice {
     /**  @brief Populate a character set with characters present in this string. */
     byteset as_set() const noexcept {
         byteset set;
-        for (auto c : *this) set.add(c);
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) set.add(*it_);
         return set;
     }
 
@@ -4743,7 +4743,7 @@ static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 point
 
 namespace literals {
 constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
-sz_constexpr_if_cpp14 byteset operator""_bs(char const *str, std::size_t length) noexcept {
+inline sz_constexpr_if_cpp14 byteset operator""_bs(char const *str, std::size_t length) noexcept {
     return byteset {str, length};
 }
 } // namespace literals
