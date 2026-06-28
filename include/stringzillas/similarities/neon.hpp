@@ -4900,11 +4900,12 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
                 vst1q_s16(current_row + column * candidate_lanes_k, cell_score_vec);
 
                 if constexpr (is_local_k) {
-                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int16x8_t const column_live = vcgtq_s16(lane_lengths_vec,
-                                                            vdupq_n_s16(static_cast<i16_t>(column - 1)));
-                    int16x8_t const masked_cell_vec = vandq_s16(cell_score_vec, column_live);
-                    running_max_vec = vmaxq_s16(running_max_vec, masked_cell_vec);
+                    // Fold into the running maximum only on lanes whose candidate reaches this column. `vcgtq_s16`'s
+                    // `uint16x8_t` mask feeds `vbslq_s16` natively, keeping the new max on live lanes, the rest as-is.
+                    uint16x8_t const column_live = vcgtq_s16(lane_lengths_vec,
+                                                             vdupq_n_s16(static_cast<i16_t>(column - 1)));
+                    running_max_vec = vbslq_s16(column_live, vmaxq_s16(running_max_vec, cell_score_vec),
+                                                running_max_vec);
                 }
             }
             trivial_swap(previous_row, current_row);
@@ -5148,11 +5149,12 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
                 vst1q_s32(current_row + column * candidate_lanes_k, cell_score_vec);
 
                 if constexpr (is_local_k) {
-                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int32x4_t const column_live = vcgtq_s32(lane_lengths_vec,
-                                                            vdupq_n_s32(static_cast<i32_t>(column - 1)));
-                    int32x4_t const masked_cell_vec = vandq_s32(cell_score_vec, column_live);
-                    running_max_vec = vmaxq_s32(running_max_vec, masked_cell_vec);
+                    // Fold into the running maximum only on lanes whose candidate reaches this column. `vcgtq_s32`'s
+                    // `uint32x4_t` mask feeds `vbslq_s32` natively, keeping the new max on live lanes, the rest as-is.
+                    uint32x4_t const column_live = vcgtq_s32(lane_lengths_vec,
+                                                             vdupq_n_s32(static_cast<i32_t>(column - 1)));
+                    running_max_vec = vbslq_s32(column_live, vmaxq_s32(running_max_vec, cell_score_vec),
+                                                running_max_vec);
                 }
             }
             trivial_swap(previous_row, current_row);
