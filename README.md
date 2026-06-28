@@ -498,6 +498,19 @@ sz.Hash("hello", 0)                      // fast 64-bit hash
 ```
 
 The cgo module exposes byte-level search, counting, checksums, SHA-256, and UTF-8 case-folding to Go.
+### Java
+
+Maven `com.github.ashvardanian:stringzilla` &centerdot; guide: [`java/README.md`](java/README.md)
+
+```java
+import com.stringzilla.StringZilla;
+
+StringZilla.indexOf("the quick brown fox".getBytes(), "brown".getBytes());  // 10
+StringZilla.hash("hello".getBytes());                                       // fast 64-bit hash
+```
+
+Pure [Foreign Function & Memory API](https://openjdk.org/jeps/454) (JDK 22+), __no JNI__.
+Zero-copy over `byte[]` and `MemorySegment` — including Lucene `BytesRef` and Spark `UTF8String` backing memory.
 
 ## Algorithms & Design Decisions
 
