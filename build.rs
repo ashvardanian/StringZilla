@@ -61,8 +61,7 @@ fn build_stringzilla() -> HashMap<String, bool> {
         // checked-in source (same pattern as the relaxed-SIMD probe). Exactly one TU avoids duplicate symbols.
         build.define("SZ_DYNAMIC_DISPATCH", "0");
         build.define("SZ_EXPORT", "1");
-        let amalgam_path =
-            std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_stringzilla.c");
+        let amalgam_path = std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_stringzilla.c");
         std::fs::write(&amalgam_path, "#include <stringzilla/stringzilla.h>\n").expect("write amalgamation TU");
         build.file(&amalgam_path);
     }
@@ -216,8 +215,7 @@ fn wasm_relaxed_simd_supported() -> bool {
         "    return wasm_i32x4_relaxed_dot_i8x16_i7x16_add(a, b, c);\n",
         "}\n",
     );
-    let probe_path =
-        std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_wasm_relaxed_probe.c");
+    let probe_path = std::path::Path::new(&env::var("OUT_DIR").unwrap_or_default()).join("sz_wasm_relaxed_probe.c");
     if std::fs::write(&probe_path, probe_source).is_err() {
         return false;
     }

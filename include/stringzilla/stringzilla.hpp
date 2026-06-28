@@ -1393,6 +1393,128 @@ class utf8_tokens_view {
 };
 
 /**
+ *  @brief A range of string slices split by any UTF-8 delimiter codepoint.
+ *
+ *  The general superset of `utf8_tokens_view`: splits on every codepoint whose Unicode general category is
+ *  punctuation (P*), symbol (S*), or separator/whitespace (Z*). N delimiters yield N+1 segments (including
+ *  empty segments). Drives `sz_utf8_delimiters`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
+class utf8_delimiters_view {
+  public:
+    using string_type = string_type_;
+    using string_view_type = typename string_view_for<string_type>::type;
+    using value_type = string_view_type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
+  private:
+    string_type haystack_;
+
+  public:
+    utf8_delimiters_view() noexcept = default;
+    utf8_delimiters_view(string_type haystack) noexcept : haystack_(haystack) {}
+
+    class iterator {
+        char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
+        char const *end_;    // End of original text (immutable)
+        size_type
+            starts_[steps_ + 1]; // Segment offsets relative to `suffix_` (one extra slot for the trailing segment)
+        size_type lengths_[steps_ + 1];
+        size_type count_;   // Number of segments in the current batch; `count_ == 0` is the end sentinel
+        size_type index_;   // Current segment within the batch
+        size_type advance_; // Bytes to advance `suffix_` by when the batch drains
+
+        /** @brief Refill from `suffix_`: fetch a delimiter batch and transform it to segments in place. */
+        void refill_() noexcept {
+            size_type region = static_cast<size_type>(end_ - suffix_);
+            sz_size_t consumed = 0;
+            size_type delimiters = sz_utf8_delimiters(suffix_, region, starts_, lengths_, steps_, &consumed);
+            size_type previous_end = 0;
+            for (size_type d = 0; d < delimiters; ++d) {
+                size_type delimiter_start = starts_[d], delimiter_length = lengths_[d];
+                starts_[d] = previous_end, lengths_[d] = delimiter_start - previous_end;
+                previous_end = delimiter_start + delimiter_length;
+            }
+            if (static_cast<size_type>(consumed) == region) {
+                starts_[delimiters] = previous_end, lengths_[delimiters] = region - previous_end;
+                count_ = delimiters + 1, advance_ = region + 1;
+            }
+            else { count_ = delimiters, advance_ = static_cast<size_type>(consumed); }
+            index_ = 0;
+        }
+
+        /** @brief Position `index_` on the next yieldable segment, refilling and (when `skip_empty_`) skipping empties. */
+        void settle_() noexcept {
+            for (;;) {
+                if (skip_empty_)
+                    while (index_ < count_ && lengths_[index_] == 0) ++index_;
+                if (index_ < count_ || count_ == 0) return;
+                suffix_ += advance_;
+                if (suffix_ > end_) {
+                    count_ = 0;
+                    return;
+                }
+                refill_();
+            }
+        }
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = string_view_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = string_view_type;
+        using reference = string_view_type;
+
+        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0), advance_(0) {}
+        iterator(string_view_type text) noexcept
+            : suffix_(text.data()), end_(text.data() + text.size()), count_(0), index_(0), advance_(0) {
+            refill_(), settle_();
+        }
+
+        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
+        pointer operator->() const noexcept { return **this; }
+
+        iterator &operator++() noexcept {
+            ++index_, settle_();
+            return *this;
+        }
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator==(iterator const &other) const noexcept {
+            return count_ == 0 ? other.count_ == 0
+                               : (other.count_ != 0 && suffix_ == other.suffix_ && index_ == other.index_);
+        }
+        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
+        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
+        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
+    };
+
+    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
+    iterator end() const noexcept { return {}; }
+    end_sentinel_type end_sentinel() const noexcept { return {}; }
+
+    /** @brief Copies the segments into a container. */
+    template <typename container_>
+    void to(container_ &container) {
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
+    }
+
+    /** @brief Copies the segments into a consumed container, returning it at the end. */
+    template <typename container_>
+    container_ to(container_ &&container = {}) {
+        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
+        return std::move(container);
+    }
+};
+
+/**
  *  @brief A range of string slices split at UAX-29 word boundaries, in order.
  *
  *  Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
@@ -2796,6 +2918,7 @@ class basic_string_slice {
      *  Empty segments are skipped.
      */
     utf8_tokens_view<string_slice> utf8_tokens() const noexcept { return {*this}; }
+    utf8_delimiters_view<string_slice> utf8_delimiters() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-29 words, in order.
@@ -4643,6 +4766,7 @@ class basic_string {
      *  Splits on all 25 Unicode whitespace characters. Empty segments (consecutive whitespace) are skipped.
      */
     utf8_tokens_view<basic_string> utf8_tokens() const noexcept { return {*this}; }
+    utf8_delimiters_view<basic_string> utf8_delimiters() const noexcept { return {*this}; }
 
     /** @brief Lazily splits the string into UAX-29 words, in order (words tile the input contiguously). */
     utf8_words_view<basic_string> utf8_words() const noexcept { return {*this}; }

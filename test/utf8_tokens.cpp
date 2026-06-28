@@ -367,6 +367,17 @@ void test_utf8_tokens_unit() {
         let_assert(auto w = words_str.utf8_tokens().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }
+
+    // `utf8_delimiters`: split on any punctuation/symbol/separator, the superset of whitespace tokens.
+    {
+        // "Hi, world" -> delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
+        let_assert(auto d = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
+                   d.size() == 3 && d[0] == "Hi" && d[2] == "world");
+        // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
+        let_assert(
+            auto e = sz::string_view("a\xE2\x80\x94" "b").utf8_delimiters().template to<std::vector<std::string>>(),
+            e.size() == 2 && e[0] == "a" && e[1] == "b");
+    }
 }
 
 #pragma endregion // Unit

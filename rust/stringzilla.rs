@@ -473,6 +473,14 @@ extern "C" {
         matches_capacity: usize,
         bytes_consumed: *mut usize,
     ) -> usize;
+    pub(crate) fn sz_utf8_delimiters(
+        text: *const c_void,
+        length: usize,
+        match_offsets: *mut usize,
+        match_lengths: *mut usize,
+        matches_capacity: usize,
+        bytes_consumed: *mut usize,
+    ) -> usize;
     pub(crate) fn sz_utf8_uncased_fold(source: *const c_void, source_length: usize, destination: *mut c_void) -> usize;
     pub(crate) fn sz_utf8_norm(
         source: *const c_void,
@@ -3243,6 +3251,144 @@ impl<'a, const STEPS: usize> Iterator for Utf8Tokens<'a, STEPS> {
     }
 }
 
+/// An iterator over segments of UTF-8 text split by any Unicode delimiter codepoint.
+///
+/// Splits on every codepoint whose Unicode general category is punctuation (`P*`), symbol (`S*`), or
+/// separator/whitespace (`Z*`) — the superset of [`Utf8Tokens`]. N delimiters yield N+1 segments; empty
+/// segments are **kept** by default (call [`Self::skip_empty`] to drop them for token-style splitting).
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla::{Utf8Delimiters};
+///
+/// // "Hi, world—foo" splits on ',', ' ', and U+2014 EM DASH.
+/// let tokens: Vec<&[u8]> = Utf8Delimiters::new("Hi, world\u{2014}foo".as_bytes()).skip_empty().collect();
+/// assert_eq!(tokens, vec![&b"Hi"[..], &b"world"[..], &b"foo"[..]]);
+/// ```
+pub struct Utf8Delimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+    text: &'a [u8],
+    suffix: usize,
+    starts: [usize; STEPS],
+    lengths: [usize; STEPS],
+    trailing: Option<(usize, usize)>,
+    count: usize,
+    index: usize,
+    advance: usize,
+    skip_empty: bool,
+}
+
+impl<'a> Utf8Delimiters<'a, ITERATORS_DEFAULT_STEPS> {
+    /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
+    pub fn new(text: &'a [u8]) -> Self {
+        Self::with_steps(text)
+    }
+}
+
+impl<'a, const STEPS: usize> Utf8Delimiters<'a, STEPS> {
+    /// Constructs an iterator buffering up to `STEPS` delimiters per FFI call.
+    pub fn with_steps(text: &'a [u8]) -> Self {
+        let mut splits = Self {
+            text,
+            suffix: 0,
+            starts: [0; STEPS],
+            lengths: [0; STEPS],
+            trailing: None,
+            count: 0,
+            index: 0,
+            advance: 0,
+            skip_empty: false,
+        };
+        splits.refill();
+        splits.settle();
+        splits
+    }
+
+    /// When set, zero-length segments are skipped, dropping leading/trailing/inner empties.
+    pub fn skip_empty(mut self) -> Self {
+        self.skip_empty = true;
+        self.settle();
+        self
+    }
+
+    /// Refill from `suffix`: fetch a delimiter batch and transform it to segments in place.
+    fn refill(&mut self) {
+        let region = self.text.len() - self.suffix;
+        let mut consumed = 0usize;
+        let delimiters = unsafe {
+            sz_utf8_delimiters(
+                self.text[self.suffix..].as_ptr() as *const c_void,
+                region,
+                self.starts.as_mut_ptr(),
+                self.lengths.as_mut_ptr(),
+                STEPS,
+                &mut consumed,
+            )
+        };
+        let mut previous_end = 0usize;
+        for d in 0..delimiters {
+            let delimiter_start = self.starts[d];
+            let delimiter_length = self.lengths[d];
+            self.starts[d] = previous_end;
+            self.lengths[d] = delimiter_start - previous_end;
+            previous_end = delimiter_start + delimiter_length;
+        }
+        if consumed == region {
+            self.trailing = Some((previous_end, region - previous_end));
+            self.count = delimiters + 1;
+            self.advance = region + 1;
+        } else {
+            self.trailing = None;
+            self.count = delimiters;
+            self.advance = consumed;
+        }
+        self.index = 0;
+    }
+
+    #[inline]
+    fn segment(&self, index: usize) -> (usize, usize) {
+        match self.trailing {
+            Some(trailing) if index == self.count - 1 => trailing,
+            _ => (self.starts[index], self.lengths[index]),
+        }
+    }
+
+    fn settle(&mut self) {
+        loop {
+            if self.skip_empty {
+                while self.index < self.count && self.segment(self.index).1 == 0 {
+                    self.index += 1;
+                }
+            }
+            if self.index < self.count || self.count == 0 {
+                return;
+            }
+            self.suffix += self.advance;
+            if self.suffix > self.text.len() {
+                self.count = 0;
+                return;
+            }
+            self.refill();
+        }
+    }
+}
+
+impl<'a, const STEPS: usize> Iterator for Utf8Delimiters<'a, STEPS> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == 0 {
+            return None;
+        }
+        let (offset, length) = self.segment(self.index);
+        let begin = self.suffix + offset;
+        let end = begin + length;
+        self.index += 1;
+        self.settle();
+        Some(&self.text[begin..end])
+    }
+}
+
 /// Default batch size for buffering the `sz_utf8_*` boundary kernels' output, mirroring the core
 /// `sz_iterators_default_steps_k` enum in `include/stringzilla/utf8_words.h`. Buffering this many
 /// boundaries per call amortizes the per-item dispatch/FFI overhead without an unbounded buffer; the
@@ -3814,6 +3960,9 @@ pub trait StringZillableUnary {
     /// ```
     fn sz_utf8_tokens(&self) -> Utf8Tokens<'_>;
 
+    /// Returns an iterator splitting on any Unicode delimiter (punctuation/symbol/separator/whitespace).
+    fn sz_utf8_delimiters(&self) -> Utf8Delimiters<'_>;
+
     /// Returns an iterator over UAX-29 words (Unicode TR29), in order. Words tile the input contiguously.
     fn sz_utf8_words(&self) -> Utf8Words<'_>;
 
@@ -4087,6 +4236,10 @@ where
         Utf8Tokens::new(self.as_ref())
     }
 
+    fn sz_utf8_delimiters(&self) -> Utf8Delimiters<'_> {
+        Utf8Delimiters::new(self.as_ref())
+    }
+
     fn sz_utf8_words(&self) -> Utf8Words<'_> {
         Utf8Words::new(self.as_ref())
     }
@@ -4186,6 +4339,20 @@ mod tests {
     #[test]
     fn bytesum() {
         assert_eq!(sz::bytesum("hi"), 209u64);
+    }
+
+    #[test]
+    fn utf8_delimiters() {
+        // Splits on ',', ' ', and U+2014 EM DASH; skip_empty drops the empties.
+        let toks: Vec<&[u8]> = "Hi, world\u{2014}foo"
+            .as_bytes()
+            .sz_utf8_delimiters()
+            .skip_empty()
+            .collect();
+        assert_eq!(toks, vec![&b"Hi"[..], &b"world"[..], &b"foo"[..]]);
+        // Default policy keeps the empty segment between adjacent delimiters.
+        let kept: Vec<&[u8]> = "a,,b".as_bytes().sz_utf8_delimiters().collect();
+        assert_eq!(kept, vec![&b"a"[..], &b""[..], &b"b"[..]]);
     }
 
     #[test]

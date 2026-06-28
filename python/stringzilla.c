@@ -112,6 +112,7 @@ static PyTypeObject StrsType;
 static PyTypeObject FindSplitsType;
 static PyTypeObject Utf8LinesType;
 static PyTypeObject Utf8TokensType;
+static PyTypeObject Utf8DelimitersType;
 static PyTypeObject Utf8WordsType;
 static PyTypeObject Utf8GraphemesType;
 static PyTypeObject Utf8SentencesType;
@@ -262,6 +263,9 @@ typedef struct {
     sz_bool_t primed;        //< Whether the first batch has been filled (lazy on first `__next__`).
 
 } Utf8Tokens;
+
+/** @brief Iterator splitting a UTF-8 string on any Unicode delimiter; same layout as @c Utf8Tokens. */
+typedef Utf8Tokens Utf8Delimiters;
 
 /**
  *  @brief  Iterator for finding word boundaries in UTF-8 text per Unicode TR29.
@@ -5365,6 +5369,78 @@ static PyObject *Str_like_utf8_tokens(PyObject *self, PyObject *const *args, Py_
     return (PyObject *)result_obj;
 }
 
+static char const doc_utf8_delimiters[] =                                                //
+    "Create an iterator for splitting a string on any Unicode delimiter.\n"              //
+    "\n"                                                                                 //
+    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"      //
+    "separator/whitespace (Z*) codepoint - the superset of utf8_tokens(). Splits on\n"   //
+    "runs of delimiters and yields the segments between them.\n"                         //
+    "\n"                                                                                 //
+    "Args:\n"                                                                            //
+    "  text (Str or str or bytes): The string object.\n"                                 //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"           //
+    "Returns:\n"                                                                         //
+    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"      //
+    "\n"                                                                                 //
+    "Example:\n"                                                                         //
+    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_delimiters(skip_empty=True))\n" //
+    "  ['Hi', 'world']";
+
+static PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t min_args = !is_member;
+    Py_ssize_t max_args = !is_member + 1;
+    if (positional_args_count < min_args || positional_args_count > max_args) {
+        PyErr_Format(PyExc_TypeError, "utf8_delimiters() requires %zd to %zd arguments", min_args, max_args);
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *skip_empty_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "skip_empty") == 0 && !skip_empty_obj) { skip_empty_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+        }
+    }
+
+    sz_string_view_t text;
+    int skip_empty = 0;
+
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    if (skip_empty_obj) {
+        skip_empty = PyObject_IsTrue(skip_empty_obj);
+        if (skip_empty == -1) {
+            wrap_current_exception("The skip_empty argument must be a boolean");
+            return NULL;
+        }
+    }
+
+    Utf8Delimiters *result_obj = (Utf8Delimiters *)Utf8DelimitersType.tp_alloc(&Utf8DelimitersType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->text_obj = text_obj;
+    result_obj->suffix = text.start;
+    result_obj->end = text.start + text.length;
+    result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
+    result_obj->batch_count = 0;
+    result_obj->batch_index = 0;
+    result_obj->batch_advance = 0;
+    result_obj->primed = sz_false_k;
+
+    Py_INCREF(text_obj);
+    return (PyObject *)result_obj;
+}
+
 static char const doc_utf8_words[] =                                                 //
     "utf8_words(string, /, skip_empty=False)\n"                                      //
     "\n"                                                                             //
@@ -6324,6 +6400,7 @@ static PyMethodDef Str_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_lines", (PyCFunction)Str_like_utf8_lines, SZ_METHOD_FLAGS, doc_utf8_lines},
     {"utf8_tokens", (PyCFunction)Str_like_utf8_tokens, SZ_METHOD_FLAGS, doc_utf8_tokens},
+    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, SZ_METHOD_FLAGS, doc_utf8_delimiters},
     {"utf8_words", (PyCFunction)Str_like_utf8_words, SZ_METHOD_FLAGS, doc_utf8_words},
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
@@ -6731,6 +6808,97 @@ static PyTypeObject Utf8TokensType = {
     .tp_doc = doc_Utf8Tokens,
     .tp_iter = Utf8TokensType_iter,
     .tp_iternext = (iternextfunc)Utf8TokensType_next,
+};
+
+static void Utf8Delimiters_refill_(Utf8Delimiters *self) {
+    sz_size_t region = (sz_size_t)(self->end - self->suffix);
+    sz_size_t consumed = 0;
+    sz_size_t delimiters = sz_utf8_delimiters(self->suffix, region, self->batch_starts, self->batch_lengths,
+                                              sz_iterators_default_steps_k, &consumed);
+    sz_size_t previous_end = 0;
+    for (sz_size_t d = 0; d < delimiters; ++d) {
+        sz_size_t delimiter_start = self->batch_starts[d], delimiter_length = self->batch_lengths[d];
+        self->batch_starts[d] = previous_end;
+        self->batch_lengths[d] = delimiter_start - previous_end;
+        previous_end = delimiter_start + delimiter_length;
+    }
+    if (consumed == region) { // batch reached end-of-text: append the trailing segment
+        self->batch_starts[delimiters] = previous_end;
+        self->batch_lengths[delimiters] = region - previous_end;
+        self->batch_count = delimiters + 1;
+        self->batch_advance = region + 1;
+    }
+    else {
+        self->batch_count = delimiters;
+        self->batch_advance = consumed;
+    }
+    self->batch_index = 0;
+    self->primed = sz_true_k;
+}
+
+static void Utf8Delimiters_settle_(Utf8Delimiters *self) {
+    if (!self->primed) Utf8Delimiters_refill_(self);
+    for (;;) {
+        if (self->skip_empty)
+            while (self->batch_index < self->batch_count && self->batch_lengths[self->batch_index] == 0)
+                ++self->batch_index;
+        if (self->batch_index < self->batch_count || self->batch_count == 0) return;
+        self->suffix += self->batch_advance;
+        if (self->suffix > self->end) {
+            self->batch_count = 0;
+            return;
+        }
+        Utf8Delimiters_refill_(self);
+    }
+}
+
+static PyObject *Utf8DelimitersType_next(Utf8Delimiters *self) {
+    Utf8Delimiters_settle_(self);
+    if (self->batch_count == 0) return NULL;
+
+    sz_size_t i = self->batch_index++;
+    sz_cptr_t segment_start = self->suffix + self->batch_starts[i];
+    sz_size_t segment_length = self->batch_lengths[i];
+
+    Str *result_obj = Str_alloc_();
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    result_obj->memory.start = segment_start;
+    result_obj->memory.length = segment_length;
+    result_obj->parent = self->text_obj;
+    Py_INCREF(self->text_obj);
+    return (PyObject *)result_obj;
+}
+
+static void Utf8DelimitersType_dealloc(Utf8Delimiters *self) {
+    Py_XDECREF(self->text_obj);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Utf8DelimitersType_iter(PyObject *self) {
+    Py_INCREF(self);
+    return self;
+}
+
+static char const doc_Utf8Delimiters[] =                                             //
+    "Utf8Delimiters(string, ...)\n"                                                  //
+    "\n"                                                                             //
+    "UTF-8 aware delimiter-splitting iterator: splits on any Unicode punctuation,\n" //
+    "symbol, or separator/whitespace codepoint - the superset of Utf8Tokens.\n"      //
+    "\n"                                                                             //
+    "Created by:\n"                                                                  //
+    "  - Str.utf8_delimiters()\n"                                                    //
+    "  - sz.utf8_delimiters()\n";
+
+static PyTypeObject Utf8DelimitersType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Utf8Delimiters",
+    .tp_basicsize = sizeof(Utf8Delimiters),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)Utf8DelimitersType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = doc_Utf8Delimiters,
+    .tp_iter = Utf8DelimitersType_iter,
+    .tp_iternext = (iternextfunc)Utf8DelimitersType_next,
 };
 
 #pragma endregion
@@ -9456,6 +9624,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"utf8_count", (PyCFunction)Str_like_utf8_count, SZ_METHOD_FLAGS, doc_utf8_count},
     {"utf8_lines", (PyCFunction)Str_like_utf8_lines, SZ_METHOD_FLAGS, doc_utf8_lines},
     {"utf8_tokens", (PyCFunction)Str_like_utf8_tokens, SZ_METHOD_FLAGS, doc_utf8_tokens},
+    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, SZ_METHOD_FLAGS, doc_utf8_delimiters},
     {"utf8_words", (PyCFunction)Str_like_utf8_words, SZ_METHOD_FLAGS, doc_utf8_words},
     {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, SZ_METHOD_FLAGS, doc_utf8_codepoints},
     {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, SZ_METHOD_FLAGS, doc_utf8_graphemes},
@@ -9512,6 +9681,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&FindSplitsType) < 0) return NULL;
     if (PyType_Ready(&Utf8LinesType) < 0) return NULL;
     if (PyType_Ready(&Utf8TokensType) < 0) return NULL;
+    if (PyType_Ready(&Utf8DelimitersType) < 0) return NULL;
     if (PyType_Ready(&Utf8WordsType) < 0) return NULL;
     if (PyType_Ready(&Utf8CodepointsType) < 0) return NULL;
     if (PyType_Ready(&Utf8GraphemesType) < 0) return NULL;
@@ -9619,6 +9789,19 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&Utf8TokensType);
     if (PyModule_AddObject(m, "Utf8Tokens", (PyObject *)&Utf8TokensType) < 0) {
+        Py_XDECREF(&Utf8TokensType);
+        Py_XDECREF(&Utf8LinesType);
+        Py_XDECREF(&FindSplitsType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&Utf8DelimitersType);
+    if (PyModule_AddObject(m, "Utf8Delimiters", (PyObject *)&Utf8DelimitersType) < 0) {
+        Py_XDECREF(&Utf8DelimitersType);
         Py_XDECREF(&Utf8TokensType);
         Py_XDECREF(&Utf8LinesType);
         Py_XDECREF(&FindSplitsType);
