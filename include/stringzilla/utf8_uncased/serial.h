@@ -1719,7 +1719,7 @@ SZ_INTERNAL void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t ne
     // A needle containing any byte that does not begin a well-formed codepoint cannot be window-analyzed by the
     // unchecked decode below; route it to the serial kernel, which handles malformed bytes losslessly (each is
     // folded to itself and resyncs by one byte), keeping SIMD and serial results identical.
-    if (sz_utf8_valid(needle, needle_length) == sz_false_k) {
+    if (sz_utf8_find_malformed(needle, needle_length) != SZ_NULL_CHAR) {
         refined->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
         refined->offset_in_unfolded = 0;
         refined->length_in_unfolded = 0;

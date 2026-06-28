@@ -428,7 +428,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t source
     sz_u8_t const *source_end = source_ptr + source_length;
     sz_u8_t *destination_ptr = (sz_u8_t *)destination;
 
-    // Assumes valid UTF-8 input; use sz_utf8_valid() first if validation is needed.
+    // Assumes valid UTF-8 input; use sz_utf8_find_malformed() first if validation is needed.
     while (source_ptr < source_end) {
         // Fold a maximal ASCII run, 16 bytes per window, stopping at the first non-ASCII byte.
         sz_size_t remaining = (sz_size_t)(source_end - source_ptr);

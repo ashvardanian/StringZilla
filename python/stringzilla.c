@@ -3850,7 +3850,7 @@ static PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *arg
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && !sz_utf8_valid(str.start, str.length)) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
@@ -3973,7 +3973,7 @@ static PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ss
     }
 
     // Validate UTF-8 input only if requested
-    if (validate && !sz_utf8_valid(str.start, str.length)) {
+    if (validate && sz_utf8_find_malformed(str.start, str.length) != SZ_NULL_CHAR) {
         PyErr_SetString(PyExc_ValueError, "Input is not valid UTF-8");
         return NULL;
     }
@@ -4270,11 +4270,11 @@ static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *a
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (!sz_utf8_valid(haystack.start, haystack.length)) {
+        if (sz_utf8_find_malformed(haystack.start, haystack.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Haystack is not valid UTF-8");
             return NULL;
         }
-        if (!sz_utf8_valid(needle.start, needle.length)) {
+        if (sz_utf8_find_malformed(needle.start, needle.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Needle is not valid UTF-8");
             return NULL;
         }
@@ -4364,11 +4364,11 @@ static PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *ar
 
     // Validate UTF-8 input only if requested
     if (validate) {
-        if (!sz_utf8_valid(a.start, a.length)) {
+        if (sz_utf8_find_malformed(a.start, a.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "First argument is not valid UTF-8");
             return NULL;
         }
-        if (!sz_utf8_valid(b.start, b.length)) {
+        if (sz_utf8_find_malformed(b.start, b.length) != SZ_NULL_CHAR) {
             PyErr_SetString(PyExc_ValueError, "Second argument is not valid UTF-8");
             return NULL;
         }
@@ -8172,7 +8172,7 @@ sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_
     *did_fit = 1;
 
     // Validate UTF-8 first
-    if (!sz_utf8_valid(cstr, cstr_length)) {
+    if (sz_utf8_find_malformed(cstr, cstr_length) != SZ_NULL_CHAR) {
         *did_fit = -1; // Signal UTF-8 error
         return buffer_ptr;
     }
@@ -8299,7 +8299,7 @@ static PyObject *Strs_repr(Strs *self) {
 
         // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = sz_utf8_valid(cstr_start, cstr_length)
+        repr_buffer_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
                               ? export_escaped_unquoted_to_utf8_buffer(
                                     cstr_start, cstr_length, repr_buffer_ptr,
                                     repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
@@ -8344,7 +8344,7 @@ static PyObject *Strs_str(Strs *self) {
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
-        if (sz_utf8_valid(cstr_start, cstr_length)) {
+        if (sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR) {
             // Valid UTF-8: format as '...' with escaped quotes
             total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
@@ -8389,7 +8389,7 @@ static PyObject *Strs_str(Strs *self) {
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
         int did_fit;
         // Check if the string contains valid UTF-8 and export appropriately
-        result_ptr = sz_utf8_valid(cstr_start, cstr_length)
+        result_ptr = sz_utf8_find_malformed(cstr_start, cstr_length) == SZ_NULL_CHAR
                          ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
                                                                   total_bytes - (result_ptr - result_buffer), &did_fit)
                          : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,

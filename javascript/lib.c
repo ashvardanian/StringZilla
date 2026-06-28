@@ -82,7 +82,7 @@ napi_value utf8UncasedFoldAPI(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_valid((sz_cptr_t)source_data, source_length) == sz_false_k) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != SZ_NULL_CHAR) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }
@@ -140,8 +140,8 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 2) { napi_get_value_bool(env, args[2], &validate); }
-    if (validate && (sz_utf8_valid((sz_cptr_t)haystack_data, haystack_length) == sz_false_k ||
-                     sz_utf8_valid((sz_cptr_t)needle_data, needle_length) == sz_false_k)) {
+    if (validate && (sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != SZ_NULL_CHAR ||
+                     sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != SZ_NULL_CHAR)) {
         napi_throw_error(env, NULL, "Input is not valid UTF-8");
         return NULL;
     }
@@ -189,7 +189,7 @@ napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_valid((sz_cptr_t)needle_data, needle_length) == sz_false_k) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)needle_data, needle_length) != SZ_NULL_CHAR) {
         napi_throw_error(env, NULL, "Needle is not valid UTF-8");
         return NULL;
     }
@@ -245,7 +245,7 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
 
     bool validate = false;
     if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
-    if (validate && sz_utf8_valid((sz_cptr_t)haystack_data, haystack_length) == sz_false_k) {
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)haystack_data, haystack_length) != SZ_NULL_CHAR) {
         napi_throw_error(env, NULL, "Haystack is not valid UTF-8");
         return NULL;
     }

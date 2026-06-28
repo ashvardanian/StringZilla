@@ -238,7 +238,7 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
  *  only requirements are that it survives and that any returned violation pointer stays inside
  *  `[text, text + length]`. `sz_utf8_norm` instead documents a valid-UTF-8 precondition (the decoder
  *  "performs no validity checks") and asserts internally on garbage, so it is only exercised on the
- *  `sz_utf8_valid` subset of the same adversarial shapes - the normalizer's output must stay within its
+ *  `sz_utf8_find_malformed` subset of the same adversarial shapes - the normalizer's output must stay within its
  *  documented 18x bound; `with_guarded_buffer_` brackets the destination with canaries and asserts they
  *  survive, like `test_uncased_safety`.
  *
@@ -271,10 +271,10 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
         }
 
         // Normalization: unlike the violation finder, `sz_utf8_norm` documents a valid-UTF-8 precondition and
-        // asserts internally on malformed bytes, so it is only driven on inputs that pass `sz_utf8_valid`. The
+        // asserts internally on malformed bytes, so it is only driven on inputs that pass `sz_utf8_find_malformed`. The
         // output must still stay within the bound; `with_guarded_buffer_` brackets the destination with
         // canaries and asserts they survive, like `test_uncased_safety`.
-        if (sz_utf8_valid(input, (sz_size_t)input_length) == sz_true_k) {
+        if (sz_utf8_find_malformed(input, (sz_size_t)input_length) == SZ_NULL_CHAR) {
             with_guarded_buffer_(norm_bound, [&](sz_ptr_t output, std::size_t) {
                 sz_size_t const normalized = norm(input, (sz_size_t)input_length, sz_normal_form_nfkd_k, output);
                 if (normalized > norm_bound) {

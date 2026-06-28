@@ -570,7 +570,7 @@ static void test_utf8_runes_large_count() {
  *
  *  Counting is bounds-safe on arbitrary bytes, so it faces the full malformed battery: it must merely
  *  survive. `sz_utf8_decode` documents a valid-UTF-8 precondition (the decoder "performs no
- *  validity checks") and asserts internally on garbage, so it is only exercised on the `sz_utf8_valid`
+ *  validity checks") and asserts internally on garbage, so it is only exercised on the `sz_utf8_find_malformed`
  *  subset; each call must report no more runes than the destination holds and never let its cursor run
  *  past the input.
  *

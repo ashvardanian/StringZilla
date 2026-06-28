@@ -186,7 +186,7 @@ func isValidUTF8String(s string) bool {
 	if len(s) == 0 {
 		return true
 	}
-	return C.sz_utf8_valid((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.ulong(len(s))) == C.sz_true_k
+	return C.sz_utf8_find_malformed((*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.ulong(len(s))) == nil
 }
 
 // Utf8CaseFold applies full Unicode case folding to a UTF-8 string.
