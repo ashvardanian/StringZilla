@@ -64,8 +64,19 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     // When moving small buffers, using a small buffer on stack as a temporary storage is faster.
 
     if (target < source || target >= source + length) {
-        // Non-overlapping, proceed forward
-        sz_copy_neon(target, source, length);
+        // Forward copy. We inline it rather than call `sz_copy_neon`: that function finishes its tail with a
+        // single 16-byte store reaching BACK from the cursor, which on an actual overlap (`source < target +
+        // length`) re-reads tail bytes this forward pass already overwrote. The 16/64-byte forward stores trail
+        // their reads, so the bulk is overlap-safe; only the tail must avoid reaching backward, hence the scalar.
+        for (; length >= 64; target += 64, source += 64, length -= 64) {
+            vst1q_u8((sz_u8_t *)(target + 0), vld1q_u8((sz_u8_t const *)(source + 0)));
+            vst1q_u8((sz_u8_t *)(target + 16), vld1q_u8((sz_u8_t const *)(source + 16)));
+            vst1q_u8((sz_u8_t *)(target + 32), vld1q_u8((sz_u8_t const *)(source + 32)));
+            vst1q_u8((sz_u8_t *)(target + 48), vld1q_u8((sz_u8_t const *)(source + 48)));
+        }
+        for (; length >= 16; target += 16, source += 16, length -= 16)
+            vst1q_u8((sz_u8_t *)target, vld1q_u8((sz_u8_t const *)source));
+        while (length) { *target++ = *source++, --length; }
     }
     else {
         // Overlapping, proceed backward
