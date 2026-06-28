@@ -24,7 +24,6 @@ fn build_stringzilla() -> HashMap<String, bool> {
         .include("include")
         .include("c/stringzilla") // for the same-directory `dispatch.h`
         .warnings(false)
-        .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
         .flag("-std=c99") // Enforce C99 standard
         .flag_if_supported("-fdiagnostics-color=always")
@@ -72,6 +71,10 @@ fn build_stringzilla() -> HashMap<String, bool> {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_endian = env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default();
     let target_bits = env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    let avoid_libc = target_os == "unknown" || target_os.is_empty();
+    build.define("SZ_AVOID_LIBC", if avoid_libc { "1" } else { "0" });
 
     // Set endian-specific macro
     if target_endian == "big" {

@@ -81,6 +81,7 @@ SZ_INTERNAL sz_size_t sz_line_break_cluster_base_(sz_u8_t const *raw_classes, sz
 
 /** @brief Per-call internal window: codepoints buffered on the stack before the LB1-LB31 sweep runs. */
 enum { sz_utf8_line_window_k = 128 };
+sz_static_assert(sz_utf8_line_window_k * 4 <= SZ_U16_MAX, line_window_fits_u16_relative_offsets);
 
 /**
  *  @brief Plural UAX-14 line-break segmentation: one forward sweep emits every UAX-14 break opportunity
@@ -105,7 +106,6 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(       //
     }
 
     sz_u16_t codepoint_byte_starts_buffer[sz_utf8_line_window_k];
-    sz_static_assert(sz_utf8_line_window_k * 4 <= SZ_U16_MAX, line_window_fits_u16_relative_offsets);
     sz_u16_t codepoint_descriptors_buffer[sz_utf8_line_window_k];
     sz_u8_t raw_classes_buffer[sz_utf8_line_window_k];
     sz_u8_t effective_classes_buffer[sz_utf8_line_window_k];
