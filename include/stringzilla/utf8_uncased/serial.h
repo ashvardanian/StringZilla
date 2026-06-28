@@ -317,7 +317,7 @@ SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_le
     sz_utf8_folded_iter_init_(&a_iterator, a, a_length);
     sz_utf8_folded_iter_init_(&b_iterator, b, b_length);
 
-    sz_rune_t a_rune, b_rune;
+    sz_rune_t a_rune = 0, b_rune = 0; // Initialized to satisfy GCC's -Wmaybe-uninitialized; the iterators always set them.
     for (;;) {
         sz_bool_t pulled_from_a = sz_utf8_folded_iter_next_(&a_iterator, &a_rune);
         sz_bool_t pulled_from_b = sz_utf8_folded_iter_next_(&b_iterator, &b_rune);

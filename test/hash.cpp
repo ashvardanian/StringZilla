@@ -446,6 +446,7 @@ void test_hash_all() {
     using hash_serial_t = hash_from_sz_<sz_hash_serial, sz_hash_state_init_serial, //
                                         sz_hash_state_update_serial, sz_hash_state_digest_serial>;
     hash_serial_t const hash_serial;
+    sz_unused_(hash_serial); // Used only by the SIMD differential blocks below; unreferenced on no-SIMD-tier targets.
 
     // Number of random-length inputs to fuzz per differential test, scaled by the global multiplier.
     sz_size_t const hash_inputs = (sz_size_t)scale_iterations(200);

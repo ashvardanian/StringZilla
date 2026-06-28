@@ -56,7 +56,7 @@
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
 
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
 #include <execinfo.h> // `backtrace`, `backtrace_symbols_fd`
 #include <unistd.h>   // `STDERR_FILENO`
 #endif
@@ -403,7 +403,7 @@ inline void print_test_environment() noexcept {
  */
 inline void test_fatal_signal_handler(int signal_number) noexcept {
     std::fprintf(stderr, "\n*** Fatal signal %d - backtrace follows ***\n", signal_number);
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
     void *frames[64];
     int const frames_count = backtrace(frames, sizeof(frames) / sizeof(frames[0]));
     backtrace_symbols_fd(frames, frames_count, STDERR_FILENO);
