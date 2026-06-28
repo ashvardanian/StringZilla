@@ -22,9 +22,10 @@
 #
 # Tests for parallel algorithms:
 #
-# * stringzillas_test_cpp20 / stringzillas_test_cpp23: Parallel-algorithm tests for the host's best CPU backend.
-# * stringzillas_test_cu20 (and stringzillas_test_cu23 on CMake 3.30+): Parallel-algorithm tests on CUDA-capable GPUs
-#   (base SIMT, Kepler, and Hopper tiers selected at runtime).
+# * stringzillas_test_cpp20 (and stringzillas_test_cpp23 where the compiler advertises C++23): Parallel-algorithm tests
+#   for the host's best CPU backend.
+# * stringzillas_test_cu20 (and stringzillas_test_cu23 where nvcc advertises CUDA23): Parallel-algorithm tests on
+#   CUDA-capable GPUs (base SIMT, Kepler, and Hopper tiers selected at runtime).
 #
 # Serial Benchmarks:
 #
@@ -245,8 +246,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         if (compiler_id STREQUAL "NVIDIA")
             set_target_properties(${target} PROPERTIES CUDA_STANDARD ${cpp_standard})
         elseif (compiler_id MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts
-            target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
+            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts.
+            # MSVC has no `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
+            if (cpp_standard GREATER_EQUAL 23)
+                target_compile_options(${target} PRIVATE "/std:c++latest")
+            else ()
+                target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
+            endif ()
         else ()
             set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
         endif ()
@@ -1007,23 +1013,29 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Test parallel algorithms separately; link the static archive when the libraries are built. StringZillas requires
-    # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We test both
-    # C++20 and C++23 to validate forward compatibility.
+    # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We also test
+    # C++23 to validate forward compatibility, but only where the toolchain actually advertises support for it — older
+    # MSVC and nvcc releases lack a C++23 dialect, and forcing it there silently decays to an earlier standard or hard
+    # errors at configure time.
     define_launcher(stringzillas_test_cpp20 test/stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzillas_test_cpp23 test/stringzillas.cpp 23 "${STRINGZILLA_TARGET_ARCH}")
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
-        target_link_libraries(stringzillas_test_cpp23 PRIVATE stringzillas_cpus_static)
+    endif ()
+    if ("cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+        define_launcher(stringzillas_test_cpp23 test/stringzillas.cpp 23 "${STRINGZILLA_TARGET_ARCH}")
+        if (STRINGZILLAS_BUILD_SHARED)
+            target_link_libraries(stringzillas_test_cpp23 PRIVATE stringzillas_cpus_static)
+        endif ()
     endif ()
 
     if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(stringzillas_test_cu20 test/stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
-        if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.30")
-            define_gpu_launcher(stringzillas_test_cu23 test/stringzillas.cu 23 "${STRINGZILLA_TARGET_ARCH}")
-        endif ()
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)
-            if (TARGET stringzillas_test_cu23)
+        endif ()
+        if ("cuda_std_23" IN_LIST CMAKE_CUDA_COMPILE_FEATURES)
+            define_gpu_launcher(stringzillas_test_cu23 test/stringzillas.cu 23 "${STRINGZILLA_TARGET_ARCH}")
+            if (STRINGZILLAS_BUILD_SHARED)
                 target_link_libraries(stringzillas_test_cu23 PRIVATE stringzillas_cuda_static)
             endif ()
         endif ()
