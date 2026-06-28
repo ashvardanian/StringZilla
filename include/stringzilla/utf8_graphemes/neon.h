@@ -277,6 +277,15 @@ SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
         mid[quarter] = vorrq_u8(vshlq_n_u8(vandq_u8(n1, c0f), 4), sz_utf8_srl8_neon_(n2, 2, 0x0F));
         alo[quarter] = vorrq_u8(vshlq_n_u8(vandq_u8(n2, c03), 6), vandq_u8(n3, c3f));
 
+        // A 4-byte lead's blind codepoint is `(plane<<16)|(mid<<8)|alo`, NOT the 2-byte fold seated in high/low above.
+        // Override its BMP high/low to mid/alo so a plane-0 (overlong) 4-byte lead resolves on the BMP path exactly as
+        // serial/haswell do — those carry the full 21-bit value and split BMP-vs-astral on `cp < 0x10000`, so a plane-0
+        // 4-byte lane (e.g. `F0 87 ..`) is a BMP codepoint, not astral. (The astral overwrite below is then gated on a
+        // non-zero in-range plane, mirroring haswell's `is_astral`.)
+        uint8x16_t const four_sel_blend = sz_grapheme_byte_mask_from_bits_neon_(four_byte, quarter * 16);
+        high[quarter] = vbslq_u8(four_sel_blend, mid[quarter], high[quarter]);
+        low[quarter] = vbslq_u8(four_sel_blend, alo[quarter], low[quarter]);
+
         // ASCII descriptor (cp < 0x80) via a single 256-LUT over the raw byte — the cheap gated fast path so a
         // pure-ASCII window never pays the full BMP nibble cascade. Mirrors haswell's `ascii_desc` LUT.
         ascii_desc[quarter] = sz_utf8_rune_lut256_neon_(sz_utf8_grapheme_break_haswell_ascii_desc_, here);
@@ -305,16 +314,38 @@ SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
             desc[quarter] = vbslq_u8(ascii_bool[quarter], ascii_desc[quarter], bmp);
         }
     }
-    // Astral lanes overwrite with the 4-byte descriptor. The astral cascade is addressed by offset = cp - 0x10000;
-    // subtract 1 from the reconstructed plane to get the offset plane nibble. Gated behind any astral lane.
-    sz_u64_t const is_astral = four_byte & loaded_mask;
+    // A 4-byte lead splits three ways on its blind plane = bits[16..20] of cp, matching haswell/serial value dispatch
+    // (`is_bmp = cp < 0x10000`, `is_astral = 0x10000 ≤ cp < 0x110000`, else Other):
+    //   plane == 0      → BMP codepoint (cp = (mid<<8)|alo); already resolved through the BMP path above, since the
+    //                      high/low override seated `mid`/`alo` for these lanes (e.g. overlong `F0 87 ..`).
+    //   plane in [1,16] → genuine astral (cp in 0x10000..0x10FFFF); overwrite with the 4-byte trie descriptor.
+    //   plane ≥ 17      → cp ≥ 0x110000 (e.g. overlong `F4 90 80 80`); neither BMP nor astral, force Other (0).
+    // `plane[q]` carries the 5-bit plane per 4-byte-lead lane (junk on other lanes, gated out by `four_byte`).
+    uint8x16_t const plane_one = vdupq_n_u8(1), plane_sixteen = vdupq_n_u8(0x10);
+    uint8x16_t plane_nonzero_q[4], plane_le16_q[4];
+    for (int quarter = 0; quarter < 4; ++quarter) {
+        plane_nonzero_q[quarter] = vcgeq_u8(plane[quarter], plane_one);
+        plane_le16_q[quarter] = sz_grapheme_cmpge_epu8_neon_(plane_sixteen, plane[quarter]);
+    }
+    sz_u64_t const plane_nonzero = sz_utf8_mask_combine_neon_(plane_nonzero_q[0], plane_nonzero_q[1],
+                                                              plane_nonzero_q[2], plane_nonzero_q[3]);
+    sz_u64_t const plane_le_16 = sz_utf8_mask_combine_neon_(plane_le16_q[0], plane_le16_q[1], plane_le16_q[2],
+                                                            plane_le16_q[3]);
+    sz_u64_t const is_astral = four_byte & plane_nonzero & plane_le_16 & loaded_mask;
+    sz_u64_t const is_overrange = four_byte & plane_nonzero & ~plane_le_16 & loaded_mask;
     if (is_astral) {
+        // offset = cp - 0x10000; high16/low16 unchanged, plane nibble = cp_plane - 1.
         for (int quarter = 0; quarter < 4; ++quarter) {
-            uint8x16_t const four_sel = sz_grapheme_byte_mask_from_bits_neon_(four_byte, quarter * 16);
+            uint8x16_t const four_sel = sz_grapheme_byte_mask_from_bits_neon_(is_astral, quarter * 16);
             uint8x16_t const plane_off = vsubq_u8(vandq_u8(four_sel, plane[quarter]), vdupq_n_u8(1));
             uint8x16_t const astral = sz_grapheme_astral_descriptor_neon_(plane_off, mid[quarter], alo[quarter]);
             desc[quarter] = vbslq_u8(four_sel, astral, desc[quarter]);
         }
+    }
+    if (is_overrange) {
+        // cp ≥ 0x110000: clear to Other (0); the BMP-path value seated on these lanes is meaningless.
+        for (int quarter = 0; quarter < 4; ++quarter)
+            desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(is_overrange, quarter * 16));
     }
 
     // `0xF8..0xFF` begin no valid sequence and match no lead-length mask; force their start lanes to the Other
