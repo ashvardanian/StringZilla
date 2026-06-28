@@ -73,6 +73,10 @@ def _parallel_compiler_compile(
     """A parallel drop-in for `distutils.ccompiler.CCompiler.compile`, which compiles the sources of one
     extension serially. Reuses the compiler's own `_setup_compile` / `_get_cc_args` / `_compile`, so the exact
     flags distutils would pass are preserved; only the per-object loop is spread across a thread pool."""
+    is_msvc = getattr(self, "compiler_type", "") == "msvc"
+    if is_msvc and not self.initialized:
+        self.initialize()
+
     macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
         output_dir, macros, include_dirs, sources, depends, extra_postargs
     )
@@ -82,15 +86,38 @@ def _parallel_compiler_compile(
     # a translation unit whose object is newer than every source AND header (distutils' own check tracks sources
     # only, which is why a header-only edit otherwise needs `--force`). MSVC has no `-MMD`, so it keeps the
     # source-only behavior. `_sz_force` mirrors `build_ext --force`.
-    use_depfiles = getattr(self, "compiler_type", "") != "msvc"
+    use_depfiles = not is_msvc
     force = getattr(self, "_sz_force", False)
+
+    # MSVC's `_compile` is a no-op — it does all work inside its `compile()` override. Build the per-object
+    # command template once so each thread can compile independently.
+    if is_msvc:
+        msvc_compile_opts = list(extra_preargs or [])
+        msvc_compile_opts.append("/c")
+        if debug:
+            msvc_compile_opts.extend(self.compile_options_debug)
+        else:
+            msvc_compile_opts.extend(self.compile_options)
 
     def _compile_one(obj):
         try:
             src, ext = build[obj]
         except KeyError:
             return
-        if use_depfiles:
+        if is_msvc:
+            if ext in self._c_extensions:
+                input_opt = "/Tc" + src
+            elif ext in self._cpp_extensions:
+                input_opt = "/Tp" + src
+            else:
+                return
+            args = [self.cc] + msvc_compile_opts + pp_opts
+            if ext in self._cpp_extensions:
+                args.append("/EHsc")
+            args.extend([input_opt, "/Fo" + obj])
+            args.extend(extra_postargs)
+            self.spawn(args)
+        elif use_depfiles:
             dep_path = obj + ".d"
             if not force and _object_is_fresh(obj, dep_path):
                 return
