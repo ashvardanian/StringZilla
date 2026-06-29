@@ -1,3 +1,8 @@
+# Normalize line endings: store LF in the repository and check out LF everywhere. This project is
+# LF-canonical, so pin endings deterministically regardless of each contributor's `core.autocrlf`.
+# Git still auto-detects and leaves binary files untouched.
+* text=auto eol=lf
+
 # GitHub's Linguist doesn't properly classify many languages
 # https://github.com/github-linguist/linguist/blob/main/docs/overrides.md
 *.h linguist-language=C
