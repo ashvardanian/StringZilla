@@ -1,5 +1,5 @@
 /**
- *  @file   include/stringzilla/utf8_words/neon.h
+ *  @file   include/stringzilla/utf8_wordbreaks/neon.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for NEON (AArch64). The NEON twin of the AVX2 (Haswell)
  *          and Ice Lake kernels: no path scalar-walks codepoints, spills a vector to the stack to call the serial
@@ -19,8 +19,8 @@
 #define STRINGZILLA_UTF8_WORDS_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/neon.h"
 
 #ifdef __cplusplus
@@ -417,10 +417,11 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_neon_(sz
 
 /**
  *  @brief  Forward UAX-29 word segmentation over `[0, length)` (NEON AArch64): the overlap-free advancing driver,
- *          mirroring @ref sz_utf8_words_haswell over the NEON window/classify/partition/decide/drain leaves. Bit-exact
- *          with `sz_utf8_words_serial`, `sz_utf8_words_haswell`, and `sz_utf8_words_icelake`.
+ *          mirroring @ref sz_utf8_wordbreaks_haswell over the NEON window/classify/partition/decide/drain
+ *          leaves. Bit-exact with `sz_utf8_wordbreaks_serial`, `sz_utf8_wordbreaks_haswell`, and
+ *          `sz_utf8_wordbreaks_icelake`.
  */
-SZ_PUBLIC sz_size_t sz_utf8_words_neon(              //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_neon(         //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

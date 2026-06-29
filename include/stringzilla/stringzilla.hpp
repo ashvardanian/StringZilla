@@ -822,9 +822,7 @@ class find_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -950,9 +948,7 @@ class rfind_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1116,9 +1112,7 @@ class utf8_runes_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept {
-        return {string_view_type(haystack_), end_sentinel_type {}};
-    }
+    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -1144,19 +1138,39 @@ class utf8_runes_view {
     }
 };
 
+/** @brief Which parts of the split a @ref utf8_split_view yields at each separator the kernel reports. */
+enum class split_parts_t {
+    between_k, ///< The segments BETWEEN separators - split_newlines, split_whitespaces, split_delimiters. The default.
+    separators_k, ///< The separator runs themselves - newlines, whitespace, delimiter codepoints.
+    both_k,       ///< Interleaved segment, separator, segment, ... Lossless: rejoining yields the input.
+};
+
+/** @brief Whether a @ref utf8_split_view keeps or drops empty (zero-length) segments. */
+enum class empty_segments_t { keep_k, skip_k };
+
 /**
- *  @brief A range of string slices split by UTF-8 newline characters.
+ *  @brief A range of string slices produced by splitting on the delimiter codepoints a @b transform kernel reports.
  *
- *  Unlike splitlines() which uses ASCII byteset, this handles full Unicode.
- *  Splits on all 7 Unicode newline characters + CRLF sequence:
- *  - U+000A (LF), U+000B (VT), U+000C (FF), U+000D (CR)
- *  - U+0085 (NEL), U+2028 (LS), U+2029 (PS)
- *  - U+000D U+000A (CRLF as single delimiter)
+ *  The shared engine behind `utf8_split_newlines_view`/`utf8_split_whitespaces_view`/`utf8_split_delimiters_view` (between segments) and
+ *  `utf8_newlines_view`/`utf8_whitespaces_view`/`utf8_delimiters_view` (the delimiter runs). The kernel reports the
+ *  byte spans of the @b delimiters; @p parts_ then selects what the view yields:
+ *  - `between_k` - the N+1 segments between delimiters (the friendly `lines`/`tokens`/`fields`);
+ *  - `separators_k` - the N delimiter runs themselves (`newlines`/`whitespace`/`delimiters`);
+ *  - `both_k` - the 2N+1 items interleaved, so concatenating them reconstructs the input exactly.
+ *  Each batch's separator endpoints are expanded once into a single boundary array, so every span is just
+ *  `bounds_[i] .. bounds_[i+1]` and `parts_` reduces to a compile-time `(first, stride)` over it - the iterator's
+ *  hot path is one branchless formula shared by all three modes. `empties_` (a compile-time switch reachable via
+ *  `.skip_empty()`) drops empty segments; `both_k` is lossless only when empties are kept.
  *
+ *  @tparam kernel_ A `sz_utf8_segmenter_t` reporting delimiter spans (e.g. `sz_utf8_whitespaces`).
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ *  @tparam steps_ Delimiters fetched per kernel call.
+ *  @tparam parts_ Which parts to yield: between segments, the delimiters, or both interleaved.
+ *  @tparam empties_ Whether empty segments are kept or skipped.
  */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
-class utf8_lines_view {
+template <sz_utf8_segmenter_t kernel_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          split_parts_t parts_ = split_parts_t::between_k, empty_segments_t empties_ = empty_segments_t::keep_k>
+class utf8_split_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1168,50 +1182,63 @@ class utf8_lines_view {
     string_type haystack_;
 
   public:
-    utf8_lines_view() noexcept = default;
-    utf8_lines_view(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_split_view() noexcept = default;
+    utf8_split_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
-        char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
-        char const *end_;    // End of original text (immutable)
-        size_type
-            starts_[steps_ + 1]; // Segment offsets relative to `suffix_` (one extra slot for the trailing segment)
-        size_type lengths_[steps_ + 1];
-        size_type count_;   // Number of segments in the current batch; `count_ == 0` is the end sentinel
-        size_type index_;   // Current segment within the batch
-        size_type advance_; // Bytes to advance `suffix_` by when the batch drains
+        /**
+         *  @brief Span selection as a compile-time `(first, stride)` over the boundary array.
+         *
+         *  The kernel reports separator spans; their endpoints are the span boundaries
+         *  `{0, sep0.start, sep0.end, sep1.start, ..., [region]}`, and span `i` is `bounds_[i] .. bounds_[i+1]`. So
+         *  the three modes are just a starting boundary and a stride: `between_k` walks the even spans (the gaps),
+         *  `separators_k` the odd ones, `both_k` every span - and `operator*` is one branchless formula for all.
+         */
+        static constexpr size_type first_k = parts_ == split_parts_t::separators_k ? 1 : 0;
+        static constexpr size_type stride_k = parts_ == split_parts_t::both_k ? 1 : 2;
 
-        /** @brief Refill from `suffix_`: fetch a delimiter batch and transform it to segments in place. */
+        /** @brief Fixed text base; `bounds_` are byte offsets relative to here. */
+        char const *origin_;
+        /** @brief Base of the current batch; scans forward by `consumed` on each refill. */
+        char const *suffix_;
+        /** @brief End of the original text (immutable). */
+        char const *end_;
+        /** @brief Span boundaries for the current batch, as offsets from `origin_`. */
+        size_type bounds_[2 * steps_ + 2];
+        /** @brief Cursor: the current span is `bounds_[index_] .. bounds_[index_ + 1]`. */
+        size_type index_;
+        /** @brief One past the last startable boundary (so `index_ + 1` stays valid). */
+        size_type limit_;
+
+        /** @brief Refill from `suffix_`: fetch a separator batch and expand its endpoints into `bounds_`. */
         void refill_() noexcept {
-            size_type region = static_cast<size_type>(end_ - suffix_);
+            size_type offsets[steps_], lengths[steps_];
+            size_type const base = static_cast<size_type>(suffix_ - origin_);
+            size_type const region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
-            size_type delimiters = sz_utf8_newlines(suffix_, region, starts_, lengths_, steps_, &consumed);
-            // In place: delimiter `d` spans `[starts_[d], starts_[d] + lengths_[d])`; the segment before it runs
-            // from the previous delimiter's end to this delimiter's start.
-            size_type previous_end = 0;
-            for (size_type d = 0; d < delimiters; ++d) {
-                size_type delimiter_start = starts_[d], delimiter_length = lengths_[d];
-                starts_[d] = previous_end, lengths_[d] = delimiter_start - previous_end;
-                previous_end = delimiter_start + delimiter_length;
-            }
-            if (static_cast<size_type>(consumed) == region) { // batch reached end-of-text: append the trailing segment
-                starts_[delimiters] = previous_end, lengths_[delimiters] = region - previous_end;
-                count_ = delimiters + 1,
-                advance_ = region + 1; // `region + 1` pushes `suffix_` past `end_` when drained
-            }
-            else { count_ = delimiters, advance_ = static_cast<size_type>(consumed); }
-            index_ = 0;
+            size_type const separators = kernel_(suffix_, region, offsets, lengths, steps_, &consumed);
+            bounds_[0] = base;
+            for (size_type s = 0; s < separators; ++s)
+                bounds_[2 * s + 1] = base + offsets[s], bounds_[2 * s + 2] = base + offsets[s] + lengths[s];
+            size_type boundaries = 2 * separators + 1;
+            // At end-of-text append the closing boundary, which materializes the trailing gap (empty if the text
+            // ends on a separator - keeping `both_k` lossless). On a partial batch the trailing gap continues into
+            // the next batch, so it is not built here; `separators_k`/`both_k` never start a span there anyway.
+            if (static_cast<size_type>(consumed) == region) bounds_[boundaries++] = base + region;
+            limit_ = boundaries - 1;
+            index_ = first_k;
+            suffix_ += consumed;
         }
 
-        /** @brief Position `index_` on the next yieldable segment, refilling and (when `skip_empty_`) skipping empties. */
+        /** @brief Land `index_` on the next yieldable span, refilling and (when `skip_k`) skipping empty spans. */
         void settle_() noexcept {
             for (;;) {
-                if (skip_empty_)
-                    while (index_ < count_ && lengths_[index_] == 0) ++index_;
-                if (index_ < count_ || count_ == 0) return;
-                suffix_ += advance_;
-                if (suffix_ > end_) {
-                    count_ = 0;
+                while (index_ < limit_) {
+                    if (empties_ == empty_segments_t::keep_k || bounds_[index_ + 1] != bounds_[index_]) return;
+                    index_ += stride_k;
+                }
+                if (suffix_ == end_) { // every batch consumed
+                    limit_ = 0;
                     return;
                 }
                 refill_();
@@ -1225,17 +1252,19 @@ class utf8_lines_view {
         using pointer = string_view_type;
         using reference = string_view_type;
 
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0), advance_(0) {}
+        iterator() noexcept : origin_(nullptr), suffix_(nullptr), end_(nullptr), index_(0), limit_(0) {}
         iterator(string_view_type text) noexcept
-            : suffix_(text.data()), end_(text.data() + text.size()), count_(0), index_(0), advance_(0) {
+            : origin_(text.data()), suffix_(text.data()), end_(text.data() + text.size()), index_(0), limit_(0) {
             refill_(), settle_();
         }
 
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
+        reference operator*() const noexcept {
+            return string_view_type(origin_ + bounds_[index_], bounds_[index_ + 1] - bounds_[index_]);
+        }
         pointer operator->() const noexcept { return **this; }
 
         iterator &operator++() noexcept {
-            ++index_, settle_();
+            index_ += stride_k, settle_();
             return *this;
         }
         iterator operator++(int) noexcept {
@@ -1244,26 +1273,37 @@ class utf8_lines_view {
             return temp;
         }
 
+        bool at_end_() const noexcept { return index_ >= limit_ && suffix_ == end_; }
         bool operator==(iterator const &other) const noexcept {
-            return count_ == 0 ? other.count_ == 0
-                               : (other.count_ != 0 && suffix_ == other.suffix_ && index_ == other.index_);
+            return at_end_() ? other.at_end_()
+                             : (!other.at_end_() && suffix_ == other.suffix_ && index_ == other.index_);
         }
         bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
+        bool operator==(end_sentinel_type) const noexcept { return at_end_(); }
+        bool operator!=(end_sentinel_type) const noexcept { return !at_end_(); }
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
     iterator end() const noexcept { return {}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
-    /** @brief Copies the lines into a container. */
+    /** @brief The same split with empty segments dropped (compile-time, branchless). */
+    utf8_split_view<kernel_, string_type_, steps_, parts_, empty_segments_t::skip_k> skip_empty() const noexcept {
+        return {haystack_};
+    }
+
+    /** @brief The same split yielding segments @b and delimiters interleaved (lossless; `between_k` -> `both_k`). */
+    utf8_split_view<kernel_, string_type_, steps_, split_parts_t::both_k, empties_> with_separators() const noexcept {
+        return {haystack_};
+    }
+
+    /** @brief Copies the items into a container. */
     template <typename container_>
     void to(container_ &container) {
         for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
     }
 
-    /** @brief Copies the lines into a consumed container, returning it at the end. */
+    /** @brief Copies the items into a consumed container, returning it at the end. */
     template <typename container_>
     container_ to(container_ &&container = {}) {
         for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
@@ -1272,15 +1312,18 @@ class utf8_lines_view {
 };
 
 /**
- *  @brief A range of string slices split by UTF-8 whitespace characters.
+ *  @brief A range of string slices that @b tile the input, as reported directly by a segmentation kernel.
  *
- *  Splits on all 25 Unicode "White_Space" characters.
- *  N whitespace delimiters yield N+1 segments (including empty segments).
+ *  The shared engine behind `utf8_wordbreaks_view` / `utf8_graphemes_view` / `utf8_sentences_view` /
+ *  `utf8_linebreaks_view`: the kernel returns the tiling units directly - every byte belongs to exactly one unit, so
+ *  consecutive units are contiguous and no empty segments arise (hence no `skip_empty_`).
  *
+ *  @tparam kernel_ A `sz_utf8_segmenter_t` returning tiling units (e.g. `sz_utf8_wordbreaks`).
  *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ *  @tparam steps_ Units fetched per kernel call.
  */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
-class utf8_tokens_view {
+template <sz_utf8_segmenter_t kernel_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+class utf8_segments_view {
   public:
     using string_type = string_type_;
     using string_view_type = typename string_view_for<string_type>::type;
@@ -1292,264 +1335,26 @@ class utf8_tokens_view {
     string_type haystack_;
 
   public:
-    utf8_tokens_view() noexcept = default;
-    utf8_tokens_view(string_type haystack) noexcept : haystack_(haystack) {}
+    utf8_segments_view() noexcept = default;
+    utf8_segments_view(string_type haystack) noexcept : haystack_(haystack) {}
 
     class iterator {
-        char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
-        char const *end_;    // End of original text (immutable)
-        size_type
-            starts_[steps_ + 1]; // Segment offsets relative to `suffix_` (one extra slot for the trailing segment)
-        size_type lengths_[steps_ + 1];
-        size_type count_;   // Number of segments in the current batch; `count_ == 0` is the end sentinel
-        size_type index_;   // Current segment within the batch
-        size_type advance_; // Bytes to advance `suffix_` by when the batch drains
-
-        /** @brief Refill from `suffix_`: fetch a delimiter batch and transform it to segments in place. */
-        void refill_() noexcept {
-            size_type region = static_cast<size_type>(end_ - suffix_);
-            sz_size_t consumed = 0;
-            size_type delimiters = sz_utf8_whitespaces(suffix_, region, starts_, lengths_, steps_, &consumed);
-            size_type previous_end = 0;
-            for (size_type d = 0; d < delimiters; ++d) {
-                size_type delimiter_start = starts_[d], delimiter_length = lengths_[d];
-                starts_[d] = previous_end, lengths_[d] = delimiter_start - previous_end;
-                previous_end = delimiter_start + delimiter_length;
-            }
-            if (static_cast<size_type>(consumed) == region) {
-                starts_[delimiters] = previous_end, lengths_[delimiters] = region - previous_end;
-                count_ = delimiters + 1, advance_ = region + 1;
-            }
-            else { count_ = delimiters, advance_ = static_cast<size_type>(consumed); }
-            index_ = 0;
-        }
-
-        /** @brief Position `index_` on the next yieldable segment, refilling and (when `skip_empty_`) skipping empties. */
-        void settle_() noexcept {
-            for (;;) {
-                if (skip_empty_)
-                    while (index_ < count_ && lengths_[index_] == 0) ++index_;
-                if (index_ < count_ || count_ == 0) return;
-                suffix_ += advance_;
-                if (suffix_ > end_) {
-                    count_ = 0;
-                    return;
-                }
-                refill_();
-            }
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0), advance_(0) {}
-        iterator(string_view_type text) noexcept
-            : suffix_(text.data()), end_(text.data() + text.size()), count_(0), index_(0), advance_(0) {
-            refill_(), settle_();
-        }
-
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return **this; }
-
-        iterator &operator++() noexcept {
-            ++index_, settle_();
-            return *this;
-        }
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator==(iterator const &other) const noexcept {
-            return count_ == 0 ? other.count_ == 0
-                               : (other.count_ != 0 && suffix_ == other.suffix_ && index_ == other.index_);
-        }
-        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the words into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-    }
-
-    /** @brief Copies the words into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-        return std::move(container);
-    }
-};
-
-/**
- *  @brief A range of string slices split by any UTF-8 delimiter codepoint.
- *
- *  The general superset of `utf8_tokens_view`: splits on every codepoint whose Unicode general category is
- *  punctuation (P*), symbol (S*), or separator/whitespace (Z*). N delimiters yield N+1 segments (including
- *  empty segments). Drives `sz_utf8_delimiters`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k, bool skip_empty_ = false>
-class utf8_delimiters_view {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    utf8_delimiters_view() noexcept = default;
-    utf8_delimiters_view(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *suffix_; // Start of the not-yet-segmented suffix (moves past `end_` once done)
-        char const *end_;    // End of original text (immutable)
-        size_type
-            starts_[steps_ + 1]; // Segment offsets relative to `suffix_` (one extra slot for the trailing segment)
-        size_type lengths_[steps_ + 1];
-        size_type count_;   // Number of segments in the current batch; `count_ == 0` is the end sentinel
-        size_type index_;   // Current segment within the batch
-        size_type advance_; // Bytes to advance `suffix_` by when the batch drains
-
-        /** @brief Refill from `suffix_`: fetch a delimiter batch and transform it to segments in place. */
-        void refill_() noexcept {
-            size_type region = static_cast<size_type>(end_ - suffix_);
-            sz_size_t consumed = 0;
-            size_type delimiters = sz_utf8_delimiters(suffix_, region, starts_, lengths_, steps_, &consumed);
-            size_type previous_end = 0;
-            for (size_type d = 0; d < delimiters; ++d) {
-                size_type delimiter_start = starts_[d], delimiter_length = lengths_[d];
-                starts_[d] = previous_end, lengths_[d] = delimiter_start - previous_end;
-                previous_end = delimiter_start + delimiter_length;
-            }
-            if (static_cast<size_type>(consumed) == region) {
-                starts_[delimiters] = previous_end, lengths_[delimiters] = region - previous_end;
-                count_ = delimiters + 1, advance_ = region + 1;
-            }
-            else { count_ = delimiters, advance_ = static_cast<size_type>(consumed); }
-            index_ = 0;
-        }
-
-        /** @brief Position `index_` on the next yieldable segment, refilling and (when `skip_empty_`) skipping empties. */
-        void settle_() noexcept {
-            for (;;) {
-                if (skip_empty_)
-                    while (index_ < count_ && lengths_[index_] == 0) ++index_;
-                if (index_ < count_ || count_ == 0) return;
-                suffix_ += advance_;
-                if (suffix_ > end_) {
-                    count_ = 0;
-                    return;
-                }
-                refill_();
-            }
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0), advance_(0) {}
-        iterator(string_view_type text) noexcept
-            : suffix_(text.data()), end_(text.data() + text.size()), count_(0), index_(0), advance_(0) {
-            refill_(), settle_();
-        }
-
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return **this; }
-
-        iterator &operator++() noexcept {
-            ++index_, settle_();
-            return *this;
-        }
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator==(iterator const &other) const noexcept {
-            return count_ == 0 ? other.count_ == 0
-                               : (other.count_ != 0 && suffix_ == other.suffix_ && index_ == other.index_);
-        }
-        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the segments into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-    }
-
-    /** @brief Copies the segments into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-        return std::move(container);
-    }
-};
-
-/**
- *  @brief A range of string slices split at UAX-29 word boundaries, in order.
- *
- *  Unlike whitespace splitting, the words tile the input: every byte belongs to exactly one word, so
- *  consecutive words are contiguous and no empty segments are produced. Drives `sz_utf8_words`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class utf8_words_view {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    utf8_words_view() noexcept = default;
-    utf8_words_view(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
-        char const *end_;           // End of original text (immutable)
-        size_type starts_[steps_];  // Buffered word offsets, relative to `suffix_`
-        size_type lengths_[steps_]; // Buffered word lengths
-        size_type count_;           // Number of buffered words (0 once exhausted)
-        size_type index_;           // Index of the current word within the buffer
+        /** @brief Start of the not-yet-segmented suffix (a TR29 boundary; the text end once exhausted). */
+        char const *suffix_;
+        /** @brief End of the original text (immutable). */
+        char const *end_;
+        /** @brief Buffered unit offsets, relative to `suffix_`. */
+        size_type starts_[steps_];
+        /** @brief Buffered unit lengths. */
+        size_type lengths_[steps_];
+        /** @brief Number of buffered units (0 once exhausted). */
+        size_type count_;
+        /** @brief Index of the current unit within the buffer. */
+        size_type index_;
 
         void fill_() noexcept {
             sz_size_t consumed = 0;
-            count_ = sz_utf8_words(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                   &consumed);
+            count_ = kernel_(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_, &consumed);
             index_ = 0;
         }
 
@@ -1588,274 +1393,6 @@ class utf8_words_view {
     end_sentinel_type end() const noexcept { return {}; }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
-    /** @brief Copies the words into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-    }
-
-    /** @brief Copies the words into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-        return std::move(container);
-    }
-};
-
-/**
- *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, in order.
- *
- *  Unlike whitespace splitting, the graphemes tile the input: every byte belongs to exactly one grapheme, so
- *  consecutive graphemes are contiguous and no empty segments are produced. Drives
- *  `sz_utf8_graphemes`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class utf8_graphemes_view {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    utf8_graphemes_view() noexcept = default;
-    utf8_graphemes_view(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
-        char const *end_;           // End of original text (immutable)
-        size_type starts_[steps_];  // Buffered grapheme offsets, relative to `suffix_`
-        size_type lengths_[steps_]; // Buffered grapheme lengths
-        size_type count_;           // Number of buffered graphemes (0 once exhausted)
-        size_type index_;           // Index of the current grapheme within the buffer
-
-        void fill_() noexcept {
-            sz_size_t consumed = 0;
-            count_ = sz_utf8_graphemes(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                       &consumed);
-            index_ = 0;
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0) {}
-        iterator(string_view_type text) noexcept : suffix_(text.data()), end_(text.data() + text.size()) { fill_(); }
-
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-
-        iterator &operator++() noexcept {
-            if (++index_ < count_) return *this; // Still graphemes buffered from the current batch.
-            // Batch drained: advance past the last grapheme (a TR29 boundary) and refill; `count_` hits 0 at the end.
-            suffix_ += starts_[count_ - 1] + lengths_[count_ - 1];
-            fill_();
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    end_sentinel_type end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the graphemes into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-    }
-
-    /** @brief Copies the graphemes into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-        return std::move(container);
-    }
-};
-
-/**
- *  @brief A range of string slices split at UAX-29 sentence boundaries, in order.
- *
- *  Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one sentence, so
- *  consecutive sentences are contiguous and no empty segments are produced. Drives
- *  `sz_utf8_sentences`.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class utf8_sentences_view {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    utf8_sentences_view() noexcept = default;
-    utf8_sentences_view(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
-        char const *end_;           // End of original text (immutable)
-        size_type starts_[steps_];  // Buffered sentence offsets, relative to `suffix_`
-        size_type lengths_[steps_]; // Buffered sentence lengths
-        size_type count_;           // Number of buffered sentences (0 once exhausted)
-        size_type index_;           // Index of the current sentence within the buffer
-
-        void fill_() noexcept {
-            sz_size_t consumed = 0;
-            count_ = sz_utf8_sentences(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                       &consumed);
-            index_ = 0;
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0) {}
-        iterator(string_view_type text) noexcept : suffix_(text.data()), end_(text.data() + text.size()) { fill_(); }
-
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-
-        iterator &operator++() noexcept {
-            if (++index_ < count_) return *this; // Still sentences buffered from the current batch.
-            // Batch drained: advance past the last sentence (a TR29 boundary) and refill; `count_` hits 0 at the end.
-            suffix_ += starts_[count_ - 1] + lengths_[count_ - 1];
-            fill_();
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    end_sentinel_type end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
-    /** @brief Copies the sentences into a container. */
-    template <typename container_>
-    void to(container_ &container) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-    }
-
-    /** @brief Copies the sentences into a consumed container, returning it at the end. */
-    template <typename container_>
-    container_ to(container_ &&container = {}) {
-        for (auto it_ = this->begin(); it_ != this->end(); ++it_) container.push_back(*it_);
-        return std::move(container);
-    }
-};
-
-/**
- *  @brief A range of string slices split at UAX-14 line break opportunities, in order.
- *
- *  Unlike whitespace splitting, the segments tile the input: every byte belongs to exactly one segment, so
- *  consecutive segments are contiguous and no empty segments are produced. Each segment ends at an allowed
- *  line break opportunity (both mandatory hard breaks and soft wrap points). Drives
- *  `sz_utf8_linebreaks`. To split only on hard line breaks use `utf8_lines` instead.
- *
- *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
- */
-template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-class utf8_linebreaks_view {
-  public:
-    using string_type = string_type_;
-    using string_view_type = typename string_view_for<string_type>::type;
-    using value_type = string_view_type;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-
-  private:
-    string_type haystack_;
-
-  public:
-    utf8_linebreaks_view() noexcept = default;
-    utf8_linebreaks_view(string_type haystack) noexcept : haystack_(haystack) {}
-
-    class iterator {
-        char const *suffix_;        // Start of the not-yet-segmented suffix (a TR29 boundary; text end once exhausted)
-        char const *end_;           // End of original text (immutable)
-        size_type starts_[steps_];  // Buffered segment offsets, relative to `suffix_`
-        size_type lengths_[steps_]; // Buffered segment lengths
-        size_type count_;           // Number of buffered segments (0 once exhausted)
-        size_type index_;           // Index of the current segment within the buffer
-
-        void fill_() noexcept {
-            sz_size_t consumed = 0;
-            count_ = sz_utf8_linebreaks(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_,
-                                        &consumed);
-            index_ = 0;
-        }
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using value_type = string_view_type;
-        using difference_type = std::ptrdiff_t;
-        using pointer = string_view_type;
-        using reference = string_view_type;
-
-        iterator() noexcept : suffix_(nullptr), end_(nullptr), count_(0), index_(0) {}
-        iterator(string_view_type text) noexcept : suffix_(text.data()), end_(text.data() + text.size()) { fill_(); }
-
-        reference operator*() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-        pointer operator->() const noexcept { return string_view_type(suffix_ + starts_[index_], lengths_[index_]); }
-
-        iterator &operator++() noexcept {
-            if (++index_ < count_) return *this; // Still segments buffered from the current batch.
-            // Batch drained: advance past the last segment (a TR29 boundary) and refill; `count_` hits 0 at the end.
-            suffix_ += starts_[count_ - 1] + lengths_[count_ - 1];
-            fill_();
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(end_sentinel_type) const noexcept { return count_ != 0; }
-        bool operator==(end_sentinel_type) const noexcept { return count_ == 0; }
-    };
-
-    iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    end_sentinel_type end() const noexcept { return {}; }
-    end_sentinel_type end_sentinel() const noexcept { return {}; }
-
     /** @brief Copies the segments into a container. */
     template <typename container_>
     void to(container_ &container) {
@@ -1869,6 +1406,110 @@ class utf8_linebreaks_view {
         return std::move(container);
     }
 };
+
+/**
+ *  @brief A range of string slices @b between UTF-8 newlines - i.e. the lines. Unicode-aware `splitlines()`.
+ *
+ *  Splits on all 7 Unicode newline characters plus the CRLF sequence (LF, VT, FF, CR, NEL, LS, PS, CRLF) and yields
+ *  the segments between them. See @ref utf8_newlines_view for the newline runs themselves.
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_split_newlines_view =
+    utf8_split_view<sz_utf8_newlines, string_type_, steps_, split_parts_t::between_k, empties_>;
+
+/** @brief A range of the UTF-8 newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...); see @ref utf8_split_newlines_view. */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_newlines_view =
+    utf8_split_view<sz_utf8_newlines, string_type_, steps_, split_parts_t::separators_k, empties_>;
+
+/**
+ *  @brief A range of string slices @b between UTF-8 whitespace runs - i.e. the tokens.
+ *
+ *  Splits on all 25 Unicode White_Space characters and yields the segments between them (empties kept by default).
+ *  See @ref utf8_whitespaces_view for the whitespace runs themselves.
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_split_whitespaces_view =
+    utf8_split_view<sz_utf8_whitespaces, string_type_, steps_, split_parts_t::between_k, empties_>;
+
+/** @brief A range of the UTF-8 whitespace runs themselves; see @ref utf8_split_whitespaces_view for the tokens between them. */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_whitespaces_view =
+    utf8_split_view<sz_utf8_whitespaces, string_type_, steps_, split_parts_t::separators_k, empties_>;
+
+/**
+ *  @brief A range of string slices @b between any UTF-8 delimiter codepoints - i.e. the fields.
+ *
+ *  The superset of @ref utf8_split_whitespaces_view: splits on every punctuation (P*), symbol (S*), or separator/whitespace
+ *  (Z*) codepoint and yields the segments between them. See @ref utf8_delimiters_view for the delimiter runs.
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_split_delimiters_view =
+    utf8_split_view<sz_utf8_delimiters, string_type_, steps_, split_parts_t::between_k, empties_>;
+
+/** @brief A range of the UTF-8 delimiter runs themselves (P/S/Z categories); see @ref utf8_split_delimiters_view. */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
+using utf8_delimiters_view =
+    utf8_split_view<sz_utf8_delimiters, string_type_, steps_, split_parts_t::separators_k, empties_>;
+
+/**
+ *  @brief A range of UAX-29 word segments, in order.
+ *
+ *  Word segmentation tiles the input: every byte belongs to exactly one segment - alternating "words" (letter /
+ *  number / mark / CJK runs) and the whitespace / punctuation between them - so consecutive segments are contiguous
+ *  and no empty segments arise. Drives `sz_utf8_wordbreaks`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ *  @tparam steps_ Segments fetched per kernel call.
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+using utf8_wordbreaks_view = utf8_segments_view<sz_utf8_wordbreaks, string_type_, steps_>;
+
+/**
+ *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, in order.
+ *
+ *  Unlike whitespace splitting, the graphemes tile the input: every byte belongs to exactly one grapheme, so
+ *  consecutive graphemes are contiguous and no empty segments are produced. Drives
+ *  `sz_utf8_graphemes`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes, string_type_, steps_>;
+
+/**
+ *  @brief A range of string slices split at UAX-29 sentence boundaries, in order.
+ *
+ *  Unlike whitespace splitting, the sentences tile the input: every byte belongs to exactly one sentence, so
+ *  consecutive sentences are contiguous and no empty segments are produced. Drives
+ *  `sz_utf8_sentences`.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences, string_type_, steps_>;
+
+/**
+ *  @brief A range of string slices split at UAX-14 line break opportunities, in order.
+ *
+ *  Unlike whitespace splitting, the segments tile the input: every byte belongs to exactly one segment, so
+ *  consecutive segments are contiguous and no empty segments are produced. Each segment ends at an allowed
+ *  line break opportunity (both mandatory hard breaks and soft wrap points). Drives
+ *  `sz_utf8_linebreaks`. To split only on hard line breaks use `utf8_split_newlines` instead.
+ *
+ *  @tparam string_type_ String type (string_view, string_slice, std::string, etc.)
+ */
+template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks, string_type_, steps_>;
 
 /**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring.
@@ -2225,6 +1866,35 @@ class utf8_uncased_needle {
     char_type *data() const noexcept { return needle_; }
     std::size_t size() const noexcept { return length_; }
     sz_utf8_uncased_needle_metadata_t &metadata_ref() const noexcept { return metadata_; }
+};
+
+/**
+ *  @brief Stateful matcher driving @ref find_matches_view over @b case-insensitive UTF-8 matches.
+ *
+ *  The uncased twin of @ref matcher_find: each match is resolved through @c sz_utf8_uncased_search, and the needle's
+ *  folding metadata is cached in the @ref utf8_uncased_needle across calls, so a repeated scan compiles the needle
+ *  once. Because case folding can change a match's byte length, @ref needle_length reports the byte span of the
+ *  @b last match rather than the needle's own length. Matches are reported @b non-overlapping.
+ *
+ *  @tparam string_type_ The haystack view type handed in by @ref find_matches_view (e.g. @ref string_view).
+ *  @tparam needle_char_type_ The needle's (const) character type.
+ */
+template <typename string_type_, typename needle_char_type_ = char const>
+struct matcher_utf8_uncased_search {
+    using size_type = typename string_type_::size_type;
+    utf8_uncased_needle<needle_char_type_> needle_;
+    mutable size_type matched_length_ = 0; // Byte span of the last match (folding may change it); set by `operator()`.
+
+    matcher_utf8_uncased_search(utf8_uncased_needle<needle_char_type_> needle) noexcept : needle_(needle) {}
+    size_type needle_length() const noexcept { return matched_length_; }
+    size_type skip_length() const noexcept { return matched_length_ ? matched_length_ : 1; }
+    size_type operator()(string_type_ haystack) const noexcept {
+        sz_size_t match_length = 0;
+        sz_cptr_t ptr = sz_utf8_uncased_search(haystack.data(), haystack.size(), needle_.data(), needle_.size(),
+                                               &needle_.metadata_ref(), &match_length);
+        matched_length_ = static_cast<size_type>(match_length);
+        return ptr ? static_cast<size_type>(ptr - haystack.data()) : string_type_::npos;
+    }
 };
 
 #pragma endregion
@@ -2896,42 +2566,74 @@ class basic_string_slice {
     }
 
     /**
+     *  @brief All @b non-overlapping case-insensitive matches of a pre-compiled UTF-8 needle, as a lazy view.
+     *  @param needle A pre-compiled pattern; its folding metadata is cached and reused across the whole scan.
+     *  @return A @ref find_matches_view yielding each match as a `string_view` (the C++ twin of Rust/Python `Utf8UncasedMatches`).
+     */
+    template <typename needle_char_type_>
+    find_matches_view<string_view, matcher_utf8_uncased_search<string_view, needle_char_type_>> utf8_uncased_matches(
+        utf8_uncased_needle<needle_char_type_> const &needle) const noexcept {
+        return {string_view(start_, length_), matcher_utf8_uncased_search<string_view, needle_char_type_>(needle)};
+    }
+
+    /**
+     *  @brief All @b non-overlapping case-insensitive matches of a UTF-8 needle string, as a lazy view.
+     *  @param needle The pattern to match, case-insensitively, under Unicode case folding.
+     */
+    find_matches_view<string_view, matcher_utf8_uncased_search<string_view>> utf8_uncased_matches(
+        string_view needle) const noexcept {
+        return utf8_uncased_matches(utf8_uncased_needle<char const>(needle));
+    }
+
+    /**
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
     utf8_runes_view<string_slice> utf8_runes() const noexcept { return {*this}; }
 
     /**
-     *  @brief Split the string by Unicode newline characters (UTF-8 aware).
-     *  @return A range of string slices split by newlines.
-     *
-     *  Splits on all 7 Unicode newline characters + CRLF sequence.
+     *  @brief Lazily splits the string into the lines @b between Unicode newlines (UTF-8 aware).
+     *  @return A range of the segments between all 7 Unicode newlines + the CRLF sequence.
+     *  @sa utf8_newlines() for the newline runs themselves.
      */
-    utf8_lines_view<string_slice> utf8_lines() const noexcept { return {*this}; }
+    utf8_split_newlines_view<string_slice> utf8_split_newlines() const noexcept { return {*this}; }
+
+    /** @brief Lazily yields the Unicode newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...). */
+    utf8_newlines_view<string_slice> utf8_newlines() const noexcept { return {*this}; }
 
     /**
-     *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
-     *  @return A range of non-empty string slices split by whitespace.
-     *
-     *  Splits on all 25 Unicode White_Space characters.
-     *  Consecutive whitespace is treated as a single delimiter.
-     *  Empty segments are skipped.
+     *  @brief Lazily splits the string into the tokens @b between Unicode whitespace runs (UTF-8 aware).
+     *  @return A range of the segments between all 25 Unicode White_Space characters. Empty segments are kept by
+     *          default (call `.skip_empty()` for `str.split_whitespace()`-style behavior).
+     *  @sa utf8_whitespaces() for the whitespace runs themselves.
      */
-    utf8_tokens_view<string_slice> utf8_tokens() const noexcept { return {*this}; }
+    utf8_split_whitespaces_view<string_slice> utf8_split_whitespaces() const noexcept { return {*this}; }
+
+    /** @brief Lazily yields the Unicode whitespace runs themselves. */
+    utf8_whitespaces_view<string_slice> utf8_whitespaces() const noexcept { return {*this}; }
+
+    /**
+     *  @brief Lazily splits the string into the fields @b between any Unicode delimiter (punctuation/symbol/separator).
+     *  @return A range of the segments between every P/S/Z codepoint - the superset of `utf8_split_whitespaces()`.
+     *  @sa utf8_delimiters() for the delimiter runs themselves.
+     */
+    utf8_split_delimiters_view<string_slice> utf8_split_delimiters() const noexcept { return {*this}; }
+
+    /** @brief Lazily yields the Unicode delimiter runs themselves (punctuation, symbols, separators). */
     utf8_delimiters_view<string_slice> utf8_delimiters() const noexcept { return {*this}; }
 
     /**
-     *  @brief Lazily splits the string into UAX-29 words, in order.
+     *  @brief Lazily yields the UAX-29 word segments, in order (words and the separators between them).
      *
-     *  Unlike `utf8_tokens()`, the words tile the input contiguously (no empty segments). Each yielded slice is
-     *  the span between consecutive TR29 word boundaries.
+     *  The segments tile the input contiguously - each yielded slice is the span between consecutive TR29 word
+     *  boundaries, so concatenating them reconstructs the input.
      */
-    utf8_words_view<string_slice> utf8_words() const noexcept { return {*this}; }
+    utf8_wordbreaks_view<string_slice> utf8_wordbreaks() const noexcept { return {*this}; }
 
     /**
      *  @brief Lazily splits the string into UAX-29 grapheme clusters, in order.
      *
-     *  Unlike `utf8_tokens()`, the graphemes tile the input contiguously (no empty segments). Each yielded slice is
+     *  Unlike `utf8_split_whitespaces()`, the graphemes tile the input contiguously (no empty segments). Each yielded slice is
      *  the span between consecutive TR29 grapheme cluster boundaries.
      */
     utf8_graphemes_view<string_slice> utf8_graphemes() const noexcept { return {*this}; }
@@ -2939,7 +2641,7 @@ class basic_string_slice {
     /**
      *  @brief Lazily splits the string into UAX-29 sentences, in order.
      *
-     *  Unlike `utf8_tokens()`, the sentences tile the input contiguously (no empty segments). Each yielded slice is
+     *  Unlike `utf8_split_whitespaces()`, the sentences tile the input contiguously (no empty segments). Each yielded slice is
      *  the span between consecutive TR29 sentence boundaries.
      */
     utf8_sentences_view<string_slice> utf8_sentences() const noexcept { return {*this}; }
@@ -2947,7 +2649,7 @@ class basic_string_slice {
     /**
      *  @brief Lazily splits the string into UAX-14 line-breakable segments, in order.
      *
-     *  Distinct from `utf8_lines()`, which splits only on hard (mandatory) Unicode newline characters. Here
+     *  Distinct from `utf8_split_newlines()`, which splits only on hard (mandatory) Unicode newline characters. Here
      *  every byte belongs to exactly one segment ending at an allowed line break opportunity, including both the
      *  mandatory hard breaks and the soft wrap points.
      */
@@ -3090,14 +2792,10 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept {
-        return {*this, {set}};
-    }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
 
     using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -3112,14 +2810,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
-        return {*this, {set}};
-    }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -4751,25 +4445,26 @@ class basic_string {
      */
     utf8_runes_view<basic_string> utf8_runes() const noexcept { return {*this}; }
 
-    /**
-     *  @brief Split the string by Unicode newline characters (UTF-8 aware).
-     *  @return A range of string slices split by newlines.
-     *
-     *  Splits on all 7 Unicode newline characters + CRLF sequence.
-     */
-    utf8_lines_view<basic_string> utf8_lines() const noexcept { return {*this}; }
+    /** @brief Lazily splits into the lines @b between Unicode newlines; @sa utf8_newlines() for the runs. */
+    utf8_split_newlines_view<basic_string> utf8_split_newlines() const noexcept { return {*this}; }
 
-    /**
-     *  @brief Split the string by Unicode whitespace characters (UTF-8 aware).
-     *  @return A range of non-empty string slices split by whitespace.
-     *
-     *  Splits on all 25 Unicode whitespace characters. Empty segments (consecutive whitespace) are skipped.
-     */
-    utf8_tokens_view<basic_string> utf8_tokens() const noexcept { return {*this}; }
+    /** @brief Lazily yields the Unicode newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...). */
+    utf8_newlines_view<basic_string> utf8_newlines() const noexcept { return {*this}; }
+
+    /** @brief Lazily splits into the tokens @b between Unicode whitespace runs (empties kept; `.skip_empty()` drops). */
+    utf8_split_whitespaces_view<basic_string> utf8_split_whitespaces() const noexcept { return {*this}; }
+
+    /** @brief Lazily yields the Unicode whitespace runs themselves. */
+    utf8_whitespaces_view<basic_string> utf8_whitespaces() const noexcept { return {*this}; }
+
+    /** @brief Lazily splits into the fields @b between any Unicode delimiter (P/S/Z); the superset of utf8_split_whitespaces(). */
+    utf8_split_delimiters_view<basic_string> utf8_split_delimiters() const noexcept { return {*this}; }
+
+    /** @brief Lazily yields the Unicode delimiter runs themselves (punctuation, symbols, separators). */
     utf8_delimiters_view<basic_string> utf8_delimiters() const noexcept { return {*this}; }
 
-    /** @brief Lazily splits the string into UAX-29 words, in order (words tile the input contiguously). */
-    utf8_words_view<basic_string> utf8_words() const noexcept { return {*this}; }
+    /** @brief Lazily yields the UAX-29 word segments, in order (words + the separators between them; they tile). */
+    utf8_wordbreaks_view<basic_string> utf8_wordbreaks() const noexcept { return {*this}; }
 
     /**
      *  @brief Apply Unicode case folding to the string in-place.

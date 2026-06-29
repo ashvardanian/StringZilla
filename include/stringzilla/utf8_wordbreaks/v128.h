@@ -1,14 +1,14 @@
 /**
  *  @brief WebAssembly SIMD128 backend for UAX-29 word boundaries.
- *  @file include/stringzilla/utf8_words/v128.h
+ *  @file include/stringzilla/utf8_wordbreaks/v128.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDS_V128_H_
 #define STRINGZILLA_UTF8_WORDS_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/v128.h"
 
 #ifdef __cplusplus
@@ -91,7 +91,7 @@ SZ_INTERNAL v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_
 
 #pragma endregion // Word boundary left pack
 
-SZ_PUBLIC sz_size_t sz_utf8_words_v128(              //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_v128(         //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

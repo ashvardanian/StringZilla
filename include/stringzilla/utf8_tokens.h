@@ -35,7 +35,7 @@ extern "C" {
  *        These are data structure delimiters used in formats like USV (Unicode Separated Values),
  *        not line breaks. Use @c sz_find_byte() if you need to find these separators.
  *
- *  Enumerates every newline delimiter in a single sweep, mirroring `sz_utf8_words`: writes the
+ *  Enumerates every newline delimiter in a single sweep, mirroring `sz_utf8_wordbreaks`: writes the
  *  byte offset and byte length of each match into the parallel `match_offsets` / `match_lengths` arrays (a
  *  @c "\r\n" CRLF is one match of length 2). Returns the number of delimiters emitted. When the output fills
  *  before the input is exhausted, `*bytes_consumed` is set to the resume offset - always past the last emitted

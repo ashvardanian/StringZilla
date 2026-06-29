@@ -1,6 +1,6 @@
 /**
  *  @brief RISC-V Vector backend for UAX-29 word boundaries.
- *  @file include/stringzilla/utf8_words/rvv.h
+ *  @file include/stringzilla/utf8_wordbreaks/rvv.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDS_RVV_H_
@@ -8,8 +8,8 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/rvv.h"
 
 #ifdef __cplusplus
@@ -292,8 +292,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_emit_ascii_rvv_(                       
  *  strip anchored two bytes before the open boundary (`base = position-2`); all-ASCII strips emit in-register
  *  via `sz_utf8_word_break_emit_ascii_rvv_`, any other window takes one scalar codepoint step. The capacity cut
  *  sets `*bytes_consumed = word_start` (a true boundary) so a fresh next call restarts cleanly. */
-SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                         sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_INTERNAL sz_size_t sz_utf8_wordbreaks_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                              sz_size_t *word_lengths, sz_size_t words_capacity,
+                                              sz_size_t *bytes_consumed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t words = 0;
     sz_size_t word_start = 0;                              // Start of the in-progress word (always a true boundary).
@@ -354,12 +355,13 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t len
         return 0;
     }
     if (!sz_utf8_word_break_is_well_formed_rvv_(text, length))
-        return sz_utf8_words_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-    return sz_utf8_words_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+        return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_words_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                      sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                           sz_size_t *bytes_consumed) {
     return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 

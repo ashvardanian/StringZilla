@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_words/icelake.h
+ *  @file include/stringzilla/utf8_wordbreaks/icelake.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for AVX-512 (Ice Lake and later). No path scalar-walks
  *          codepoints, spills a ZMM to the stack, calls the serial oracle, or issues a gather.
@@ -56,8 +56,8 @@
 #define STRINGZILLA_UTF8_WORDS_ICELAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/icelake.h"
 
 #ifdef __cplusplus
@@ -484,7 +484,7 @@ SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_icel
  *          register carry; there is no scalar back-walk, no deferred-emission state machine, and no carry
  *          re-derivation by re-reading the text. Every iteration advances at least one codepoint on all inputs.
  */
-SZ_PUBLIC sz_size_t sz_utf8_words_icelake(           //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_icelake(      //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

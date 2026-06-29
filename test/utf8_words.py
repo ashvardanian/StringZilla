@@ -33,21 +33,21 @@ from test.utf8_helpers import (
 def test_utf8_words_basic():
     """Test basic word iteration."""
     # Simple two words
-    result = [str(w) for w in sz.utf8_words("hello world")]
+    result = [str(w) for w in sz.utf8_wordbreaks("hello world")]
     assert result == ["hello", " ", "world"]
 
     # Empty string
-    result = [str(w) for w in sz.utf8_words("")]
+    result = [str(w) for w in sz.utf8_wordbreaks("")]
     assert result == []
 
     # Single character
-    result = [str(w) for w in sz.utf8_words("a")]
+    result = [str(w) for w in sz.utf8_wordbreaks("a")]
     assert result == ["a"]
 
 
 def test_utf8_words_skip_empty():
     """Test skip_empty parameter."""
-    result = [str(w) for w in sz.utf8_words("hello  world", skip_empty=True)]
+    result = [str(w) for w in sz.utf8_wordbreaks("hello  world")]
     # Should skip empty segments at boundaries
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
@@ -56,7 +56,7 @@ def test_utf8_words_skip_empty():
 def test_utf8_words_contractions():
     """Test English contractions per TR29 rules."""
     # Per TR29, apostrophe between letters should not break
-    result = [str(w) for w in sz.utf8_words("don't")]
+    result = [str(w) for w in sz.utf8_wordbreaks("don't")]
     # TR29: "don't" should be one word (WB6-7: MidLetter rules)
     assert "don't" in result or result == ["don't"]
 
@@ -64,15 +64,15 @@ def test_utf8_words_contractions():
 def test_utf8_words_unicode():
     """Test UTF-8 multi-byte characters."""
     # German with eszett
-    result = [str(w) for w in sz.utf8_words("Größe")]
+    result = [str(w) for w in sz.utf8_wordbreaks("Größe")]
     assert "Größe" in result
 
     # Russian text
-    result = [str(w) for w in sz.utf8_words("привет мир")]
+    result = [str(w) for w in sz.utf8_wordbreaks("привет мир")]
     assert len(result) >= 2
 
     # CJK (each character is its own word in TR29)
-    result = [str(w) for w in sz.utf8_words("你好")]
+    result = [str(w) for w in sz.utf8_wordbreaks("你好")]
     # CJK characters are typically "Other" category - each is a boundary
     assert len(result) >= 1
 
@@ -80,31 +80,31 @@ def test_utf8_words_unicode():
 def test_utf8_words_emoji():
     """Test emoji handling."""
     # Simple emoji
-    result = [str(w) for w in sz.utf8_words("hello 👋 world")]
+    result = [str(w) for w in sz.utf8_wordbreaks("hello 👋 world")]
     assert "hello" in result
     assert "world" in result
 
 
 def test_utf8_words_numbers():
     """Test numeric handling per TR29."""
-    result = [str(w) for w in sz.utf8_words("test123")]
+    result = [str(w) for w in sz.utf8_wordbreaks("test123")]
     # ALetter followed by Numeric should not break (WB9)
     assert "test123" in result or result == ["test123"]
 
-    result = [str(w) for w in sz.utf8_words("3.14")]
+    result = [str(w) for w in sz.utf8_wordbreaks("3.14")]
     # Numeric with MidNum should stay together (WB11-12)
     assert "3.14" in result or len(result) <= 3
 
 
 def test_utf8_words_str_method():
-    """Test the Str.utf8_words() method."""
+    """Test the Str.utf8_wordbreaks() method."""
     s = Str("hello world")
     # Method requires text argument, even when called on Str object
-    result = [str(w) for w in s.utf8_words(s)]
+    result = [str(w) for w in s.utf8_wordbreaks(s)]
     assert result == ["hello", " ", "world"]
 
     # Also test via module function
-    result = [str(w) for w in sz.utf8_words(s)]
+    result = [str(w) for w in sz.utf8_wordbreaks(s)]
     assert result == ["hello", " ", "world"]
 
 
@@ -151,7 +151,7 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
 
         # StringZilla boundaries = cumulative byte lengths of the emitted words.
         sz_boundaries = [0]
-        for word in sz.utf8_words(text):
+        for word in sz.utf8_wordbreaks(text):
             sz_boundaries.append(sz_boundaries[-1] + len(str(word).encode("utf-8")))
 
         # Exact match required — no `len >= 2` escape hatch.
@@ -178,7 +178,7 @@ def test_utf8_word_boundary_official_conformance():
 
         # The StringZilla iterator yields words back-to-back; their cumulative byte lengths are the boundaries.
         sz_boundaries = [0]
-        for word in sz.utf8_words(test_str):
+        for word in sz.utf8_wordbreaks(test_str):
             sz_boundaries.append(sz_boundaries[-1] + len(str(word).encode("utf-8")))
 
         # `get_word_break_test_cases` already returns BYTE boundaries (including 0 and len), matching `sz_boundaries`.
@@ -244,7 +244,7 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
     # match exactly. (Pathological >64-byte ignorable runs exceed any fixed window; serial-only, out of scope here.)
     samples = seam_regressions + ["".join(choice(palette) for _ in range(randint(1, 100))) for _ in range(2000)]
     for text in samples:
-        sz_boundaries = boundaries(str(w) for w in sz.utf8_words(text))
+        sz_boundaries = boundaries(str(w) for w in sz.utf8_wordbreaks(text))
         ref_boundaries = boundaries(uniseg_wordbreak.words(text))
         if sz_boundaries != ref_boundaries:
             cps = " ".join(f"{ord(c):04X}" for c in text)
@@ -264,7 +264,7 @@ def test_utf8_word_safety(seed_value: int):
     (named malformed shapes, astral fixtures, all single bytes, every lead-class byte pair, random garbage)."""
     rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
-        assert_segments_tile(sz.utf8_words(raw), raw)
+        assert_segments_tile(sz.utf8_wordbreaks(raw), raw)
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
@@ -275,13 +275,13 @@ def test_utf8_word_seam(seed_value: int):
     rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
-        assert_segments_tile(sz.utf8_words(raw), raw)
+        assert_segments_tile(sz.utf8_wordbreaks(raw), raw)
     # Phase sweep: shift a fixed corpus by every byte offset 0..63 so its content lands at every alignment
     # relative to the 64-byte window — exhaustive deterministic complement to the length sweep.
     body = corpus_of_byte_length(96, rng)
     for phase in range(64):
         raw = b"a" * phase + body
-        assert_segments_tile(sz.utf8_words(raw), raw)
+        assert_segments_tile(sz.utf8_wordbreaks(raw), raw)
 
 
 #  endregion Synthetic corner cases (safety / seam)
@@ -306,7 +306,7 @@ def test_utf8_word_class_adjacency():
 
     failures = []
     for text in cases:
-        sz_boundaries = byte_boundaries(sz.utf8_words(text))
+        sz_boundaries = byte_boundaries(sz.utf8_wordbreaks(text))
         reference_boundaries = byte_boundaries(list(uniseg_wordbreak.words(text)))
         if sz_boundaries != reference_boundaries:
             codepoints = " ".join(f"{ord(character):04X}" for character in text)

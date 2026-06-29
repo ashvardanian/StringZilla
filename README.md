@@ -856,7 +856,7 @@ The decoder lives in `include/stringzilla/utf8_runes.h`.
 
 UAX-29 word, grapheme, and sentence boundaries, together with UAX-14 line-break opportunities, are found in a single pass.
 Each codepoint is classified against register-resident property tables and the boundary rules are applied directly, so combining marks, emoji zero-width-joiner sequences, and regional-indicator flags are all handled without a second traversal.
-The segmenters live in the `utf8_words*`, `utf8_graphemes*`, `utf8_sentences*`, and `utf8_linebreaks*` files.
+The segmenters live in the `utf8_wordbreaks*`, `utf8_graphemes*`, `utf8_sentences*`, and `utf8_linebreaks*` files.
 
 ### Unicode Normalization and Case Folding
 

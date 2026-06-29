@@ -37,7 +37,7 @@
 #include "shared.hpp"
 #include "stringzilla.hpp" // `log_environment`
 
-#include "stringzilla/utf8_words.h"      // `sz_utf8_words`
+#include "stringzilla/utf8_wordbreaks.h" // `sz_utf8_wordbreaks`
 #include "stringzilla/utf8_graphemes.h"  // `sz_utf8_graphemes`
 #include "stringzilla/utf8_sentences.h"  // `sz_utf8_sentences`
 #include "stringzilla/utf8_linebreaks.h" // `sz_utf8_linebreaks`
@@ -76,32 +76,40 @@ struct utf8_word_forward_from_sz {
 #pragma region Benchmarks
 
 void bench_utf8_words(environment_t const &env) {
-    auto base_v = utf8_word_forward_from_sz<sz_utf8_words_serial> {env};
-    bench_result_t base = bench_unary(env, "sz_utf8_words_serial", base_v).log();
+    auto base_v = utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_wordbreaks_serial", base_v).log();
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_utf8_words_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_words_haswell> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_haswell", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_haswell> {env})
+        .log(base);
 #endif
 #if SZ_USE_ICELAKE
-    bench_unary(env, "sz_utf8_words_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_words_icelake> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_icelake", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_icelake> {env})
+        .log(base);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_utf8_words_neon", base_v, utf8_word_forward_from_sz<sz_utf8_words_neon> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_neon", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_neon> {env})
+        .log(base);
 #endif
 #if SZ_USE_SVE2
-    bench_unary(env, "sz_utf8_words_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_words_sve2> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_sve2", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_sve2> {env})
+        .log(base);
 #endif
 #if SZ_USE_V128
-    bench_unary(env, "sz_utf8_words_v128", base_v, utf8_word_forward_from_sz<sz_utf8_words_v128> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_v128", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_v128> {env})
+        .log(base);
 #endif
 #if SZ_USE_RVV
-    bench_unary(env, "sz_utf8_words_rvv", base_v, utf8_word_forward_from_sz<sz_utf8_words_rvv> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_rvv", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_rvv> {env})
+        .log(base);
 #endif
 #if SZ_USE_POWERVSX
-    bench_unary(env, "sz_utf8_words_powervsx", base_v, utf8_word_forward_from_sz<sz_utf8_words_powervsx> {env})
+    bench_unary(env, "sz_utf8_wordbreaks_powervsx", base_v,
+                utf8_word_forward_from_sz<sz_utf8_wordbreaks_powervsx> {env})
         .log(base);
 #endif
 #if SZ_USE_LASX
-    bench_unary(env, "sz_utf8_words_lasx", base_v, utf8_word_forward_from_sz<sz_utf8_words_lasx> {env}).log(base);
+    bench_unary(env, "sz_utf8_wordbreaks_lasx", base_v, utf8_word_forward_from_sz<sz_utf8_wordbreaks_lasx> {env})
+        .log(base);
 #endif
 }
 

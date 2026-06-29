@@ -34,7 +34,7 @@ extern "C" {
  *
  *  @note No zero-length words are emitted; @p length == 0 returns 0.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_words(                  //
+SZ_DYNAMIC sz_size_t sz_utf8_wordbreaks(             //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed);
@@ -95,96 +95,104 @@ SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t le
 
 #pragma region Platform Specific Backends
 
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                         sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                              sz_size_t *word_lengths, sz_size_t words_capacity,
+                                              sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                          sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                               sz_size_t *word_lengths, sz_size_t words_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                          sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                               sz_size_t *word_lengths, sz_size_t words_capacity,
+                                               sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                       sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_SVE2
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                       sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_V128
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                       sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_RVV
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                      sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                           sz_size_t *word_lengths, sz_size_t words_capacity,
+                                           sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_LASX
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                       sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_POWERVSX
-/** @copydoc sz_utf8_words */
-SZ_PUBLIC sz_size_t sz_utf8_words_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                           sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks */
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
-#include "stringzilla/utf8_words/serial.h"
-#include "stringzilla/utf8_words/icelake.h"
-#include "stringzilla/utf8_words/haswell.h"
-#include "stringzilla/utf8_words/neon.h"
-#include "stringzilla/utf8_words/sve2.h"
-#include "stringzilla/utf8_words/v128.h"
-#include "stringzilla/utf8_words/rvv.h"
-#include "stringzilla/utf8_words/lasx.h"
-#include "stringzilla/utf8_words/powervsx.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
+#include "stringzilla/utf8_wordbreaks/icelake.h"
+#include "stringzilla/utf8_wordbreaks/haswell.h"
+#include "stringzilla/utf8_wordbreaks/neon.h"
+#include "stringzilla/utf8_wordbreaks/sve2.h"
+#include "stringzilla/utf8_wordbreaks/v128.h"
+#include "stringzilla/utf8_wordbreaks/rvv.h"
+#include "stringzilla/utf8_wordbreaks/lasx.h"
+#include "stringzilla/utf8_wordbreaks/powervsx.h"
 
 #pragma region Dynamic Dispatch
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_words(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                   sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_DYNAMIC sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                        sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
-    return sz_utf8_words_icelake(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_icelake(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
-    return sz_utf8_words_haswell(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_haswell(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_SVE2
-    return sz_utf8_words_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_NEON
-    return sz_utf8_words_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_V128
-    return sz_utf8_words_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_RVV
-    return sz_utf8_words_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_LASX
-    return sz_utf8_words_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_POWERVSX
-    return sz_utf8_words_powervsx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_powervsx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #else
-    return sz_utf8_words_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #endif
 }
 

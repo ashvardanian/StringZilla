@@ -53,7 +53,7 @@ def test_utf8_sentences_basic():
 
 def test_utf8_sentences_skip_empty():
     """Test skip_empty parameter for sentence iteration."""
-    result = [str(s) for s in sz.utf8_sentences("A. B. C.", skip_empty=True)]
+    result = [str(s) for s in sz.utf8_sentences("A. B. C.")]
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
 

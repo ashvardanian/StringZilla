@@ -361,7 +361,7 @@ UAX-29 keeps `can't` whole while separating CJK ideographs that no space divides
 
 ```cpp
 sz::string_view phrase = "can't stop 北京!";
-assert(*phrase.utf8_words().begin() == "can't"); // apostrophe is interior; 北 and 京 split apart
+assert(*phrase.utf8_wordbreaks().begin() == "can't"); // apostrophe is interior; 北 and 京 split apart
 
 sz::string_view prose = "She paid $9.99. Cheap.";
 std::size_t sentences = 0;
@@ -369,17 +369,19 @@ for (sz::string_view s : prose.utf8_sentences()) (void)s, ++sentences;
 assert(sentences == 2); // the dot inside $9.99 is not a sentence break
 ```
 
-The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes:
+The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes. Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them:
 
 - `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar.
 - `utf8_graphemes()` — UAX-29 grapheme clusters, the user-perceived characters.
-- `utf8_words()` — UAX-29 word boundaries.
+- `utf8_wordbreaks()` — all UAX-29 word segments (words and the separators between them).
 - `utf8_sentences()` — UAX-29 sentence boundaries.
-- `utf8_lines()` — all seven Unicode newline characters plus the CRLF pair.
-- `utf8_tokens()` — the Unicode "White_Space" set, skipping empty segments.
 - `utf8_linebreaks()` — UAX-14 line-break opportunities, both hard breaks and soft wrap points.
+- `utf8_split_newlines()` / `utf8_newlines()` — content between the seven Unicode newlines (CRLF as one), or the newline runs themselves.
+- `utf8_split_whitespaces()` / `utf8_whitespaces()` — content between Unicode "White_Space" runs (tokens), or the whitespace runs.
+- `utf8_split_delimiters()` / `utf8_delimiters()` — content between any Unicode punctuation/symbol/separator, or the delimiter runs.
 
-The `utf8_words`, `utf8_graphemes`, `utf8_sentences`, and `utf8_linebreaks` ranges _tile_ the input — every byte belongs to exactly one segment, with no gaps and no empty slices.
+On any `split_*` range, `.skip_empty()` drops empty segments and `.with_separators()` interleaves segments and separators losslessly (concatenation reconstructs the input).
+The `utf8_wordbreaks`, `utf8_graphemes`, `utf8_sentences`, and `utf8_linebreaks` ranges _tile_ the input — every byte belongs to exactly one segment, with no gaps and no empty slices.
 Because every range borrows and walks the buffer once, segmenting a multi-megabyte document into graphemes or words allocates nothing.
 
 ## Case Insensitive Search and Folding

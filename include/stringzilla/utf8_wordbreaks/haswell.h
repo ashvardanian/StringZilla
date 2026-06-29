@@ -1,5 +1,5 @@
 /**
- *  @file include/stringzilla/utf8_words/haswell.h
+ *  @file include/stringzilla/utf8_wordbreaks/haswell.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for AVX2 (Haswell). The AVX2 twin of the Ice Lake kernel:
  *          no path scalar-walks codepoints, spills a YMM to the stack to call the serial oracle, or issues a gather.
@@ -15,8 +15,8 @@
 #define STRINGZILLA_UTF8_WORDS_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/haswell.h"
 
 #ifdef __cplusplus
@@ -468,10 +468,10 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_
 
 /**
  *  @brief  Forward UAX-29 word segmentation over `[0, length)` (Haswell AVX2): the overlap-free advancing driver,
- *          mirroring @ref sz_utf8_words_icelake over the AVX2 window/classify/partition/decide/drain leaves. Bit-exact
- *          with `sz_utf8_words_serial` and `sz_utf8_words_icelake`.
+ *          mirroring @ref sz_utf8_wordbreaks_icelake over the AVX2 window/classify/partition/decide/drain
+ *          leaves. Bit-exact with `sz_utf8_wordbreaks_serial` and `sz_utf8_wordbreaks_icelake`.
  */
-SZ_PUBLIC sz_size_t sz_utf8_words_haswell(           //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_haswell(      //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

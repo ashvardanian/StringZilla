@@ -1,14 +1,14 @@
 /**
  *  @brief SVE2 backend for UAX-29 word boundaries.
- *  @file include/stringzilla/utf8_words/sve2.h
+ *  @file include/stringzilla/utf8_wordbreaks/sve2.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDS_SVE2_H_
 #define STRINGZILLA_UTF8_WORDS_SVE2_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/sve2.h"
 
 #ifdef __cplusplus
@@ -127,7 +127,7 @@ SZ_INTERNAL sz_size_t sz_utf8_word_compact_boundaries_sve2_(svbool_t boundary, s
     return produced;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_words_sve2(              //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_sve2(         //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
@@ -140,7 +140,7 @@ SZ_PUBLIC sz_size_t sz_utf8_words_sve2(              //
 
     sz_size_t const window_bytes = svcntb();
     if (window_bytes < 16) // Too narrow to host the [2, W-2] trusted window: defer wholesale to serial.
-        return sz_utf8_words_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+        return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t word_start = 0; // Start of the word currently being accumulated (always a boundary).

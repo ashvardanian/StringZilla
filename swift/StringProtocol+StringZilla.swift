@@ -405,7 +405,7 @@ extension StringZillaViewable {
             var cursor: sz_size_t = 0
             while cursor < length {
                 var wordStart: sz_size_t = 0, wordLength: sz_size_t = 0, consumed: sz_size_t = 0
-                let count = sz_utf8_words(
+                let count = sz_utf8_wordbreaks(
                     pointer.advanced(by: Int(cursor)), length - cursor, &wordStart, &wordLength, 1, &consumed)
                 if count == 0 { break }
                 let begin = cursor + wordStart // The first word of the suffix starts at offset 0.

@@ -549,23 +549,29 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------- |
 | `utf8_codepoints(string)`                              | scalar values                    | `int` code points; ill-formed bytes decode to `U+FFFD`, so iteration never raises.     |
 | `utf8_graphemes(string, skip_empty=False)`             | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
-| `utf8_words(string, skip_empty=False)`                 | TR29 word boundaries             | words across all Unicode scripts.                                                      |
+| `utf8_wordbreaks(string, skip_empty=False)`            | TR29 word boundaries             | all UAX-29 word segments (words and the separators between them; they tile).            |
 | `utf8_sentences(string, skip_empty=False)`             | TR29 sentence boundaries         | sentences.                                                                             |
 | `utf8_linebreaks(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
-| `utf8_lines(string, keepends=False, skip_empty=False)` | 7 Unicode newlines + CRLF        | hard lines on LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, and CRLF.                       |
-| `utf8_tokens(string, skip_empty=False)`                | 25 Unicode `"White_Space"` chars | whitespace-delimited tokens, like `str.split()` with no separator.                     |
+| `utf8_split_newlines(string, skip_empty=False, with_separators=False)` | 7 Unicode newlines + CRLF | content BETWEEN hard newlines (LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, CRLF).          |
+| `utf8_newlines(string, skip_empty=False)`              | 7 Unicode newlines + CRLF        | the newline runs themselves (the separators).                                          |
+| `utf8_split_whitespaces(string, skip_empty=False, with_separators=False)` | 25 Unicode `"White_Space"` | content BETWEEN whitespace runs, like `str.split()` with no separator.            |
+| `utf8_whitespaces(string, skip_empty=False)`           | 25 Unicode `"White_Space"` chars | the whitespace runs themselves (the separators).                                       |
+| `utf8_split_delimiters(string, skip_empty=False, with_separators=False)` | punctuation/symbol/separator | content BETWEEN any Unicode delimiter (superset of whitespace).                  |
+| `utf8_delimiters(string, skip_empty=False)`            | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
 
-`skip_empty` drops empty segments between adjacent boundaries.
-`utf8_lines` additionally takes `keepends` to retain the line terminator on each line.
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while
+`split_*` yields the content **between** them. `skip_empty` drops empty segments; `with_separators=True` interleaves
+both losslessly (concatenation reproduces the input), replacing the old `keepends`.
 
 ```python
 import stringzilla as sz
 
 assert list(sz.utf8_codepoints("AB")) == [65, 66]
 assert [str(g) for g in sz.Str("a👍🏽b").utf8_graphemes()] == ["a", "👍🏽", "b"]
-[str(w) for w in sz.utf8_words("Hi, world")]         # words per TR29
-assert sum(1 for _ in sz.Str("first\nsecond\nthird").utf8_lines()) == 3
-assert [str(t) for t in sz.utf8_tokens("foo  bar baz")] == ["foo", "bar", "baz"]
+[str(w) for w in sz.utf8_wordbreaks("Hi, world")]    # all UAX-29 segments
+assert sum(1 for _ in sz.Str("first\nsecond\nthird").utf8_split_newlines()) == 3
+assert [str(t) for t in sz.utf8_split_whitespaces("foo  bar baz", skip_empty=True)] == ["foo", "bar", "baz"]
+assert "".join(str(s) for s in sz.utf8_split_newlines("a\nb", with_separators=True)) == "a\nb"
 ```
 
 ### Counting Code Points

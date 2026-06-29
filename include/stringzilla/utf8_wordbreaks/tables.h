@@ -1,5 +1,5 @@
 /**
- *  @file   include/stringzilla/utf8_words/tables.h
+ *  @file   include/stringzilla/utf8_wordbreaks/tables.h
  *  @author Ash Vardanian
  *  @brief Gather-free UAX-29 Word_Break property tables. A codepoint maps to one of the 16
  *  `sz_utf8_word_break_t` values (see the walk in `sz_rune_word_break_property`). Derived from the UCD by:

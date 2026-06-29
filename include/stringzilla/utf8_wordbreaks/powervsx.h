@@ -1,14 +1,14 @@
 /**
  *  @brief POWER VSX backend for UAX-29 word boundaries.
- *  @file include/stringzilla/utf8_words/powervsx.h
+ *  @file include/stringzilla/utf8_wordbreaks/powervsx.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDS_POWERVSX_H_
 #define STRINGZILLA_UTF8_WORDS_POWERVSX_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
-#include "stringzilla/utf8_words/serial.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
+#include "stringzilla/utf8_wordbreaks/serial.h"
 #include "stringzilla/utf8_runes/powervsx.h"
 
 #ifdef __cplusplus
@@ -67,7 +67,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigne
     return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_words_powervsx(          //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_powervsx(     //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

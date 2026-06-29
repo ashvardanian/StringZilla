@@ -209,7 +209,7 @@ void test_utf8_tokens_unit() {
 
     // Split by Unicode newlines
     {
-        auto lines = [](sz::string_view t) { return t.utf8_lines().template to<std::vector<std::string>>(); };
+        auto lines = [](sz::string_view t) { return t.utf8_split_newlines().template to<std::vector<std::string>>(); };
 
         // Basic newline types
         let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
@@ -251,7 +251,9 @@ void test_utf8_tokens_unit() {
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
     {
-        auto words = [](sz::string_view t) { return t.utf8_tokens().template to<std::vector<std::string>>(); };
+        auto words = [](sz::string_view t) {
+            return t.utf8_split_whitespaces().template to<std::vector<std::string>>();
+        };
 
         // Basic ASCII whitespace (6 single-byte chars)
         let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
@@ -345,7 +347,7 @@ void test_utf8_tokens_unit() {
 
         // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
         scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
-                     sz::string_view(long_ws).utf8_tokens().template to<std::vector<std::string>>().size() ==
+                     sz::string_view(long_ws).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
                          101); // 100 spaces = 101 empty segments
 
         scope_assert(
@@ -354,29 +356,72 @@ void test_utf8_tokens_unit() {
                 for (int i = 0; i < 50; ++i) long_mixed += "word ";
                 long_mixed.pop_back();
             }, // Remove trailing space
-            sz::string_view(long_mixed).utf8_tokens().template to<std::vector<std::string>>().size() == 50); // 50 words
+            sz::string_view(long_mixed).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
+                50); // 50 words
     }
 
     // Test with `sz::string` - not just `sz::string_view`
     {
         sz::string multiline = "a\nb\nc";
-        let_assert(auto l = multiline.utf8_lines().template to<std::vector<std::string>>(),
+        let_assert(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
                    l.size() == 3 && l[1] == "b");
 
         sz::string words_str = "foo bar baz";
-        let_assert(auto w = words_str.utf8_tokens().template to<std::vector<std::string>>(),
+        let_assert(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }
 
-    // `utf8_delimiters`: split on any punctuation/symbol/separator, the superset of whitespace tokens.
+    // `utf8_split_delimiters`: the segments BETWEEN any punctuation/symbol/separator - the superset of whitespace tokens.
     {
         // "Hi, world" -> delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
-        let_assert(auto d = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
-                   d.size() == 3 && d[0] == "Hi" && d[2] == "world");
-        // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
         let_assert(
-            auto e = sz::string_view("a\xE2\x80\x94" "b").utf8_delimiters().template to<std::vector<std::string>>(),
-            e.size() == 2 && e[0] == "a" && e[1] == "b");
+            auto d = sz::string_view("Hi, world").utf8_split_delimiters().template to<std::vector<std::string>>(),
+            d.size() == 3 && d[0] == "Hi" && d[2] == "world");
+        // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
+        let_assert(auto e = sz::string_view("a\xE2\x80\x94" "b")
+                                .utf8_split_delimiters()
+                                .skip_empty()
+                                .template to<std::vector<std::string>>(),
+                   e.size() == 2 && e[0] == "a" && e[1] == "b");
+    }
+
+    // The kernel-named accessors yield the DELIMITER runs themselves (not the segments between).
+    {
+        // `utf8_delimiters` on "Hi, world": the ',' and ' ' runs.
+        let_assert(auto d = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
+                   d.size() == 2 && d[0] == "," && d[1] == " ");
+        // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
+        let_assert(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
+                   n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
+        // `utf8_whitespaces` on "a b  c": each whitespace codepoint is its own delimiter (runs are not coalesced).
+        let_assert(auto w = sz::string_view("a b  c").utf8_whitespaces().template to<std::vector<std::string>>(),
+                   w.size() == 3 && w[0] == " " && w[1] == " " && w[2] == " ");
+    }
+
+    // `.with_separators()` interleaves segments and delimiters losslessly: concatenation reconstructs the input.
+    {
+        for (sz::string_view input : {sz::string_view("Hi, world"), sz::string_view("a\nb\nc"),
+                                      sz::string_view("  x  "), sz::string_view(""), sz::string_view("plain")}) {
+            std::string rejoined;
+            for (auto piece : input.utf8_split_whitespaces().with_separators())
+                rejoined.append(piece.data(), piece.size());
+            let_assert(std::string round = rejoined, round == std::string(input.data(), input.size()));
+        }
+    }
+
+    // `.skip_empty()`: a compile-time, branchless variant that drops empty segments, matching Rust/Python.
+    {
+        // "Hi, world" has an empty field between ',' and ' '; `.skip_empty()` drops it: "Hi", "world".
+        let_assert(auto d = sz::string_view("Hi, world")
+                                .utf8_split_delimiters()
+                                .skip_empty()
+                                .template to<std::vector<std::string>>(),
+                   d.size() == 2 && d[0] == "Hi" && d[1] == "world");
+        // Whitespace tokens across a double space: "a  b" -> "a", "b" (the empty middle dropped).
+        let_assert(
+            auto t =
+                sz::string_view("a  b").utf8_split_whitespaces().skip_empty().template to<std::vector<std::string>>(),
+            t.size() == 2 && t[0] == "a" && t[1] == "b");
     }
 }
 

@@ -964,6 +964,22 @@ void test_uncased_unit() {
         { let_assert(auto match = str(greeting).utf8_uncased_search("world"), match.offset == 6 && match.length == 5); }
         { let_assert(auto match = str(sharp_s).utf8_uncased_search("SS"), match.offset == 0 && match.length == 2); }
 
+        // C++ wrapper: `utf8_uncased_matches` yields every non-overlapping case-insensitive match (the twin of
+        // Rust/Python `Utf8UncasedMatches`). Folding can change a match's byte length, so each yielded slice spans
+        // the matched bytes, not the needle's length.
+        {
+            std::vector<str> hits;
+            for (str match : str("Ab aB AB xyz ab").utf8_uncased_matches("ab")) hits.push_back(match);
+            assert(hits.size() == 4);
+            assert(hits[0] == "Ab" && hits[1] == "aB" && hits[2] == "AB" && hits[3] == "ab");
+            assert(str("xyz").utf8_uncased_matches("ab").empty());
+
+            // 'ß' (U+00DF, 2 bytes) folds to "ss": each occurrence is a length-2 match of the needle "SS".
+            std::vector<str> folded;
+            for (str match : str("\xC3\x9F" "ox \xC3\x9F").utf8_uncased_matches("SS")) folded.push_back(match);
+            assert(folded.size() == 2 && folded[0].size() == 2 && folded[1].size() == 2);
+        }
+
         // `sz_utf8_uncased_fold`: "HeLLo" → "hello", and 'ß' (U+00DF) → "ss".
         check_uncased_fold_unit_(sz_utf8_uncased_fold, "HeLLo", 5, "hello");        // Dispatched (automatic kernel)
         check_uncased_fold_unit_(sz_utf8_uncased_fold_serial, "HeLLo", 5, "hello"); // Manual: serial kernel

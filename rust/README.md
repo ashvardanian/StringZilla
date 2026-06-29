@@ -89,7 +89,7 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `Hasher` — an incremental AES-based 64-bit hasher implementing `core::hash::Hasher`.
 - `Sha256` — an incremental SHA-256 hasher with a one-shot convenience constructor.
 - `BuildSzHasher` — a `std::hash::BuildHasher`, gated on feature `std`, for using `Hasher` with `HashMap`/`HashSet`.
-- `Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
+- `Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
 - `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `Utf8NormalForm` — uncased search and Unicode normalization helpers.
 - `SemVer`, `Status`, `SmallCString` — version, error, and capability-string types.
 - `ArgsortOptions` — knobs for sorting.
@@ -272,12 +272,14 @@ let nonempty: Vec<&[u8]> = b"a,,b,".sz_splits(b",").skip_empty().collect();
 assert_eq!(nonempty, vec![b"a", b"b"]);
 ```
 
-For direct construction, `MatcherType<'a>` selects the search mode and is paired with `FindMatches::new(haystack, matcher, include_overlaps)`, `RFindMatches::new(...)`, `FindSplits::new(haystack, matcher)`, or `RFindSplits::new(...)`:
+For direct construction, `MatcherType<'a>` selects the search mode and is paired with `FindMatches::new(haystack, matcher)`, `RFindMatches::new(...)`, `FindSplits::new(haystack, matcher)`, or `RFindSplits::new(...)`. Policies are compile-time markers, opted into with builder methods: `.overlapping()` (default `NonOverlapping`, like `str::matches`) and `.skip_empty()` (default `KeepEmpty`, like `str::split`):
 
 ```rust
 use stringzilla::sz::{MatcherType, FindMatches, FindSplits};
 
-let overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", MatcherType::Find(b"aa"), true).collect();
+let non_overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", MatcherType::Find(b"aa")).collect();
+assert_eq!(non_overlapping, vec![&b"aa"[..], &b"aa"[..]]);
+let overlapping: Vec<&[u8]> = FindMatches::new(b"aaaa", MatcherType::Find(b"aa")).overlapping().collect();
 assert_eq!(overlapping, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
 
 let split: Vec<&[u8]> = FindSplits::new(b",a;;b,", MatcherType::FindFirstOf(b",;")).skip_empty().collect();
@@ -739,17 +741,23 @@ StringZilla draws every one of these boundaries: `sz_utf8_runes` (`Utf8View`) wa
 The `StringZillableUnary` trait turns any `AsRef<[u8]>` into a broad family of lazy UTF-8 iterators and views, each yielding borrowed byte sub-slices or `char`s on demand:
 
 ```rust
-fn sz_utf8_runes(&self) -> Utf8View<'_>;       // codepoints / random codepoint access
-fn sz_utf8_lines(&self) -> Utf8Lines<'_>;      // split on hard newlines (CRLF = one delimiter)
-fn sz_utf8_tokens(&self) -> Utf8Tokens<'_>;    // split on Unicode whitespace
-fn sz_utf8_words(&self) -> Utf8Words<'_>;      // UAX-29 words
-fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;  // UAX-29 grapheme clusters
-fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;  // UAX-29 sentences
-fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;  // UAX-14 line-break opportunities
+fn sz_utf8_runes(&self) -> Utf8View<'_>;                         // codepoints / random codepoint access
+fn sz_utf8_split_newlines(&self) -> Utf8SplitNewlines<'_>;       // content BETWEEN hard newlines (CRLF = one)
+fn sz_utf8_newlines(&self) -> Utf8Newlines<'_>;                  // the newline runs themselves
+fn sz_utf8_split_whitespaces(&self) -> Utf8SplitWhitespaces<'_>; // content BETWEEN Unicode whitespace
+fn sz_utf8_whitespaces(&self) -> Utf8Whitespaces<'_>;            // the whitespace runs themselves
+fn sz_utf8_split_delimiters(&self) -> Utf8SplitDelimiters<'_>;   // content BETWEEN whitespace/punctuation
+fn sz_utf8_delimiters(&self) -> Utf8Delimiters<'_>;              // the delimiter runs themselves
+fn sz_utf8_wordbreaks(&self) -> Utf8Wordbreaks<'_>;             // all UAX-29 word segments (tiling)
+fn sz_utf8_graphemes(&self) -> Utf8Graphemes<'_>;              // UAX-29 grapheme clusters
+fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;             // UAX-29 sentences
+fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;          // UAX-14 line-break opportunities
 ```
 
+The naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them. Chain `.with_separators()` on a `split_*` iterator to interleave both losslessly.
+
 Every member of this family is lazy and zero-copy.
-`Utf8View`, `Utf8Runes`, `Utf8Lines`, `Utf8Tokens`, `Utf8Words`, `Utf8Graphemes`, `Utf8Sentences`, and `Utf8Linebreaks`, together with the `sz_splits` / `sz_rsplits` iterators, all borrow from the source string and yield `&[u8]` or `&str` slices on demand without allocating.
+`Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, and `Utf8Linebreaks`, together with the `sz_splits` / `sz_rsplits` iterators, all borrow from the source string and yield `&[u8]` or `&str` slices on demand without allocating.
 There is no backing vector and no per-element heap buffer.
 Contrast this with the standard library, where collecting into a `Vec<String>` allocates the vector and a fresh heap buffer for every element, and even a `Vec<&str>` allocates the backing vector up front.
 Because these iterators borrow from the input, you can stream over millions of words or grapheme clusters of a large document with effectively zero per-element allocation, and the borrow lifetimes keep the yielded slices zero-copy.
@@ -766,34 +774,34 @@ let chars: Vec<char> = view.iter().collect();
 assert_eq!(chars, vec!['H', 'e', 'l', 'l', 'o', '🌍']);
 ```
 
-The boundary iterators `words`, `graphemes`, `sentences`, and `linebreaks` __tile__ the input — every byte belongs to exactly one segment, so consecutive segments are contiguous and no empty slices appear:
+The boundary iterators `wordbreaks`, `graphemes`, `sentences`, and `linebreaks` __tile__ the input — every byte belongs to exactly one segment, so consecutive segments are contiguous and no empty slices appear:
 
 ```rust
 use stringzilla::sz::StringZillableUnary;
 
-let words: Vec<&[u8]> = b"Hi, world".sz_utf8_words().collect();
+let words: Vec<&[u8]> = b"Hi, world".sz_utf8_wordbreaks().collect();
 assert_eq!(words, vec![&b"Hi"[..], &b","[..], &b" "[..], &b"world"[..]]);
 
 let sentences: Vec<&[u8]> = b"Hi. Bye.".sz_utf8_sentences().collect();
 assert_eq!(sentences, vec![&b"Hi. "[..], &b"Bye."[..]]);
 ```
 
-`lines` splits on the 8 Unicode hard newlines, treating CRLF as a single delimiter and excluding the newline from each segment, while `tokens` splits on the 25 Unicode whitespace characters and __keeps__ empty segments by default; chain `.skip_empty()` for `str::split_whitespace`-style behavior:
+`split_newlines` splits on the 8 Unicode hard newlines, treating CRLF as a single delimiter and excluding the newline from each segment, while `split_whitespaces` splits on the 25 Unicode whitespace characters and __keeps__ empty segments by default; chain `.skip_empty()` for `str::split_whitespace`-style behavior:
 
 ```rust
 use stringzilla::sz::StringZillableUnary;
 
 let lines: Vec<&str> = "Hello\nWorld\r\nRust"
-    .sz_utf8_lines()
+    .sz_utf8_split_newlines()
     .map(|l| std::str::from_utf8(l).unwrap())
     .collect();
 assert_eq!(lines, vec!["Hello", "World", "Rust"]);
 
-let tokens: Vec<&[u8]> = b"  hi  ".sz_utf8_tokens().skip_empty().collect();
+let tokens: Vec<&[u8]> = b"  hi  ".sz_utf8_split_whitespaces().skip_empty().collect();
 assert_eq!(tokens, vec![&b"hi"[..]]);
 ```
 
-Every iterator is also constructible directly, for example `Utf8Words::new(text)`.
+Every iterator is also constructible directly, for example `Utf8Wordbreaks::new(text)`.
 Each exposes a `STEPS` const-generic batch-size knob via `with_steps`, written with a turbofish such as `Utf8Runes::<256>::with_steps(bytes)`, that trades buffer size for FFI-call amortization without changing the yielded results.
 The default batch size is the public constant `ITERATORS_DEFAULT_STEPS = 64`.
 

@@ -624,7 +624,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/utf8_norm.c
     c/stringzilla/utf8_runes.c
     c/stringzilla/utf8_tokens.c
-    c/stringzilla/utf8_words.c
+    c/stringzilla/utf8_wordbreaks.c
     c/stringzilla/utf8_graphemes.c
     c/stringzilla/utf8_sentences.c
     c/stringzilla/utf8_linebreaks.c
@@ -925,7 +925,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/hash.cpp
         test/utf8_runes.cpp
         test/utf8_tokens.cpp
-        test/utf8_words.cpp
+        test/utf8_wordbreaks.cpp
         test/utf8_graphemes.cpp
         test/utf8_sentences.cpp
         test/utf8_linebreaks.cpp

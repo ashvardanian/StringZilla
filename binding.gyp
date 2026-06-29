@@ -13,7 +13,7 @@
         "c/stringzilla/intersect.c",
         "c/stringzilla/utf8_runes.c",
         "c/stringzilla/utf8_tokens.c",
-        "c/stringzilla/utf8_words.c",
+        "c/stringzilla/utf8_wordbreaks.c",
         "c/stringzilla/utf8_graphemes.c",
         "c/stringzilla/utf8_sentences.c",
         "c/stringzilla/utf8_linebreaks.c",

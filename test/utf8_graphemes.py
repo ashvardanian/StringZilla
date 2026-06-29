@@ -62,7 +62,7 @@ def test_utf8_graphemes_basic():
 
 def test_utf8_graphemes_skip_empty():
     """Test skip_empty parameter for grapheme iteration."""
-    result = [str(g) for g in sz.utf8_graphemes("héllo", skip_empty=True)]
+    result = [str(g) for g in sz.utf8_graphemes("héllo")]
     assert len(result) > 0
     assert all(len(s) > 0 for s in result)
 

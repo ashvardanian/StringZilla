@@ -1,13 +1,13 @@
 /**
  *  @brief Serial backend for UAX-29 word boundaries.
- *  @file include/stringzilla/utf8_words/serial.h
+ *  @file include/stringzilla/utf8_wordbreaks/serial.h
  *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_UTF8_WORDS_SERIAL_H_
 #define STRINGZILLA_UTF8_WORDS_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/utf8_words/tables.h"
+#include "stringzilla/utf8_wordbreaks/tables.h"
 #include "stringzilla/utf8_runes/serial.h" // shared decode helpers
 
 #ifdef __cplusplus
@@ -87,9 +87,9 @@ SZ_PUBLIC sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
  *  the hot WB4 skip loops. */
 enum {
     sz_utf8_word_break_ignorable_set_k = (1u << sz_utf8_word_break_extend_k) | (1u << sz_utf8_word_break_zwj_k) |
-        (1u << sz_utf8_word_break_format_k),
+                                         (1u << sz_utf8_word_break_format_k),
     sz_utf8_word_break_aletter_or_hebrew_set_k = (1u << sz_utf8_word_break_aletter_k) |
-        (1u << sz_utf8_word_break_hebrew_letter_k),
+                                                 (1u << sz_utf8_word_break_hebrew_letter_k),
     sz_utf8_word_break_mid_quotes_set_k = (1u << sz_utf8_word_break_mid_quotes_k),
 };
 
@@ -602,7 +602,7 @@ SZ_INTERNAL sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *sta
  *  position. On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
  *  boundary - so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
  */
-SZ_PUBLIC sz_size_t sz_utf8_words_serial(            //
+SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_serial(       //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

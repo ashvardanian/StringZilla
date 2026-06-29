@@ -58,7 +58,7 @@ def test_utf8_linebreaks_tiling():
 
 def test_utf8_linebreaks_skip_empty():
     """Test skip_empty parameter for line iteration."""
-    result = [str(seg) for seg in sz.utf8_linebreaks("a\n\nb", skip_empty=True)]
+    result = [str(seg) for seg in sz.utf8_linebreaks("a\n\nb")]
     assert len(result) > 0
     assert all(len(seg) > 0 for seg in result)
 
