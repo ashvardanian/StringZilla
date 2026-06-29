@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_COMPTIME sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
@@ -38,7 +38,7 @@ SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);

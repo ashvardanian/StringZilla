@@ -12,11 +12,11 @@ extern "C" {
 
 #pragma region Metadata
 
-SZ_DYNAMIC int szs_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_DYNAMIC int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_DYNAMIC int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_API_RUNTIME int szs_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_API_RUNTIME int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_API_RUNTIME int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 
-SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
+SZ_API_RUNTIME sz_capability_t szs_capabilities(void) {
     // Preserve the static capabilities
     static sz_capability_t static_caps = sz_caps_none_k;
     if (static_caps == sz_caps_none_k) {
@@ -40,7 +40,7 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
     return static_caps;
 }
 
-SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc, char const **error_message) {
+SZ_API_RUNTIME sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc, char const **error_message) {
 #if SZ_USE_CUDA
     alloc->allocate = &sz_memory_allocate_from_unified_;
     alloc->free = &sz_memory_free_from_unified_;
@@ -56,7 +56,7 @@ SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *a
 
 #pragma region Device Scopes
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_punned, char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_punned, char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
     auto *scope = new device_scope_t {default_scope_t {}};
     if (!scope) return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to allocate device scope");
@@ -64,8 +64,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_p
     return propagate_error(sz::status_t::success_k, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned,
-                                                       char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned,
+                                                           char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
     // If `cpu_cores` is 0, use all available cores
@@ -87,8 +87,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_
     return propagate_error(sz::status_t::success_k, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope_punned,
-                                                        char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, szs_device_scope_t *scope_punned,
+                                                            char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
 #if SZ_USE_CUDA
@@ -111,8 +111,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_gpu_device(sz_size_t gpu_device, sz
 #endif
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_punned, sz_size_t *cpu_cores,
-                                                      char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_punned, sz_size_t *cpu_cores,
+                                                          char const **error_message) {
     if (scope_punned == nullptr || cpu_cores == nullptr)
         return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
@@ -133,8 +133,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_get_cpu_cores(szs_device_scope_t scope_p
     return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is GPU-only");
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_punned, sz_size_t *gpu_device,
-                                                       char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_punned, sz_size_t *gpu_device,
+                                                           char const **error_message) {
     if (scope_punned == nullptr || gpu_device == nullptr)
         return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
 
@@ -153,14 +153,15 @@ SZ_DYNAMIC sz_status_t szs_device_scope_get_gpu_device(szs_device_scope_t scope_
     return propagate_error(sz::status_t::unknown_k, error_message, "Device scope is CPU-only");
 }
 
-SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope_punned) {
+SZ_API_RUNTIME void szs_device_scope_free(szs_device_scope_t scope_punned) {
     if (scope_punned == nullptr) return;
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     delete scope;
 }
 
-SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned, sz_capability_t *capabilities,
-                                                         char const **error_message) {
+SZ_API_RUNTIME sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned,
+                                                             sz_capability_t *capabilities,
+                                                             char const **error_message) {
 
     if (scope_punned == nullptr || capabilities == nullptr)
         return propagate_error(sz::status_t::unknown_k, error_message, "Invalid null pointer argument");
@@ -184,7 +185,7 @@ SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scop
 
 #pragma region Unified Allocator
 
-SZ_DYNAMIC void *szs_unified_alloc(sz_size_t size_bytes) {
+SZ_API_RUNTIME void *szs_unified_alloc(sz_size_t size_bytes) {
 #if SZ_USE_CUDA
     return szs::unified_alloc_t {}.allocate(size_bytes);
 #else
@@ -192,7 +193,7 @@ SZ_DYNAMIC void *szs_unified_alloc(sz_size_t size_bytes) {
 #endif
 }
 
-SZ_DYNAMIC void szs_unified_free(void *ptr, sz_size_t size_bytes) {
+SZ_API_RUNTIME void szs_unified_free(void *ptr, sz_size_t size_bytes) {
     if (!ptr) return;
 #if SZ_USE_CUDA
     szs::unified_alloc_t {}.deallocate(static_cast<char *>(ptr), size_bytes);

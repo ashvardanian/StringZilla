@@ -112,7 +112,7 @@ extern "C" {
 
 #pragma region Needleman Wunsch
 
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                           //
+SZ_API_RUNTIME sz_status_t szs_needleman_wunsch_scores_init(                       //
     sz_u8_t const *byte_to_class, sz_error_cost_t const *class_substitution_costs, //
     sz_error_cost_t open, sz_error_cost_t extend,                                  //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,              //
@@ -191,7 +191,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                        
                                                                                       substitution_costs, affine_costs);
 }
 
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores(                                //
+SZ_API_RUNTIME sz_status_t szs_needleman_wunsch_scores(                            //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *queries, sz_sequence_t const *candidates,                 //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -206,7 +206,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores(                             
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                        //
+SZ_API_RUNTIME sz_status_t szs_needleman_wunsch_scores_u32tape(                    //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -221,7 +221,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u32tape(                     
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                        //
+SZ_API_RUNTIME sz_status_t szs_needleman_wunsch_scores_u64tape(                    //
     szs_needleman_wunsch_scores_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
     sz_ssize_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -236,7 +236,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_u64tape(                     
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t engine_punned) {
+SZ_API_RUNTIME void szs_needleman_wunsch_scores_free(szs_needleman_wunsch_scores_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<needleman_wunsch_backends_t *>(engine_punned);
     delete engine;

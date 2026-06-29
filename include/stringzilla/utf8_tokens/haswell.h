@@ -26,7 +26,7 @@ extern "C" {
 /**
  *  @brief Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity.
  */
-SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
+SZ_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a);
 }
 
@@ -40,7 +40,7 @@ SZ_INTERNAL __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
  *  @brief  Peel the window's first `emit_count` matches with a `vpermd` left-pack, 4 lanes per sub-block.
  *          Each sub-block gathers its set lanes to the front and masked-stores them at the advancing cursor.
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_haswell_(                                //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_haswell_(                             //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -85,7 +85,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_haswell_(                                /
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_haswell(           //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_haswell(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -154,7 +154,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_haswell(           //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_haswell(        //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -241,13 +241,13 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_haswell(        //
 #pragma region Gather free membership
 
 /** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
-SZ_INTERNAL __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
+SZ_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value, bound), value);
 }
 
 /** @brief  Per-half "third forward neighbour" `next3[i] = window[i+3]`, wrapping modulo 64 to mirror the substrate
  *          neighbour helper (which only emits next1/next2). Needed for the 4-byte astral codepoint reconstruction. */
-SZ_INTERNAL void sz_delimiter_forward_neighbour3_haswell_( //
+SZ_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
     __m256i window_lo, __m256i window_hi, __m256i *next3_lo, __m256i *next3_hi) {
     __m256i const low_successor = _mm256_permute2x128_si256(window_lo, window_hi, 0x21);
     *next3_lo = _mm256_alignr_epi8(low_successor, window_lo, 3);
@@ -257,7 +257,7 @@ SZ_INTERNAL void sz_delimiter_forward_neighbour3_haswell_( //
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half, returned as a 0xFF/0x00
  *          byte mask. The bit mask `1 << (low & 7)` is built by a `vpshufb` over the resident power-of-two table. */
-SZ_INTERNAL __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte, __m256i low) {
+SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte, __m256i low) {
     __m256i const bit_table = _mm256_setr_epi8(                    //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0, //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -270,7 +270,7 @@ SZ_INTERNAL __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte, __m256i 
  *          column reads (each a 64-entry `cascade_stage` over `block_id`) blended by which column `(low >> 3)` selects.
  *          The transposed `..._columns_` layout (column c holds `bitmaps[id*32+c]`) makes each column lut256-addressable
  *          for `block_id < 64` without a page network. */
-SZ_INTERNAL __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id, __m256i low) {
+SZ_HELPER_AUTO __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id, __m256i low) {
     __m256i const selector = _mm256_and_si256(_mm256_srli_epi16(block_id, 4),
                                               _mm256_set1_epi8(0x0F));         // block_id>>4 (0..3)
     __m256i const within = _mm256_and_si256(block_id, _mm256_set1_epi8(0x0F)); // block_id&15
@@ -287,7 +287,7 @@ SZ_INTERNAL __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __
 
 /** @brief  BMP (codepoint < 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. ASCII lanes
  *          (top bit clear) carry their codepoint in the raw byte, so are overridden to (high=0, low=byte). */
-SZ_INTERNAL __m256i sz_delimiter_bmp_membership_haswell_(__m256i window, __m256i high_in, __m256i low_in) {
+SZ_HELPER_AUTO __m256i sz_delimiter_bmp_membership_haswell_(__m256i window, __m256i high_in, __m256i low_in) {
     __m256i const ascii = _mm256_cmpeq_epi8(_mm256_and_si256(window, _mm256_set1_epi8((char)0x80)),
                                             _mm256_setzero_si256());
     __m256i const high = _mm256_andnot_si256(ascii, high_in);
@@ -301,7 +301,7 @@ SZ_INTERNAL __m256i sz_delimiter_bmp_membership_haswell_(__m256i window, __m256i
 /** @brief  Astral (codepoint >= 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. The full
  *          21-bit codepoint is reconstructed in byte-domain from the raw lead/continuation bytes; the small L1/L2 network
  *          and bitmap are then walked exactly as for the BMP path. Only meaningful on 4-byte lead lanes (caller blends). */
-SZ_INTERNAL __m256i sz_delimiter_astral_membership_haswell_( //
+SZ_HELPER_AUTO __m256i sz_delimiter_astral_membership_haswell_( //
     __m256i window, __m256i next1, __m256i next2, __m256i next3) {
     __m256i const b0 = _mm256_and_si256(window, _mm256_set1_epi8(0x07)); // lead bits  cp[20:18]
     __m256i const b1 = _mm256_and_si256(next1, _mm256_set1_epi8(0x3F));  // cp[17:12]
@@ -337,7 +337,7 @@ SZ_INTERNAL __m256i sz_delimiter_astral_membership_haswell_( //
 /** @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
  *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
  *          overlong, a surrogate, or beyond U+10FFFF. Returned as a `sz_u64_t` lane mask. */
-SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_haswell_( //
+SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_haswell_( //
     sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo, __m256i next1_hi, __m256i next2_lo,
     __m256i next2_hi, __m256i next3_lo, __m256i next3_hi) {
     sz_size_t const loaded = decoded->loaded;
@@ -414,7 +414,7 @@ SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_haswell_( //
 #pragma region Enumerate delimiters
 
 /** @copydoc sz_utf8_delimiters */
-SZ_PUBLIC sz_size_t sz_utf8_delimiters_haswell(         //
+SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

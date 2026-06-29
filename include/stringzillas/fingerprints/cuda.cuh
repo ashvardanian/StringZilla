@@ -41,9 +41,9 @@ struct cuda_fingerprint_task {
     warp_tasks_density_t density = warps_working_together_k; // ? Worst case, we have to sync final writes
 };
 
-__device__ __forceinline__ f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t inverse_modulo) noexcept {
+SZ_DEVICE_INLINE f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t inverse_modulo) noexcept {
     f64_t q = floor(x * inverse_modulo); // native FRND — no magic-number floor correction on the GPU
-    f64_t result = fma(-q, modulo, x); // r = x - q * modulo
+    f64_t result = fma(-q, modulo, x);   // r = x - q * modulo
 
     // Only the high-side fixup is kept: q = floor(x * inverse_modulo) overshoots floor(x / modulo) (→ r < 0) only
     // when the reciprocal rounding error beats the sub-integer gap near a k * modulo boundary, needing x → 2^52.
@@ -61,8 +61,8 @@ __device__ __forceinline__ f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t 
  *  current @p rolling_minimum. The arithmetic select lowers to predicated math instead of a data-dependent branch.
  */
 template <typename count_type_, typename value_type_>
-__device__ __forceinline__ void update_min_count_(count_type_ &min_count, value_type_ &rolling_minimum,
-                                                  value_type_ value) noexcept {
+SZ_DEVICE_INLINE void update_min_count_(count_type_ &min_count, value_type_ &rolling_minimum,
+                                        value_type_ value) noexcept {
     min_count *= value >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
     min_count += value <= rolling_minimum; // ? Increments by 1 for new & old minimums
     rolling_minimum = (std::min)(rolling_minimum, value);

@@ -543,7 +543,7 @@ struct cuda_launch_t {
  *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
  *  @see https://stackoverflow.com/a/40198552/2766161
  */
-__forceinline__ __device__ u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
+SZ_DEVICE_INLINE u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
     // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
     // four consecutive bytes into a 32-bit register.
     u32_vec_t result;
@@ -666,7 +666,7 @@ struct warp_tasks_group_descriptor_t {
 template <typename task_type_>
 struct warp_tasks_group_key_functor_ {
     task_type_ const *tasks = nullptr;
-    __host__ __device__ __forceinline__ u32_t operator()(size_t index) const noexcept {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(size_t index) const noexcept {
         task_type_ const &task = tasks[index];
         return (static_cast<u32_t>(task.bytes_per_cell) << 8) | static_cast<u32_t>(task.density);
     }
@@ -675,7 +675,7 @@ struct warp_tasks_group_key_functor_ {
 /** @brief Reads one warp task's `memory_requirement` for the per-group `cub::DeviceSegmentedReduce::Max`. */
 template <typename task_type_>
 struct warp_tasks_memory_requirement_functor_ {
-    __host__ __device__ __forceinline__ size_t operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE size_t operator()(task_type_ const &task) const noexcept {
         return task.memory_requirement;
     }
 };
@@ -683,7 +683,7 @@ struct warp_tasks_memory_requirement_functor_ {
 /** @brief `cub::DevicePartition::If` predicate selecting device-level tasks (whole-device cooperative). */
 template <typename task_type_>
 struct task_is_device_level_functor_ {
-    __host__ __device__ __forceinline__ bool operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
         return task.density == warps_working_together_k;
     }
 };
@@ -691,7 +691,7 @@ struct task_is_device_level_functor_ {
 /** @brief `cub::DevicePartition::If` predicate selecting non-empty tasks (a pre-seeded cell is `infinite_*`). */
 template <typename task_type_>
 struct task_is_non_empty_functor_ {
-    __host__ __device__ __forceinline__ bool operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
         return task.density != infinite_warps_per_multiprocessor_k;
     }
 };

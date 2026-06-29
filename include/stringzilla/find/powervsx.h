@@ -34,7 +34,7 @@ extern "C" {
  *  @param cmp_u8x16 A comparison result vector (0xFF where matched, 0x00 otherwise).
  *  @return 64-bit value with low 16 bits forming the movemask.
  */
-SZ_INTERNAL sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16) {
+SZ_HELPER_INLINE sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16) {
     __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
     __vector unsigned long long const gathered = vec_vbpermq(cmp_u8x16, indices);
 #if SZ_IS_BIG_ENDIAN_
@@ -44,7 +44,7 @@ SZ_INTERNAL sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16) {
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
@@ -64,7 +64,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)(haystack + haystack_length - 16));
@@ -86,8 +86,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystac
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -160,8 +160,8 @@ SZ_PUBLIC sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_leng
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -239,7 +239,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_len
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                   sz_byteset_t const *set) {
     // Two halves of the 256-bit set, each 16 bytes, covering byte indices [0,16) and [16,32).
     __vector unsigned char set_low_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[0]);
     __vector unsigned char set_high_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[16]);
@@ -268,7 +269,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t hayst
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                    sz_byteset_t const *set) {
     __vector unsigned char set_low_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[0]);
     __vector unsigned char set_high_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[16]);
 

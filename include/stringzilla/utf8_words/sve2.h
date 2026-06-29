@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 /** @brief  Classify an all-ASCII window to `sz_utf8_word_break_t` properties via eight 16-entry `svtbl_u8` rows. */
-SZ_INTERNAL svuint8_t sz_utf8_word_break_classify_ascii_sve2_(svbool_t pg, svuint8_t bytes) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_classify_ascii_sve2_(svbool_t pg, svuint8_t bytes) {
     // Eight rows of the ASCII Word_Break property table (high nibble → 16 low-nibble entries); a single `svtbl_u8`
     // reads 16 entries from lanes [0,16), so each row is broadcast with `svdupq_n_u8` and indexed by the low nibble.
     svuint8_t const row0 = svdupq_n_u8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02, 0x03, 0x03, 0x01, 0, 0);
@@ -57,7 +57,7 @@ SZ_INTERNAL svuint8_t sz_utf8_word_break_classify_ascii_sve2_(svbool_t pg, svuin
  *          it is suppressed by a UAX-29 no-break rule. `<< k` becomes a `k`-lane up-shift (`svinsr`), `>> 1` a
  *          one-lane down-shift (`svext`). Intentional divergence: a scalable SVE register exceeds 64 bits at
  *          VLEN >= 1024, so there is no `sz_u64_t` movemask to shift — the cascade runs on per-lane 0/1 vectors. */
-SZ_INTERNAL svuint8_t sz_utf8_word_break_join_lanes_sve2_(svbool_t pg, svuint8_t classes) {
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_join_lanes_sve2_(svbool_t pg, svuint8_t classes) {
     svuint8_t const aletter = svdup_u8_z(svcmpeq_n_u8(pg, classes, sz_utf8_word_break_aletter_k), 1);
     svuint8_t const numeric = svdup_u8_z(svcmpeq_n_u8(pg, classes, sz_utf8_word_break_numeric_k), 1);
     svuint8_t const extendnumlet = svdup_u8_z(svcmpeq_n_u8(pg, classes, sz_utf8_word_break_extendnumlet_k), 1);
@@ -106,8 +106,8 @@ SZ_INTERNAL svuint8_t sz_utf8_word_break_join_lanes_sve2_(svbool_t pg, svuint8_t
 
 /** @brief  Compact the absolute byte positions of the set lanes of `boundary` (over lanes `[0, usable)`) into
  *          `out`, walking `svcntw()`-lane sub-blocks with `svcompact_u32`. Returns the number of positions. */
-SZ_INTERNAL sz_size_t sz_utf8_word_compact_boundaries_sve2_(svbool_t boundary, sz_size_t window_base, sz_size_t usable,
-                                                            sz_u32_t *out) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_compact_boundaries_sve2_(svbool_t boundary, sz_size_t window_base,
+                                                               sz_size_t usable, sz_u32_t *out) {
     svuint8_t const boundary_flags = svdup_u8_z(boundary, 1);
     svuint8_t const lane_iota = svindex_u8(0, 1);
     sz_size_t const words = svcntw();
@@ -127,7 +127,7 @@ SZ_INTERNAL sz_size_t sz_utf8_word_compact_boundaries_sve2_(svbool_t boundary, s
     return produced;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_words_sve2(              //
+SZ_API_COMPTIME sz_size_t sz_utf8_words_sve2(        //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

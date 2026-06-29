@@ -216,47 +216,47 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.bytesum(text, length); }
+SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.bytesum(text, length); }
 
-SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_dispatch_table.hash(text, length, seed);
 }
 
-SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                  sz_u64_t *hashes) {
+SZ_API_RUNTIME void sz_hash_multiseed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                      sz_u64_t *hashes) {
     sz_dispatch_table.hash_multiseed(text, length, seeds, seeds_count, hashes);
 }
 
-SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_dispatch_table.hash_state_init(state, seed);
 }
 
-SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_dispatch_table.hash_state_update(state, text, length);
 }
 
-SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
+SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_dispatch_table.hash_state_digest(state);
 }
 
-SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_dispatch_table.fill_random(text, length, nonce);
 }
 
-SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) { sz_dispatch_table.sha256_state_init(state); }
+SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) { sz_dispatch_table.sha256_state_init(state); }
 
-SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
     sz_dispatch_table.sha256_state_update(state, data, length);
 }
 
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
     sz_dispatch_table.sha256_state_digest(state, digest);
 }
 
 // Provide overrides for the libc mem* functions
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
 #if !defined(_MSC_VER)
-SZ_DYNAMIC void memfrob(void *target, size_t length) {
+SZ_API_RUNTIME void memfrob(void *target, size_t length) {
     static sz_u64_t nonce = 42;
     sz_fill_random(target, length, nonce++);
 }

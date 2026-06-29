@@ -30,7 +30,7 @@ extern "C" {
  *  @param block_start Pointer to the first byte of the block.
  *  @return Pointer to the first match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_locate_first_v128_(v128_t match_vec, sz_cptr_t block_start) {
+SZ_HELPER_INLINE sz_cptr_t sz_locate_first_v128_(v128_t match_vec, sz_cptr_t block_start) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_vec);
     if (!matches) return SZ_NULL_CHAR;
     return block_start + sz_u32_ctz(matches);
@@ -42,14 +42,14 @@ SZ_INTERNAL sz_cptr_t sz_locate_first_v128_(v128_t match_vec, sz_cptr_t block_st
  *  @param block_start Pointer to the first byte of the block.
  *  @return Pointer to the last match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_locate_last_v128_(v128_t match_vec, sz_cptr_t block_start) {
+SZ_HELPER_INLINE sz_cptr_t sz_locate_last_v128_(v128_t match_vec, sz_cptr_t block_start) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_vec);
     if (!matches) return SZ_NULL_CHAR;
     // `matches` occupies the low 16 bits, so `31 - clz` is the index of its highest set bit.
     return block_start + (31 - sz_u32_clz(matches));
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_vec = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
     // Scan 64 bytes per iteration: OR four equality masks and gate with a single `any_true`, only
@@ -80,7 +80,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_len
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_vec = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
     // Scan the trailing 64 bytes per iteration; on a hit, locate the LAST match by walking the four
@@ -120,7 +120,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_le
  *  @param set_bottom_vec Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_INTERNAL v128_t sz_find_byteset_match_v128_(v128_t haystack_vec, v128_t set_top_vec, v128_t set_bottom_vec) {
+SZ_HELPER_AUTO v128_t sz_find_byteset_match_v128_(v128_t haystack_vec, v128_t set_top_vec, v128_t set_bottom_vec) {
     // Serial equivalent per byte `c`: `(set->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
     v128_t byte_index_vec = wasm_u8x16_shr(haystack_vec, 3); // c >> 3, in [0, 31]
     // The bit mask `1 << (c & 7)` is produced via a swizzle into a tiny power-of-two table.
@@ -136,7 +136,7 @@ SZ_INTERNAL v128_t sz_find_byteset_match_v128_(v128_t haystack_vec, v128_t set_t
     return wasm_i8x16_ne(wasm_v128_and(matches_vec, byte_mask_vec), wasm_i8x16_splat(0));
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     v128_t set_top_vec = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_vec = wasm_v128_load(&set->_u8s[16]);
 
@@ -169,7 +169,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                sz_byteset_t const *set) {
     v128_t set_top_vec = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_vec = wasm_v128_load(&set->_u8s[16]);
 
@@ -216,7 +217,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t haystack
  *  @param needle_last_vec Broadcasted last-anomaly needle byte.
  *  @return 0xFF per lane where all three needle bytes match.
  */
-SZ_INTERNAL v128_t sz_find_substr_match_v128_(                                                     //
+SZ_HELPER_INLINE v128_t sz_find_substr_match_v128_(                                                //
     sz_cptr_t haystack_start, sz_size_t offset_first, sz_size_t offset_mid, sz_size_t offset_last, //
     v128_t needle_first_vec, v128_t needle_mid_vec, v128_t needle_last_vec) {
     return wasm_v128_and(                                                                   //
@@ -234,7 +235,7 @@ SZ_INTERNAL v128_t sz_find_substr_match_v128_(                                  
  *  @param needle_length Length of `needle` in bytes.
  *  @return Pointer to the first verified match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_locate_substr_first_v128_( //
+SZ_HELPER_AUTO sz_cptr_t sz_locate_substr_first_v128_( //
     v128_t match_vec, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_vec);
     while (matches) {
@@ -254,7 +255,7 @@ SZ_INTERNAL sz_cptr_t sz_locate_substr_first_v128_( //
  *  @param needle_length Length of `needle` in bytes.
  *  @return Pointer to the last verified match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_locate_substr_last_v128_( //
+SZ_HELPER_AUTO sz_cptr_t sz_locate_substr_last_v128_( //
     v128_t match_vec, sz_cptr_t window_start, sz_cptr_t needle, sz_size_t needle_length) {
     sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_vec);
     while (matches) {
@@ -266,8 +267,8 @@ SZ_INTERNAL sz_cptr_t sz_locate_substr_last_v128_( //
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -318,8 +319,8 @@ SZ_PUBLIC sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, 
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;

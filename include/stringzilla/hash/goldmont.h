@@ -28,8 +28,8 @@ extern "C" {
  *  @param hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
-                                                   sz_u8_t const block[sz_at_least_(64)]) {
+SZ_HELPER_AUTO void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)],
+                                                      sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load and byte-swap the first 16 words (big-endian) using SSE
@@ -198,7 +198,7 @@ SZ_INTERNAL void sz_sha256_process_block_goldmont_(sz_u32_t hash[sz_at_least_(8)
     _mm_storeu_si128((__m128i *)&hash[4], state1);
 }
 
-SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
+SZ_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
     // Vectorize the load/store of 8x u32s using 2x 128-bit SSE loads
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_lddqu_si128((__m128i const *)&initial_hash[0]));
@@ -206,7 +206,7 @@ SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state_ptr) {
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
+SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / 64;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / 64;
@@ -254,7 +254,8 @@ SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state_ptr, sz_
     _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_load_si128((__m128i const *)&hash[4]));
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state_ptr,
+                                                     sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 

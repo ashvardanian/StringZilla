@@ -28,7 +28,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __mmask64 matches_mask;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -51,8 +51,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -156,7 +156,7 @@ SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_lengt
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __mmask64 matches_mask;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -179,8 +179,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;

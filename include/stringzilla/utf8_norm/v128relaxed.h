@@ -28,12 +28,13 @@ extern "C" {
 
 #pragma region relaxed_simd
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                             sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                   sz_ptr_t destination) {
     return sz_utf8_norm_v128(source, length, form, destination);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t source, sz_size_t length,
+                                                                sz_normal_form_t form) {
     return sz_utf8_find_denormalized_v128(source, length, form);
 }
 

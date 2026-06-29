@@ -246,8 +246,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         if (compiler_id STREQUAL "NVIDIA")
             set_target_properties(${target} PROPERTIES CUDA_STANDARD ${cpp_standard})
         elseif (compiler_id MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts.
-            # MSVC has no `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
+            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts. MSVC has no
+            # `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
             if (cpp_standard GREATER_EQUAL 23)
                 target_compile_options(${target} PRIVATE "/std:c++latest")
             else ()
@@ -273,10 +273,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # MSVC uses numeric values: > 4068 for "unknown pragmas". > 4146 for "unary minus operator applied to unsigned type,
     # result still unsigned". We also specify `/utf-8` to properly UTF-8 symbols in tests.
     if (compiler_id STREQUAL "GNU")
+        # `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector
+        # loads near a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible
+        # warning, not a build-breaking error.
         target_compile_options(
             ${target}
             PRIVATE
-                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion"
+                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
         )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
@@ -308,7 +311,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             target_compile_options(
                 ${target}
                 PRIVATE
-                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
             )
         endif ()
     endif ()

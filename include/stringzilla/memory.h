@@ -63,7 +63,7 @@ extern "C" {
  *  @sa sz_copy_serial, sz_copy_haswell, sz_copy_skylake, sz_copy_neon, sz_copy_sve, sz_copy_v128,
  *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_lasx, sz_copy_powervsx
  */
-SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief Similar to `memmove`, copies (moves) contents of one string into another.
@@ -89,7 +89,7 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
  *  @sa sz_move_serial, sz_move_haswell, sz_move_skylake, sz_move_neon, sz_move_sve, sz_move_v128,
  *      sz_move_v128relaxed, sz_move_rvv, sz_move_lasx, sz_move_powervsx
  */
-SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief Similar to `memset`, fills a string with a given value.
@@ -114,7 +114,7 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
  *  @sa sz_fill_serial, sz_fill_haswell, sz_fill_skylake, sz_fill_neon, sz_fill_sve, sz_fill_v128,
  *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_lasx, sz_fill_powervsx
  */
-SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /**
  *  @brief Look Up Table @b (LUT) transformation of a @p source string. Same as `for (char &c : text) c = lut[c]`.
@@ -150,53 +150,55 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
  *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon, sz_lookup_sve, sz_lookup_v128,
  *      sz_lookup_v128relaxed, sz_lookup_rvv, sz_lookup_lasx, sz_lookup_powervsx
  */
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
+SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
 
 /** @copydoc sz_copy */
-SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_fill */
-SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
+SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                      char const lut[sz_at_least_(256)]);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_copy */
-SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                 char const lut[sz_at_least_(256)]);
+SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                       char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_copy */
-SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                 char const lut[sz_at_least_(256)]);
+SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                       char const lut[sz_at_least_(256)]);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_copy */
-SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
-SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]);
+SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]);
 #endif
 
 #pragma endregion // Core API
@@ -213,7 +215,7 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  */
-SZ_PUBLIC void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
     static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -245,7 +247,7 @@ SZ_PUBLIC void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  */
-SZ_PUBLIC void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
     static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -271,7 +273,7 @@ SZ_PUBLIC void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
  *  @param lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-SZ_PUBLIC void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
@@ -281,7 +283,7 @@ SZ_PUBLIC void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
  *  @param length Number of bytes in the string.
  *  @return Whether all characters are valid ASCII characters.
  */
-SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 
     if (!length) return sz_true_k;
     sz_u8_t const *text_cursor = (sz_u8_t const *)text;
@@ -328,7 +330,7 @@ SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 
 #pragma region Core Functionality
 
-SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     sz_copy_v128relaxed(target, source, length);
 #elif SZ_USE_V128
@@ -352,7 +354,7 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     sz_move_v128relaxed(target, source, length);
 #elif SZ_USE_V128
@@ -376,7 +378,7 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #if SZ_USE_V128RELAXED
     sz_fill_v128relaxed(target, length, value);
 #elif SZ_USE_V128
@@ -400,7 +402,7 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #endif
 }
 
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
 #if SZ_USE_V128RELAXED
     sz_lookup_v128relaxed(target, length, source, lut);
 #elif SZ_USE_V128

@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     uint64x2_t sum_u64x2 = vdupq_n_u64(0);
 
     // Process 16 bytes (128 bits) at a time

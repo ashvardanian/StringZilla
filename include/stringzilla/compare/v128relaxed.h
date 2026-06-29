@@ -20,11 +20,11 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-SZ_PUBLIC sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_order_v128(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_COMPTIME sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_equal_v128(a, b, length);
 }
 

@@ -39,7 +39,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_words_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_words(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                   sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_words(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                       sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_words(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }

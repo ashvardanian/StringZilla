@@ -50,7 +50,7 @@ extern "C" {
  *  @sa sz_equal_serial, sz_equal_westmere, sz_equal_haswell, sz_equal_skylake, sz_equal_neon, sz_equal_sve,
  *      sz_equal_v128, sz_equal_v128relaxed, sz_equal_rvv, sz_equal_lasx, sz_equal_powervsx
  */
-SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /**
  *  @brief Compares two strings lexicographically. Equivalent to `memcmp(a, b, length)` in LibC.
@@ -85,39 +85,39 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *  @sa sz_order_serial, sz_order_westmere, sz_order_haswell, sz_order_skylake, sz_order_neon, sz_order_sve,
  *      sz_order_v128, sz_order_v128relaxed, sz_order_rvv, sz_order_lasx, sz_order_powervsx
  */
-SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 #if SZ_USE_WESTMERE
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_COMPTIME sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_COMPTIME sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
-SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
 #pragma endregion // Core API
@@ -140,7 +140,7 @@ SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     return sz_equal_v128relaxed(a, b, length);
 #elif SZ_USE_V128
@@ -164,7 +164,7 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_V128RELAXED
     return sz_order_v128relaxed(a, a_length, b, b_length);
 #elif SZ_USE_V128

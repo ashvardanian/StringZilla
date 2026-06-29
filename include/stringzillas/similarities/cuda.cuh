@@ -69,13 +69,13 @@ using affine_smith_waterman_hopper_t =
  *  @brief Dispatches min or max operation based on the compile-time objective.
  */
 template <sz_similarity_objective_t objective_, typename scalar_type_>
-__forceinline__ __device__ scalar_type_ pick_best_(scalar_type_ a, scalar_type_ b) noexcept {
+SZ_DEVICE_INLINE scalar_type_ pick_best_(scalar_type_ a, scalar_type_ b) noexcept {
     if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
     else { return std::max(a, b); }
 }
 
 template <sz_similarity_objective_t objective_, typename scalar_type_>
-__forceinline__ __device__ scalar_type_ pick_best_in_warp_(scalar_type_ x) noexcept {
+SZ_DEVICE_INLINE scalar_type_ pick_best_in_warp_(scalar_type_ x) noexcept {
     // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
     x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 16), x);
     x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 8), x);
@@ -91,7 +91,7 @@ __forceinline__ __device__ scalar_type_ pick_best_in_warp_(scalar_type_ x) noexc
  *  @see https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#global-memory-5-x
  */
 template <typename scalar_type_>
-__forceinline__ __device__ scalar_type_ load_immutable_(scalar_type_ const *ptr) noexcept {
+SZ_DEVICE_INLINE scalar_type_ load_immutable_(scalar_type_ const *ptr) noexcept {
     // The `__ldg` intrinsic translates into the `ld.global.nc` PTX instruction.
     // It reads a value from global memory and caches it in the non-coherent cache.
     // return __ldg(ptr);
@@ -104,7 +104,7 @@ __forceinline__ __device__ scalar_type_ load_immutable_(scalar_type_ const *ptr)
  *  @see https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
  */
 template <typename scalar_type_>
-__forceinline__ __device__ scalar_type_ load_last_use_(scalar_type_ const *ptr) noexcept {
+SZ_DEVICE_INLINE scalar_type_ load_last_use_(scalar_type_ const *ptr) noexcept {
     // return __ldlu(ptr);
     return *ptr;
 }
@@ -150,7 +150,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t final_score_ {0};
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
+    SZ_DEVICE_INLINE tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
         : substituter_(subs), gap_costs_(gaps) {}
 
     /**
@@ -158,14 +158,14 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    __forceinline__ __device__ void init_score(score_t &cell, size_t diagonal_index) const noexcept {
+    SZ_DEVICE_INLINE void init_score(score_t &cell, size_t diagonal_index) const noexcept {
         cell = gap_costs_.open_or_extend * diagonal_index;
     }
 
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
+    SZ_DEVICE_INLINE score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -179,7 +179,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
-    __forceinline__ __device__ void operator()(                                                      //
+    SZ_DEVICE_INLINE void operator()(                                                                //
         first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion,                 //
@@ -248,7 +248,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t final_score_ {0};
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
+    SZ_DEVICE_INLINE tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
         : substituter_(subs), gap_costs_(gaps) {}
 
     /**
@@ -256,12 +256,12 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    __forceinline__ __device__ void init_score(score_t &cell, size_t diagonal_index) const noexcept { cell = 0; }
+    SZ_DEVICE_INLINE void init_score(score_t &cell, size_t diagonal_index) const noexcept { cell = 0; }
 
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
+    SZ_DEVICE_INLINE score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -275,7 +275,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
-    __forceinline__ __device__ void operator()(                                                      //
+    SZ_DEVICE_INLINE void operator()(                                                                //
         first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion,                 //
@@ -349,7 +349,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t final_score_ {0};
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
+    SZ_DEVICE_INLINE tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
         : substituter_(subs), gap_costs_(gaps) {}
 
     /**
@@ -357,11 +357,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    __forceinline__ __device__ void init_score(score_t &cell, size_t diagonal_index) const noexcept {
+    SZ_DEVICE_INLINE void init_score(score_t &cell, size_t diagonal_index) const noexcept {
         cell = diagonal_index ? gap_costs_.open + gap_costs_.extend * (diagonal_index - 1) : 0;
     }
 
-    __forceinline__ __device__ void init_gap(score_t &cell, size_t diagonal_index) const noexcept {
+    SZ_DEVICE_INLINE void init_gap(score_t &cell, size_t diagonal_index) const noexcept {
         // Make sure the initial value of the gap is not smaller in magnitude than the primary.
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
@@ -373,7 +373,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
+    SZ_DEVICE_INLINE score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -387,7 +387,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
-    __forceinline__ __device__ void operator()(                                                      //
+    SZ_DEVICE_INLINE void operator()(                                                                //
         first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution,                                                      //
@@ -471,7 +471,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t final_score_ {0};
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
+    SZ_DEVICE_INLINE tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
         : substituter_(subs), gap_costs_(gaps) {}
 
     /**
@@ -479,8 +479,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    __forceinline__ __device__ void init_score(score_t &cell, size_t diagonal_index) const noexcept { cell = 0; }
-    __forceinline__ __device__ void init_gap(score_t &cell, size_t /* diagonal_index */) const noexcept {
+    SZ_DEVICE_INLINE void init_score(score_t &cell, size_t diagonal_index) const noexcept { cell = 0; }
+    SZ_DEVICE_INLINE void init_gap(score_t &cell, size_t /* diagonal_index */) const noexcept {
         // Make sure the initial value of the gap is not smaller in magnitude than the primary.
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
@@ -491,7 +491,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
+    SZ_DEVICE_INLINE score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -505,7 +505,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
-    __forceinline__ __device__ void operator()(                                                      //
+    SZ_DEVICE_INLINE void operator()(                                                                //
         first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution,                                                      //
@@ -568,8 +568,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *         table lookup, which the scheduler already overlaps across warps.
  */
 template <typename score_type_, typename substituter_type_, typename char_type_>
-__forceinline__ __device__ score_type_ tiled_substitution_cost_(substituter_type_ const &substituter, char_type_ a,
-                                                                char_type_ b) noexcept {
+SZ_DEVICE_INLINE score_type_ tiled_substitution_cost_(substituter_type_ const &substituter, char_type_ a,
+                                                      char_type_ b) noexcept {
     if constexpr (is_same_type<substituter_type_, uniform_substitution_costs_t>::value) {
         score_type_ const differ = static_cast<score_type_>(a != b);
         return static_cast<score_type_>(substituter.match) +
@@ -587,8 +587,8 @@ __forceinline__ __device__ score_type_ tiled_substitution_cost_(substituter_type
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename score_type_, typename enable_ = void>
 struct score_cell {
-    __forceinline__ __device__ score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
-                                                      score_type_ substitution, score_type_ gap) const noexcept {
+    SZ_DEVICE_INLINE score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
+                                            score_type_ substitution, score_type_ gap) const noexcept {
         using score_t = score_type_;
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
         score_t cell = min_or_max<objective_>(
@@ -607,7 +607,7 @@ struct score_cell {
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename score_type_, typename enable_ = void>
 struct affine_score_cell {
-    __forceinline__ __device__ score_type_ operator()( //
+    SZ_DEVICE_INLINE score_type_ operator()( //
         score_type_ diag, score_type_ top_m, score_type_ top_v, score_type_ left_m, score_type_ left_h,
         score_type_ substitution, score_type_ open, score_type_ extend, score_type_ &v_out,
         score_type_ &h_out) const noexcept {
@@ -633,7 +633,7 @@ struct affine_score_cell {
  *         arrived via `__shfl_up`. Shared by the global and local instantiations of `score_across_cuda_device_`.
  */
 template <typename score_type_>
-__device__ __forceinline__ void resolve_left_boundary_(                    //
+SZ_DEVICE_INLINE void resolve_left_boundary_(                              //
     unsigned lane_index, unsigned micro_row, unsigned micro_side,          //
     score_type_ const *shared_left_row, score_type_ tile_corner,           //
     score_type_ const *shuffled_right_edge, score_type_ shuffled_topright, //
@@ -656,7 +656,7 @@ __device__ __forceinline__ void resolve_left_boundary_(                    //
  *         global and local instantiations of `affine_score_across_cuda_device_`.
  */
 template <typename score_type_>
-__device__ __forceinline__ void resolve_left_boundary_affine_(                          //
+SZ_DEVICE_INLINE void resolve_left_boundary_affine_(                                    //
     unsigned lane_index, unsigned micro_row, unsigned micro_side,                       //
     score_type_ const *shared_left_m_row, score_type_ const *shared_left_h_row,         //
     score_type_ tile_corner_m,                                                          //
@@ -688,7 +688,7 @@ __device__ __forceinline__ void resolve_left_boundary_affine_(                  
  */
 template <sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, tile_march_t march_,
           typename score_type_, typename final_score_type_>
-__device__ __forceinline__ void capture_cell_(                                        //
+SZ_DEVICE_INLINE void capture_cell_(                                                  //
     score_type_ cell_score, bool tile_is_full, bool tile_has_corner,                  //
     u32_t matrix_row, u32_t matrix_column, u32_t shorter_length, u32_t longer_length, //
     score_type_ &running_best, final_score_type_ *result_ptr) {
@@ -1219,9 +1219,9 @@ __global__ void affine_frontier_init_across_cuda_device_(task_type_ *tasks, scor
  *         shift would spill past the diagonal a few steps later. Warp-strided; the caller owns the outer `__syncwarp`s.
  */
 template <typename score_type_>
-__forceinline__ __device__ void rotate_central_band_(unsigned thread_in_warp_index, unsigned warp_size,
-                                                     unsigned diagonal_length, score_type_ *previous_scores,
-                                                     score_type_ *current_scores, score_type_ *next_scores) {
+SZ_DEVICE_INLINE void rotate_central_band_(unsigned thread_in_warp_index, unsigned warp_size, unsigned diagonal_length,
+                                           score_type_ *previous_scores, score_type_ *current_scores,
+                                           score_type_ *next_scores) {
     for (unsigned i = thread_in_warp_index; i + 1 < diagonal_length; i += warp_size)
         previous_scores[i] = current_scores[i + 1];
     __syncwarp();
@@ -1908,16 +1908,16 @@ enum class levenshtein_tier_mode_t {
 
 /** @brief Whether @p task takes a Myers tier: unit-cost-linear mode AND shorter within the Myers crossover cap. */
 template <typename char_type_>
-__host__ __device__ __forceinline__ bool levenshtein_task_uses_myers(cuda_similarity_task<char_type_> const &task,
-                                                                     levenshtein_tier_mode_t mode) noexcept {
+__host__ SZ_DEVICE_INLINE bool levenshtein_task_uses_myers(cuda_similarity_task<char_type_> const &task,
+                                                           levenshtein_tier_mode_t mode) noexcept {
     return mode == levenshtein_tier_mode_t::myers_and_registers_k &&
            task.shorter.size() <= levenshtein_myers_cooperative_max_shorter_k;
 }
 
 /** @brief Group-ordering priority placed in the key MSBs for one task. */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u32_t levenshtein_task_tier_priority(cuda_similarity_task<char_type_> const &task,
-                                                                         levenshtein_tier_mode_t mode) noexcept {
+__host__ SZ_DEVICE_INLINE u32_t levenshtein_task_tier_priority(cuda_similarity_task<char_type_> const &task,
+                                                               levenshtein_tier_mode_t mode) noexcept {
     if (levenshtein_task_uses_myers(task, mode)) return levenshtein_priority_myers_k;
     if (task.fits_in_registers())
         return task.bytes_per_cell == one_byte_per_cell_k ? levenshtein_priority_register_u8_k
@@ -1927,8 +1927,8 @@ __host__ __device__ __forceinline__ u32_t levenshtein_task_tier_priority(cuda_si
 
 /** @brief Dense final tier id 0..4, including the Myers word1 / generic split at 64, for one task. */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u32_t levenshtein_task_dense_tier(cuda_similarity_task<char_type_> const &task,
-                                                                      levenshtein_tier_mode_t mode) noexcept {
+__host__ SZ_DEVICE_INLINE u32_t levenshtein_task_dense_tier(cuda_similarity_task<char_type_> const &task,
+                                                            levenshtein_tier_mode_t mode) noexcept {
     if (levenshtein_task_uses_myers(task, mode)) {
         if (task.shorter.size() <= levenshtein_myers_word1_cap_k) return levenshtein_tier_myers_word1_k;
         if (task.shorter.size() <= levenshtein_myers_max_shorter_k) return levenshtein_tier_myers_generic_k;
@@ -1946,7 +1946,7 @@ __host__ __device__ __forceinline__ u32_t levenshtein_task_dense_tier(cuda_simil
  *         length) groups tasks into power-of-two length bands within a priority tier -> uniform-depth launches.
  *         Host-portable: uses `__clzll` on device and the `sz_u64_clz` SWAR/intrinsic wrapper on the host.
  */
-__host__ __device__ __forceinline__ u64_t levenshtein_length_dyadic_bucket(u64_t length) noexcept {
+__host__ SZ_DEVICE_INLINE u64_t levenshtein_length_dyadic_bucket(u64_t length) noexcept {
     if (length <= 1) return 0;
 #ifdef __CUDA_ARCH__
     return static_cast<u64_t>(64 - __clzll(static_cast<unsigned long long>(length - 1)));
@@ -1957,9 +1957,8 @@ __host__ __device__ __forceinline__ u64_t levenshtein_length_dyadic_bucket(u64_t
 
 /** @brief Packs one task into the MSB-ordered radix-sort key described above. */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u64_t levenshtein_pack_tier_key(cuda_similarity_task<char_type_> const &task,
-                                                                    u32_t original_index,
-                                                                    levenshtein_tier_mode_t mode) noexcept {
+__host__ SZ_DEVICE_INLINE u64_t levenshtein_pack_tier_key(cuda_similarity_task<char_type_> const &task,
+                                                          u32_t original_index, levenshtein_tier_mode_t mode) noexcept {
     u64_t const priority = levenshtein_task_tier_priority(task, mode);
     // Bucket the length dyadically (`bit_width(L - 1)`) instead of using the raw length, so the ascending sub-sort
     // groups tasks into power-of-two length bands - uniform launch depth - while staying monotonic. The bucket is
@@ -2005,7 +2004,7 @@ template <typename char_type_>
 struct levenshtein_dense_tier_functor {
     cuda_similarity_task<char_type_> const *tasks;
     levenshtein_tier_mode_t mode;
-    __host__ __device__ __forceinline__ u32_t operator()(size_t index) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(size_t index) const {
         return levenshtein_task_dense_tier(tasks[index], mode);
     }
 };
@@ -2190,21 +2189,21 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, //
  */
 template <typename char_type_>
 struct task_shorter_length_functor {
-    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
         return static_cast<u32_t>(task.shorter.size());
     }
 };
 
 template <typename char_type_>
 struct task_longer_length_functor {
-    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
         return static_cast<u32_t>(task.longer.size());
     }
 };
 
 template <typename char_type_>
 struct task_bytes_per_cell_functor {
-    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
         return static_cast<u32_t>(task.bytes_per_cell);
     }
 };
@@ -2212,7 +2211,7 @@ struct task_bytes_per_cell_functor {
 /** @brief Reads the decoded shorter @b rune count of a task (UTF-8 device-tier rune-grid sizing). @sa task_shorter_length_functor. */
 template <typename char_type_>
 struct task_shorter_runes_functor {
-    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
         return task.shorter_runes;
     }
 };
@@ -2220,7 +2219,7 @@ struct task_shorter_runes_functor {
 /** @brief Reads the decoded longer @b rune count of a task (UTF-8 device-tier rune-grid sizing). @sa task_longer_length_functor. */
 template <typename char_type_>
 struct task_longer_runes_functor {
-    __host__ __device__ __forceinline__ u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(cuda_similarity_task<char_type_> const &task) const {
         return task.longer_runes;
     }
 };
@@ -2338,8 +2337,8 @@ cuda_status_t reduce_device_tier_rune_maxima_(span<cuda_similarity_task<char_typ
  *         the same predicate as the host. `gpu_specs_t::shared_memory_per_multiprocessor()` is host-only, so the
  *         shared-per-SM divide is inlined here from the POD `specs` fields.
  */
-__forceinline__ __device__ warp_tasks_density_t warp_tasks_density_device_(size_t task_memory_requirement,
-                                                                           gpu_specs_t const &specs) noexcept {
+SZ_DEVICE_INLINE warp_tasks_density_t warp_tasks_density_device_(size_t task_memory_requirement,
+                                                                 gpu_specs_t const &specs) noexcept {
     warp_tasks_density_t const densities[] {
         sixty_four_warps_per_multiprocessor_k, thirty_two_warps_per_multiprocessor_k,
         sixteen_warps_per_multiprocessor_k,    eight_warps_per_multiprocessor_k,
@@ -2499,7 +2498,7 @@ cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_t
  *         On the device they map to the `__vcmpeq4`/`__vminu4`/`__vaddus4`/`__byte_perm` video instructions; the
  *         host fallbacks keep the kernel unit-testable on the CPU.
  */
-__forceinline__ __device__ __host__ u32_t u32_vcmpeq4_(u32_t a, u32_t b) noexcept {
+SZ_DEVICE_INLINE __host__ u32_t u32_vcmpeq4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vcmpeq4(a, b);
 #else
@@ -2512,7 +2511,7 @@ __forceinline__ __device__ __host__ u32_t u32_vcmpeq4_(u32_t a, u32_t b) noexcep
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t u32_vminu4_(u32_t a, u32_t b) noexcept {
+SZ_DEVICE_INLINE __host__ u32_t u32_vminu4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vminu4(a, b);
 #else
@@ -2525,7 +2524,7 @@ __forceinline__ __device__ __host__ u32_t u32_vminu4_(u32_t a, u32_t b) noexcept
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t u32_vaddus4_(u32_t a, u32_t b) noexcept {
+SZ_DEVICE_INLINE __host__ u32_t u32_vaddus4_(u32_t a, u32_t b) noexcept {
 #ifdef __CUDA_ARCH__
     return __vaddus4(a, b);
 #else
@@ -2538,7 +2537,7 @@ __forceinline__ __device__ __host__ u32_t u32_vaddus4_(u32_t a, u32_t b) noexcep
 #endif
 }
 
-__forceinline__ __device__ __host__ u32_t u32_byte_perm_(u32_t x, u32_t y, u32_t selector) noexcept {
+SZ_DEVICE_INLINE __host__ u32_t u32_byte_perm_(u32_t x, u32_t y, u32_t selector) noexcept {
 #ifdef __CUDA_ARCH__
     return __byte_perm(x, y, selector);
 #else
@@ -2551,12 +2550,10 @@ __forceinline__ __device__ __host__ u32_t u32_byte_perm_(u32_t x, u32_t y, u32_t
 }
 
 /** @brief Broadcasts a byte-wide cost into all four lanes of a packed `u32_t`. */
-__forceinline__ __device__ __host__ u32_t broadcast_cost_u8x4_(u8_t value) noexcept {
-    return (u32_t)value * 0x01010101u;
-}
+SZ_DEVICE_INLINE __host__ u32_t broadcast_cost_u8x4_(u8_t value) noexcept { return (u32_t)value * 0x01010101u; }
 
 /** @brief Broadcasts a 16-bit cost into both lanes of a packed `u32_t`. */
-__forceinline__ __device__ __host__ u32_t broadcast_cost_u16x2_(u16_t value) noexcept {
+SZ_DEVICE_INLINE __host__ u32_t broadcast_cost_u16x2_(u16_t value) noexcept {
     return (u32_t)value | ((u32_t)value << 16);
 }
 
@@ -2564,9 +2561,8 @@ __forceinline__ __device__ __host__ u32_t broadcast_cost_u16x2_(u16_t value) noe
  *  @brief Fills a packed DP row with the leading `(column index + 1) * gap` ladder, shared by the register kernels.
  *  @param[out] packed_row The row of packed cells, @p lanes_per_pack cells of @p bits_per_lane bits per `u32_t`.
  */
-__forceinline__ __device__ __host__ void fill_gap_ladder_(u32_t *packed_row, unsigned pack_count,
-                                                          unsigned lanes_per_pack, unsigned bits_per_lane,
-                                                          error_cost_t gap_cost) noexcept {
+SZ_DEVICE_INLINE __host__ void fill_gap_ladder_(u32_t *packed_row, unsigned pack_count, unsigned lanes_per_pack,
+                                                unsigned bits_per_lane, error_cost_t gap_cost) noexcept {
     unsigned gap_ladder = gap_cost;
     for (unsigned pack = 0; pack < pack_count; ++pack) {
         u32_t value = 0;
@@ -2602,7 +2598,7 @@ struct register_levenshtein {
     u32_vec_t row_cells_[pack_count_k];
     u32_vec_t longer_chars_[pack_count_k];
 
-    __forceinline__ __device__ __host__ u8_t operator()(     //
+    SZ_DEVICE_INLINE __host__ u8_t operator()(               //
         u8_t const *longer_string, unsigned longer_length,   //
         u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
@@ -3242,7 +3238,7 @@ struct register_levenshtein_u16 {
     u32_t row_cells_[pack_count_k];
     u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ u16_t operator()(             //
+    SZ_DEVICE_INLINE u16_t operator()(                       //
         u8_t const *longer_string, unsigned longer_length,   //
         u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
@@ -3324,7 +3320,7 @@ struct register_levenshtein_u16_affine {
     u32_t insertion_cells_[pack_count_k]; // ? the insertion matrix I (gap from the row above)
     u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ u16_t operator()(             //
+    SZ_DEVICE_INLINE u16_t operator()(                       //
         u8_t const *longer_string, unsigned longer_length,   //
         u8_t const *shorter_string, unsigned shorter_length, //
         uniform_substitution_costs_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
@@ -3436,7 +3432,7 @@ __global__ __launch_bounds__(256, 1) void unit_gotoh_u16_per_cuda_thread_( //
  *  @param[out] out The decoded codepoint.
  *  @return The number of UTF-8 bytes consumed (1..4).
  */
-__device__ __forceinline__ unsigned decode_utf8_rune(unsigned char const *bytes, rune_t *out) noexcept {
+SZ_DEVICE_INLINE unsigned decode_utf8_rune(unsigned char const *bytes, rune_t *out) noexcept {
     unsigned const lead = bytes[0];
     unsigned const length = 1u + (lead >= 0xC0u) + (lead >= 0xE0u) + (lead >= 0xF0u);
     unsigned const lead_mask = length == 1u ? 0xFFu : (0x7Fu >> length);
@@ -3468,24 +3464,24 @@ struct rune_cursor_t {
     unsigned char const *bytes {nullptr};
     u32_t const *rune_offsets {nullptr};
 
-    __forceinline__ __device__ rune_t at(size_t rune_index) const noexcept {
+    SZ_DEVICE_INLINE rune_t at(size_t rune_index) const noexcept {
         rune_t decoded;
         decode_utf8_rune(bytes + rune_offsets[rune_index], &decoded);
         return decoded;
     }
-    __forceinline__ __device__ rune_t operator*() const noexcept { return at(0); }
-    __forceinline__ __device__ rune_t operator[](size_t rune_index) const noexcept { return at(rune_index); }
-    __forceinline__ __device__ rune_cursor_t &operator++() noexcept { return ++rune_offsets, *this; }
-    __forceinline__ __device__ rune_cursor_t operator+(difference_type advance) const noexcept {
+    SZ_DEVICE_INLINE rune_t operator*() const noexcept { return at(0); }
+    SZ_DEVICE_INLINE rune_t operator[](size_t rune_index) const noexcept { return at(rune_index); }
+    SZ_DEVICE_INLINE rune_cursor_t &operator++() noexcept { return ++rune_offsets, *this; }
+    SZ_DEVICE_INLINE rune_cursor_t operator+(difference_type advance) const noexcept {
         return rune_cursor_t {bytes, rune_offsets + advance};
     }
-    __forceinline__ __device__ rune_cursor_t operator-(difference_type retreat) const noexcept {
+    SZ_DEVICE_INLINE rune_cursor_t operator-(difference_type retreat) const noexcept {
         return rune_cursor_t {bytes, rune_offsets - retreat};
     }
 };
 
 /** @brief `load_immutable_` overload so the warp `tile_scorer` decodes a codepoint from a @ref rune_cursor_t. */
-__forceinline__ __device__ rune_t load_immutable_(rune_cursor_t cursor) noexcept { return cursor.at(0); }
+SZ_DEVICE_INLINE rune_t load_immutable_(rune_cursor_t cursor) noexcept { return cursor.at(0); }
 
 /**
  *  @brief Register-only @b codepoint-level Levenshtein distance, one thread per pair, for UTF-8 byte spans whose
@@ -3505,7 +3501,7 @@ struct register_levenshtein_runes {
     u16_t row_cells_[max_text_length_k];
 
     /** @brief Decodes a UTF-8 byte span into @p out runes, returning the rune count. */
-    __forceinline__ __device__ unsigned decode_span_(u8_t const *bytes, unsigned byte_length, rune_t *out) noexcept {
+    SZ_DEVICE_INLINE unsigned decode_span_(u8_t const *bytes, unsigned byte_length, rune_t *out) noexcept {
         unsigned rune_count = 0, byte_offset = 0;
         while (byte_offset < byte_length) {
             rune_t rune;
@@ -3516,7 +3512,7 @@ struct register_levenshtein_runes {
         return rune_count;
     }
 
-    __forceinline__ __device__ u16_t operator()(                 //
+    SZ_DEVICE_INLINE u16_t operator()(                           //
         u8_t const *longer_bytes, unsigned longer_byte_length,   //
         u8_t const *shorter_bytes, unsigned shorter_byte_length, //
         uniform_substitution_costs_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
@@ -3589,7 +3585,7 @@ __global__ __launch_bounds__(256, 2) void unit_utf8_per_cuda_thread_( //
 #pragma region UTF 8 Codepoint Level Rune Offset Index
 
 /** @brief Byte length of the UTF-8 rune whose lead byte is @p lead (1..4); mirrors @ref decode_utf8_rune's length. */
-__device__ __forceinline__ unsigned utf8_rune_length(unsigned char lead) noexcept {
+SZ_DEVICE_INLINE unsigned utf8_rune_length(unsigned char lead) noexcept {
     return 1u + (lead >= 0xC0u) + (lead >= 0xE0u) + (lead >= 0xF0u);
 }
 
@@ -5357,12 +5353,11 @@ struct error_costs_classes_in_cuda_shared_memory_t {
  *  letting every thread in the block read the cost table from fast shared memory.
  */
 template <typename substituter_type_>
-__forceinline__ __device__ substituter_type_
-load_substituter_into_shared_(substituter_type_ const substituter) noexcept {
+SZ_DEVICE_INLINE substituter_type_ load_substituter_into_shared_(substituter_type_ const substituter) noexcept {
     return substituter;
 }
 
-__forceinline__ __device__ error_costs_classes_in_cuda_shared_memory_t
+SZ_DEVICE_INLINE error_costs_classes_in_cuda_shared_memory_t
 load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const substituter) noexcept {
 
     constexpr unsigned classes_count_k = error_costs_classes_in_cuda_shared_memory_t::classes_count_k;
@@ -5388,8 +5383,8 @@ load_substituter_into_shared_(error_costs_classes_in_cuda_shared_memory_t const 
  */
 template <sz_similarity_locality_t locality_, sz_capability_t capability_, typename enable_ = void>
 struct weighted_gap_fold {
-    __forceinline__ __device__ void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
-                                               i16_t gap_cost) const noexcept {
+    SZ_DEVICE_INLINE void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
+                                     i16_t gap_cost) const noexcept {
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
         cell_low = std::max<i16_t>(cell_low, left_cell + gap_cost);
         cell_high = std::max<i16_t>(cell_high, cell_low + gap_cost);
@@ -5405,7 +5400,7 @@ struct weighted_gap_fold {
  */
 template <sz_similarity_locality_t locality_, sz_capability_t capability_, typename enable_ = void>
 struct weighted_affine_gap_fold {
-    __forceinline__ __device__ void operator()(                         //
+    SZ_DEVICE_INLINE void operator()(                                   //
         i16_t match_or_insert_low, i16_t match_or_insert_high,          //
         i16_t left_cell, i16_t left_deletion, i16_t open, i16_t extend, //
         i16_t &deletion_low, i16_t &cell_low, i16_t &deletion_high, i16_t &cell_high) const noexcept {
@@ -5433,7 +5428,7 @@ struct weighted_needleman_register_scorer {
     u32_t row_cells_[pack_count_k];
     u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ i16_t operator()(             //
+    SZ_DEVICE_INLINE i16_t operator()(                       //
         u8_t const *longer_string, unsigned longer_length,   //
         u8_t const *shorter_string, unsigned shorter_length, //
         error_costs_classes_in_cuda_shared_memory_t const substituter, linear_gap_costs_t const gap_costs) noexcept {
@@ -5528,7 +5523,7 @@ struct weighted_gotoh_register_scorer {
     u32_t insertion_cells_[pack_count_k]; // ? the insertion matrix I (gap from the row above)
     u8_t longer_chars_[max_text_length_k];
 
-    __forceinline__ __device__ i16_t operator()(             //
+    SZ_DEVICE_INLINE i16_t operator()(                       //
         u8_t const *longer_string, unsigned longer_length,   //
         u8_t const *shorter_string, unsigned shorter_length, //
         error_costs_classes_in_cuda_shared_memory_t const substituter, affine_gap_costs_t const gap_costs) noexcept {
@@ -5648,8 +5643,7 @@ static constexpr int weighted_tier_count_k = 3;
 
 /** @brief Dense tier id 0..2 (register / batch / device) for one weighted task. */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u32_t
-weighted_task_dense_tier(cuda_similarity_task<char_type_> const &task) noexcept {
+__host__ SZ_DEVICE_INLINE u32_t weighted_task_dense_tier(cuda_similarity_task<char_type_> const &task) noexcept {
     if (task.fits_in_registers()) return weighted_tier_register_k;
     if (task.fits_in_batch()) return weighted_tier_batch_k;
     return weighted_tier_device_k;
@@ -5657,8 +5651,8 @@ weighted_task_dense_tier(cuda_similarity_task<char_type_> const &task) noexcept 
 
 /** @brief Packs one weighted task into the Levenshtein-layout MSB-ordered radix-sort key (priority = dense tier id). */
 template <typename char_type_>
-__host__ __device__ __forceinline__ u64_t weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task,
-                                                                 u32_t original_index) noexcept {
+__host__ SZ_DEVICE_INLINE u64_t weighted_pack_tier_key(cuda_similarity_task<char_type_> const &task,
+                                                       u32_t original_index) noexcept {
     u64_t const priority = weighted_task_dense_tier(task);
     // Dyadic length bucket (see @ref levenshtein_length_dyadic_bucket) so both engine families bucket identically.
     u64_t const shorter_max = (1ull << levenshtein_shorter_length_bits_k) - 1ull;
@@ -5692,9 +5686,7 @@ template <typename char_type_>
 struct weighted_dense_tier_functor {
     cuda_similarity_task<char_type_> const *tasks;
     u32_t mode; // unused; present so the router can construct/forward it uniformly with the Levenshtein functor
-    __host__ __device__ __forceinline__ u32_t operator()(size_t index) const {
-        return weighted_task_dense_tier(tasks[index]);
-    }
+    __host__ SZ_DEVICE_INLINE u32_t operator()(size_t index) const { return weighted_task_dense_tier(tasks[index]); }
 };
 
 #pragma endregion Weighted Device Tier Router

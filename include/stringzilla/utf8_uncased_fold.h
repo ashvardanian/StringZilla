@@ -52,54 +52,54 @@ extern "C" {
  *      // destination now contains "hello", result_length = 5
  *  @endcode
  */
-SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(     //
+SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold( //
     sz_cptr_t source, sz_size_t source_length, //
     sz_ptr_t destination);
 
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial( //
-    sz_cptr_t source, sz_size_t source_length,   //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial( //
+    sz_cptr_t source, sz_size_t source_length,         //
     sz_ptr_t destination);
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_haswell( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_neon( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_V128
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_v128( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_RVV
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_rvv( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_LASX
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_lasx( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
 #if SZ_USE_POWERVSX
 /** @copydoc sz_utf8_uncased_fold */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_powervsx( //
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
@@ -122,7 +122,7 @@ SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_powervsx( //
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 #if SZ_USE_ICELAKE
     return sz_utf8_uncased_fold_icelake(source, source_length, destination);
 #elif SZ_USE_HASWELL

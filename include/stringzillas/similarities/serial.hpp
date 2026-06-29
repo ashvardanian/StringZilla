@@ -2215,8 +2215,8 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *      it lines up with the Ice Lake lockstep family; trailing empty blocks stay at the boundary harmlessly.
      */
     template <index_t words_count_> // 1, 2, 4, 8  ->  shorter <= 64, 128, 256, 512
-    inline status_t unrolled_(span<char const> shorter, span<char const> longer, size_t &result_ref,
-                              scratch_space_t scratch_space) const noexcept {
+    status_t unrolled_(span<char const> shorter, span<char const> longer, size_t &result_ref,
+                       scratch_space_t scratch_space) const noexcept {
         index_t const shorter_length = (index_t)shorter.size();
         size_t const longer_length = longer.size();
         if (shorter_length > words_count_ * 64) return status_t::unexpected_dimensions_k;
@@ -2287,8 +2287,8 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *  per-block `vertical_positives` / `vertical_negatives` state stays on the stack up to `stack_words_capacity_k`
      *  blocks and otherwise spills into scratch, so the hot loop never touches the heap.
      */
-    inline status_t generic_(span<char const> shorter, span<char const> longer, size_t &result_ref,
-                             scratch_space_t scratch_space) const noexcept {
+    status_t generic_(span<char const> shorter, span<char const> longer, size_t &result_ref,
+                      scratch_space_t scratch_space) const noexcept {
         size_t const shorter_length = shorter.size();
         size_t const longer_length = longer.size();
         // Empty pattern: the distance is the text length, and the top-bit read below would underflow.
@@ -2366,8 +2366,8 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         return status_t::success_k;
     }
 
-    inline status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
-                               scratch_space_t scratch_space) noexcept {
+    status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
+                        scratch_space_t scratch_space) noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char const> shorter = first_is_shorter ? first : second;
         span<char const> longer = first_is_shorter ? second : first;
@@ -2470,8 +2470,8 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
         return at;
     }
 
-    inline status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
-                               scratch_space_t scratch_space) const noexcept {
+    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                        scratch_space_t scratch_space) const noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char_t const> shorter = first_is_shorter ? first : second;
         span<char_t const> longer = first_is_shorter ? second : first;

@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
@@ -44,13 +44,13 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_leng
  *      span up to 65535 lanes — beyond the RVV 1.0 maximum `VLEN` of 64 Kib at `e8m4`
  *      (`VLMAX = VLEN/2`), so no software cap is ever needed.
  */
-SZ_INTERNAL vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vector_length) {
+SZ_HELPER_INLINE vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vector_length) {
     vuint16m8_t iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
     vuint16m8_t reverse_index_u16m8 = __riscv_vrsub_vx_u16m8(iota_u16m8, (sz_u16_t)(vector_length - 1), vector_length);
     return __riscv_vrgatherei16_vv_u8m4(strip_u8m4, reverse_index_u16m8, vector_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
@@ -77,8 +77,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_len
  *  @param vector_length Vector length for this strip.
  *  @return Predicate mask where lane `i` is set if `haystack_u8m8[i]` is in the set.
  */
-SZ_INTERNAL vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
-                                                  sz_size_t vector_length) {
+SZ_HELPER_AUTO vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
+                                                     sz_size_t vector_length) {
     vuint8m8_t byte_index_u8m8 = __riscv_vsrl_vx_u8m8(haystack_u8m8, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m8_t bit_position_u8m8 = __riscv_vand_vx_u8m8(haystack_u8m8, 7, vector_length); // c & 7
     vuint8m8_t one_u8m8 = __riscv_vmv_v_x_u8m8(1, vector_length);
@@ -91,8 +91,8 @@ SZ_INTERNAL vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u
 /**
  *  @brief `m4` sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip.
  */
-SZ_INTERNAL vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
-                                                  sz_size_t vector_length) {
+SZ_HELPER_AUTO vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
+                                                     sz_size_t vector_length) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m4_t bit_position_u8m4 = __riscv_vand_vx_u8m4(haystack_u8m4, 7, vector_length); // c & 7
     vuint8m4_t one_u8m4 = __riscv_vmv_v_x_u8m4(1, vector_length);
@@ -102,7 +102,7 @@ SZ_INTERNAL vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u
     return __riscv_vmsne_vx_u8m4_b2(anded_u8m4, 0, vector_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
@@ -115,7 +115,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_l
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m4(haystack_length);
@@ -129,8 +129,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                      sz_size_t needle_length) {
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_rvv(haystack, haystack_length, needle);
 
@@ -168,8 +168,8 @@ SZ_PUBLIC sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, s
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length) {
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_rvv(haystack, haystack_length, needle);
 

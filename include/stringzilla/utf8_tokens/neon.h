@@ -27,7 +27,7 @@ extern "C" {
  *  @brief Left-packs the @p submask -selected lanes of one 4-lane sub-block to the @p out_offsets / @p out_lengths
  *         cursors in lane order via a `vqtbl2q_u8` table; returns how many lanes were written.
  */
-SZ_INTERNAL sz_size_t sz_utf8_iterate_compact4_neon_(                       //
+SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_compact4_neon_(                  //
     uint8x16x2_t const offsets_u8x16x2, uint8x16x2_t const lengths_u8x16x2, //
     sz_u32_t const submask, sz_size_t *const out_offsets, sz_size_t *const out_lengths) {
 
@@ -68,7 +68,7 @@ SZ_INTERNAL sz_size_t sz_utf8_iterate_compact4_neon_(                       //
  *  @brief  Peel the tile's first @p emit_count matches by SIMD left-pack over four 4-lane sub-blocks into a
  *          fixed-width stack scratch, then copy the surviving prefix to the caller (no `ctz`, no per-match branch).
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_neon_(         //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_neon_(      //
     sz_u64_t start_bits, uint8x16_t length_per_lane, //
     sz_size_t emit_count, sz_size_t position,        //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -109,7 +109,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_neon_(         //
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_neon(              //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_neon(        //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -193,7 +193,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_neon(              //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_neon(           //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -290,7 +290,7 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_neon(           //
 #pragma region Gather free membership
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF lanes. */
-SZ_INTERNAL uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, uint8x16_t low) {
+SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, uint8x16_t low) {
     static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
     uint8x16_t const bit_table = vld1q_u8(bit_for_low3);
     uint8x16_t const bit_mask = vqtbl1q_u8(bit_table, vandq_u8(low, vdupq_n_u8(0x07)));
@@ -305,7 +305,7 @@ SZ_INTERNAL uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, uint8
  *  @p block_id via a 4-row `vqtbl1q_u8` cascade, then the lane keeps the candidate whose column index matches its
  *  `(low >> 3)`. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`. @p block_id / @p low address one quarter.
  */
-SZ_INTERNAL uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns, uint8x16_t block_id, uint8x16_t low) {
+SZ_HELPER_AUTO uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns, uint8x16_t block_id, uint8x16_t low) {
     uint8x16_t const within = vandq_u8(block_id, vdupq_n_u8(0x0F));
     uint8x16_t const selector = vshrq_n_u8(block_id, 4);
     uint8x16_t const nibble = vshrq_n_u8(low, 3); // (low >> 3) in [0, 32): the column index
@@ -326,7 +326,7 @@ SZ_INTERNAL uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns, ui
  *  `high` (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned 256-entry `bmp_block` table via
  *  `vqtbl4q_u8`; the bitmap byte at `row_id*32 + (low >> 3)` is read column-major; the bit `(low & 7)` is tested.
  */
-SZ_INTERNAL uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, uint8x16_t high_in, uint8x16_t low_in) {
+SZ_HELPER_AUTO uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, uint8x16_t high_in, uint8x16_t low_in) {
     uint8x16_t const is_ascii = vcltq_u8(window, vdupq_n_u8(0x80));
     uint8x16_t const high = vbicq_u8(high_in, is_ascii);       // high = is_ascii ? 0 : high_in
     uint8x16_t const low = vbslq_u8(is_ascii, window, low_in); // low  = is_ascii ? byte : low_in
@@ -345,8 +345,8 @@ SZ_INTERNAL uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, uint
  *  `low8 = cp & 0xFF`. The `super` (0..15) selects an L1 group; `group*256 + sub` selects a bitmap row id (group < 2,
  *  so the two 256-entry halves of the L2 table are read and blended by the group bit); the bit `(low8 & 7)` is tested.
  */
-SZ_INTERNAL uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window, uint8x16_t next1, uint8x16_t next2,
-                                                            uint8x16_t next3) {
+SZ_HELPER_AUTO uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window, uint8x16_t next1, uint8x16_t next2,
+                                                               uint8x16_t next3) {
     uint8x16_t const b0 = vandq_u8(window, vdupq_n_u8(0x07));
     uint8x16_t const b1 = vandq_u8(next1, vdupq_n_u8(0x3F));
     uint8x16_t const b2 = vandq_u8(next2, vdupq_n_u8(0x3F));
@@ -381,8 +381,9 @@ SZ_INTERNAL uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window, u
  *          continuation bytes wrap is rejected) is applied by the caller via `byte_span`; here the substrate masks are
  *          already loaded-clamped. An invalid lead is never reported (serial advances one byte and re-syncs).
  */
-SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded, uint8x16_t const *next1,
-                                                     uint8x16_t const *next2, uint8x16_t const *next3) {
+SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t const *decoded,
+                                                        uint8x16_t const *next1, uint8x16_t const *next2,
+                                                        uint8x16_t const *next3) {
     uint8x16_t const continuation_mask = vdupq_n_u8(0xC0), continuation_pattern = vdupq_n_u8(0x80);
     uint8x16_t c1_ok_bool[4], c2_ok_bool[4], c3_ok_bool[4];
     uint8x16_t lead_ge_c2_bool[4], three_well_bool[4], four_well_bool[4], ascii_bool[4];
@@ -442,7 +443,7 @@ SZ_INTERNAL sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon_t 
 #pragma region Forward driver
 
 /** @copydoc sz_utf8_delimiters */
-SZ_PUBLIC sz_size_t sz_utf8_delimiters_neon(            //
+SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

@@ -16,7 +16,7 @@ extern "C" {
 #if SZ_USE_LASX
 /** @brief  Recombine the two per-128-bit-lane 16-bit `__lasx_xvmskltz_b` sign-bit masks into one 32-bit mask,
  *          matching AVX2's `_mm256_movemask_epi8` (word 0 = low lane, word 4 = high lane). */
-SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
     __m256i comparison_result_u8x32 = __lasx_xvmskltz_b(sign_extended);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 4);
@@ -26,14 +26,14 @@ SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
 /** @brief  Per-lane logical right shift by 4 bits, keeping only the low nibble of every byte lane. The single shift
  *          amount the classifier needs is spelled out (LASX `xvsrli.h` requires an immediate; it shifts 16-bit lanes,
  *          so we mask back to byte width afterwards). */
-SZ_INTERNAL __m256i sz_utf8_high_nibble_lasx_(__m256i value) {
+SZ_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value) {
     return __lasx_xvand_v(__lasx_xvsrli_h(value, 4), __lasx_xvreplgr2vr_b((char)0x0F));
 }
 
 /** @brief  Shift the whole 32-byte window left by one byte (lane `i` receives original lane `i + 1`), zero-filling the
  *          top. Built from an in-lane `xvbsrl.v` (per-128-bit down-shift) stitched with the cross-lane high half via
  *          `xvpermi.q` so byte 16 receives original byte 17 across the 128-bit seam. */
-SZ_INTERNAL __m256i sz_utf8_next1_lasx_(__m256i window) {
+SZ_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window) {
     __m256i const high_half_duplicated_u8x32 = __lasx_xvpermi_q(window, window, 0x31); // both halves := original high
     __m256i const shift_within_lane_u8x32 = __lasx_xvbsrl_v(window, 1); // bytes down by 1 within each 128-bit half
     __m256i const cross_lane_carry_u8x32 = __lasx_xvbsll_v(high_half_duplicated_u8x32,
@@ -47,7 +47,7 @@ SZ_INTERNAL __m256i sz_utf8_next1_lasx_(__m256i window) {
  *          (value = bit index 0..7), in `.rodata` (no per-call rebuild). The caller reads only the leading
  *          `popcount(m)` lanes; the 0x80 fill marks the unused tail. 16 bytes per row so one `xvld` brings a row into
  *          a 128-bit `xvshuf.b` source lane. */
-SZ_INTERNAL sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
+SZ_HELPER_INLINE sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
     // 256 rows x 16 bytes of `.rodata`: row `m` lists the set-bit positions of the 8-bit mask `m`; only the leading
     // `popcount(m)` lanes are read, the 0x80 fill is an unused-tail marker.
     static sz_u8_t const table[256][16] = {
@@ -318,7 +318,7 @@ SZ_INTERNAL sz_u8_t const *sz_utf8_pack8_lut_lasx_(void) {
  *          lane. The four packed groups are stitched in order by their `popcount` offset (the group base + local
  *          index gives the absolute byte offset). @return the popcount of @p mask.
  */
-SZ_INTERNAL sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
     sz_u8_t const *lut = sz_utf8_pack8_lut_lasx_();
     // Lane-local byte identity {0..15, 0..15}: each 128-bit lane shuffles its own 0..15 identity by the LUT row, so
     // the packed values are the within-half bit positions; we add the half base to recover absolute offsets.
@@ -353,7 +353,7 @@ SZ_INTERNAL sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out) {
  *          lane never skips bytes owing their own next U+FFFD).
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover.
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_lasx_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_lasx_( //
     __m256i window, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length, int has_three, int has_four,
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
@@ -486,9 +486,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_lasx_( //
  *          declines (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses
  *          the window edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_lasx_( //
-    sz_cptr_t text, sz_size_t length,            //
-    sz_rune_t *runes, sz_size_t runes_capacity,  //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_lasx_( //
+    sz_cptr_t text, sz_size_t length,               //
+    sz_rune_t *runes, sz_size_t runes_capacity,     //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 32 ? length : 32;
@@ -651,7 +651,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_lasx_( //
     return text + consumed;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_lasx(        //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
@@ -690,7 +690,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_lasx(        //
  *  [0,29] and we step 30; a `t[pos-1] == '\r'` carry suppresses an LF completing a tile-straddling CRLF. */
 
 /** @brief  Store the low `group` (1..4) of four 64-bit lanes of `values_u64x4` to `destination`. */
-SZ_INTERNAL void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size_t group, sz_size_t *destination) {
+SZ_HELPER_INLINE void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size_t group, sz_size_t *destination) {
     if (group == 4) { __lasx_xvst(values_u64x4, destination, 0); }
     else {
         __lasx_xvstelm_d(values_u64x4, destination, 0, 0);
@@ -699,7 +699,7 @@ SZ_INTERNAL void sz_utf8_iterate_store_group_lasx_(__m256i values_u64x4, sz_size
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
     __m256i continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i const one_byte_u8x32 = __lasx_xvreplgr2vr_b(1);
@@ -746,7 +746,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length) {
 
 /** @brief  Same block logic as `sz_utf8_count_lasx`, but locating the Nth start byte. LASX has no `PDEP`, so the
  *          start-byte bitmask is fed to `sz_u32_nth_set_bit` to land on the Nth set bit. */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     __m256i continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
     __m256i continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
     __m256i const one_byte_u8x32 = __lasx_xvreplgr2vr_b(1);

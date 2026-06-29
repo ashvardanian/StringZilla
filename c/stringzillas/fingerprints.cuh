@@ -28,7 +28,7 @@ extern "C" {
 
 #pragma region Fingerprints
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                     //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_init(                                 //
     sz_size_t dimensions, sz_size_t alphabet_size,                                //
     sz_size_t const *window_widths, sz_size_t window_widths_count, sz_u64_t seed, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,             //
@@ -163,7 +163,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_init(                                   
                                                                 std::move(variant));
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(                       //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_sequence(                   //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *texts,                                         //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
@@ -176,7 +176,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_sequence(                       //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(                        //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_u32tape(                    //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *texts,                                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
@@ -189,7 +189,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_u32tape(                        //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(                        //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_u64tape(                    //
     szs_fingerprints_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *texts,                                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                  //
@@ -202,7 +202,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_u64tape(                        //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC void szs_fingerprints_free(szs_fingerprints_t engine_punned) {
+SZ_API_RUNTIME void szs_fingerprints_free(szs_fingerprints_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<fingerprints_backends_t *>(engine_punned);
     delete engine;
@@ -212,7 +212,7 @@ SZ_DYNAMIC void szs_fingerprints_free(szs_fingerprints_t engine_punned) {
 
 #pragma region Fingerprints UTF8
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_init(                    //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_utf8_init(                //
     sz_size_t dimensions, sz_size_t alphabet_size,                    //
     sz_size_t const *window_widths, sz_size_t window_widths_count,    //
     sz_u64_t seed,                                                    //
@@ -224,7 +224,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_init(                    //
         alloc, capabilities, engine_punned, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_sequence(                       //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_utf8_sequence(                   //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *texts,                                              //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
@@ -235,7 +235,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_sequence(                       //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u32tape(                        //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_utf8_u32tape(                    //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *texts,                                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
@@ -246,7 +246,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u32tape(                        //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u64tape(                        //
+SZ_API_RUNTIME sz_status_t szs_fingerprints_utf8_u64tape(                    //
     szs_fingerprints_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *texts,                                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                       //
@@ -257,7 +257,7 @@ SZ_DYNAMIC sz_status_t szs_fingerprints_utf8_u64tape(                        //
         min_hashes, min_hashes_stride, min_counts, min_counts_stride, error_message);
 }
 
-SZ_DYNAMIC void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_punned) {
+SZ_API_RUNTIME void szs_fingerprints_utf8_free(szs_fingerprints_utf8_t engine_punned) {
     return szs_fingerprints_free(engine_punned);
 }
 

@@ -32,7 +32,8 @@ extern "C" {
 #endif
 
 /** @brief 64-entry lead lookup in one `vpermb` (AVX-512 VBMI), reading the shared LUT verbatim. */
-SZ_INTERNAL __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes, __mmask64 is_lead, sz_u8_t form_flag) {
+SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes, __mmask64 is_lead,
+                                                                      sz_u8_t form_flag) {
     __m512i index = _mm512_and_si512(bytes, _mm512_set1_epi8(0x3F));
     __m512i table = _mm512_loadu_si512((void const *)sz_utf8_norm_lead_lut_);
     __m512i families = _mm512_permutexvar_epi8(index, table);
@@ -41,16 +42,16 @@ SZ_INTERNAL __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes, __
 }
 
 /** @brief Scan primitive (Ice Lake): the Skylake skeleton with the single-`vpermb` lead classifier. */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_vbmi_icelake_);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_icelake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                         sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_icelake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                               sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_icelake_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_icelake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_icelake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_icelake_);
 }
 

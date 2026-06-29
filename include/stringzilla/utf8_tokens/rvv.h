@@ -25,13 +25,13 @@ extern "C" {
 
 /*  Cap the logical tile so a `u16` iota addresses every lane. RVV 1.0 allows `VLEN` up to 64 Kib, i.e.
  *  `e8m4` `VLMAX` up to 32768 — well within `u16`. */
-SZ_INTERNAL sz_size_t sz_utf8_iterate_tile_bytes_rvv_(void) {
+SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_tile_bytes_rvv_(void) {
     sz_size_t vlmax = __riscv_vsetvlmax_e8m4();
     return vlmax < 4 ? 4 : vlmax; // need at least 4 lanes so the trusted region [0, tile-3] is non-empty
 }
 
 /** @brief Peel a window's first `emit_count` matches: compress lane offsets + lengths, widen-store absolute pairs. */
-SZ_INTERNAL void sz_utf8_iterate_peel_tile_rvv_(                          //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_tile_rvv_(                       //
     vuint8m4_t length_u8m4, vbool2_t start_mask, sz_size_t tile_position, //
     sz_size_t vector_length, sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
@@ -66,9 +66,9 @@ SZ_INTERNAL void sz_utf8_iterate_peel_tile_rvv_(                          //
 
 /*  Classify a tile into a per-lane byte-length vector (0 = no delimiter starts here). The 2nd/3rd bytes are
  *  carried from the buffer via `next`/`after_next`; multi-byte masks are computed unconditionally. */
-SZ_INTERNAL vuint8m4_t sz_utf8_classify_newlines_rvv_(sz_u8_t const *text_u8, sz_size_t position, vuint8m4_t bytes_u8m4,
-                                                      vuint8m4_t next_u8m4, vuint8m4_t after_next_u8m4,
-                                                      sz_size_t vector_length) {
+SZ_HELPER_AUTO vuint8m4_t sz_utf8_classify_newlines_rvv_(sz_u8_t const *text_u8, sz_size_t position,
+                                                         vuint8m4_t bytes_u8m4, vuint8m4_t next_u8m4,
+                                                         vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
     vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
     // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
     vbool2_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x0A, vector_length), 3,
@@ -102,8 +102,8 @@ SZ_INTERNAL vuint8m4_t sz_utf8_classify_newlines_rvv_(sz_u8_t const *text_u8, sz
     return __riscv_vmerge_vxm_u8m4(length_u8m4, 0, is_lf_of_crlf, vector_length);
 }
 
-SZ_INTERNAL vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u8m4, vuint8m4_t next_u8m4,
-                                                         vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
+SZ_HELPER_AUTO vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u8m4, vuint8m4_t next_u8m4,
+                                                            vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
     vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
     // ASCII whitespace: '\t'-'\r' (0x09-0x0D) and ' ' (0x20): length 1.
     vbool2_t is_ascii_ws = __riscv_vmor_mm_b2(
@@ -149,9 +149,9 @@ SZ_INTERNAL vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u8m4, 
 
 /*  Shared window/carry/trusted-lane/peel scaffolding for both delimiter sets. `classify_newlines` selects the
  *  per-lane classifier and the post-loop CRLF straddle fixup; otherwise the two paths are identical. */
-SZ_INTERNAL sz_size_t sz_utf8_iterate_multistep_rvv_(   //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+SZ_HELPER_AUTO sz_size_t sz_utf8_iterate_multistep_rvv_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,  //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed, int classify_newlines) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -201,7 +201,7 @@ SZ_INTERNAL sz_size_t sz_utf8_iterate_multistep_rvv_(   //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_rvv(               //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_rvv(         //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -209,7 +209,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_rvv(               //
                                           1);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_rvv(            //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_rvv(      //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

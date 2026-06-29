@@ -17,7 +17,7 @@ extern "C" {
  *  @brief Branchless ASCII case fold - converts A-Z to a-z.
  *  Uses unsigned subtraction trick: (c - 'A') <= 25 is true only for uppercase letters.
  */
-SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
+SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') <= 25u) * 0x20); }
 
 /**
  *  @brief Folded-rune representation of a byte that does not begin a well-formed codepoint.
@@ -27,7 +27,7 @@ SZ_INTERNAL sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A') 
  *  lone malformed byte 0xFC can only match another malformed 0xFC - never the valid rune U+00FC ('ü'). Two
  *  equal malformed bytes still produce equal tagged runes, preserving byte-for-byte matching.
  */
-SZ_INTERNAL sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
+SZ_HELPER_INLINE sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
 /**  Helper macro for readable assertions - use for SIMD implementation reference */
 #define sz_is_in_range_(x, low, high) ((x) >= (low) && (x) <= (high))
 
@@ -43,7 +43,7 @@ SZ_INTERNAL sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u
  *
  *  Each range check includes an assertion with traditional bounds for SIMD implementation reference.
  */
-SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
+SZ_HELPER_AUTO sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *folded) {
 
     // 1-byte UTF-8 (U+0000-007F): ASCII - only A-Z needs folding
     if (rune <= 0x7F) {
@@ -1295,7 +1295,7 @@ SZ_INTERNAL sz_size_t sz_unicode_fold_codepoint_(sz_rune_t rune, sz_rune_t *fold
  *  @param bytes_consumed Number of bytes read from source.
  *  @param bytes_exported Number of bytes written to destination.
  */
-SZ_INTERNAL void sz_utf8_uncased_fold_upto_(                        //
+SZ_HELPER_AUTO void sz_utf8_uncased_fold_upto_(                     //
     sz_cptr_t source, sz_size_t source_length,                      //
     sz_ptr_t destination, sz_size_t destination_length,             //
     sz_size_t *codepoints_consumed, sz_size_t *codepoints_exported, //
@@ -1359,7 +1359,7 @@ SZ_INTERNAL void sz_utf8_uncased_fold_upto_(                        //
     if (bytes_exported) *bytes_exported = (sz_size_t)(destination_ptr - destination_start);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
 
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;

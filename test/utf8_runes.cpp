@@ -494,7 +494,7 @@ void test_utf8_runes_unit() {
  *  @param unpack_candidate  Candidate streaming chunk decoder (or NULL when the backend has none).
  *  @param inputs            Number of random inputs to fuzz, scaled by the global multiplier.
  */
-static void test_utf8_runes_equivalence(                               //
+static inline void test_utf8_runes_equivalence(                        //
     sz_utf8_count_t count_serial, sz_utf8_count_t count_candidate,     //
     sz_utf8_seek_t find_nth_serial, sz_utf8_seek_t find_nth_candidate, //
     sz_utf8_decode_t unpack_serial, sz_utf8_decode_t unpack_candidate, //

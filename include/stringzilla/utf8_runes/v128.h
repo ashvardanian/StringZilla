@@ -18,7 +18,7 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     // A continuation byte satisfies `(byte & 0xC0) == 0x80`, i.e. it lies in `[0x80, 0xBF]`, which as a
     // SIGNED int8 is `[-128, -65]` — exactly the values strictly less than `0xC0` (= -64). So a single
@@ -60,7 +60,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
 }
 
 /** @brief  Locate the @p n-th code-point start (a non-continuation byte) via a per-tile count + nth-set-bit. */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     // A continuation byte is exactly a value `< 0xC0` as a signed int8 (see `sz_utf8_count_v128`), so a single
     // signed compare flags continuation lanes; the code-point starts are the complement.
@@ -84,7 +84,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_
 /*  Decodes UTF-8 into UTF-32 runes. The pure-ASCII prefix (every byte `< 0x80`) widens 16 bytes straight
  *  into 16 u32 runes via zero-extends; the first non-ASCII byte or exhausted capacity defers the remainder
  *  to `sz_utf8_decode_serial`, which owns all multi-byte / malformed / truncation logic. */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_v128(        //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_v128(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {

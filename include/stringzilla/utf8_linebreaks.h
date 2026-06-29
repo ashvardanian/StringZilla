@@ -38,7 +38,7 @@ extern "C" {
  *
  *  @note No zero-length segments are emitted; @p length == 0 returns 0. Line segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_linebreaks(             //
+SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(         //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *line_starts, sz_size_t *line_lengths, //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed);
@@ -48,29 +48,29 @@ SZ_DYNAMIC sz_size_t sz_utf8_linebreaks(             //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_linebreaks */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                              sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                    sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                    sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_linebreaks */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                               sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                               sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                     sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                     sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_linebreaks */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                            sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                  sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_linebreaks */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                               sz_size_t *line_lengths, sz_size_t lines_capacity,
-                                               sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                                     sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                                     sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -85,8 +85,9 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t length,
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
-                                        sz_size_t *line_lengths, sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
+                                            sz_size_t *line_lengths, sz_size_t lines_capacity,
+                                            sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_linebreaks_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL

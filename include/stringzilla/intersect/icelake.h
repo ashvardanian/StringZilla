@@ -43,7 +43,7 @@ extern "C" {
  *  @param values A 256-bit vector holding four 64-bit values [a, b, c, d].
  *  @return Non-zero if at least two of the four values are identical, zero otherwise.
  */
-SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i values) {
+SZ_HELPER_AUTO int sz_u64x4_contains_collisions_haswell_(__m256i values) {
     // Assume `values` stores: [a, b, c, d].
     __m256i cmp1 = _mm256_cmpeq_epi64(values, _mm256_permute4x64_epi64(values, 0xB1)); // 0xB1 produces [b, a, d, c]
     __m256i cmp2 = _mm256_cmpeq_epi64(values, _mm256_permute4x64_epi64(values, 0x4E)); // 0x4E produces [c, d, a, b]
@@ -57,7 +57,7 @@ SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i values) {
     return matches_mask;
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                                //
+SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                          //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {

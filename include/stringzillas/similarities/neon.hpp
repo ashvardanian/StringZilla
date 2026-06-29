@@ -28,6 +28,9 @@ namespace stringzillas {
 #pragma GCC target("+simd")
 #endif
 
+/** @brief Per-lane nonzero test: an all-ones lane where any bit of @p value is set, else all-zeros. */
+SZ_INLINE uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
+
 #pragma region Bit Parallel Myers
 
 /**
@@ -70,9 +73,6 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                         scratch_space_t scratch_space) noexcept {
         return levenshtein_distance_myers<char, sz_cap_serial_k> {}(first, second, result_ref, scratch_space);
     }
-
-    /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
 
     /**
      *  @brief Two independent single-word Myers distances, one per `uint64x2_t` lane (each shorter side <= 64).
@@ -556,9 +556,6 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
 
 #pragma endregion Per Lane Hash match_masks
 
-    /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
-
     /**
      *  @brief Two independent single-word rune Myers distances, one per `uint64x2_t` lane (each shorter side <= 64
      *      runes). The scan is verbatim the byte `distances_2x64_`; only the `Eq` source differs - per text position
@@ -931,9 +928,9 @@ struct substitution_lookup_neon_t {
     uint8x16x4_t byte_to_class_vecs_[4];
     uint8x16x4_t cost_windows_vecs_[16];
 
-    inline substitution_lookup_neon_t() noexcept {}
+    substitution_lookup_neon_t() noexcept {}
 
-    inline void reload_classes(u8_t const *byte_to_class) noexcept {
+    void reload_classes(u8_t const *byte_to_class) noexcept {
         byte_to_class_vecs_[0] = vld1q_u8_x4(byte_to_class + 64 * 0);
         byte_to_class_vecs_[1] = vld1q_u8_x4(byte_to_class + 64 * 1);
         byte_to_class_vecs_[2] = vld1q_u8_x4(byte_to_class + 64 * 2);
@@ -946,7 +943,7 @@ struct substitution_lookup_neon_t {
      *         still returns the original `class_substitution_costs[first][second]` even when the diagonal walker
      *         has swapped the shorter and longer strings (which flips the order of the two class operands).
      */
-    inline void reload_costs(
+    void reload_costs(
         error_cost_t const (&class_substitution_costs)[error_costs_classes_count_k][error_costs_classes_count_k],
         bool transpose) noexcept {
         alignas(16) error_cost_t windows[16 * 64];
@@ -962,7 +959,7 @@ struct substitution_lookup_neon_t {
             cost_windows_vecs_[window] = vld1q_u8_x4((u8_t const *)(windows + window * 64));
     }
 
-    inline uint8x16_t classify16(uint8x16_t text_vec) const noexcept {
+    SZ_INLINE uint8x16_t classify16(uint8x16_t text_vec) const noexcept {
 
         // Map each input byte to its class using the 256-entry `byte_to_class` table. Each `vqtbl4q_u8`
         // addresses one 64-byte window and returns zero for indices outside [0, 63], so XOR-ing the index by
@@ -974,7 +971,7 @@ struct substitution_lookup_neon_t {
         return vorrq_u8(vorrq_u8(lookup_0_to_63, lookup_64_to_127), vorrq_u8(lookup_128_to_191, lookup_192_to_255));
     }
 
-    inline int8x16_t lookup16(uint8x16_t first_class_vec, uint8x16_t second_class_vec) const noexcept {
+    SZ_INLINE int8x16_t lookup16(uint8x16_t first_class_vec, uint8x16_t second_class_vec) const noexcept {
 
         // The permute index inside every window is `((first_class & 1) << 5) | second_class`, always below 64.
         uint8x16_t index_vec = vorrq_u8( //

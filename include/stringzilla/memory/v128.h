@@ -25,7 +25,7 @@ extern "C" {
  *  constant-lane switch; the 8..15 case loads the low 8 with `load64_zero` and folds the remaining
  *  bytes in with one constant `i8x16.shuffle`. Other `v128` backends `#include` this header to reuse
  *  these (hash short-string loads, `fill_random` tails, …). */
-SZ_INTERNAL v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
+SZ_HELPER_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
     v128_t result = wasm_u64x2_splat(0);
     switch (remainder) {
     case 1: result = wasm_v128_load8_lane(source_pointer, result, 0); break;
@@ -54,7 +54,7 @@ SZ_INTERNAL v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_s
 }
 
 /** @brief Load exactly `length` (0..16) bytes into a v128; remaining lanes zero; no over-read. */
-SZ_INTERNAL v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
+SZ_HELPER_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t const *source_pointer = (sz_u8_t const *)source;
     if (length >= 16) return wasm_v128_load(source_pointer);
     if (length & 8) {
@@ -65,7 +65,7 @@ SZ_INTERNAL v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
     return sz_load_partial_lo8_v128_(source_pointer, length);
 }
 
-SZ_INTERNAL void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data, sz_size_t remainder) {
+SZ_HELPER_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data, sz_size_t remainder) {
     switch (remainder) {
     case 1: wasm_v128_store8_lane(target_pointer, data, 0); break;
     case 2: wasm_v128_store16_lane(target_pointer, data, 0); break;
@@ -92,7 +92,7 @@ SZ_INTERNAL void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data
 }
 
 /** @brief Store exactly `length` (0..16) bytes from a v128; no over-write past the buffer. */
-SZ_INTERNAL void sz_store_partial_v128_(sz_ptr_t target, v128_t data, sz_size_t length) {
+SZ_HELPER_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t data, sz_size_t length) {
     sz_u8_t *target_pointer = (sz_u8_t *)target;
     if (length >= 16) {
         wasm_v128_store(target_pointer, data);
@@ -106,12 +106,12 @@ SZ_INTERNAL void sz_store_partial_v128_(sz_ptr_t target, v128_t data, sz_size_t 
     else { sz_store_partial_lo8_v128_(target_pointer, data, length); }
 }
 
-SZ_PUBLIC void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 16; target += 16, source += 16, length -= 16) wasm_v128_store(target, wasm_v128_load(source));
     if (length) sz_store_partial_v128_(target, sz_load_partial_v128_(source, length), length);
 }
 
-SZ_PUBLIC void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) {
         // Non-overlapping (or `target` precedes `source`): copy forward.
         sz_copy_v128(target, source, length);
@@ -131,7 +131,7 @@ SZ_PUBLIC void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     v128_t fill_vec = wasm_i8x16_splat((sz_i8_t)value);
     while (length >= 16) {
         wasm_v128_store(target, fill_vec);
@@ -141,7 +141,8 @@ SZ_PUBLIC void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length) sz_store_partial_v128_(target, fill_vec, length);
 }
 
-SZ_PUBLIC void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]) {
 
     // For tiny inputs the SIMD setup isn't worth it. Match the NEON heuristic.
     if (length <= 128) {

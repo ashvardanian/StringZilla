@@ -53,7 +53,7 @@ static sz_u8_t const *const sz_utf8_fold_latin_c6_deltas_rvv_ = sz_utf8_fold_lat
 
 /*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of `sz_ascii_fold_`.
  *  Only `[0x41, 0x5A]` shifts by `+0x20`; every other lane passes through unchanged. */
-SZ_INTERNAL vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
+SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
     vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
                                                   vector_length);
     vuint8m8_t lowered_u8m8 = __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length);
@@ -63,8 +63,8 @@ SZ_INTERNAL vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t
 /*  Largest strip length that does not split a trailing multi-byte sequence across strips. On the final strip
  *  (`vector_length == remaining`) the whole input ends here, so nothing is trimmed; otherwise a last codepoint whose
  *  declared length runs past `vector_length` is excluded and reprocessed in the next strip. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                    sz_size_t remaining) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                       sz_size_t remaining) {
     if (vector_length >= remaining) return vector_length;
     sz_size_t boundary = vector_length;
     while (boundary && (source_ptr[boundary - 1] & 0xC0) == 0x80) --boundary; // back up to the last lead
@@ -86,8 +86,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr, s
  *  indices (which is what pinned the gather-based form to `e8m4`). Sets `*needs_serial` when it stopped on a
  *  non-handled codepoint (vs. merely trimming a trailing incomplete sequence). Returns the number of bytes
  *  folded and written. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                    sz_u8_t *destination_ptr, int *needs_serial) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                       sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
@@ -187,8 +187,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, s
  *  Runs at `e8m8`: the offset table is read from memory, so it no longer has to share a register group with
  *  the indices the way a `vrgather` would, lifting the old `e8m4` ceiling. Same stop-and-serial contract as
  *  `sz_utf8_fold_latin_strip_rvv_`. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                          sz_u8_t *destination_ptr, int *needs_serial) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
@@ -253,8 +253,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_ptr
  *  and 'Σ'-'Ϋ' fold `-0x20` with a CE->CF lead promotion (+1); final sigma 'ς' (CF 82) folds to 'σ' (+1).
  *  Accented uppercase (CE 84-90), the expanding 'ΰ' (CE B0), the CF 8F+ symbols, and any non-CE/CF lead are
  *  stops routed to serial. Same `e8m8` strip / stop-and-serial contract as the other handlers. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                    sz_u8_t *destination_ptr, int *needs_serial) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                       sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -334,8 +334,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, s
  *  D5 90-96 fold `-0x10`, D5 80-8F folds `+0x30` — plus the lead `+1` rewrites D4->D5 (next B1-BF) and
  *  D5->D6 (next 90-96). The 'և' ligature (D6 87, expands), the D4 Cyrillic-Supplement range (next < B1), and
  *  any non-D4/D5/D6 lead are stops routed to serial. Same `e8m8` strip / stop-and-serial contract. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                          sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -409,8 +409,8 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr
  *  uppercase flag is carried one lane to the second-byte rewrite and two lanes to the third-byte offset:
  *  lead E1->E2, second 82/83->B4, third -0x20 (E1 82) or +0x20 (E1 83). Non-Georgian E1 second bytes and
  *  any non-E1 lead are stops routed to serial. Same `e8m8` strip / stop-and-serial contract. */
-SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
-                                                       sz_u8_t *destination_ptr, int *needs_serial) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
+                                                          sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
     vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t carry1 = (vector_length < remaining) ? source_ptr[vector_length] : 0;
@@ -496,7 +496,7 @@ SZ_INTERNAL sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr
  *  (dispatched on the lead byte), and any other script / length-changing fold is handled by the value-exact
  *  serial decode/fold/encode for that one codepoint before re-entering the vector path. These folds are 1:1
  *  in length, so the destination tracks the source for those runs. */
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
     sz_u8_t *destination_ptr = (sz_u8_t *)destination;

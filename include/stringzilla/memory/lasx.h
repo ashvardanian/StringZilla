@@ -23,14 +23,14 @@ extern "C" {
  *  @param offset Byte offset into `lut` at which to start the 16-byte slice.
  *  @return A 256-bit LASX register with the 16-byte slice duplicated into both 128-bit lanes.
  */
-SZ_INTERNAL __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
+SZ_HELPER_AUTO __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
     sz_u8_t lut_pairs[32];
     for (sz_size_t lane_index = 0; lane_index < 16; ++lane_index)
         lut_pairs[lane_index] = lut_pairs[lane_index + 16] = (sz_u8_t)lut[offset + lane_index];
     return __lasx_xvld(lut_pairs, 0);
 }
 
-SZ_PUBLIC void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length <= 32) { sz_fill_serial(target, length, value); }
     else {
         __m256i value_vec = __lasx_xvreplgr2vr_b((char)value);
@@ -44,7 +44,7 @@ SZ_PUBLIC void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     }
 }
 
-SZ_PUBLIC void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (length < 8) {
         while (length--) *(target++) = *(source++);
     }
@@ -86,7 +86,7 @@ SZ_PUBLIC void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (length < 8) {
         if (target < source)
             while (length--) *(target++) = *(source++);
@@ -128,7 +128,8 @@ SZ_PUBLIC void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]) {
 
     // The setup cost only pays off for larger inputs.
     if (length <= 128) {

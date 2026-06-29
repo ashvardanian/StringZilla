@@ -84,10 +84,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_RUNTIME sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_table.equal(a, b, length);
 }
 
-SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_RUNTIME sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     return sz_dispatch_table.order(a, a_length, b, b_length);
 }

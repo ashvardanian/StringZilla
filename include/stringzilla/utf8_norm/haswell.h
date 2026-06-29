@@ -36,7 +36,8 @@ extern "C" {
  *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
  *  @return The vector of flagged lanes (nonzero where a lead byte begins a candidate-non-inert codepoint).
  */
-SZ_INTERNAL __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes, __m256i is_lead, sz_u8_t form_flag) {
+SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes, __m256i is_lead,
+                                                                     sz_u8_t form_flag) {
     __m256i index = _mm256_and_si256(bytes, _mm256_set1_epi8(0x3F));
     __m256i low_nibble = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
@@ -66,7 +67,7 @@ SZ_INTERNAL __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes, _
  *  lead-classify, then the shared scalar verify on any block that survives the gate. The verify carries
  *  the combining class across blocks and reports order / quick-check violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_haswell_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_haswell_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -99,12 +100,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_haswell_(sz_cptr_t text, sz_size_t l
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                         sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                               sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_haswell_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_haswell(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_haswell_);
 }
 

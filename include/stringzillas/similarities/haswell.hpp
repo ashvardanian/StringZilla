@@ -49,16 +49,16 @@ struct class_lookup_haswell_t {
     u256_vec_t row_subs_low_vec_, row_subs_high_vec_;
     u256_vec_t low_nibble_mask_vec_;
 
-    inline class_lookup_haswell_t() noexcept { low_nibble_mask_vec_.ymm = _mm256_set1_epi8(0x0f); }
+    class_lookup_haswell_t() noexcept { low_nibble_mask_vec_.ymm = _mm256_set1_epi8(0x0f); }
 
-    inline void reload_classes(u8_t const *byte_to_class) noexcept {
+    void reload_classes(u8_t const *byte_to_class) noexcept {
         for (int group = 0; group != 16; ++group) {
             __m128i group_xmm = _mm_loadu_si128((__m128i const *)(byte_to_class + group * 16));
             byte_to_class_group_vecs_[group].ymm = _mm256_set_m128i(group_xmm, group_xmm);
         }
     }
 
-    inline void reload_row(error_cost_t const *row_subs) noexcept {
+    void reload_row(error_cost_t const *row_subs) noexcept {
         // The cost row holds only `error_costs_classes_count_k` (32) entries, split into two 16-byte halves
         // broadcast to both lanes so the second-stage `VPSHUFB` works regardless of which lane a class lands in.
         __m128i low_xmm = _mm_loadu_si128((__m128i const *)(row_subs + 0));
@@ -71,7 +71,7 @@ struct class_lookup_haswell_t {
      *  @brief First stage only: map each input byte to its class. Loop-invariant across query rows, so diagonal
      *      walkers pre-classify candidate columns @b once and feed the result into `costs_for_classes32`.
      */
-    inline u256_vec_t classify32(u256_vec_t const &text_vec) const noexcept {
+    SZ_INLINE u256_vec_t classify32(u256_vec_t const &text_vec) const noexcept {
 
         u256_vec_t low_nibbles_vec, high_nibbles_vec, class_vec;
 
@@ -94,7 +94,7 @@ struct class_lookup_haswell_t {
      *  @brief Second stage only: map each precomputed class to its substitution cost using the resident cost row
      *      set by `reload_row`. Cheap enough to re-run per cell while the class stage is hoisted out of the row loop.
      */
-    inline u256_vec_t costs_for_classes32(u256_vec_t const &class_vec) const noexcept {
+    SZ_INLINE u256_vec_t costs_for_classes32(u256_vec_t const &class_vec) const noexcept {
 
         u256_vec_t substituted_vec;
 
@@ -107,7 +107,7 @@ struct class_lookup_haswell_t {
         return substituted_vec;
     }
 
-    inline u256_vec_t lookup32(u256_vec_t const &text_vec) const noexcept {
+    SZ_INLINE u256_vec_t lookup32(u256_vec_t const &text_vec) const noexcept {
         return costs_for_classes32(classify32(text_vec));
     }
 };
@@ -138,9 +138,9 @@ struct substitution_lookup_haswell_t {
     u256_vec_t cost_rows_low_vecs_[error_costs_classes_count_k], cost_rows_high_vecs_[error_costs_classes_count_k];
     u256_vec_t low_nibble_mask_vec_;
 
-    inline substitution_lookup_haswell_t() noexcept { low_nibble_mask_vec_.ymm = _mm256_set1_epi8(0x0f); }
+    substitution_lookup_haswell_t() noexcept { low_nibble_mask_vec_.ymm = _mm256_set1_epi8(0x0f); }
 
-    inline void reload_classes(u8_t const *byte_to_class) noexcept {
+    void reload_classes(u8_t const *byte_to_class) noexcept {
         for (int group = 0; group != 16; ++group) {
             __m128i group_xmm = _mm_loadu_si128((__m128i const *)(byte_to_class + group * 16));
             byte_to_class_group_vecs_[group].ymm = _mm256_set_m128i(group_xmm, group_xmm);
@@ -153,7 +153,7 @@ struct substitution_lookup_haswell_t {
      *         still returns the original `class_substitution_costs[first][second]` even when the diagonal walker
      *         has swapped the shorter and longer strings (which flips the order of the two class operands).
      */
-    inline void reload_costs(
+    void reload_costs(
         error_cost_t const (&class_substitution_costs)[error_costs_classes_count_k][error_costs_classes_count_k],
         bool transpose) noexcept {
         for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class) {
@@ -168,7 +168,7 @@ struct substitution_lookup_haswell_t {
         }
     }
 
-    inline u256_vec_t classify32(u256_vec_t const &text_vec) const noexcept {
+    SZ_INLINE u256_vec_t classify32(u256_vec_t const &text_vec) const noexcept {
 
         u256_vec_t low_nibbles_vec, high_nibbles_vec, class_vec;
 
@@ -186,7 +186,8 @@ struct substitution_lookup_haswell_t {
         return class_vec;
     }
 
-    inline u256_vec_t lookup32(u256_vec_t const &first_class_vec, u256_vec_t const &second_class_vec) const noexcept {
+    SZ_INLINE u256_vec_t lookup32(u256_vec_t const &first_class_vec,
+                                  u256_vec_t const &second_class_vec) const noexcept {
 
         u256_vec_t cost_low_vecs[error_costs_classes_count_k], cost_high_vecs[error_costs_classes_count_k];
         u256_vec_t substituted_vec;

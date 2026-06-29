@@ -27,7 +27,7 @@ extern "C" {
  *  SVE2 has no `svcompact_u8`, so the byte-granular start/length lanes are walked in `svcntw()`-byte sub-blocks:
  *  each gathers its lanes with `svtbl_u8`, widens to 32-bit, `svcompact_u32` packs the matches, and the store is
  *  bounded by `emit_count` so the output never exceeds the remaining capacity. */
-SZ_INTERNAL void sz_utf8_iterate_peel_tile_sve2_(                                  //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_tile_sve2_(                               //
     svbool_t starts, svuint8_t lengths_u8, sz_size_t usable, sz_size_t emit_count, //
     sz_size_t position, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
@@ -68,7 +68,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_tile_sve2_(                               
     }
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_sve2(              //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(        //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -154,7 +154,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_sve2(              //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_sve2(           //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

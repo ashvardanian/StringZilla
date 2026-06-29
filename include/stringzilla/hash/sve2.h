@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();

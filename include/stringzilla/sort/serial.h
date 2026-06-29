@@ -22,7 +22,7 @@ extern "C" {
  *  @brief Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase.
  *         Needs no extra memory and is used as a fallback for small inputs.
  */
-SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
+SZ_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t element_index = 1; element_index < sequence->count; ++element_index) {
         sz_sorted_idx_t current_idx = order[element_index];
@@ -54,7 +54,7 @@ SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
  *         Needs no extra memory and is used as a fallback for small inputs.
  */
 
-SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
+SZ_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
 
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t element_index = 1; element_index < count; ++element_index) {
@@ -102,7 +102,7 @@ SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count
 /**
  *  @brief Sorting network for 2 elements is just a single compare-swap.
  */
-SZ_INTERNAL void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+SZ_HELPER_INLINE void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
     sz_sequence_sorting_network_conditional_swap_(0, 1);
 }
 
@@ -115,7 +115,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_i
  *      Stage 2: (0, 2)
  *      Stage 3: (1, 2)
  */
-SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+SZ_HELPER_INLINE void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     sz_sequence_sorting_network_conditional_swap_(0, 1);
     sz_sequence_sorting_network_conditional_swap_(0, 2);
@@ -137,7 +137,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_i
  *      Stage 3: (1, 3)
  *      Stage 4: (1, 2)
  */
-SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+SZ_HELPER_AUTO void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
@@ -172,7 +172,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_i
  *      Stage 5: (2,4), (3,5)
  *      Stage 6: (1,2), (3,4), (5,6)
  */
-SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+SZ_HELPER_AUTO void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
@@ -224,7 +224,7 @@ SZ_INTERNAL void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_i
  *  insertion sort would be quadratic on large runs of one repeated string (e.g. a very common word),
  *  so the indices - which are distinct integers - get the same log-linear treatment as the pgrams.
  */
-SZ_INTERNAL void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
+SZ_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
     // A small explicit stack of deferred half-open ranges; always recursing into the smaller side and
     // looping on the larger keeps the depth below `log2(count)`, so 2*64 slots cover any 64-bit count.
     sz_size_t stack[2 * 64];
@@ -292,7 +292,7 @@ SZ_INTERNAL void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t c
  *  @param reverse If set, exports the bitwise-complement of each pgram, so that an ascending integer
  *      sort of the complemented keys yields a descending lexicographic order of the strings.
  */
-SZ_INTERNAL void sz_sequence_argsort_serial_export_byte_window_(                //
+SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(             //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -383,7 +383,7 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_byte_window_(                
  *  @param count Number of pgrams in the array.
  *  @return Pointer to the chosen pivot pgram within the array.
  */
-SZ_INTERNAL sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
+SZ_HELPER_AUTO sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
     sz_size_t const middle_offset = count / 2;
     sz_pgram_t const *first_pgram = &pgrams[0];
     sz_pgram_t const *middle_pgram = &pgrams[middle_offset];
@@ -415,7 +415,7 @@ SZ_INTERNAL sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *
  *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
-SZ_INTERNAL void sz_sequence_argsort_serial_3way_partition_(              //
+SZ_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(           //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
@@ -475,7 +475,7 @@ SZ_INTERNAL void sz_sequence_argsort_serial_3way_partition_(              //
  *      Pass 0 to fully sort the range. With the complement trick the wanted elements (smallest, or
  *      largest under reverse) always fall in `[0, top_count)`, so one cut-off serves both directions.
  */
-SZ_PUBLIC void sz_sequence_argsort_serial_quicksort_pgrams_(              //
+SZ_API_COMPTIME void sz_sequence_argsort_serial_quicksort_pgrams_(        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
 
@@ -511,7 +511,7 @@ SZ_PUBLIC void sz_sequence_argsort_serial_quicksort_pgrams_(              //
  *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param reverse Whether to export complemented keys for descending order.
  */
-SZ_PUBLIC void sz_sequence_argsort_serial_sort_byte_windows_(             //
+SZ_API_COMPTIME void sz_sequence_argsort_serial_sort_byte_windows_(       //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
@@ -566,8 +566,8 @@ SZ_PUBLIC void sz_sequence_argsort_serial_sort_byte_windows_(             //
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                 sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                       sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
@@ -611,8 +611,8 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, 
     return sz_success_k;
 }
 
-SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                            sz_sorted_idx_t *order) {
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                  sz_sorted_idx_t *order) {
     sz_unused_(alloc);
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
@@ -651,7 +651,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
  *  @param folded_skip_count Number of leading folded code-points to skip (recursion depth x fields-per-pgram).
  *  @param reverse Whether to export complemented keys for descending order.
  */
-SZ_INTERNAL void sz_sequence_argsort_serial_export_casefold_window_(            //
+SZ_HELPER_AUTO void sz_sequence_argsort_serial_export_casefold_window_(         //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -723,7 +723,7 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_casefold_window_(            
  *      folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups one window
  *      deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly like `start_character`.
  */
-SZ_PUBLIC void sz_sequence_argsort_serial_sort_casefold_windows_(         //
+SZ_API_COMPTIME void sz_sequence_argsort_serial_sort_casefold_windows_(   //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
@@ -762,7 +762,7 @@ SZ_PUBLIC void sz_sequence_argsort_serial_sort_casefold_windows_(         //
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_serial(        //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial(  //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
@@ -805,7 +805,7 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_serial(        //
  *  @param result_indices Output array for merged indices; must hold at least `first_count + second_count` entries.
  *  @see https://en.cppreference.com/w/cpp/algorithm/set_union
  */
-SZ_INTERNAL void sz_pgrams_union_serial_(                                                           //
+SZ_HELPER_AUTO void sz_pgrams_union_serial_(                                                        //
     sz_pgram_t const *first_pgrams, sz_sorted_idx_t const *first_indices, sz_size_t first_count,    //
     sz_pgram_t const *second_pgrams, sz_sorted_idx_t const *second_indices, sz_size_t second_count, //
     sz_pgram_t *result_pgrams, sz_sorted_idx_t *result_indices) {

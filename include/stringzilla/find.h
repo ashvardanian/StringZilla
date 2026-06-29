@@ -40,7 +40,7 @@ extern "C" {
  *  @param needle Needle - single-byte substring to find.
  *  @return Address of the first match. NULL if not found.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /**
  *  @brief Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, haystack_length)` in LibC.
@@ -53,39 +53,39 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length,
  *  @param needle Needle - single-byte substring to find.
  *  @return Address of the last match. NULL if not found.
  */
-SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 /** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 
 #if SZ_USE_WESTMERE
 /** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
 /**
@@ -99,7 +99,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_le
  *  @param needle_length Number of bytes in the needle.
  *  @return Address of the first match.
  */
-SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length);
+SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                 sz_size_t needle_length);
 
 /**
  *  @brief Locates the last matching substring.
@@ -110,49 +111,50 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_c
  *  @param needle_length Number of bytes in the needle.
  *  @return Address of the last match.
  */
-SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length);
+SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                  sz_size_t needle_length);
 
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                   sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                         sz_size_t needle_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length);
 
 #if SZ_USE_WESTMERE
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length);
 #endif
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length);
 #endif
 
 /**
@@ -171,7 +173,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length,
  *  @param set Set of relevant characters.
  *  @return Pointer to the first matching character from @p set.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /**
  *  @brief Finds the last character present from the @p set, present in @p text.
@@ -189,32 +191,32 @@ SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_bytese
  *  @param set Set of relevant characters.
  *  @return Pointer to the last matching character from @p set.
  */
-SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /** @copydoc sz_find_byteset */
-SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_find_byteset */
-SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_find_byteset */
-SZ_PUBLIC sz_cptr_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_find_byteset */
-SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 /*  `sz_utf8_delimiters` (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
@@ -232,8 +234,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, 
  *  @param needle_length Number of bytes in the needle.
  *  @return Pointer to the first matching byte, or NULL if not found.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -248,8 +250,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_from(sz_cptr_t haystack, sz_size_t haystack_len
  *  @param needle_length Number of bytes in the needle.
  *  @return Pointer to the first non-matching byte, or NULL if not found.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                          sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -265,8 +267,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_not_from(sz_cptr_t haystack, sz_size_t haystack
  *  @param needle_length Number of bytes in the needle.
  *  @return Pointer to the last matching byte, or NULL if not found.
  */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                       sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -281,8 +283,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_from(sz_cptr_t haystack, sz_size_t haystack_le
  *  @param needle_length Number of bytes in the needle.
  *  @return Pointer to the last non-matching byte, or NULL if not found.
  */
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                           sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_size_t needle_length) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -313,7 +315,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t haystac
 
 #pragma region Core Functionality
 
-SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_RUNTIME sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 #if SZ_USE_V128RELAXED
     return sz_find_byte_v128relaxed(haystack, haystack_length, needle);
 #elif SZ_USE_V128
@@ -339,7 +341,7 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length,
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_RUNTIME sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 #if SZ_USE_V128RELAXED
     return sz_rfind_byte_v128relaxed(haystack, haystack_length, needle);
 #elif SZ_USE_V128
@@ -365,7 +367,8 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
+SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                 sz_size_t needle_length) {
 #if SZ_USE_V128RELAXED
     return sz_find_v128relaxed(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_V128
@@ -391,8 +394,8 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_c
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                              sz_size_t needle_length) {
+SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                  sz_size_t needle_length) {
 #if SZ_USE_V128RELAXED
     return sz_rfind_v128relaxed(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_V128
@@ -416,7 +419,7 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
 #if SZ_USE_V128RELAXED
     return sz_find_byteset_v128relaxed(text, length, set);
 #elif SZ_USE_V128
@@ -438,7 +441,7 @@ SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_bytese
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
 #if SZ_USE_V128RELAXED
     return sz_rfind_byteset_v128relaxed(text, length, set);
 #elif SZ_USE_V128

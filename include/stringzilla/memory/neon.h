@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // In most cases the `source` and the `target` are not aligned, but we should
     // at least make sure that writes don't touch many cache lines.
     // NEON has an instruction to load and write 64 bytes at once.
@@ -60,7 +60,7 @@ SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // When moving small buffers, using a small buffer on stack as a temporary storage is faster.
 
     if (target < source || target >= source + length) {
@@ -96,7 +96,7 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     uint8x16_t fill_u8x16 = vdupq_n_u8(value); // Broadcast the value across the register
 
     // Tiny buffers (`< 16`) can't use the overlapping trick, so the serial path handles them.
@@ -117,7 +117,8 @@ SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length) vst1q_u8((sz_u8_t *)(target - (16 - length)), fill_u8x16);
 }
 
-SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.

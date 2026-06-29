@@ -33,13 +33,13 @@ extern "C" {
  *  @param vec A 16-byte NEON comparison vector (0xFF where matched, 0x00 otherwise).
  *  @return 64-bit mask with one set bit per matching byte (at bit positions 0, 4, 8, ..., 60).
  */
-SZ_INTERNAL sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec) {
+SZ_HELPER_INLINE sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)needle);
@@ -59,7 +59,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_len
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)needle);
@@ -83,7 +83,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_le
  *  @param set_bottom_vec_u8x16 Bottom half of the 32-byte byteset (bytes 16..31).
  *  @return 64-bit mask with 4-bit-spaced bits set for matching positions.
  */
-SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
+SZ_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
     sz_u128_vec_t haystack_vec, uint8x16_t set_top_vec_u8x16, uint8x16_t set_bottom_vec_u8x16) {
 
     // Once we've read the characters in the haystack, we want to
@@ -109,7 +109,7 @@ SZ_PUBLIC sz_u64_t sz_find_byteset_neon_register_( //
  *         to avoid the per-candidate call + length re-dispatch. Loops over 16-byte `vceqq_u8` chunks with
  *         a `vminvq_u8` all-match reduction and closes with one overlapping tail window.
  */
-SZ_INTERNAL sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_HELPER_AUTO sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 16) return sz_equal_serial(a, b, length);
 
     sz_size_t offset = 0;
@@ -127,8 +127,8 @@ SZ_INTERNAL sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t l
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -209,8 +209,8 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, 
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -241,7 +241,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length,
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz(matches) / 4;
-            if (sz_find_verify_neon_(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
+            if (sz_find_verify_neon_(haystack + haystack_length - needle_length - potential_offset, needle,
+                                     needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             sz_assert_((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                        "The bit must be set before we squash it");
@@ -252,7 +253,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length,
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
@@ -267,7 +268,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);

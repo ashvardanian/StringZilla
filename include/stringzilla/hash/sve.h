@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();
     // Base SVE lacks the `svaddwb`/`svaddwt` widening accumulators that the SVE2 sibling uses, but `UDOT`

@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /** @brief Collapses two `uint64x2_t` compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
-SZ_INTERNAL sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
+SZ_HELPER_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
     static sz_u16_t const lane_weights[4] = {1, 2, 4, 8};
     uint16x4_t flags_u16x4 = vmovn_u32(vcombine_u32(vmovn_u64(lower_u64x2), vmovn_u64(upper_u64x2)));
     return (sz_u32_t)vaddv_u16(vand_u16(flags_u16x4, vld1_u16(lane_weights)));
@@ -46,7 +46,7 @@ SZ_INTERNAL sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t
  *         surviving count, so the unwritten tail is overwritten by the next call or lands in the region
  *         slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
  *         "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
-SZ_INTERNAL sz_size_t sz_sort_neon_compact4_(                          //
+SZ_HELPER_INLINE sz_size_t sz_sort_neon_compact4_(                     //
     uint8x16x2_t const keys_u8x16x2, uint8x16x2_t const order_u8x16x2, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
@@ -98,7 +98,7 @@ SZ_INTERNAL sz_size_t sz_sort_neon_compact4_(                          //
  *        the three regions are then copied back contiguously. A single block-major pass left-packs all three
  *        comparison kinds together, so each block is loaded once and the equal mask is derived for free.
  */
-SZ_INTERNAL void sz_sequence_argsort_neon_3way_partition_(                          //
+SZ_HELPER_AUTO void sz_sequence_argsort_neon_3way_partition_(                       //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -220,11 +220,10 @@ SZ_INTERNAL void sz_sequence_argsort_neon_3way_partition_(                      
     *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-SZ_PUBLIC void sz_sequence_argsort_neon_quicksort_pgrams_(sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,
-                                                          sz_pgram_t *temporary_pgrams,
-                                                          sz_sorted_idx_t *temporary_order,
-                                                          sz_size_t const start_in_sequence,
-                                                          sz_size_t const end_in_sequence, sz_size_t const top_count) {
+SZ_API_COMPTIME void sz_sequence_argsort_neon_quicksort_pgrams_(
+    sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
+    sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
+    sz_size_t const top_count) {
     sz_size_t const count = end_in_sequence - start_in_sequence;
     if (count <= 32) { // Below the vectorization break-even, a stable insertion sort wins.
         sz_pgrams_sort_with_insertion(initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
@@ -243,8 +242,8 @@ SZ_PUBLIC void sz_sequence_argsort_neon_quicksort_pgrams_(sz_pgram_t *initial_pg
                                                    last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                          sz_sorted_idx_t *order) {
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                sz_sorted_idx_t *order) {
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
 
     sz_memory_allocator_t global_alloc;
@@ -265,7 +264,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, s
     return sz_success_k;
 }
 
-SZ_PUBLIC void sz_sequence_argsort_neon_sort_byte_windows_(
+SZ_API_COMPTIME void sz_sequence_argsort_neon_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
@@ -305,8 +304,8 @@ SZ_PUBLIC void sz_sequence_argsort_neon_sort_byte_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
     sz_size_t count = sequence->count;
     for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
         order[sequence_index] = sequence_index;
@@ -341,7 +340,7 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
  *      NEON partition - which is where NEON beats the fully-serial uncased path.
  */
-SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
+SZ_API_COMPTIME void sz_sequence_argsort_neon_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -377,7 +376,7 @@ SZ_PUBLIC void sz_sequence_argsort_neon_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_neon(          //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

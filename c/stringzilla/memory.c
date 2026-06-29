@@ -114,26 +114,26 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps) {
 #endif
 }
 
-SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_dispatch_table.copy(target, source, length);
 }
 
-SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_dispatch_table.move(target, source, length);
 }
 
-SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_dispatch_table.fill(target, length, value);
 }
 
-SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
     sz_dispatch_table.lookup(target, length, source, lut);
 }
 
 // Provide overrides for the libc mem* functions
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
 
-// SZ_DYNAMIC can't be use here for MSVC, because MSVC complains about different linkage (C2375), probably due
+// SZ_API_RUNTIME can't be use here for MSVC, because MSVC complains about different linkage (C2375), probably due
 // to to the CRT headers specifying the function as `__declspec(dllimport)`, there might be a combination of
 // defines that works. But for now they will be manually exported using linker flags.
 // Also when building for 32-bit we must add an underscore to the exported function name, because that's
@@ -147,7 +147,7 @@ SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, c
 #endif
 void *__cdecl memcpy(void *target, void const *source, size_t length) {
 #else
-SZ_DYNAMIC void *memcpy(void *target, void const *source, size_t length) {
+SZ_API_RUNTIME void *memcpy(void *target, void const *source, size_t length) {
 #endif
     sz_copy(target, source, length);
     return (void *)target;
@@ -161,7 +161,7 @@ SZ_DYNAMIC void *memcpy(void *target, void const *source, size_t length) {
 #endif
 void *__cdecl memmove(void *target, void const *source, size_t length) {
 #else
-SZ_DYNAMIC void *memmove(void *target, void const *source, size_t length) {
+SZ_API_RUNTIME void *memmove(void *target, void const *source, size_t length) {
 #endif
     sz_move(target, source, length);
     return (void *)target;
@@ -175,7 +175,7 @@ SZ_DYNAMIC void *memmove(void *target, void const *source, size_t length) {
 #endif
 void *__cdecl memset(void *target, int value, size_t length) {
 #else
-SZ_DYNAMIC void *memset(void *target, int value, size_t length) {
+SZ_API_RUNTIME void *memset(void *target, int value, size_t length) {
 #endif
     sz_fill(target, length, value);
     return (void *)target;

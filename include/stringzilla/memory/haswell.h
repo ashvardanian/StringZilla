@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     char value_char = *(char *)&value;
     __m256i value_vec = _mm256_set1_epi8(value_char);
     // The naive implementation of this function is very simple.
@@ -65,7 +65,7 @@ SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value)
     }
 }
 
-SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -169,7 +169,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
 }
 
-SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 
     if (length < 8) {
         if (target < source)
@@ -221,8 +221,8 @@ SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
 }
 
-SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                 char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                       char const lut[sz_at_least_(256)]) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.

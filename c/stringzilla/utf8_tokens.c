@@ -76,22 +76,23 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                      sz_size_t *match_lengths, sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_newlines(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                          sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                          sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_newlines(text, length, match_offsets, match_lengths, matches_capacity,
                                            bytes_consumed);
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                         sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                         sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                             sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                             sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_whitespaces(text, length, match_offsets, match_lengths, matches_capacity,
                                               bytes_consumed);
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
-                                        sz_size_t *match_lengths, sz_size_t matches_capacity,
-                                        sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                            sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                            sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_delimiters(text, length, match_offsets, match_lengths, matches_capacity,
                                              bytes_consumed);
 }

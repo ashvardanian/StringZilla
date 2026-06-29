@@ -30,7 +30,7 @@ extern "C" {
 /** @brief  Software `_pext_u64`: gather the bits of @p value selected by @p selector, packed to the low end (bit `j`
  *          of the result = the `j`-th set bit of @p value within @p selector). NEON has no `pext`; the sparse loop
  *          trips once per set @p selector bit (codepoint-dense compaction over the start lanes). Bit-exact with BMI2. */
-SZ_INTERNAL sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selector) {
+SZ_HELPER_AUTO sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     sz_u64_t out_bit = 1;
     while (selector) {
@@ -45,7 +45,7 @@ SZ_INTERNAL sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selec
 /** @brief  Software `_pdep_u64`: scatter the low bits of @p value into the positions set in @p selector (the `j`-th
  *          set bit of @p selector receives bit `j` of @p value). NEON has no `pdep`; the sparse loop trips once per
  *          set @p selector bit (the dense-boundary scatter back onto codepoint-start lanes). Bit-exact with BMI2. */
-SZ_INTERNAL sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
+SZ_HELPER_AUTO sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     while (selector) {
         sz_u64_t const low = selector & (~selector + 1); // lowest set bit of `selector`
@@ -71,7 +71,7 @@ SZ_INTERNAL sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selec
 
 /** @brief  Expand a 16-bit lane mask into a `uint8x16_t` select vector (byte `i` = 0xFF when bit `i` is set), the NEON
  *          twin of @ref sz_utf8_byte_mask_from_bits_haswell_ confined to one quarter. */
-SZ_INTERNAL uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
+SZ_HELPER_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
     static sz_u8_t const byte_router_lanes[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
     static sz_u8_t const bit_select_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const broadcast = vreinterpretq_u8_u16(vdupq_n_u16((sz_u16_t)bits));
@@ -90,7 +90,7 @@ SZ_INTERNAL uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits
  *          makes those missing continuations read as zero, exactly like serial's blind decode (`text[start+k]` past the
  *          input reads 0). Lanes that are neither a 2- nor a 3-byte lead keep `low = raw`, `high = 0`; the classifier
  *          re-seats raw / 4-byte lanes anyway. */
-SZ_INTERNAL void sz_utf8_sentence_break_bmp_highlow_neon_( //
+SZ_HELPER_AUTO void sz_utf8_sentence_break_bmp_highlow_neon_( //
     uint8x16_t raw, uint8x16_t next1, uint8x16_t next2, sz_u64_t two_bits, sz_u64_t three_bits, uint8x16_t *out_high,
     uint8x16_t *out_low) {
     uint8x16_t const low_two_bits = vdupq_n_u8(0x03);
@@ -119,7 +119,7 @@ SZ_INTERNAL void sz_utf8_sentence_break_bmp_highlow_neon_( //
  *          register-resident 3-stage `vqtbl` nibble cascade, the NEON twin of @ref sz_utf8_sentence_break_bmp_class_haswell_.
  *          Gather-free; bit-exact with `sz_rune_sentence_break_property` over the whole BMP. Operates on one quarter;
  *          the caller iterates the four quarters. */
-SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high, uint8x16_t low) {
+SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const high_high = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
     uint8x16_t const high_low = vandq_u8(high, low_nibble_mask);
@@ -151,7 +151,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high, u
  *          cascade), the NEON twin of @ref sz_utf8_sentence_break_astral_class_haswell_. Per-lane bytes:
  *          @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
  *          Gather-free; bit-exact with `sz_rune_sentence_break_property` over all astral. Operates on one quarter. */
-SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
+SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const n4 = vandq_u8(plane, low_nibble_mask);
     uint8x16_t const n3 = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
@@ -189,7 +189,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plan
  *          reconstructs them. BMP lanes go through the BMP cascade; 4-byte lanes are routed by reconstructed plane
  *          through the astral cascade. The class on non-codepoint-start lanes is irrelevant (the dense compaction only
  *          reads start lanes), so those lanes are never selected. */
-SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
+SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
     uint8x16_t window_high, uint8x16_t window_low, uint8x16_t raw, uint8x16_t next1, uint8x16_t next2, uint8x16_t next3,
     sz_u64_t four_byte_bits) {
     uint8x16_t const low_two_bits = vdupq_n_u8(0x03);
@@ -247,8 +247,8 @@ SZ_INTERNAL uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
 /** @brief  Build the per-class membership frame from the dense class byte stream with NEON compares: each class is one
  *          `vceqq_u8` per quarter OR-combined to a u64, the NEON twin of @ref sz_utf8_sentence_break_frame_haswell_ (no
  *          scalar pass). The dense stream is at most 64 lanes, held as four `uint8x16_t` quarters. */
-SZ_INTERNAL sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(sz_u8_t const *dense_classes,
-                                                                              sz_u64_t valid) {
+SZ_HELPER_AUTO sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(sz_u8_t const *dense_classes,
+                                                                                 sz_u64_t valid) {
     uint8x16_t dense[4];
     dense[0] = vld1q_u8(dense_classes + 0);
     dense[1] = vld1q_u8(dense_classes + 16);
@@ -265,7 +265,7 @@ SZ_INTERNAL sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(sz
 }
 
 /** @brief  Run the portable rule engine over a dense class stream, building the frame with NEON compares first. */
-SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_neon_( //
+SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_neon_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t const frame = sz_utf8_sentence_break_frame_neon_(dense_classes, valid);
@@ -275,8 +275,8 @@ SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_de
 /** @brief  Largest byte prefix of the window whose codepoints are all fully loaded — the NEON twin of
  *          @ref sz_utf8_sentence_break_complete_limit_haswell_ over the NEON window struct. Never below 1 when the
  *          window is non-empty. */
-SZ_INTERNAL sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
-                                                                  sz_u8_t const *bytes_after, sz_bool_t more_text) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
+                                                                     sz_u8_t const *bytes_after, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -307,7 +307,7 @@ SZ_INTERNAL sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_w
  *          front-end feeds the shared portable rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense
  *          breaks are scattered back to byte lanes.
  */
-SZ_PUBLIC sz_size_t sz_utf8_sentences_neon(                  //
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {

@@ -28,7 +28,7 @@ extern "C" {
  *  which disagree on malformed input, so only well-formed buffers may take the table path. Pure ASCII is
  *  trivially well-formed and detected with a single `vfirst` "any byte >= 0x80" scan (folding in the
  *  always-malformed 0xF8..0xFF reject); a non-ASCII buffer then takes one linear framing walk. */
-SZ_INTERNAL int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t length) {
+SZ_HELPER_AUTO int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t offset = 0;
     int has_non_ascii = 0;
@@ -60,7 +60,7 @@ SZ_INTERNAL int sz_utf8_word_break_is_well_formed_rvv_(sz_cptr_t text, sz_size_t
 }
 
 /** @brief Local word-break decision: 1 (break), 0 (no break), or -1 (stateful rule — consult serial). */
-SZ_INTERNAL int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t after_raw, sz_u8_t after_prop) {
+SZ_HELPER_AUTO int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_t after_raw, sz_u8_t after_prop) {
     // WB3: CR x LF
     if (prev_prop == sz_utf8_word_break_cr_k && after_raw == sz_utf8_word_break_lf_k) return 0;
     // WB3a: break after Newline/CR/LF
@@ -127,7 +127,7 @@ SZ_INTERNAL int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_u8_
 }
 
 /** @brief Per-codepoint non-ASCII word-break step, reproducing `sz_utf8_is_word_boundary_serial` exactly. */
-SZ_INTERNAL sz_bool_t sz_utf8_word_break_decision_at_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_decision_at_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_u8_t prev_prop = sz_utf8_word_break_previous_property_(text, position);
     sz_size_t after_position = position;
     sz_u8_t after_raw = sz_rune_word_break_property(sz_utf8_next_rune_(text, length, &after_position));
@@ -139,7 +139,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_word_break_decision_at_rvv_(sz_cptr_t text, sz_siz
 /*  All-ASCII window word-break boundary mask. ASCII has no Extend/Format/ZWJ/RI/Hebrew/Katakana, so the
  *  look-around rules reduce to neighbour slides (`vslide1up` for i-1/i-2, `vslide1down` for i+1). Bit `i` is
  *  set when the boundary BEFORE lane `i` is not suppressed, restricted to trusted lanes [2, vl-2]. */
-SZ_INTERNAL vbool2_t sz_utf8_word_break_ascii_boundary_mask_rvv_(vuint8m4_t props_u8m4, sz_size_t vector_length) {
+SZ_HELPER_AUTO vbool2_t sz_utf8_word_break_ascii_boundary_mask_rvv_(vuint8m4_t props_u8m4, sz_size_t vector_length) {
     // Effective neighbour properties via slides (the fill values land outside the trusted lanes).
     vuint8m4_t prev1_u8m4 = __riscv_vslide1up_vx_u8m4(props_u8m4, 0, vector_length);   // lane i-1
     vuint8m4_t prev2_u8m4 = __riscv_vslide1up_vx_u8m4(prev1_u8m4, 0, vector_length);   // lane i-2
@@ -225,7 +225,8 @@ SZ_INTERNAL vbool2_t sz_utf8_word_break_ascii_boundary_mask_rvv_(vuint8m4_t prop
 }
 
 /** @brief Classify an all-ASCII strip's Word_Break properties via one `vluxei8` over the 128-entry table. */
-SZ_INTERNAL vuint8m4_t sz_utf8_word_break_classify_ascii_bytes_rvv_(vuint8m4_t bytes_u8m4, sz_size_t vector_length) {
+SZ_HELPER_INLINE vuint8m4_t sz_utf8_word_break_classify_ascii_bytes_rvv_(vuint8m4_t bytes_u8m4,
+                                                                         sz_size_t vector_length) {
     vuint8m4_t indices_u8m4 = __riscv_vand_vx_u8m4(bytes_u8m4, 0x7F, vector_length);
     return __riscv_vluxei8_v_u8m4(&sz_utf8_word_break_property_ascii_[0], indices_u8m4, vector_length);
 }
@@ -235,7 +236,7 @@ SZ_INTERNAL vuint8m4_t sz_utf8_word_break_classify_ascii_bytes_rvv_(vuint8m4_t b
  *  the compacted indices are reversed (`vrgatherei16`) so emission walks high-to-low, `starts = boundary`,
  *  `lengths = previous - boundary`. In both directions the carried boundary is the last emitted boundary.
  *  Returns the number of boundaries emitted, writes whether the output buffer filled into `*filled`. */
-SZ_INTERNAL sz_size_t sz_utf8_word_break_emit_ascii_rvv_(                                       //
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_emit_ascii_rvv_(                                    //
     vuint8m4_t bytes_u8m4, sz_size_t base, sz_size_t vector_length,                             //
     sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words, sz_size_t words_capacity, //
     sz_size_t *carry, int reverse, int *filled) {
@@ -292,8 +293,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_emit_ascii_rvv_(                       
  *  strip anchored two bytes before the open boundary (`base = position-2`); all-ASCII strips emit in-register
  *  via `sz_utf8_word_break_emit_ascii_rvv_`, any other window takes one scalar codepoint step. The capacity cut
  *  sets `*bytes_consumed = word_start` (a true boundary) so a fresh next call restarts cleanly. */
-SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                         sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t words = 0;
     sz_size_t word_start = 0;                              // Start of the in-progress word (always a true boundary).
@@ -346,9 +348,9 @@ SZ_INTERNAL sz_size_t sz_utf8_words_rvv_(sz_cptr_t text, sz_size_t length, sz_si
 }
 
 /** @brief Common driver: route malformed UTF-8 to serial, otherwise run the vectorized window scan. */
-SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                   sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                   sz_size_t *bytes_consumed) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed) {
     if (length == 0 || words_capacity == 0) {
         if (bytes_consumed) *bytes_consumed = 0;
         return 0;
@@ -358,8 +360,9 @@ SZ_INTERNAL sz_size_t sz_utf8_word_break_scan_rvv_(sz_cptr_t text, sz_size_t len
     return sz_utf8_words_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_words_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts, sz_size_t *word_lengths,
-                                      sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_API_COMPTIME sz_size_t sz_utf8_words_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed) {
     return sz_utf8_word_break_scan_rvv_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 }
 

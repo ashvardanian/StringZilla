@@ -26,7 +26,7 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u256_vec_t haystack_vec, needle_vec;
     needle_vec.ymm = _mm256_set1_epi8(needle[0]);
@@ -41,7 +41,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u256_vec_t haystack_vec, needle_vec;
     needle_vec.ymm = _mm256_set1_epi8(needle[0]);
@@ -56,8 +56,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -94,8 +94,8 @@ SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_lengt
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -134,7 +134,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_leng
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
@@ -239,7 +239,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz
     return sz_find_byteset_serial(text, length, filter);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Mirror of `sz_find_byteset_haswell` scanning from the end: the same transposed Muła nibble-bitset
     // classifier, but each iteration tests the trailing 32-byte window and resolves the highest matching

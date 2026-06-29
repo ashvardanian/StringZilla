@@ -157,8 +157,8 @@ extern "C" {
  *  @return Number of capability strings written to the array.
  *  @sa sz_capabilities_to_string_implementation_, sz_capabilities
  */
-SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t caps, char const **strings,
-                                                                 sz_size_t max_count) {
+SZ_HELPER_AUTO sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t caps, char const **strings,
+                                                                    sz_size_t max_count) {
     // Mapping each flag to its string literal.
     struct {
         sz_capability_t flag;
@@ -204,7 +204,7 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
     return capability_count;
 }
 
-SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
+SZ_HELPER_AUTO sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
     if (!a || !b) return sz_false_k;
     for (; *a && *b; a++, b++)
         if (*a != *b) return sz_false_k;
@@ -216,7 +216,7 @@ SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const 
  *  @param name Capability name, e.g. "serial", "neon", "sve2aes".
  *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
  */
-SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const *name) {
+SZ_HELPER_AUTO sz_capability_t sz_capability_from_string_implementation_(char const *name) {
 
     // CPU + execution model
     if (sz_equal_null_terminated_serial(name, "serial") == sz_true_k) return sz_cap_serial_k;
@@ -254,7 +254,7 @@ SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const
  *  @brief Internal helper function to convert SIMD capabilities to a string.
  *  @sa sz_capabilities_to_string, sz_capabilities
  */
-SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
+SZ_HELPER_AUTO sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
 
     static char buffer[256];
     char *p = buffer;
@@ -282,7 +282,7 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
     return buffer;
 }
 
-SZ_PUBLIC sz_capability_t sz_capabilities_comptime_implementation_(void) {
+SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
     return (sz_capability_t)(                         //
         (sz_cap_neon_k * SZ_USE_NEON) |               //
         (sz_cap_neonaes_k * SZ_USE_NEONAES) |         //
@@ -333,7 +333,7 @@ static void sz_mrs_test_sigill_handler_(int sig) {
  *  @brief Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
+SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
 #if defined(SZ_IS_APPLE_)
@@ -473,7 +473,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 
 #if SZ_IS_64BIT_X86_
 
-SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
+SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
 
 #if SZ_USE_WESTMERE || SZ_USE_GOLDMONT || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
 
@@ -551,7 +551,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
  *  @brief Function to determine the SIMD capabilities of the current 64-bit RISC-V machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_riscv_(void) {
+SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
@@ -608,7 +608,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_riscv_(void) {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
  */
-SZ_PUBLIC sz_capability_t sz_capabilities_runtime_implementation_(void) {
+SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
 #if SZ_IS_64BIT_X86_
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
@@ -624,36 +624,36 @@ SZ_PUBLIC sz_capability_t sz_capabilities_runtime_implementation_(void) {
 
 #if SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC int sz_dynamic_dispatch(void);
-SZ_DYNAMIC int sz_version_major(void);
-SZ_DYNAMIC int sz_version_minor(void);
-SZ_DYNAMIC int sz_version_patch(void);
-SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void);
-SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void);
-SZ_DYNAMIC sz_capability_t sz_capabilities(void);
-SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
-SZ_DYNAMIC void sz_dispatch_table_init(void);
-SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
+SZ_API_RUNTIME int sz_dynamic_dispatch(void);
+SZ_API_RUNTIME int sz_version_major(void);
+SZ_API_RUNTIME int sz_version_minor(void);
+SZ_API_RUNTIME int sz_version_patch(void);
+SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void);
+SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void);
+SZ_API_RUNTIME sz_capability_t sz_capabilities(void);
+SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
+SZ_API_RUNTIME void sz_dispatch_table_init(void);
+SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps);
 
 #else
 
-// These public entry points are `SZ_DYNAMIC` so they export as external symbols when this header is
+// These public entry points are `SZ_API_RUNTIME` so they export as external symbols when this header is
 // compiled into the amalgamation TU with `SZ_EXPORT` (compile-time dispatch as a linkable library);
-// for plain header-only inclusion `SZ_DYNAMIC` is `inline static`, same as the rest of the API.
-SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 0; }
-SZ_DYNAMIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_DYNAMIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_DYNAMIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
-SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
-SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
+// for plain header-only inclusion `SZ_API_RUNTIME` is `inline static`, same as the rest of the API.
+SZ_API_RUNTIME int sz_dynamic_dispatch(void) { return 0; }
+SZ_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
+SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
+SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
-SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
-SZ_DYNAMIC void sz_dispatch_table_init(void) {}
-SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
+SZ_API_RUNTIME void sz_dispatch_table_init(void) {}
+SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
 
 #endif
 

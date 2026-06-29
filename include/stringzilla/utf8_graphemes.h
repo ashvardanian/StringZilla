@@ -34,7 +34,7 @@ extern "C" {
  *
  *  @note No zero-length clusters are emitted; @p length == 0 returns 0.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_graphemes(                    //
+SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(                //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed);
@@ -44,29 +44,29 @@ SZ_DYNAMIC sz_size_t sz_utf8_graphemes(                    //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_graphemes */
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                             sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                             sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                                   sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                                   sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_graphemes */
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                              sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                                    sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                                    sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_graphemes */
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_neon(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                           sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                           sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_neon(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                                 sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                                 sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_graphemes */
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                              sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                                    sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                                    sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -81,9 +81,9 @@ SZ_PUBLIC sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t length, 
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                       sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                       sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                           sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                           sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_graphemes_icelake(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL

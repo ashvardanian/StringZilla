@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     __m512i value_vec = _mm512_set1_epi8(value);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores".
@@ -52,7 +52,7 @@ SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value)
     }
 }
 
-SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -133,7 +133,7 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
 }
 
-SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target == source) return; // Don't be silly, don't move the data if it's already there.
 
     // On very short buffers, that are one cache line in width or less, we don't need any loops.

@@ -452,7 +452,7 @@ static sz_align_(64) sz_u8_t const sz_utf8_delimiter_astral_bitmaps_columns_[204
  *  @brief Branch-free membership test: is @p codepoint a delimiter?
  *  @return 1 if the codepoint is a delimiter, 0 otherwise (out-of-range codepoints are non-members).
  */
-SZ_INTERNAL int sz_rune_is_delimiter_(sz_rune_t codepoint) {
+SZ_HELPER_AUTO int sz_rune_is_delimiter_(sz_rune_t codepoint) {
     sz_u8_t const low = (sz_u8_t)(codepoint & 0xFF);
     if (codepoint < 0x10000u) {
         sz_u8_t const block_id = sz_utf8_delimiter_bmp_block_[(sz_size_t)(codepoint >> 8)];

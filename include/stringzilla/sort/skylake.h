@@ -46,7 +46,7 @@ extern "C" {
  *  @param first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                       //
+SZ_HELPER_AUTO void sz_sequence_argsort_skylake_3way_partition_(                    //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -139,7 +139,7 @@ SZ_INTERNAL void sz_sequence_argsort_skylake_3way_partition_(                   
  *  @param start_in_sequence First index (inclusive) of the range to sort.
  *  @param end_in_sequence One-past-the-last index of the range to sort.
  */
-SZ_PUBLIC void sz_sequence_argsort_skylake_quicksort_pgrams_(       //
+SZ_API_COMPTIME void sz_sequence_argsort_skylake_quicksort_pgrams_( //
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
     sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
@@ -173,8 +173,8 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_quicksort_pgrams_(       //
             last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_sorted_idx_t *order) {
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                   sz_sorted_idx_t *order) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
@@ -216,7 +216,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
  *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param reverse Whether to export complemented keys for descending order.
  */
-SZ_PUBLIC void sz_sequence_argsort_skylake_sort_byte_windows_(                  //
+SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_byte_windows_(            //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,       //
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, //
@@ -270,8 +270,9 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_sort_byte_windows_(                  
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                        sz_sorted_idx_t *order, sz_size_t top_count,
+                                                        sz_bool_t reverse) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     sz_size_t count = sequence->count;
@@ -313,7 +314,7 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
  *      stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with the
  *      AVX-512 partition - which is where Skylake beats the fully-serial uncased path.
  */
-SZ_PUBLIC void sz_sequence_argsort_skylake_sort_casefold_windows_(
+SZ_API_COMPTIME void sz_sequence_argsort_skylake_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -349,7 +350,7 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_sort_casefold_windows_(
     }
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_skylake(       //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_skylake( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 

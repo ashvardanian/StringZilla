@@ -41,7 +41,7 @@ extern "C" {
  *  uses a 16-byte all-ASCII gate plus a `vec_perm` lead-classify; the cold per-codepoint verify carries the
  *  combining class across chunks and reports order or quick-check violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -95,12 +95,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_size_t 
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_powervsx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                          sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_powervsx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                                sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_powervsx_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_powervsx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_powervsx(sz_cptr_t source, sz_size_t length,
+                                                             sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_powervsx_);
 }
 

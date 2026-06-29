@@ -26,7 +26,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -46,7 +46,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_leng
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -69,8 +69,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_len
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                      sz_size_t needle_length) {
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_sve(haystack, haystack_length, needle);
 

@@ -18,10 +18,11 @@ PenaltyBreakAssignment: 50
 # StringZilla-specific macros
 # Visibility/linkage macros that act like storage class specifiers
 StatementAttributeLikeMacros:
-  - SZ_PUBLIC
-  - SZ_INTERNAL
-  - SZ_DYNAMIC
-  - SZ_EXTERNAL
+  - SZ_API_COMPTIME
+  - SZ_API_RUNTIME
+  - SZ_HELPER_AUTO
+  - SZ_HELPER_INLINE
+  - SZ_HELPER_NOINLINE
 
 # Attribute-like macros (clang-format 12+)
 AttributeMacros:

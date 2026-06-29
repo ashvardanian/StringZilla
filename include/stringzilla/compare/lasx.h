@@ -20,7 +20,7 @@ extern "C" {
  *  byte into a per-128-bit-lane 16-bit mask, deposited into word 0 (low lane) and word 4 (high lane).
  *  Recombining them yields the same 32-bit mask AVX2's `_mm256_movemask_epi8` would produce, so the
  *  byte order matches and `ctz`/`clz` index bytes identically to the Haswell backend. */
-SZ_INTERNAL sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
     __m256i collected_u8x32 = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u8x32, 0);
     unsigned int high = __lasx_xvpickve2gr_wu(collected_u8x32, 4);
@@ -31,17 +31,17 @@ SZ_INTERNAL sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
  *  so a single GPR extraction yields the SSE-style 16-bit `_mm_movemask_epi8` value. LSX is the natural fit
  *  for sub-32-byte inputs, where a 256-bit LASX register would be half-empty and a serial byte loop wastes
  *  the wide datapath the Loongson cores expose. */
-SZ_INTERNAL sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
     return (unsigned int)__lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }
 
-SZ_PUBLIC sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     if (length < 8) {
         sz_cptr_t const a_end = a + length;

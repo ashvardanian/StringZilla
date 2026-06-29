@@ -107,7 +107,7 @@ extern "C" {
  *      sz_bytesum_sve, sz_bytesum_sve2, sz_bytesum_v128, sz_bytesum_v128relaxed, sz_bytesum_rvv, sz_bytesum_lasx,
  *      sz_bytesum_powervsx
  */
-SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
+SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Computes the 64-bit unsigned hash of a string similar to @b `std::hash` in C++.
@@ -136,7 +136,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *  @note The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
  *  @sa sz_hash_state_init, sz_hash_state_update, sz_hash_state_digest
  */
-SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /**
  *  @brief Hashes one string under @b many seeds at once, the "multi-seed" hash.
@@ -170,7 +170,7 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake, sz_hash_multiseed_neonaes
  */
-SZ_DYNAMIC void sz_hash_multiseed(                //
+SZ_API_RUNTIME void sz_hash_multiseed(            //
     sz_cptr_t text, sz_size_t length,             //
     sz_u64_t const *seeds, sz_size_t seeds_count, //
     sz_u64_t *hashes);
@@ -209,7 +209,7 @@ SZ_DYNAMIC void sz_hash_multiseed(                //
  *      sz_fill_random_neonaes, sz_fill_random_sve2aes, sz_fill_random_v128, sz_fill_random_rvv, sz_fill_random_lasx,
  *      sz_fill_random_powervsx
  */
-SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /**
  *  @brief The state for incremental construction of a hash.
@@ -256,7 +256,7 @@ typedef struct sz_sha256_state_t {
  *  @param state The state to initialize.
  *  @param seed The 64-bit unsigned seed for the hash.
  */
-SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
 
 /**
  *  @brief Updates the state with new data.
@@ -265,7 +265,7 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
  *  @param text The new data to include in the hash.
  *  @param length The number of bytes in the new data.
  */
-SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Finalizes the immutable state and returns the hash.
@@ -273,14 +273,14 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
  *  @param state The state to fold.
  *  @return The 64-bit hash value.
  */
-SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
+SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
 
 /**
  *  @brief Initializes the state for incremental SHA256 hashing.
  *
  *  @param state The state to initialize.
  */
-SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state);
+SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state);
 
 /**
  *  @brief Updates the SHA256 state with new data.
@@ -289,7 +289,7 @@ SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state);
  *  @param data The new data to hash.
  *  @param length The number of bytes in the new data.
  */
-SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /**
  *  @brief Finalizes the SHA256 state and returns the hash.
@@ -297,203 +297,203 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
  *  @param state The state to finalize.
  *  @param digest Output buffer for the 32-byte (256-bit) hash.
  */
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                        sz_u64_t *hashes);
+SZ_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                              sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *state);
 
 #if SZ_USE_WESTMERE
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                          sz_size_t seeds_count, sz_u64_t *hashes);
+SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state);
 
 #endif
 
 #if SZ_USE_GOLDMONT
 
 /** @copydoc sz_sha256_state_init */
-SZ_PUBLIC void sz_sha256_state_init_goldmont(sz_sha256_state_t *state);
+SZ_API_COMPTIME void sz_sha256_state_init_goldmont(sz_sha256_state_t *state);
 
 /** @copydoc sz_sha256_state_update */
-SZ_PUBLIC void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
 #if SZ_USE_HASWELL
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
 
 #endif
 
 #if SZ_USE_SKYLAKE
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state);
 
 #endif
 
 #if SZ_USE_ICELAKE
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_PUBLIC void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                         sz_u64_t *hashes);
+SZ_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                               sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_icelake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state);
 
 /** @copydoc sz_sha256_state_init */
-SZ_PUBLIC void sz_sha256_state_init_icelake(sz_sha256_state_t *state);
+SZ_API_COMPTIME void sz_sha256_state_init_icelake(sz_sha256_state_t *state);
 
 /** @copydoc sz_sha256_state_update */
-SZ_PUBLIC void sz_sha256_state_update_icelake(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
 #if SZ_USE_NEON
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
 
 #endif
 
 #if SZ_USE_NEONAES
 
 /** @copydoc sz_hash */
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_hash_multiseed */
-SZ_PUBLIC void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                         sz_u64_t *hashes);
+SZ_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                               sz_size_t seeds_count, sz_u64_t *hashes);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state);
 
 #endif
 
 #if SZ_USE_NEONSHA
 
 /** @copydoc sz_sha256_state_init */
-SZ_PUBLIC void sz_sha256_state_init_neonsha(sz_sha256_state_t *state);
+SZ_API_COMPTIME void sz_sha256_state_init_neonsha(sz_sha256_state_t *state);
 
 /** @copydoc sz_sha256_state_update */
-SZ_PUBLIC void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
+SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
 
 /** @copydoc sz_sha256_state_digest */
-SZ_PUBLIC void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
+SZ_API_COMPTIME void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]);
 
 #endif
 
 #if SZ_USE_SVE
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
 
 #endif
 
 #if SZ_USE_SVE2
 
 /** @copydoc sz_bytesum */
-SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
 
 #endif
 
 #if SZ_USE_SVE2AES
 
 /** @copydoc sz_hash */
-SZ_PUBLIC sz_u64_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+SZ_API_COMPTIME sz_u64_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
 /** @copydoc sz_fill_random */
-SZ_PUBLIC void sz_fill_random_sve2aes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_API_COMPTIME void sz_fill_random_sve2aes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
-SZ_PUBLIC void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed);
+SZ_API_COMPTIME void sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed);
 
 /** @copydoc sz_hash_state_update */
-SZ_PUBLIC void sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME void sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hash_state_digest */
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
 
 #endif
 
@@ -505,7 +505,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state);
  *  @brief Compares the state of two running hashes.
  *  @note The current content of the `ins` buffer and its length is ignored.
  */
-SZ_PUBLIC sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
+SZ_API_COMPTIME sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs) {
     // Compare byte-by-byte using sz_equal (safe for packed struct)
     if (!sz_equal((sz_cptr_t)lhs->aes, (sz_cptr_t)rhs->aes, 64)) return sz_false_k;
     if (!sz_equal((sz_cptr_t)lhs->sum, (sz_cptr_t)rhs->sum, 64)) return sz_false_k;
@@ -540,7 +540,7 @@ SZ_PUBLIC sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_stat
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
+SZ_API_RUNTIME sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     return sz_bytesum_v128relaxed(text, length);
 #elif SZ_USE_V128
@@ -568,7 +568,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 #if SZ_USE_V128RELAXED
     return sz_hash_v128relaxed(text, length, seed);
 #elif SZ_USE_V128
@@ -594,9 +594,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 #endif
 }
 
-SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
-                                  sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                  sz_u64_t *hashes) {
+SZ_API_RUNTIME void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             //
+                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                      sz_u64_t *hashes) {
 #if SZ_USE_V128RELAXED
     sz_hash_multiseed_v128relaxed(text, length, seeds, seeds_count, hashes);
 #elif SZ_USE_V128
@@ -612,7 +612,7 @@ SZ_DYNAMIC void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,             
 #endif
 }
 
-SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
 #if SZ_USE_V128RELAXED
     sz_fill_random_v128relaxed(text, length, nonce);
 #elif SZ_USE_V128
@@ -638,7 +638,7 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
 #endif
 }
 
-SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
 #if SZ_USE_V128RELAXED
     sz_hash_state_init_v128relaxed(state, seed);
 #elif SZ_USE_V128
@@ -664,7 +664,7 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
 #endif
 }
 
-SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     sz_hash_state_update_v128relaxed(state, text, length);
 #elif SZ_USE_V128
@@ -690,7 +690,7 @@ SZ_DYNAMIC void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_
 #endif
 }
 
-SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
+SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 #if SZ_USE_V128RELAXED
     return sz_hash_state_digest_v128relaxed(state);
 #elif SZ_USE_V128
@@ -716,7 +716,7 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 #endif
 }
 
-SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
+SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
 #if SZ_USE_V128
     sz_sha256_state_init_v128(state);
 #elif SZ_USE_RVV
@@ -736,7 +736,7 @@ SZ_DYNAMIC void sz_sha256_state_init(sz_sha256_state_t *state) {
 #endif
 }
 
-SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
+SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
 #if SZ_USE_V128
     sz_sha256_state_update_v128(state, data, length);
 #elif SZ_USE_RVV
@@ -756,7 +756,7 @@ SZ_DYNAMIC void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data,
 #endif
 }
 
-SZ_DYNAMIC void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
 #if SZ_USE_V128
     sz_sha256_state_digest_v128(state, digest);
 #elif SZ_USE_RVV

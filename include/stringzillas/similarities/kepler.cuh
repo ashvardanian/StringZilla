@@ -46,7 +46,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,          // ! Unlike CPU, uses `unsigned`
@@ -136,7 +136,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
@@ -243,7 +243,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
         tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,            // ! Unlike CPU, uses `unsigned`
@@ -351,7 +351,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
         tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`

@@ -6,7 +6,7 @@
  *
  *  This translation unit owns only the cross-cutting glue: the shared `sz_dispatch_table`
  *  definition, its one-time initialization, and the version & capabilities exports. The
- *  per-domain backends and `SZ_DYNAMIC` wrappers live in the sibling `compare.c`, `memory.c`,
+ *  per-domain backends and `SZ_API_RUNTIME` wrappers live in the sibling `compare.c`, `memory.c`,
  *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`, `utf8_tokens.c`,
  *  `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`,
  *  and `utf8_uncased.c`.
@@ -54,12 +54,12 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
  *  @brief Initializes a global static "virtual table" of supported backends
  *         Run it just once to avoid unnecessary `if`-s.
  */
-SZ_DYNAMIC void sz_dispatch_table_init(void) {
+SZ_API_RUNTIME void sz_dispatch_table_init(void) {
     sz_capability_t caps = sz_capabilities();
     sz_dispatch_table_update_implementation_(caps);
 }
 
-SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_dispatch_table_update_implementation_(caps); }
+SZ_API_RUNTIME void sz_dispatch_table_update(sz_capability_t caps) { sz_dispatch_table_update_implementation_(caps); }
 
 #if defined(_MSC_VER)
 /*
@@ -101,15 +101,15 @@ BOOL WINAPI _DllMainCRTStartup(HINSTANCE instance_handle, DWORD reason, LPVOID r
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
 
-SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 1; }
-SZ_DYNAMIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-SZ_DYNAMIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-SZ_DYNAMIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
-SZ_DYNAMIC sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
-SZ_DYNAMIC sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
-SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
+SZ_API_RUNTIME int sz_dynamic_dispatch(void) { return 1; }
+SZ_API_RUNTIME int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_API_RUNTIME int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_API_RUNTIME int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_API_RUNTIME sz_capability_t sz_capabilities_comptime(void) { return sz_capabilities_comptime_implementation_(); }
+SZ_API_RUNTIME sz_capability_t sz_capabilities_runtime(void) { return sz_capabilities_runtime_implementation_(); }
+SZ_API_RUNTIME sz_capability_t sz_capabilities(void) {
     return (sz_capability_t)(sz_capabilities_comptime_implementation_() & sz_capabilities_runtime_implementation_());
 }
-SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+SZ_API_RUNTIME sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
