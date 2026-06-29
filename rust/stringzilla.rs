@@ -1805,6 +1805,7 @@ where
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
+#[cfg(feature = "std")]
 fn replace_all_with_finder<F, R>(
     buffer: &mut Vec<u8>,
     needle_length: usize,
@@ -1932,6 +1933,7 @@ where
 /// - longer replacements count matches once, resize once, and rewrite from the back.
 ///
 /// Returns the number of replacements performed.
+#[cfg(feature = "std")]
 pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
     replace_all_with_finder(
         buffer,
@@ -1958,6 +1960,7 @@ pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) 
 ///
 /// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
 /// left untouched. Returns the number of replacements performed.
+#[cfg(feature = "std")]
 pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
     if byteset.bits.iter().all(|&b| b == 0) {
         return Ok(0);
