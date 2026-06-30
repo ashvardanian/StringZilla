@@ -12,6 +12,11 @@ import stringzilla as sz
 
 from test.helpers import SEED_VALUES, UnicodeDataDownloadError, get_uncased_folding_rules
 
+# Both haystacks below are 6 codepoints long, so a single bound list covers boundary offsets
+# (0, 1, just past the end, and far out of range) for the degenerate-offset sweep.
+UNCASED_DEGENERATE_HAYSTACKS = ["abcabc", "Straße"]
+UNCASED_DEGENERATE_BOUNDS = [-11, -2, 0, 2, 6, 7]
+
 
 def test_unit_utf8_uncased_fold():
     """Test basic case folding functionality."""
@@ -336,20 +341,30 @@ def test_utf8_uncased_search_offsets():
     assert sz.utf8_uncased_search("Café".encode(), "FÉ".encode()) == 2
 
 
-def test_utf8_uncased_search_degenerate_offsets():
+@pytest.mark.parametrize("haystack", UNCASED_DEGENERATE_HAYSTACKS)
+@pytest.mark.parametrize("start", UNCASED_DEGENERATE_BOUNDS)
+def test_utf8_uncased_search_degenerate_offsets(haystack, start):
     """Negative offsets count from the end (str path) and degenerate windows report -1, matching str.find."""
-    for haystack in ("abcabc", "Straße"):
-        bounds = [-(len(haystack) + 5), -2, 0, 2, len(haystack), len(haystack) + 1]
-        for start in bounds:
-            assert sz.utf8_uncased_search(haystack, "", start) >= -1  # never an out-of-range positive
-            for needle in ("bc", "ß"):
-                expected = haystack.find(needle.casefold(), start) if needle.isascii() else None
-                if expected is not None:
-                    assert sz.utf8_uncased_search(haystack, needle.upper(), start) == expected, (haystack, start)
-    # Out-of-range / inverted windows with an empty needle report -1, not a clamped offset
-    assert sz.utf8_uncased_search("hello", "", 6) == -1
-    assert sz.utf8_uncased_search("hello", "", 2, 1) == -1
-    assert sz.utf8_uncased_search(b"hello", b"", 6) == -1
+    assert sz.utf8_uncased_search(haystack, "", start) >= -1  # never an out-of-range positive
+    expected = haystack.find("bc", start)  # "bc" is ASCII, so .casefold() is a no-op
+    assert sz.utf8_uncased_search(haystack, "BC", start) == expected
+
+
+@pytest.mark.parametrize(
+    "haystack, needle, start, end, expected",
+    [
+        ("hello", "", 6, None, -1),
+        ("hello", "", 2, 1, -1),
+        (b"hello", b"", 6, None, -1),
+    ],
+    ids=["str_start_past_end", "str_inverted_window", "bytes_start_past_end"],
+)
+def test_utf8_uncased_search_degenerate_offsets_report_negative_one(haystack, needle, start, end, expected):
+    """Out-of-range / inverted windows with an empty needle report -1, not a clamped offset."""
+    if end is None:
+        assert sz.utf8_uncased_search(haystack, needle, start) == expected
+    else:
+        assert sz.utf8_uncased_search(haystack, needle, start, end) == expected
 
 
 def test_utf8_uncased_search_start_end():

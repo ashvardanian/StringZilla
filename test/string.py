@@ -36,6 +36,26 @@ try:
 except:  # noqa: E722
     pass
 
+# Haystacks spanning the empty, single-character, and multi-character cases, reused by the
+# degenerate-needle tests below so each interesting length only needs to be written once.
+DEGENERATE_HAYSTACKS = ["", "a", "hello"]
+
+# Degenerate [start, end) windows: start > end, far out of range, an inverted negative pair,
+# and a non-empty-but-zero-length window. Shared by every slicing-style degenerate test.
+DEGENERATE_WINDOWS = [(3, 1), (100, 200), (-1, -3), (2, 2)]
+
+# Indices that overflow a signed/unsigned `ssize_t`/`size_t`, used to confirm huge integers
+# raise a catchable Python exception instead of leaking a `SystemError`.
+OUT_OF_SSIZE_T_INDICES = [2**63, 2**64, -(2**63) - 1]
+
+# `maxsplit` values spanning "no limit" (-1), "no splits" (0), a couple of partial splits, and
+# a limit far beyond the number of separators -- reused to check lazy/eager split parity.
+SPLIT_PARITY_MAXSPLITS = [-1, 0, 1, 2, 99]
+
+# Seeds that overflow the C `unsigned long`/`unsigned int` nonce parameters accepted by
+# `sample`/`shuffled`, which must raise a catchable exception rather than abort the interpreter.
+OUT_OF_RANGE_SEEDS = [-1, 2**70]
+
 
 def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
@@ -417,78 +437,213 @@ def test_unit_slicing():
     assert big[:-1] == "abcde"
     assert big[-3:] == "def"
     assert big[:-3] == "abc"
-    # Degenerate windows must mirror `str` (empty, not a crash on a negative length)
-    for window in ((3, 1), (100, 200), (-1, -3), (2, 2)):
-        assert big[window[0] : window[1]] == native[window[0] : window[1]]
 
 
-def test_unit_index_out_of_ssize_t():
+@pytest.mark.parametrize("start, stop", DEGENERATE_WINDOWS)
+def test_unit_slicing_degenerate(start, stop):
+    """Degenerate windows must mirror `str` (empty, not a crash on a negative length)."""
+    native = "abcdef"
+    big = Str(native)
+    assert big[start:stop] == native[start:stop]
+
+
+@pytest.mark.parametrize("container", [Str("hello"), Str("hello").split("l")], ids=["str", "strs"])
+@pytest.mark.parametrize("bad_index", OUT_OF_SSIZE_T_INDICES)
+def test_unit_index_out_of_ssize_t(container, bad_index):
     """A huge integer index raises IndexError/OverflowError, not a leaked SystemError."""
-    big = Str("hello")
-    for bad in (2**63, 2**64, -(2**63) - 1):
-        with pytest.raises((IndexError, OverflowError)):
-            big[bad]
     with pytest.raises((IndexError, OverflowError)):
-        big.split("l")[2**63]
+        container[bad_index]
 
 
-def test_unit_contains_empty_needle():
+@pytest.mark.parametrize("haystack", DEGENERATE_HAYSTACKS)
+def test_unit_contains_empty_needle(haystack):
     """The empty string is contained in every string, including the empty one (CPython parity)."""
-    for haystack in ("", "a", "hello"):
-        assert ("" in Str(haystack)) == ("" in haystack) == True  # noqa: E712
+    assert ("" in Str(haystack)) == ("" in haystack) == True  # noqa: E712
 
 
-def test_unit_startswith_endswith_degenerate():
-    """startswith/endswith mirror CPython across negative/huge/inverted windows and stay binary-safe."""
+STARTSWITH_ENDSWITH_BOUNDS = [-10, -2, 0, 2, 5, 6, 10**7, -(10**7)]
+
+
+@pytest.mark.parametrize("start", STARTSWITH_ENDSWITH_BOUNDS)
+def test_unit_startswith_endswith_degenerate(start):
+    """startswith/endswith mirror CPython across negative/huge/inverted windows."""
     haystack = "hello"
-    bounds = [-(len(haystack) + 5), -2, 0, 2, len(haystack), len(haystack) + 1, 10**7, -(10**7)]
-    for start in bounds:
-        assert sz.startswith(haystack, "lo", start) == haystack.startswith("lo", start), start
-        assert sz.endswith(haystack, "lo", start) == haystack.endswith("lo", start), start
-    # Binary-safe: comparison must not stop at an embedded NUL
-    assert sz.startswith(b"\x00x", b"\x00y") == b"\x00x".startswith(b"\x00y") == False  # noqa: E712
-    assert sz.endswith(b"ab\x00cd", b"\x00ZZ") == b"ab\x00cd".endswith(b"\x00ZZ") == False  # noqa: E712
+    assert sz.startswith(haystack, "lo", start) == haystack.startswith("lo", start)
+    assert sz.endswith(haystack, "lo", start) == haystack.endswith("lo", start)
 
 
-def test_unit_splitlines_parity():
+@pytest.mark.parametrize(
+    "sz_func, native_method, haystack, needle",
+    [
+        (sz.startswith, "startswith", b"\x00x", b"\x00y"),
+        (sz.endswith, "endswith", b"ab\x00cd", b"\x00ZZ"),
+    ],
+    ids=["startswith-embedded_nul", "endswith-embedded_nul"],
+)
+def test_unit_startswith_endswith_binary_safe(sz_func, native_method, haystack, needle):
+    """Comparison must not stop at an embedded NUL byte."""
+    assert sz_func(haystack, needle) == getattr(haystack, native_method)(needle) == False  # noqa: E712
+
+
+SPLITLINES_CASES = ["", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"]
+
+
+@pytest.mark.parametrize("native", SPLITLINES_CASES)
+def test_unit_splitlines_parity(native):
     """splitlines must match CPython: no trailing empty line after a final terminator, [] for ''."""
-    for native in ("", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"):
-        got = [str(s) for s in Str(native).splitlines()]
-        assert got == native.splitlines(), native
+    got = [str(s) for s in Str(native).splitlines()]
+    assert got == native.splitlines()
 
 
-def test_unit_translate_degenerate_window():
+TRANSLATE_DEGENERATE_STARTS = [0, 3, 100, -3, 10**6]
+
+
+@pytest.mark.parametrize("start", TRANSLATE_DEGENERATE_STARTS)
+def test_unit_translate_degenerate_window(start):
     """translate with an out-of-range / inverted / negative window must not read or write out of bounds."""
     table = {"a": "A"}
-    for start in (0, 3, 100, -3, 10**6):
-        mutable = bytearray(b"abcabc")
-        sz.translate(mutable, table, True, start)  # in-place: must not corrupt or crash
-        assert len(mutable) == 6
-        sz.translate("abcdef", table, False, start)  # copy: must not leak heap bytes
+    mutable = bytearray(b"abcabc")
+    sz.translate(mutable, table, True, start)  # in-place: must not corrupt or crash
+    assert len(mutable) == 6
+    sz.translate("abcdef", table, False, start)  # copy: must not leak heap bytes
 
 
-def test_unit_strs_reorder_empty():
+@pytest.mark.parametrize(
+    "operation, expected",
+    [
+        (lambda strs: list(strs.shuffled()), []),
+        (lambda strs: list(strs.sorted()), []),
+        (lambda strs: tuple(strs.argsort()), ()),
+        (lambda strs: list(strs.sample(5)), []),
+    ],
+    ids=["shuffled", "sorted", "argsort", "sample"],
+)
+def test_unit_strs_reorder_empty(operation, expected):
     """sample/shuffled/sorted on an empty Strs return empty, consistent with argsort()."""
     empty = Str("").split(",", skip_empty=True)
     assert len(empty) == 0
-    assert list(empty.shuffled()) == []
-    assert list(empty.sorted()) == []
-    assert tuple(empty.argsort()) == ()
-    assert list(empty.sample(5)) == []
+    assert operation(empty) == expected
+
+
+def test_unit_strs_sample_zero():
+    """sample(0) on a non-empty Strs returns an empty result."""
     assert list(Str("a,b,c").split(",").sample(0)) == []
 
 
-def test_unit_offset_within_not_contained():
-    """offset_within returns -1 (per its docstring) when the slice is not within the text."""
-    assert Str("zzz").offset_within(Str("hello world")) == -1
+@pytest.mark.parametrize(
+    "needle, haystack",
+    [
+        (Str("zzz"), Str("hello world")),
+        (Str(""), Str("hello world")),
+        (Str("hello world"), Str("zzz")),
+    ],
+    ids=["disjoint", "empty_needle_separate_allocation", "haystack_shorter_than_needle"],
+)
+def test_unit_offset_within_not_contained(needle, haystack):
+    """offset_within returns -1 (per its docstring) whenever the needle is not a pointer-derived
+    slice of the haystack, even when its contents match a substring from a separate allocation."""
+    assert needle.offset_within(haystack) == -1
 
 
-def test_unit_write_to_errors_are_catchable():
+@pytest.mark.parametrize(
+    "path, expected_exception",
+    [
+        (os.path.join("no", "such", "dir", "f.bin"), OSError),
+        ("with\x00null", ValueError),
+    ],
+    ids=["missing_directory", "embedded_nul_in_path"],
+)
+def test_unit_write_to_errors_are_catchable(path, expected_exception):
     """A failing write_to raises a catchable exception instead of aborting the interpreter."""
-    with pytest.raises(OSError):
-        Str("payload").write_to(os.path.join("no", "such", "dir", "f.bin"))
-    with pytest.raises(ValueError):
-        Str("payload").write_to("with\x00null")
+    with pytest.raises(expected_exception):
+        Str("payload").write_to(path)
+
+
+@pytest.mark.parametrize("maxsplit", SPLIT_PARITY_MAXSPLITS)
+def test_unit_split_iter_parity(maxsplit):
+    """Lazy `split_iter` must match eager `split` for every maxsplit, including negative
+    (regression guard for the negative-maxsplit fix)."""
+    haystack = Str("a,b,c,d,e")
+    lazy = list(map(str, haystack.split_iter(",", maxsplit)))
+    assert lazy == haystack.split(",", maxsplit)
+
+
+@pytest.mark.parametrize("maxsplit", SPLIT_PARITY_MAXSPLITS)
+def test_unit_rsplit_iter_parity(maxsplit):
+    """`rsplit_iter` yields elements in reverse order relative to `rsplit` (see
+    `test_unit_split_iterators`); reversing the lazy stream must reproduce the eager `rsplit`
+    result for every maxsplit, including negative (regression guard for the negative-maxsplit fix)."""
+    haystack = Str("a,b,c,d,e")
+    lazy_reversed = list(reversed(list(map(str, haystack.rsplit_iter(",", maxsplit)))))
+    assert lazy_reversed == haystack.rsplit(",", maxsplit)
+
+
+@pytest.mark.parametrize("maxsplit", SPLIT_PARITY_MAXSPLITS)
+def test_unit_split_byteset_iter_parity(maxsplit):
+    """Lazy `split_byteset_iter` must match eager `split_byteset` for every maxsplit, including
+    negative (regression guard for the negative-maxsplit fix)."""
+    haystack = Str("a,b;c,d;e")
+    lazy = list(map(str, haystack.split_byteset_iter(",;", maxsplit)))
+    assert lazy == haystack.split_byteset(",;", maxsplit)
+
+
+@pytest.mark.parametrize("maxsplit", SPLIT_PARITY_MAXSPLITS)
+def test_unit_rsplit_byteset_iter_parity(maxsplit):
+    """`rsplit_byteset_iter` yields elements in reverse order relative to `rsplit_byteset`;
+    reversing the lazy stream must reproduce the eager result for every maxsplit, including
+    negative (regression guard for the negative-maxsplit fix)."""
+    haystack = Str("a,b;c,d;e")
+    lazy_reversed = list(reversed(list(map(str, haystack.rsplit_byteset_iter(",;", maxsplit)))))
+    assert lazy_reversed == haystack.rsplit_byteset(",;", maxsplit)
+
+
+@pytest.mark.parametrize("seed_value", OUT_OF_RANGE_SEEDS)
+def test_unit_strs_sample_bad_seed_is_catchable(seed_value):
+    """An out-of-range seed raises a catchable exception instead of leaking a SystemError."""
+    strs = Str("a,b,c").split(",")
+    with pytest.raises((OverflowError, ValueError, TypeError)):
+        strs.sample(2, seed=seed_value)
+
+
+@pytest.mark.parametrize("seed_value", OUT_OF_RANGE_SEEDS)
+def test_unit_strs_shuffled_bad_seed_is_catchable(seed_value):
+    """An out-of-range seed raises a catchable exception instead of leaking a SystemError."""
+    strs = Str("a,b,c").split(",")
+    with pytest.raises((OverflowError, ValueError, TypeError)):
+        strs.shuffled(seed=seed_value)
+
+
+def test_unit_str_memoryview_is_readonly():
+    """Str exposes a read-only buffer; the buffer protocol must mark it non-writable."""
+    assert memoryview(Str("abc")).readonly is True
+
+
+def test_unit_str_reinit_rebinds():
+    """Calling `__init__` again rebinds the object to the new content."""
+    s = Str("abc")
+    s.__init__("xyz")
+    assert str(s) == "xyz"
+
+
+def test_unit_strs_reinit_rebinds():
+    """Calling `__init__` again rebinds a Strs container to the new content."""
+    ss = Str("a,b").split(",")
+    ss.__init__(("p", "q"))
+    assert [str(x) for x in ss] == ["p", "q"]
+
+
+def test_unit_file_reinit_rebinds():
+    """Calling `File.__init__` again (even on the same path) must not corrupt the mapping or raise."""
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        tmpfile.write(b"hello reinit")
+        temp_filename = tmpfile.name
+    try:
+        file = sz.File(temp_filename)
+        file.__init__(temp_filename)
+        file.__init__(temp_filename)
+        assert bytes(sz.Str(file)) == b"hello reinit"
+    finally:
+        os.remove(temp_filename)
 
 
 def test_unit_strs_rich_comparisons():
