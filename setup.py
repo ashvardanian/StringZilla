@@ -570,14 +570,17 @@ STRINGZILLAS_CPU_PROVIDER_STEMS = [
     "levenshtein_icelake",
     "levenshtein_haswell",
     "levenshtein_neon",
+    "levenshtein_rvv",
     "needleman_wunsch_serial",
     "needleman_wunsch_icelake",
     "needleman_wunsch_haswell",
     "needleman_wunsch_neon",
+    "needleman_wunsch_rvv",
     "smith_waterman_serial",
     "smith_waterman_icelake",
     "smith_waterman_haswell",
     "smith_waterman_neon",
+    "smith_waterman_rvv",
 ]
 STRINGZILLAS_CUDA_PROVIDER_STEMS = [
     "levenshtein_cuda",

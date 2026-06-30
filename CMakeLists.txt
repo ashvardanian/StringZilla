@@ -878,14 +878,17 @@ set(STRINGZILLAS_CPU_SOURCES
     c/stringzillas/levenshtein_icelake.cpp
     c/stringzillas/levenshtein_haswell.cpp
     c/stringzillas/levenshtein_neon.cpp
+    c/stringzillas/levenshtein_rvv.cpp
     c/stringzillas/needleman_wunsch_serial.cpp
     c/stringzillas/needleman_wunsch_icelake.cpp
     c/stringzillas/needleman_wunsch_haswell.cpp
     c/stringzillas/needleman_wunsch_neon.cpp
+    c/stringzillas/needleman_wunsch_rvv.cpp
     c/stringzillas/smith_waterman_serial.cpp
     c/stringzillas/smith_waterman_icelake.cpp
     c/stringzillas/smith_waterman_haswell.cpp
     c/stringzillas/smith_waterman_neon.cpp
+    c/stringzillas/smith_waterman_rvv.cpp
 )
 # CUDA translation units are grouped by their architecture floor. The C-API entry units, the base SIMT providers and the
 # Kepler video-SIMD providers run from sm_70, so they live in the "base" group. The Hopper DPX providers

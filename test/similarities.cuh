@@ -1646,6 +1646,84 @@ void test_similarities_cross_product() {
     }
 #endif
 
+#if SZ_USE_RVV
+    // RVV byte Levenshtein 2-lane Myers (multi-cell fills the 2 pair-lanes; uniform >512 hits distances_2xN_large_).
+    {
+        auto rvv_levenshtein = [&]() {
+            return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {unit_uniform, unit_linear};
+        };
+        levenshtein_baselines_t const lev_base {unit_uniform, unit_linear};
+        fuzzy_config_t const nb_small_q {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const nb_small_c {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const nb_long {"ABC", /* batch */ 4, /* min */ 700, /* max */ 700};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), lev_base, nb_small_q, nb_small_c);
+        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), lev_base, nb_long, nb_long);
+
+        // RVV NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (8 lanes), cell-by-cell vs the serial
+        // oracle. Many candidates per query fill the 8 lanes; the symmetric case mirrors the lower triangle.
+        auto rvv_nonunit_levenshtein = [&]() {
+            return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {nonunit_uniform, nonunit_linear};
+        };
+        levenshtein_baselines_t const nonunit_base {nonunit_uniform, nonunit_linear};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_nonunit_levenshtein(), nonunit_base, nb_small_q, nb_small_c);
+        check_symmetric_cell_exact_(rvv_nonunit_levenshtein(), square_set);
+
+        // RVV AFFINE byte Levenshtein: the new `u16` Gotoh E/F candidate-lane batch (8 lanes), cell-by-cell vs the
+        // serial affine oracle. Fills the 8 lanes; the symmetric case mirrors the lower triangle.
+        auto rvv_affine_levenshtein = [&]() {
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k> {nonunit_uniform, nonunit_affine};
+        };
+        levenshtein_baselines_t const affine_base {nonunit_uniform, nonunit_affine};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_affine_levenshtein(), affine_base, nb_small_q, nb_small_c);
+        check_symmetric_cell_exact_(rvv_affine_levenshtein(), square_set);
+    }
+
+    // RVV affine NW/SW candidate-lane at full 8-lane fill, vs the Gotoh baseline (validated on riscv64 under qemu).
+    constexpr affine_gap_costs_t rvv_affine_cost {-4, -1};
+    fuzzy_config_t const rvv_affine_queries {"ABC", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+    fuzzy_config_t const rvv_affine_candidates {"ABC", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {blosum62_matrix,
+                                                                                                  rvv_affine_cost},
+        needleman_wunsch_baselines_t {blosum62_matrix, rvv_affine_cost}, rvv_affine_queries, rvv_affine_candidates);
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {blosum62_matrix,
+                                                                                                rvv_affine_cost},
+        smith_waterman_baselines_t {blosum62_matrix, rvv_affine_cost}, rvv_affine_queries, rvv_affine_candidates);
+    // RVV UTF-8 rune candidate-lane (multi-cell, fills the 8 rune lanes) vs the serial UTF-8 oracle.
+    {
+        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_oracle {};
+        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t q, arrow_strings_view_t c, sz_size_t *out) {
+            strided_rows<sz_size_t> const cell {out, 1, 1, 1};
+            return utf8_oracle(q, c, cell);
+        };
+        fuzzy_config_t const utf8_queries {"ABCD", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_candidates {"ABCD", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+        check_cross_product_cell_exact_<sz_size_t>(
+            levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {}, utf8_baseline, utf8_queries,
+            utf8_candidates);
+    }
+
+    // RVV WIDE tier (4-lane i32 / u32): overflow the i16/u16 narrow tier so cells route to the new wide kernels.
+    {
+        fuzzy_config_t const wide_nw_q {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
+        fuzzy_config_t const wide_nw_c {"ABC", /* batch */ 8, /* min */ 1500, /* max */ 1500};
+        check_cross_product_cell_exact_<sz_ssize_t>(
+            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
+        check_cross_product_cell_exact_<sz_ssize_t>(
+            smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
+        fuzzy_config_t const wide_lev_q {"ABC", /* batch */ 2, /* min */ 350, /* max */ 350};
+        fuzzy_config_t const wide_lev_c {"ABC", /* batch */ 8, /* min */ 350, /* max */ 350};
+        check_cross_product_cell_exact_<sz_size_t>(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k> {wide_uniform, wide_affine},
+            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+    }
+#endif
+
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
     sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);

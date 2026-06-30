@@ -802,6 +802,7 @@ typedef enum sz_capability_t {
     sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
     sz_caps_sh_k = sz_cap_serial_k | sz_cap_haswell_k,  ///< Serial code with Haswell
     sz_caps_sn_k = sz_cap_serial_k | sz_cap_neon_k,     ///< Serial code with NEON
+    sz_caps_sr_k = sz_cap_serial_k | sz_cap_rvv_k,      ///< Serial code with RISC-V Vector
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |

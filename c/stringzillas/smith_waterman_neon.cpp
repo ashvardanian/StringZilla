@@ -15,22 +15,22 @@ namespace fu = ashvardanian::fork_union;
 template status_t //
 smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t,
                      sz_caps_sn_k>::operator()<dummy_executor_t>( //
-    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &,
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, dummy_executor_t &,
     cpu_specs_t const &) const noexcept;
 template status_t //
 smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t,
                      sz_caps_sn_k>::operator()<fu::basic_pool_t>( //
-    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &,
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, fu::basic_pool_t &,
     cpu_specs_t const &) const noexcept;
 template status_t //
 smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t,
                      sz_caps_sn_k>::operator()<dummy_executor_t>( //
-    span<char const>, span<char const>, ssize_t &, scratch_space_t, dummy_executor_t &,
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, dummy_executor_t &,
     cpu_specs_t const &) const noexcept;
 template status_t //
 smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t,
                      sz_caps_sn_k>::operator()<fu::basic_pool_t>( //
-    span<char const>, span<char const>, ssize_t &, scratch_space_t, fu::basic_pool_t &,
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, fu::basic_pool_t &,
     cpu_specs_t const &) const noexcept;
 
 } // namespace stringzillas

@@ -1429,7 +1429,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, linea
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -1657,7 +1657,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, affin
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -1900,7 +1900,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, lin
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2048,7 +2048,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, aff
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2370,7 +2370,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         return status_t::success_k;
     }
 
-    status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
+    status_t operator()(span<char const> const &first, span<char const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space) noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char const> shorter = first_is_shorter ? first : second;
@@ -2474,7 +2474,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
         return at;
     }
 
-    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space) const noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char_t const> shorter = first_is_shorter ? first : second;
@@ -2683,12 +2683,19 @@ struct levenshtein_distance {
      *  @param[in] first The first string.
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     *
+     *  @note `first`/`second` are taken by @b const-reference rather than by value. Clang 23 miscompiles the
+     *      `-O0` `-march=rv64gcv` argument lowering for this 6-argument shape: passing the two 16-byte `span`s by
+     *      value pushes the trailing arguments past the eight integer argument registers, and the resulting
+     *      stack-spill clobbers the `result_ref` reference so the score is written to the wrong address. Passing
+     *      the spans by reference keeps every argument in registers and sidesteps the backend bug; it is a no-op
+     *      on every other target.
      */
     template <typename executor_type_>
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2864,7 +2871,7 @@ struct levenshtein_distance_utf8 {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
+    status_t operator()(span<char const> const &first, span<char const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3036,7 +3043,7 @@ struct needleman_wunsch_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3149,7 +3156,7 @@ struct smith_waterman_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 

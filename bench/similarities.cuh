@@ -50,6 +50,13 @@ using ashvardanian::stringzillas::levenshtein_neon_t;
 using ashvardanian::stringzillas::levenshtein_utf8_neon_t;
 using ashvardanian::stringzillas::needleman_wunsch_neon_t;
 using ashvardanian::stringzillas::smith_waterman_neon_t;
+using ashvardanian::stringzillas::affine_levenshtein_rvv_t;
+using ashvardanian::stringzillas::affine_needleman_wunsch_rvv_t;
+using ashvardanian::stringzillas::affine_smith_waterman_rvv_t;
+using ashvardanian::stringzillas::levenshtein_rvv_t;
+using ashvardanian::stringzillas::levenshtein_utf8_rvv_t;
+using ashvardanian::stringzillas::needleman_wunsch_rvv_t;
+using ashvardanian::stringzillas::smith_waterman_rvv_t;
 
 // StringZillas library symbols provided only by the CUDA backend:
 #if SZ_USE_CUDA
@@ -544,6 +551,35 @@ void bench_levenshtein(environment_t const &env) {
             scramble_accelerated_results(results_utf8_accelerated);
 #endif
 
+#if SZ_USE_RVV
+            bench_unary(
+                env, "levenshtein_rvv_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
+                similarities_callable<levenshtein_rvv_t, fu::basic_pool_t &>(
+                    env, results_linear_accelerated, shape, levenshtein_rvv_t {scheme.uniform, scheme.linear}, pool),
+                callable_no_op_t {},        // preprocessing
+                similarities_equality_t {}) // equality check
+                .log(linear_baseline);
+            scramble_accelerated_results(results_linear_accelerated);
+
+            bench_unary(env, "affine_levenshtein_rvv_"s + scheme.tag + ":" + shape_label, call_affine_baseline,
+                        similarities_callable<affine_levenshtein_rvv_t, fu::basic_pool_t &>(
+                            env, results_affine_accelerated, shape,
+                            affine_levenshtein_rvv_t {scheme.uniform, scheme.affine}, pool),
+                        callable_no_op_t {},        // preprocessing
+                        similarities_equality_t {}) // equality check
+                .log(linear_baseline, affine_baseline);
+            scramble_accelerated_results(results_affine_accelerated);
+
+            bench_unary(
+                env, "levenshtein_utf8_rvv_"s + scheme.tag + ":" + shape_label, call_utf8_baseline,
+                similarities_callable<levenshtein_utf8_rvv_t>(env, results_utf8_accelerated, shape,
+                                                              levenshtein_utf8_rvv_t {scheme.uniform, scheme.linear}),
+                callable_no_op_t {},        // preprocessing
+                similarities_equality_t {}) // equality check
+                .log(utf8_baseline);
+            scramble_accelerated_results(results_utf8_accelerated);
+#endif
+
 #if SZ_USE_CUDA
             bench_unary(env, "levenshtein_cuda_"s + scheme.tag + ":" + shape_label, call_linear_baseline,
                         similarities_callable<levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
@@ -768,6 +804,40 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_smith_waterman_neon:"s + shape_label, call_affine_local_baseline,
                     similarities_callable<affine_smith_waterman_neon_t, fu::basic_pool_t &>(
+                        env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_local_baseline);
+        scramble_accelerated_results(results_affine_local_accelerated);
+#endif
+
+#if SZ_USE_RVV
+        bench_unary(env, "needleman_wunsch_rvv:"s + shape_label, call_linear_global_baseline,
+                    similarities_callable<needleman_wunsch_rvv_t, fu::basic_pool_t &>(
+                        env, results_linear_global_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_global_baseline);
+        scramble_accelerated_results(results_linear_global_accelerated);
+
+        bench_unary(env, "smith_waterman_rvv:"s + shape_label, call_linear_local_baseline,
+                    similarities_callable<smith_waterman_rvv_t, fu::basic_pool_t &>(
+                        env, results_linear_local_accelerated, shape, {blosum62_matrix32, blosum62_linear_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_local_baseline);
+        scramble_accelerated_results(results_linear_local_accelerated);
+
+        bench_unary(env, "affine_needleman_wunsch_rvv:"s + shape_label, call_affine_global_baseline,
+                    similarities_callable<affine_needleman_wunsch_rvv_t, fu::basic_pool_t &>(
+                        env, results_affine_global_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(affine_global_baseline);
+        scramble_accelerated_results(results_affine_global_accelerated);
+
+        bench_unary(env, "affine_smith_waterman_rvv:"s + shape_label, call_affine_local_baseline,
+                    similarities_callable<affine_smith_waterman_rvv_t, fu::basic_pool_t &>(
                         env, results_affine_local_accelerated, shape, {blosum62_matrix32, blosum62_affine_cost}, pool),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
