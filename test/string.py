@@ -417,6 +417,78 @@ def test_unit_slicing():
     assert big[:-1] == "abcde"
     assert big[-3:] == "def"
     assert big[:-3] == "abc"
+    # Degenerate windows must mirror `str` (empty, not a crash on a negative length)
+    for window in ((3, 1), (100, 200), (-1, -3), (2, 2)):
+        assert big[window[0] : window[1]] == native[window[0] : window[1]]
+
+
+def test_unit_index_out_of_ssize_t():
+    """A huge integer index raises IndexError/OverflowError, not a leaked SystemError."""
+    big = Str("hello")
+    for bad in (2**63, 2**64, -(2**63) - 1):
+        with pytest.raises((IndexError, OverflowError)):
+            big[bad]
+    with pytest.raises((IndexError, OverflowError)):
+        big.split("l")[2**63]
+
+
+def test_unit_contains_empty_needle():
+    """The empty string is contained in every string, including the empty one (CPython parity)."""
+    for haystack in ("", "a", "hello"):
+        assert ("" in Str(haystack)) == ("" in haystack) == True  # noqa: E712
+
+
+def test_unit_startswith_endswith_degenerate():
+    """startswith/endswith mirror CPython across negative/huge/inverted windows and stay binary-safe."""
+    haystack = "hello"
+    bounds = [-(len(haystack) + 5), -2, 0, 2, len(haystack), len(haystack) + 1, 10**7, -(10**7)]
+    for start in bounds:
+        assert sz.startswith(haystack, "lo", start) == haystack.startswith("lo", start), start
+        assert sz.endswith(haystack, "lo", start) == haystack.endswith("lo", start), start
+    # Binary-safe: comparison must not stop at an embedded NUL
+    assert sz.startswith(b"\x00x", b"\x00y") == b"\x00x".startswith(b"\x00y") == False  # noqa: E712
+    assert sz.endswith(b"ab\x00cd", b"\x00ZZ") == b"ab\x00cd".endswith(b"\x00ZZ") == False  # noqa: E712
+
+
+def test_unit_splitlines_parity():
+    """splitlines must match CPython: no trailing empty line after a final terminator, [] for ''."""
+    for native in ("", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"):
+        got = [str(s) for s in Str(native).splitlines()]
+        assert got == native.splitlines(), native
+
+
+def test_unit_translate_degenerate_window():
+    """translate with an out-of-range / inverted / negative window must not read or write out of bounds."""
+    table = {"a": "A"}
+    for start in (0, 3, 100, -3, 10**6):
+        mutable = bytearray(b"abcabc")
+        sz.translate(mutable, table, True, start)  # in-place: must not corrupt or crash
+        assert len(mutable) == 6
+        sz.translate("abcdef", table, False, start)  # copy: must not leak heap bytes
+
+
+def test_unit_strs_reorder_empty():
+    """sample/shuffled/sorted on an empty Strs return empty, consistent with argsort()."""
+    empty = Str("").split(",", skip_empty=True)
+    assert len(empty) == 0
+    assert list(empty.shuffled()) == []
+    assert list(empty.sorted()) == []
+    assert tuple(empty.argsort()) == ()
+    assert list(empty.sample(5)) == []
+    assert list(Str("a,b,c").split(",").sample(0)) == []
+
+
+def test_unit_offset_within_not_contained():
+    """offset_within returns -1 (per its docstring) when the slice is not within the text."""
+    assert Str("zzz").offset_within(Str("hello world")) == -1
+
+
+def test_unit_write_to_errors_are_catchable():
+    """A failing write_to raises a catchable exception instead of aborting the interpreter."""
+    with pytest.raises(OSError):
+        Str("payload").write_to(os.path.join("no", "such", "dir", "f.bin"))
+    with pytest.raises(ValueError):
+        Str("payload").write_to("with\x00null")
 
 
 def test_unit_strs_rich_comparisons():

@@ -336,6 +336,22 @@ def test_utf8_uncased_search_offsets():
     assert sz.utf8_uncased_search("Café".encode(), "FÉ".encode()) == 2
 
 
+def test_utf8_uncased_search_degenerate_offsets():
+    """Negative offsets count from the end (str path) and degenerate windows report -1, matching str.find."""
+    for haystack in ("abcabc", "Straße"):
+        bounds = [-(len(haystack) + 5), -2, 0, 2, len(haystack), len(haystack) + 1]
+        for start in bounds:
+            assert sz.utf8_uncased_search(haystack, "", start) >= -1  # never an out-of-range positive
+            for needle in ("bc", "ß"):
+                expected = haystack.find(needle.casefold(), start) if needle.isascii() else None
+                if expected is not None:
+                    assert sz.utf8_uncased_search(haystack, needle.upper(), start) == expected, (haystack, start)
+    # Out-of-range / inverted windows with an empty needle report -1, not a clamped offset
+    assert sz.utf8_uncased_search("hello", "", 6) == -1
+    assert sz.utf8_uncased_search("hello", "", 2, 1) == -1
+    assert sz.utf8_uncased_search(b"hello", b"", 6) == -1
+
+
 def test_utf8_uncased_search_start_end():
     """Test start/end parameters with codepoint and byte offsets."""
     # str: codepoint offsets

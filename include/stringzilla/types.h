@@ -1594,26 +1594,33 @@ SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t
 }
 
 /**
+ *  @brief Clamps signed offsets to a Python-style `[offset, offset + length)` slice and reports whether
+ *         the requested window was non-degenerate. Mirrors CPython's `ADJUST_INDICES`: negative indices
+ *         count from the end, `end` is clamped into the string, and a window with `start > end` (out of
+ *         range or inverted) is "empty" -- exactly when `str.find("")`/`rfind("")` return -1.
+ */
+SZ_HELPER_AUTO sz_bool_t sz_ssize_clamp_interval_checked( //
+    sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
+    sz_ssize_t const signed_length = (sz_ssize_t)length;
+    if (start < 0) start += signed_length;
+    if (end < 0) end += signed_length;
+    if (start < 0) start = 0;
+    if (end < 0) end = 0;
+    if (end > signed_length) end = signed_length;
+    sz_bool_t const window_valid = start <= end ? sz_true_k : sz_false_k;
+    if (start > end) start = end; // Collapse the degenerate window to a usable zero-length slice
+    *normalized_offset = (sz_size_t)start;
+    *normalized_length = (sz_size_t)(end - start);
+    return window_valid;
+}
+
+/**
  *  @brief Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
+ *  @note Thin wrapper over @ref sz_ssize_clamp_interval_checked for callers that ignore window validity.
  */
 SZ_HELPER_AUTO void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
-    // TODO: Remove branches.
-    // Normalize negative indices
-    if (start < 0) start += (sz_ssize_t)length;
-    if (end < 0) end += (sz_ssize_t)length;
-
-    // Clamp indices to a valid range
-    if (start < 0) start = 0;
-    if (end < 0) end = 0;
-    if (start > (sz_ssize_t)length) start = (sz_ssize_t)length;
-    if (end > (sz_ssize_t)length) end = (sz_ssize_t)length;
-
-    // Ensure start <= end
-    if (start > end) start = end;
-
-    *normalized_offset = (sz_size_t)(start);
-    *normalized_length = (sz_size_t)(end - start);
+    sz_ssize_clamp_interval_checked(length, start, end, normalized_offset, normalized_length);
 }
 
 /**

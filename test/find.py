@@ -68,6 +68,76 @@ def test_unit_contains():
     assert "xxx" not in big
 
 
+def test_unit_empty_needle_offset_parity():
+    """Empty-needle find/rfind must match CPython `str` across in-range, out-of-range, and inverted
+    [start, end) windows. Regression guard: returning a clamped offset (instead of -1) for start > len
+    or start > end makes callers scanning with `start = index + 1` loop forever."""
+    for haystack in ("", "a", "hello world"):
+        n = len(haystack)
+        bounds = [-(n + 5), -1, 0, 1, n - 1, n, n + 1, n + 5, 99]
+        for start in bounds:
+            assert sz.find(haystack, "", start) == haystack.find("", start), (haystack, start)
+            assert sz.rfind(haystack, "", start) == haystack.rfind("", start), (haystack, start)
+            for end in bounds:
+                assert sz.find(haystack, "", start, end) == haystack.find("", start, end), (haystack, start, end)
+                assert sz.rfind(haystack, "", start, end) == haystack.rfind("", start, end), (haystack, start, end)
+
+
+def test_unit_empty_needle_uncased_search_degenerate():
+    """`utf8_uncased_search` with an empty needle mirrors `str.find('')` for in-range starts and reports
+    -1 (not a clamped offset) for out-of-range or inverted windows, so `start = index + 1` scans terminate."""
+    for haystack in ("", "abc", "Straße"):
+        n = len(haystack)  # codepoint count
+        bounds = [0, 1, n, n + 1, n + 5, 99]  # non-negative: uncased counts negatives from 0, not the end
+        for start in bounds:
+            assert sz.utf8_uncased_search(haystack, "", start) == haystack.find("", start), (haystack, start)
+            for end in bounds:
+                got = sz.utf8_uncased_search(haystack, "", start, end)
+                assert got == haystack.find("", start, end), (haystack, start, end)
+    # Byte-offset path shares the same interval helper.
+    assert sz.utf8_uncased_search(b"hello", b"", 2) == 2
+    assert sz.utf8_uncased_search(b"hello", b"", 5) == 5
+    assert sz.utf8_uncased_search(b"hello", b"", 6) == -1
+    assert sz.utf8_uncased_search(b"hello", b"", 2, 1) == -1
+
+
+def test_unit_find_byteset_empty_set():
+    """An empty byteset matches nothing for `find_*_of` (-> -1) and everything for `find_*_not_of`
+    (-> first/last in-window index, never `len`). Regression guard: an out-of-bounds index crashed `h[r]`."""
+    haystack = "abc"
+    assert sz.find_first_of(haystack, "") == -1
+    assert sz.find_last_of(haystack, "") == -1
+    assert sz.find_first_not_of(haystack, "") == 0
+    assert sz.find_last_not_of(haystack, "") == 2  # last index, not len
+    # Any returned non-negative index must be safe to subscript
+    for func in (sz.find_first_not_of, sz.find_last_not_of):
+        idx = func(haystack, "")
+        assert idx == -1 or haystack[idx]
+    # Empty/degenerate windows report -1
+    assert sz.find_first_not_of(haystack, "", 0, 0) == -1
+    assert sz.find_last_of(haystack, "", 1, 2) == -1
+
+
+def test_unit_count_empty_needle():
+    """Empty-needle count matches CPython `str.count('')` (len+1 within a valid window, 0 otherwise)."""
+    for haystack in ("", "abc", "hello world"):
+        assert sz.count(haystack, "") == haystack.count("")
+        assert sz.count(haystack, "", 1, 2) == haystack.count("", 1, 2)
+        assert sz.count(haystack, "", 10, 20) == haystack.count("", 10, 20)
+        assert sz.count(haystack, "", -100, -1) == haystack.count("", -100, -1)
+
+
+def test_unit_index_args_none_and_overflow():
+    """`None` start/end act as defaults and out-of-ssize_t ints clamp, matching CPython slicing."""
+    haystack = "banana"
+    assert sz.find(haystack, "a", 0, None) == haystack.find("a", 0, None)
+    assert sz.find(haystack, "a", None) == haystack.find("a", None)
+    assert sz.find(haystack, "a", 2**63) == haystack.find("a", 2**63)
+    assert sz.find(haystack, "a", 0, 2**63) == haystack.find("a", 0, 2**63)
+    assert sz.rfind(haystack, "a", None, None) == haystack.rfind("a", None, None)
+    assert sz.count(haystack, "a", 0, None) == haystack.count("a", 0, None)
+
+
 def test_unit_globals():
     """Validates that the previously unit-tested member methods are also visible as global functions."""
 
@@ -135,7 +205,7 @@ def test_unit_globals():
 
     assert sz.translate("ABC", {"A": "X", "B": "Y", "C": "Z"}) == "XYZ"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
-    assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
+    assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "Y"  # window "ABC"[1:-1] == "B" → "Y"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
     with pytest.raises(TypeError):
         sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1, inplace=True)

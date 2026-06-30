@@ -513,6 +513,22 @@ static Strs *Strs_alloc_(void) {
     return (Strs *)StrsType.tp_alloc(&StrsType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
 }
 
+/**
+ *  @brief  Allocates an empty `Strs` in the fragmented layout. Consolidates the count-zero
+ *          initialization otherwise inlined across slicing, splitting, and reordering paths.
+ *  @return A new empty `Strs`, or `NULL` with a Python exception set on allocation failure.
+ */
+static Strs *strs_make_empty_fragmented_(void) {
+    Strs *result = Strs_alloc_();
+    if (result == NULL) return (Strs *)PyErr_NoMemory();
+    result->layout = STRS_FRAGMENTED;
+    result->data.fragmented.count = 0;
+    result->data.fragmented.spans = NULL;
+    result->data.fragmented.parent = NULL;
+    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+    return result;
+}
+
 #pragma endregion
 
 #pragma region Helpers
@@ -589,6 +605,22 @@ SZ_HELPER_AUTO sz_bool_t sz_py_is_mutable(PyObject *object) {
     }
     // Everything else is optimistically considered mutable
     return sz_true_k;
+}
+
+/**
+ *  @brief  Parses an optional `start`/`end` index argument with CPython slice semantics.
+ *          A `NULL` or `None` object yields @p default_index; an out-of-`ssize_t` value is clamped to
+ *          the representable range (via `PyNumber_AsSsize_t` with a `NULL` exception) instead of raising;
+ *          a non-integer leaves a `TypeError` set.
+ *  @return 1 on success (result written to @p result_out), 0 if a Python exception was set.
+ */
+static int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, Py_ssize_t *result_out) {
+    if (index_obj == NULL || index_obj == Py_None) {
+        *result_out = default_index;
+        return 1;
+    }
+    *result_out = PyNumber_AsSsize_t(index_obj, NULL);
+    return !(*result_out == -1 && PyErr_Occurred());
 }
 
 /**
@@ -1132,7 +1164,11 @@ get_string_at_offset_t str_at_offset_getter(Strs *strs) {
 
 #pragma region Memory Mapping File
 
-static void File_dealloc(File *self) {
+/**
+ *  @brief  Releases the memory mapping and OS handles held by a `File`, leaving it in the blank state
+ *          produced by `File_new`. Shared by `File_dealloc` and the `File_init` re-initialization guard.
+ */
+static void File_release_(File *self) {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     if (self->memory.start) {
         UnmapViewOfFile(self->memory.start);
@@ -1157,6 +1193,10 @@ static void File_dealloc(File *self) {
         self->file_descriptor = 0;
     }
 #endif
+}
+
+static void File_dealloc(File *self) {
+    File_release_(self);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -1182,6 +1222,9 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
     sz_cptr_t path;
     if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
+
+    // Re-initialization: release any mapping/handles from a prior __init__ before opening a new file
+    File_release_(self);
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     DWORD path_attributes = GetFileAttributes(path);
@@ -1241,6 +1284,12 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         return -1;
     }
     sz_size_t file_size = sb.st_size;
+    if (file_size == 0) {
+        // mmap rejects zero-length mappings (EINVAL); expose an empty file as an empty view
+        self->memory.start = NULL;
+        self->memory.length = 0;
+        return 0;
+    }
     void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, self->file_descriptor, 0);
     if (map == MAP_FAILED) {
         close(self->file_descriptor);
@@ -1331,6 +1380,12 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
             return -1;
         }
     }
+
+    // Re-initialization: release any state bound by a prior __init__ before rebinding (mirrors Str_dealloc)
+    if (self->parent) { Py_CLEAR(self->parent); }
+    else if (self->memory.start) { free((void *)self->memory.start); }
+    self->memory.start = NULL;
+    self->memory.length = 0;
 
     // Handle empty string
     if (parent_obj == NULL) {
@@ -1709,7 +1764,10 @@ static PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_
 
     buf.start += start;
     buf.length -= start;
-    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < buf.length) { buf.length = (sz_size_t)(end - start); }
+    if (end != PY_SSIZE_T_MAX) {
+        sz_size_t window_length = end >= start ? (sz_size_t)(end - start) : 0; // Inverted window fills nothing
+        if (window_length < buf.length) buf.length = window_length;
+    }
 
     sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
     if (alphabet_obj) {
@@ -2019,6 +2077,8 @@ static char const doc_like_equal[] =                                            
     "  second (Str or str or bytes): The second string object.\n"                                     //
     "Returns:\n"                                                                                      //
     "  bool: True if the strings are equal, False otherwise.\n"                                       //
+    "Note:\n"                                                                                         //
+    "  Comparison is byte-level: a `str` and a `bytes` with identical bytes compare equal.\n"         //
     "Raises:\n"                                                                                       //
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n" //
     "\n"                                                                                              //
@@ -2076,7 +2136,8 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
         // Sanity checks
         Py_ssize_t start, stop, step;
         if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
-        if (PySlice_AdjustIndices(self->memory.length, &start, &stop, step) < 0) return NULL;
+        // Keep the reported length: for an inverted window (e.g. `s[3:1]`) `stop - start` is negative.
+        Py_ssize_t const slice_length = PySlice_AdjustIndices(self->memory.length, &start, &stop, step);
         if (step != 1) {
             PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
             return NULL;
@@ -2088,14 +2149,18 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
 
         // Set its properties based on the slice
         self_slice->memory.start = self->memory.start + start;
-        self_slice->memory.length = stop - start;
+        self_slice->memory.length = slice_length;
         self_slice->parent = (PyObject *)self; // Set parent to keep it alive
 
         // Increment the reference count of the parent
         Py_INCREF(self);
         return (PyObject *)self_slice;
     }
-    else if (PyLong_Check(key)) { return Str_getitem(self, PyLong_AsSsize_t(key)); }
+    else if (PyLong_Check(key)) {
+        Py_ssize_t index = PyLong_AsSsize_t(key);
+        if (index == -1 && PyErr_Occurred()) return NULL; // Propagate OverflowError instead of leaking it
+        return Str_getitem(self, index);
+    }
     else {
         PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
         return NULL;
@@ -2108,13 +2173,22 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
         return -1;
     }
 
+    // The backing bytes are immutable (str/bytes/mmap), so refuse a writable request instead of
+    // silently handing back a "writable" view over read-only memory.
+    if ((flags & PyBUF_WRITABLE) == PyBUF_WRITABLE) {
+        PyErr_SetString(PyExc_BufferError, "Str is read-only");
+        return -1;
+    }
+
     static Py_ssize_t itemsize[1] = {1};
     view->obj = (PyObject *)self;
     view->buf = self->memory.start;
     view->len = self->memory.length;
     view->readonly = 1;
     view->itemsize = sizeof(char);
-    view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
+    // Only advertise a format string when the consumer asked for one
+    view->format = (flags & PyBUF_FORMAT) ? "c"
+                                          : NULL; // https://docs.python.org/3/library/struct.html#format-characters
     view->ndim = 1;
     view->shape = (Py_ssize_t *)&self->memory.length; // 1-D array, so shape is just a pointer to the length
     view->strides = itemsize;                         // strides in a 1-D array is just the item size
@@ -2144,6 +2218,7 @@ static int Str_in(Str *self, PyObject *needle_obj) {
         return -1;
     }
 
+    if (needle.length == 0) return 1; // CPython: the empty string is a substring of every string
     return sz_find(self->memory.start, self->memory.length, needle.start, needle.length) != NULL;
 }
 
@@ -2337,7 +2412,11 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
  */
 static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
-    if (PyLong_Check(key)) { return Strs_getitem(self, PyLong_AsSsize_t(key)); }
+    if (PyLong_Check(key)) {
+        Py_ssize_t index = PyLong_AsSsize_t(key);
+        if (index == -1 && PyErr_Occurred()) return NULL; // Propagate OverflowError instead of leaking it
+        return Strs_getitem(self, index);
+    }
 
     if (!PySlice_Check(key)) {
         PyErr_SetString(PyExc_TypeError, "Strs indices must be integers or slices");
@@ -2449,6 +2528,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         result->layout = STRS_FRAGMENTED;
         result->data.fragmented.count = result_count;
         result->data.fragmented.parent = self->data.fragmented.parent;
+        Py_XINCREF(result->data.fragmented.parent);
         sz_memory_allocator_init_default(&result->data.fragmented.allocator);
 
         result->data.fragmented.spans = malloc(sizeof(sz_string_view_t) * result_count);
@@ -2459,7 +2539,6 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         }
         sz_copy(result->data.fragmented.spans, self->data.fragmented.spans + start,
                 sizeof(sz_string_view_t) * result_count);
-        Py_INCREF(result->data.fragmented.parent);
         break;
     }
 
@@ -2789,6 +2868,12 @@ static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t 
         return NULL;
     }
 
+    // An embedded NUL would silently truncate the path at `fopen`; reject it like CPython's open()
+    if (sz_find_byte(path.start, path.length, "\0") != NULL) {
+        PyErr_SetString(PyExc_ValueError, "embedded null byte in path");
+        return NULL;
+    }
+
     // There is a chance, the path isn't NULL-terminated, so copy it to a new buffer.
     // Many OSes have fairly low limit for the maximum path length.
     // On Windows its 260, but up to __around__ 32,767 characters are supported in extended API.
@@ -2812,7 +2897,6 @@ static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t 
         PyEval_RestoreThread(gil_state);
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
         free(path_buffer);
-        PyEval_RestoreThread(gil_state);
         return NULL;
     }
 
@@ -2873,10 +2957,10 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssi
         return NULL;
     }
 
-    if (slice.start < text.start || slice.start + slice.length > text.start + text.length) {
-        PyErr_SetString(PyExc_ValueError, "The slice is not within the text bounds");
-        return NULL;
-    }
+    // Pointer-based containment check; intended for actual parent/child slices. Returns -1 (per the
+    // docstring) when the slice does not sit within the text, rather than raising.
+    if (slice.start < text.start || slice.start + slice.length > text.start + text.length)
+        return PyLong_FromSsize_t(-1);
 
     return PyLong_FromSize_t((sz_size_t)(slice.start - text.start));
 }
@@ -2887,8 +2971,8 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssi
  */
 static int Str_find_implementation_( //
     PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count, PyObject *args_names_tuple,
-    sz_find_t finder, sz_bool_t is_reverse, Py_ssize_t *offset_out, sz_string_view_t *haystack_out,
-    sz_string_view_t *needle_out) {
+    sz_find_t finder, sz_bool_t is_reverse, sz_bool_t needle_is_byteset, Py_ssize_t *offset_out,
+    sz_string_view_t *haystack_out, sz_string_view_t *needle_out) {
 
     // Fast path variables
     PyObject *haystack_obj = NULL;
@@ -2966,35 +3050,31 @@ static int Str_find_implementation_( //
         return 0;
     }
 
-    // Validate and convert `start`
-    if (start_obj) {
-        start = PyLong_AsSsize_t(start_obj);
-        if (start == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The start argument must be an integer");
-            return 0;
-        }
+    // Validate and convert `start`/`end` (None → default, out-of-ssize_t → clamped)
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
+        PyErr_SetString(PyExc_TypeError, "The start argument must be an integer");
+        return 0;
     }
-    else { start = 0; }
-
-    // Validate and convert `end`
-    if (end_obj) {
-        end = PyLong_AsSsize_t(end_obj);
-        if (end == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
-            return 0;
-        }
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
+        PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
+        return 0;
     }
-    else { end = PY_SSIZE_T_MAX; }
 
     // Limit the `haystack` range
     sz_size_t normalized_offset, normalized_length;
-    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_bool_t const window_valid = sz_ssize_clamp_interval_checked(haystack.length, start, end, &normalized_offset,
+                                                                   &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
-    // If the needle length is zero, the result is start index in normal order or end index in reverse order
-    if (needle.length == 0) {
-        *offset_out = !is_reverse ? normalized_offset : (normalized_offset + normalized_length);
+    // Empty needle: match CPython `str.find`/`str.rfind`. A forward match sits at the window start, a
+    // reverse match at its end; a degenerate window reports "not found" so that `start = index + 1`
+    // scans terminate instead of looping on a clamped offset. Bytesets fall through to the finder,
+    // which already reports "no member" (`*_of`) or "every member" (`*_not_of`) for an empty set.
+    if (needle.length == 0 && !needle_is_byteset) {
+        *offset_out = window_valid
+                          ? (Py_ssize_t)(is_reverse ? normalized_offset + normalized_length : normalized_offset)
+                          : -1;
         *haystack_out = haystack;
         *needle_out = needle;
         return 1;
@@ -3030,7 +3110,7 @@ static PyObject *Str_like_contains(PyObject *self, PyObject *const *args, Py_ssi
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k, sz_false_k,
                                   &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
@@ -3057,7 +3137,7 @@ static PyObject *Str_like_find(PyObject *self, PyObject *const *args, Py_ssize_t
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k, sz_false_k,
                                   &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -3085,7 +3165,7 @@ static PyObject *Str_like_index(PyObject *self, PyObject *const *args, Py_ssize_
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k, sz_false_k,
                                   &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
@@ -3115,7 +3195,7 @@ static PyObject *Str_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k, sz_false_k,
                                   &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -3143,7 +3223,7 @@ static PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k, sz_false_k,
                                   &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
@@ -3161,7 +3241,7 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
     PyObject *result_tuple;
 
     // Use `Str_find_implementation_` to get the index of the separator
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, finder, is_reverse,
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, finder, is_reverse, sz_false_k,
                                   &separator_index, &text, &separator))
         return NULL;
 
@@ -3175,8 +3255,18 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
     if (separator_index == -1) {
         PyObject *empty_str1 = Str_new(&StrType, Py_None, Py_None);
         PyObject *empty_str2 = Str_new(&StrType, Py_None, Py_None);
+        if (!empty_str1 || !empty_str2) {
+            Py_XDECREF(empty_str1);
+            Py_XDECREF(empty_str2);
+            return NULL;
+        }
 
         result_tuple = PyTuple_New(3);
+        if (!result_tuple) {
+            Py_DECREF(empty_str1);
+            Py_DECREF(empty_str2);
+            return NULL;
+        }
         Py_INCREF(self);
         PyTuple_SET_ITEM(result_tuple, 0, self);
         PyTuple_SET_ITEM(result_tuple, 1, empty_str1);
@@ -3188,6 +3278,12 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
     Str *before = Str_new(&StrType, NULL, NULL);
     Str *middle = Str_new(&StrType, NULL, NULL);
     Str *after = Str_new(&StrType, NULL, NULL);
+    if (!before || !middle || !after) {
+        Py_XDECREF(before);
+        Py_XDECREF(middle);
+        Py_XDECREF(after);
+        return NULL;
+    }
 
     before->parent = self, before->memory.start = text.start, before->memory.length = separator_index;
     middle->parent = self, middle->memory.start = text.start + separator_index,
@@ -3202,6 +3298,12 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
 
     // Build the result tuple
     result_tuple = PyTuple_New(3);
+    if (!result_tuple) {
+        Py_DECREF(before);
+        Py_DECREF(middle);
+        Py_DECREF(after);
+        return NULL;
+    }
     PyTuple_SET_ITEM(result_tuple, 0, before);
     PyTuple_SET_ITEM(result_tuple, 1, middle);
     PyTuple_SET_ITEM(result_tuple, 2, after);
@@ -3340,8 +3442,15 @@ static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_
 
     sz_string_view_t haystack;
     sz_string_view_t needle;
-    Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
-    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : (Py_ssize_t)PY_SSIZE_T_MAX;
+    Py_ssize_t start, end;
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
+        PyErr_SetString(PyExc_TypeError, "The start argument must be an integer");
+        return NULL;
+    }
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
+        PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
+        return NULL;
+    }
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
     if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
@@ -3350,15 +3459,18 @@ static PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_
         return NULL;
     }
 
-    if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
+    if (allowoverlap == -1 && PyErr_Occurred()) return NULL;
 
     sz_size_t normalized_offset, normalized_length;
-    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_bool_t const window_valid = sz_ssize_clamp_interval_checked(haystack.length, start, end, &normalized_offset,
+                                                                   &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
     sz_size_t count = 0;
-    if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
+    // CPython counts the empty needle at every gap: `len + 1` positions within a valid window.
+    if (needle.length == 0) { count = window_valid ? normalized_length + 1 : 0; }
+    else if (haystack.length == 0 || haystack.length < needle.length) { count = 0; }
     else if (allowoverlap) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
@@ -3468,12 +3580,12 @@ static PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_s
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
 
-    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
         PyErr_SetString(PyExc_TypeError, "start must be an integer");
         return NULL;
     }
 
-    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
         PyErr_SetString(PyExc_TypeError, "end must be an integer");
         return NULL;
     }
@@ -3485,13 +3597,14 @@ static PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_s
         return NULL;
     }
 
-    // Apply start and end arguments
-    str.start += start;
-    str.length -= start;
-    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
+    // Clamp [start, end) into the string (handles negative / out-of-range / inverted safely)
+    sz_size_t normalized_offset, normalized_length;
+    sz_ssize_clamp_interval(str.length, start, end, &normalized_offset, &normalized_length);
+    str.start += normalized_offset;
+    str.length = normalized_length;
 
     if (str.length < prefix.length) { Py_RETURN_FALSE; }
-    else if (strncmp(str.start, prefix.start, prefix.length) == 0) { Py_RETURN_TRUE; }
+    else if (sz_equal(str.start, prefix.start, prefix.length)) { Py_RETURN_TRUE; } // Binary-safe, NUL-tolerant
     else { Py_RETURN_FALSE; }
 }
 
@@ -3580,12 +3693,12 @@ static PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssi
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
 
-    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
         PyErr_SetString(PyExc_TypeError, "start must be an integer");
         return NULL;
     }
 
-    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
         PyErr_SetString(PyExc_TypeError, "end must be an integer");
         return NULL;
     }
@@ -3597,13 +3710,14 @@ static PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssi
         return NULL;
     }
 
-    // Apply start and end arguments
-    str.start += start;
-    str.length -= start;
-    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
+    // Clamp [start, end) into the string (handles negative / out-of-range / inverted safely)
+    sz_size_t normalized_offset, normalized_length;
+    sz_ssize_clamp_interval(str.length, start, end, &normalized_offset, &normalized_length);
+    str.start += normalized_offset;
+    str.length = normalized_length;
 
     if (str.length < suffix.length) { Py_RETURN_FALSE; }
-    else if (strncmp(str.start + (str.length - suffix.length), suffix.start, suffix.length) == 0) { Py_RETURN_TRUE; }
+    else if (sz_equal(str.start + (str.length - suffix.length), suffix.start, suffix.length)) { Py_RETURN_TRUE; }
     else { Py_RETURN_FALSE; }
 }
 
@@ -3655,14 +3769,12 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
     }
 
     // Optional start and end arguments
-    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
-
-    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+    Py_ssize_t start, end;
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
         PyErr_SetString(PyExc_TypeError, "start must be an integer");
         return NULL;
     }
-
-    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
         PyErr_SetString(PyExc_TypeError, "end must be an integer");
         return NULL;
     }
@@ -3713,10 +3825,11 @@ static PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ss
         return NULL;
     }
 
-    // Apply start and end arguments
-    str.start += start;
-    str.length -= start;
-    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
+    // Clamp [start, end) into the string (handles negative / out-of-range / inverted safely)
+    sz_size_t normalized_offset, normalized_length;
+    sz_ssize_clamp_interval(str.length, start, end, &normalized_offset, &normalized_length);
+    str.start += normalized_offset;
+    str.length = normalized_length;
 
     // Perform the translation using the look-up table
     if (is_inplace) {
@@ -4164,48 +4277,48 @@ static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *a
     }
 
     // Parse start/end (these are codepoint offsets for str, byte offsets for bytes)
-    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
-    if (start_obj) {
-        start = PyLong_AsSsize_t(start_obj);
-        if (start == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "start must be an integer");
-            return NULL;
-        }
+    Py_ssize_t start, end;
+    if (!sz_py_export_optional_index(start_obj, 0, &start)) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
     }
-    if (end_obj) {
-        end = PyLong_AsSsize_t(end_obj);
-        if (end == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "end must be an integer");
-            return NULL;
-        }
+    if (!sz_py_export_optional_index(end_obj, PY_SSIZE_T_MAX, &end)) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
     }
 
     // Convert offsets and prepare search range
     sz_size_t byte_offset_start = 0;
     sz_size_t byte_length = haystack_full.length;
     sz_size_t codepoint_offset_start = 0; // Only used for str return value
+    sz_bool_t window_valid = sz_true_k;   // A degenerate [start, end) window can't hold even an empty needle
 
     if (is_unicode) {
         // For str: start/end are codepoint offsets, convert to byte offsets
         sz_size_t total_codepoints = sz_utf8_count(haystack_full.start, haystack_full.length);
 
-        // Clamp codepoint offsets
-        sz_size_t cp_start = (start < 0) ? 0 : (sz_size_t)start;
-        sz_size_t cp_end = (end < 0 || (sz_size_t)end > total_codepoints) ? total_codepoints : (sz_size_t)end;
-        if (cp_start > cp_end) cp_start = cp_end;
+        // Clamp codepoint offsets with CPython slice semantics (negatives count from the end)
+        sz_ssize_t signed_start = start, signed_end = end;
+        if (signed_start < 0) signed_start += (sz_ssize_t)total_codepoints;
+        if (signed_end < 0) signed_end += (sz_ssize_t)total_codepoints;
+        sz_size_t codepoint_start = signed_start < 0 ? 0 : (sz_size_t)signed_start;
+        sz_size_t codepoint_end =
+            signed_end < 0 ? 0 : ((sz_size_t)signed_end > total_codepoints ? total_codepoints : (sz_size_t)signed_end);
+        window_valid = codepoint_start <= codepoint_end ? sz_true_k : sz_false_k;
+        if (codepoint_start > codepoint_end) codepoint_start = codepoint_end;
 
-        codepoint_offset_start = cp_start;
+        codepoint_offset_start = codepoint_start;
 
         // Convert codepoint start to byte offset
-        if (cp_start > 0) {
-            sz_cptr_t start_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_start);
+        if (codepoint_start > 0) {
+            sz_cptr_t start_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, codepoint_start);
             byte_offset_start = start_ptr ? (sz_size_t)(start_ptr - haystack_full.start) : haystack_full.length;
         }
 
         // Convert codepoint end to byte offset
         sz_size_t byte_offset_end = haystack_full.length;
-        if (cp_end < total_codepoints) {
-            sz_cptr_t end_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, cp_end);
+        if (codepoint_end < total_codepoints) {
+            sz_cptr_t end_ptr = sz_utf8_seek(haystack_full.start, haystack_full.length, codepoint_end);
             byte_offset_end = end_ptr ? (sz_size_t)(end_ptr - haystack_full.start) : haystack_full.length;
         }
 
@@ -4213,7 +4326,8 @@ static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *a
     }
     else {
         // For bytes: start/end are byte offsets, use directly
-        sz_ssize_clamp_interval(haystack_full.length, start, end, &byte_offset_start, &byte_length);
+        window_valid = sz_ssize_clamp_interval_checked(haystack_full.length, start, end, &byte_offset_start,
+                                                       &byte_length);
     }
 
     // Prepare the search haystack
@@ -4221,10 +4335,10 @@ static PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *a
     haystack.start = haystack_full.start + byte_offset_start;
     haystack.length = byte_length;
 
-    // Empty needle matches at start position
+    // Empty needle matches at the window start, unless the window is degenerate (out-of-range/inverted)
     if (needle.length == 0) {
-        if (is_unicode) { return PyLong_FromSsize_t((Py_ssize_t)codepoint_offset_start); }
-        else { return PyLong_FromSsize_t((Py_ssize_t)byte_offset_start); }
+        if (!window_valid) { return PyLong_FromSsize_t(-1); }
+        return PyLong_FromSsize_t((Py_ssize_t)(is_unicode ? codepoint_offset_start : byte_offset_start));
     }
     // Empty haystack (after slicing) can't contain non-empty needle
     if (haystack.length == 0) { return PyLong_FromSsize_t(-1); }
@@ -4360,7 +4474,7 @@ static PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, P
     sz_string_view_t text;
     sz_string_view_t separator;
     if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, sz_false_k,
-                                  &signed_offset, &text, &separator))
+                                  sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -4386,7 +4500,7 @@ static PyObject *Str_like_find_first_not_of(PyObject *self, PyObject *const *arg
     sz_string_view_t text;
     sz_string_view_t separator;
     if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_byte_not_from,
-                                  sz_false_k, &signed_offset, &text, &separator))
+                                  sz_false_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -4412,7 +4526,7 @@ static PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py
     sz_string_view_t text;
     sz_string_view_t separator;
     if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, sz_true_k,
-                                  &signed_offset, &text, &separator))
+                                  sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -4438,7 +4552,7 @@ static PyObject *Str_like_find_last_not_of(PyObject *self, PyObject *const *args
     sz_string_view_t text;
     sz_string_view_t separator;
     if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_not_from,
-                                  sz_true_k, &signed_offset, &text, &separator))
+                                  sz_true_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -4611,7 +4725,8 @@ static FindSplits *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj, 
     result_obj->match_length = match_length;
     result_obj->include_match = keepseparator;
     result_obj->is_reverse = is_reverse;
-    result_obj->max_parts = (sz_size_t)maxsplit + 1;
+    // A negative maxsplit means "unlimited", matching the eager `Str_split_`/`Str_rsplit_` paths
+    result_obj->max_parts = maxsplit < 0 ? SIZE_MAX : (sz_size_t)maxsplit + 1;
     result_obj->reached_tail = 0;
     result_obj->skip_empty = skip_empty ? sz_true_k : sz_false_k;
 
@@ -4635,6 +4750,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     // Use reordered subviews layout with the haystack as parent
     result->layout = STRS_FRAGMENTED;
     result->data.fragmented.parent = parent_string;
+    Py_INCREF(parent_string);
     sz_memory_allocator_init_default(&result->data.fragmented.allocator);
 
     // Collect split positions first
@@ -4712,7 +4828,6 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     // Set up the result
     result->data.fragmented.spans = spans;
     result->data.fragmented.count = spans_count;
-    Py_INCREF(parent_string);
 
     return result;
 }
@@ -4731,6 +4846,7 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
     // Use reordered subviews layout with the haystack as parent
     result->layout = STRS_FRAGMENTED;
     result->data.fragmented.parent = parent_string;
+    Py_INCREF(parent_string);
     sz_memory_allocator_init_default(&result->data.fragmented.allocator);
     result->data.fragmented.spans = NULL;
     result->data.fragmented.count = 0;
@@ -4802,7 +4918,6 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
 
     result->data.fragmented.spans = parts;
     result->data.fragmented.count = parts_count;
-    Py_INCREF(parent_string);
     return result;
 }
 
@@ -5210,140 +5325,140 @@ static PyObject *Str_like_utf8_split_(PyObject *self, PyObject *const *args, Py_
     return Utf8Split_make_(type, text_obj, text, kernel, parts, skip_empty);
 }
 
-static char const doc_utf8_split_newlines[] =                                                               //
-    "Create an iterator over the content between Unicode newlines (the lines).\n"                           //
-    "\n"                                                                                                    //
-    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                      //
-    "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"                      //
-    "\n"                                                                                                    //
-    "Args:\n"                                                                                               //
-    "  text (Str or str or bytes): The string object.\n"                                                    //
-    "  skip_empty (bool, optional): Skip empty lines (default is False).\n"                                 //
-    "  with_separators (bool, optional): Interleave the newline runs too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                            //
-    "  iterator: An iterator yielding the lines as Str objects.\n"                                          //
-    "\n"                                                                                                    //
-    "Recognized newlines:\n"                                                                                //
-    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                             //
-    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                              //
-    "\n"                                                                                                    //
-    "Example:\n"                                                                                            //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_split_newlines())\n"                                         //
+static char const doc_utf8_split_newlines[] =                                                                     //
+    "Create an iterator over the content between Unicode newlines (the lines).\n"                                 //
+    "\n"                                                                                                          //
+    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                            //
+    "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"                            //
+    "\n"                                                                                                          //
+    "Args:\n"                                                                                                     //
+    "  text (Str or str or bytes): The string object.\n"                                                          //
+    "  skip_empty (bool, optional): Skip empty lines (default is False).\n"                                       //
+    "  with_separators (bool, optional): Interleave the newline separators too, losslessly (default is False).\n" //
+    "Returns:\n"                                                                                                  //
+    "  iterator: An iterator yielding the lines as Str objects.\n"                                                //
+    "\n"                                                                                                          //
+    "Recognized newlines:\n"                                                                                      //
+    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                                   //
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                                    //
+    "\n"                                                                                                          //
+    "Example:\n"                                                                                                  //
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_split_newlines())\n"                                               //
     "  2";
 static PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8SplitNewlinesType, sz_utf8_newlines, 0, 1);
 }
 
-static char const doc_utf8_newlines[] =                                                //
-    "Create an iterator over the Unicode newline runs themselves (the separators).\n"  //
-    "\n"                                                                               //
-    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n" //
-    "Yields each newline run; utf8_split_newlines() yields the lines between them.\n"  //
-    "\n"                                                                               //
-    "Args:\n"                                                                          //
-    "  text (Str or str or bytes): The string object.\n"                               //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"         //
-    "Returns:\n"                                                                       //
-    "  iterator: An iterator yielding the newline runs as Str objects.\n"              //
-    "\n"                                                                               //
-    "Recognized newlines:\n"                                                           //
-    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                        //
-    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"         //
-    "\n"                                                                               //
-    "Example:\n"                                                                       //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_newlines())\n"                          //
+static char const doc_utf8_newlines[] =                                                                             //
+    "Create an iterator over the Unicode newline separators themselves (one per codepoint, CR+LF kept together).\n" //
+    "\n"                                                                                                            //
+    "Uses SIMD-accelerated detection of all 7 Unicode newline characters plus CRLF.\n"                              //
+    "Yields each newline separator; utf8_split_newlines() yields the lines between them.\n"                         //
+    "\n"                                                                                                            //
+    "Args:\n"                                                                                                       //
+    "  text (Str or str or bytes): The string object.\n"                                                            //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                      //
+    "Returns:\n"                                                                                                    //
+    "  iterator: An iterator yielding the newline separators as Str objects.\n"                                     //
+    "\n"                                                                                                            //
+    "Recognized newlines:\n"                                                                                        //
+    "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                                     //
+    "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                                      //
+    "\n"                                                                                                            //
+    "Example:\n"                                                                                                    //
+    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_newlines())\n"                                                       //
     "  1";
 static PyObject *Str_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8NewlinesType, sz_utf8_newlines, 1, 0);
 }
 
-static char const doc_utf8_split_whitespaces[] =                                                               //
-    "Create an iterator over the content between Unicode whitespace (the tokens).\n"                           //
-    "\n"                                                                                                       //
-    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                              //
-    "Splits on runs of whitespace, similar to Python's str.split() with no separator.\n"                       //
-    "\n"                                                                                                       //
-    "Args:\n"                                                                                                  //
-    "  text (Str or str or bytes): The string object.\n"                                                       //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                 //
-    "  with_separators (bool, optional): Interleave the whitespace runs too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                               //
-    "  iterator: An iterator yielding the non-whitespace tokens as Str objects.\n"                             //
-    "\n"                                                                                                       //
-    "Recognized whitespace:\n"                                                                                 //
-    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                                    //
-    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                                   //
-    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                              //
-    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                                      //
-    "\n"                                                                                                       //
-    "Example:\n"                                                                                               //
-    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_whitespaces())\n"                                   //
+static char const doc_utf8_split_whitespaces[] =                                                                     //
+    "Create an iterator over the content between Unicode whitespace (the tokens).\n"                                 //
+    "\n"                                                                                                             //
+    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                                    //
+    "Splits on whitespace, one separator per codepoint; pass skip_empty=True for str.split()-style tokens.\n"        //
+    "\n"                                                                                                             //
+    "Args:\n"                                                                                                        //
+    "  text (Str or str or bytes): The string object.\n"                                                             //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                       //
+    "  with_separators (bool, optional): Interleave the whitespace separators too, losslessly (default is False).\n" //
+    "Returns:\n"                                                                                                     //
+    "  iterator: An iterator yielding the non-whitespace tokens as Str objects.\n"                                   //
+    "\n"                                                                                                             //
+    "Recognized whitespace:\n"                                                                                       //
+    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                                          //
+    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                                         //
+    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                                    //
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                                            //
+    "\n"                                                                                                             //
+    "Example:\n"                                                                                                     //
+    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_whitespaces())\n"                                         //
     "  3";
 static PyObject *Str_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8SplitWhitespacesType, sz_utf8_whitespaces, 0, 1);
 }
 
-static char const doc_utf8_whitespaces[] =                                                   //
-    "Create an iterator over the Unicode whitespace runs themselves (the separators).\n"     //
-    "\n"                                                                                     //
-    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"            //
-    "Yields each whitespace run; utf8_split_whitespaces() yields the tokens between them.\n" //
-    "\n"                                                                                     //
-    "Args:\n"                                                                                //
-    "  text (Str or str or bytes): The string object.\n"                                     //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"               //
-    "Returns:\n"                                                                             //
-    "  iterator: An iterator yielding the whitespace runs as Str objects.\n"                 //
-    "\n"                                                                                     //
-    "Recognized whitespace:\n"                                                               //
-    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                  //
-    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                 //
-    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                            //
-    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                    //
-    "\n"                                                                                     //
-    "Example:\n"                                                                             //
-    "  >>> sum(1 for _ in sz.Str('foo bar').utf8_whitespaces())\n"                           //
+static char const doc_utf8_whitespaces[] = //
+    "Create an iterator over the Unicode whitespace separators themselves (one per codepoint, CR+LF kept together).\n" //
+    "\n"                                                                                           //
+    "Uses SIMD-accelerated detection of all 25 Unicode White_Space characters.\n"                  //
+    "Yields each whitespace codepoint; utf8_split_whitespaces() yields the tokens between them.\n" //
+    "\n"                                                                                           //
+    "Args:\n"                                                                                      //
+    "  text (Str or str or bytes): The string object.\n"                                           //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                     //
+    "Returns:\n"                                                                                   //
+    "  iterator: An iterator yielding the whitespace separators as Str objects.\n"                 //
+    "\n"                                                                                           //
+    "Recognized whitespace:\n"                                                                     //
+    "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                        //
+    "  Latin-1: NEXT LINE, NO-BREAK SPACE\n"                                                       //
+    "  General Punctuation: EN/EM QUAD/SPACE, THIN SPACE, etc.\n"                                  //
+    "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                          //
+    "\n"                                                                                           //
+    "Example:\n"                                                                                   //
+    "  >>> sum(1 for _ in sz.Str('foo bar').utf8_whitespaces())\n"                                 //
     "  1";
 static PyObject *Str_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8WhitespacesType, sz_utf8_whitespaces, 1, 0);
 }
 
-static char const doc_utf8_split_delimiters[] =                                                               //
-    "Create an iterator over the content between Unicode delimiters (the fields).\n"                          //
-    "\n"                                                                                                      //
-    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                           //
-    "separator/whitespace (Z*) codepoint - the superset of utf8_split_whitespaces().\n"                       //
-    "Splits on runs of delimiters and yields the segments between them.\n"                                    //
-    "\n"                                                                                                      //
-    "Args:\n"                                                                                                 //
-    "  text (Str or str or bytes): The string object.\n"                                                      //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                //
-    "  with_separators (bool, optional): Interleave the delimiter runs too, losslessly (default is False).\n" //
-    "Returns:\n"                                                                                              //
-    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"                           //
-    "\n"                                                                                                      //
-    "Example:\n"                                                                                              //
-    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_split_delimiters(skip_empty=True))\n"                //
+static char const doc_utf8_split_delimiters[] =                                                                     //
+    "Create an iterator over the content between Unicode delimiters (the fields).\n"                                //
+    "\n"                                                                                                            //
+    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                                 //
+    "separator/whitespace (Z*) codepoint - the superset of utf8_split_whitespaces().\n"                             //
+    "Splits on delimiters (one separator per codepoint) and yields the segments between them.\n"                    //
+    "\n"                                                                                                            //
+    "Args:\n"                                                                                                       //
+    "  text (Str or str or bytes): The string object.\n"                                                            //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                      //
+    "  with_separators (bool, optional): Interleave the delimiter separators too, losslessly (default is False).\n" //
+    "Returns:\n"                                                                                                    //
+    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"                                 //
+    "\n"                                                                                                            //
+    "Example:\n"                                                                                                    //
+    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_split_delimiters(skip_empty=True))\n"                      //
     "  ['Hi', 'world']";
 static PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8SplitDelimitersType, sz_utf8_delimiters, 0, 1);
 }
 
-static char const doc_utf8_delimiters[] =                                               //
-    "Create an iterator over the Unicode delimiter runs themselves (the separators).\n" //
-    "\n"                                                                                //
-    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"     //
-    "separator/whitespace (Z*) codepoint. Yields each delimiter run;\n"                 //
-    "utf8_split_delimiters() yields the fields between them.\n"                         //
-    "\n"                                                                                //
-    "Args:\n"                                                                           //
-    "  text (Str or str or bytes): The string object.\n"                                //
-    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"          //
-    "Returns:\n"                                                                        //
-    "  iterator: An iterator yielding the delimiter runs as Str objects.\n"             //
-    "\n"                                                                                //
-    "Example:\n"                                                                        //
-    "  >>> list(str(d) for d in sz.Str('a.b').utf8_delimiters())\n"                     //
+static char const doc_utf8_delimiters[] =                                                                             //
+    "Create an iterator over the Unicode delimiter separators themselves (one per codepoint, CR+LF kept together).\n" //
+    "\n"                                                                                                              //
+    "Uses SIMD-accelerated detection of every punctuation (P*), symbol (S*), and\n"                                   //
+    "separator/whitespace (Z*) codepoint. Yields each delimiter codepoint;\n"                                         //
+    "utf8_split_delimiters() yields the fields between them.\n"                                                       //
+    "\n"                                                                                                              //
+    "Args:\n"                                                                                                         //
+    "  text (Str or str or bytes): The string object.\n"                                                              //
+    "  skip_empty (bool, optional): Skip empty segments (default is False).\n"                                        //
+    "Returns:\n"                                                                                                      //
+    "  iterator: An iterator yielding the delimiter separators as Str objects.\n"                                     //
+    "\n"                                                                                                              //
+    "Example:\n"                                                                                                      //
+    "  >>> list(str(d) for d in sz.Str('a.b').utf8_delimiters())\n"                                                   //
     "  ['.']";
 static PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t n, PyObject *k) {
     return Str_like_utf8_split_(self, args, n, k, &Utf8DelimitersType, sz_utf8_delimiters, 1, 0);
@@ -5848,7 +5963,21 @@ static PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_s
     sz_string_view_t separator;
     separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
     separator.length = 8;
-    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_byte_from, 1, /*skip_empty=*/0);
+    Strs *result = Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_byte_from, 1,
+                              /*skip_empty=*/0);
+
+    // Unlike a plain split, CPython `splitlines` yields no trailing empty line after a final terminator,
+    // and `[]` for an empty input. Drop that single spurious trailing segment (interior blank lines stay).
+    if (result && result->layout == STRS_FRAGMENTED && result->data.fragmented.count > 0) {
+        sz_size_t parts_count = result->data.fragmented.count;
+        int text_ends_with_terminator = text.length != 0 &&
+                                        sz_find_byte_from(text.start + text.length - 1, 1, separator.start,
+                                                          separator.length) != NULL;
+        if ((text.length == 0 || text_ends_with_terminator) &&
+            result->data.fragmented.spans[parts_count - 1].length == 0)
+            result->data.fragmented.count = parts_count - 1;
+    }
+    return (PyObject *)result;
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
@@ -5872,6 +6001,7 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     // Allocate memory for the new string
     result_str->memory.start = malloc(result_str->memory.length);
     if (result_str->memory.start == NULL) {
+        Py_DECREF(result_str);
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for string concatenation");
         return NULL;
     }
@@ -7438,6 +7568,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
             return NULL;
         }
         seed = PyLong_AsUnsignedLong(seed_obj);
+        if (PyErr_Occurred()) return NULL; // Reject negative / oversized seed
     }
 
     // Determine the amount of memory needed
@@ -7479,6 +7610,9 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
         break;
     }
 
+    // An empty container has nothing to reorder; allocate(0) would spuriously fail (and count-1 would underflow)
+    if (substrings_count == 0) return (PyObject *)strs_make_empty_fragmented_();
+
     sz_string_view_t *new_spans = (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t),
                                                                          allocator.handle);
     if (new_spans == NULL) {
@@ -7519,7 +7653,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     result->data.fragmented.spans = new_spans;
     result->data.fragmented.parent = parent_to_increment;
     result->data.fragmented.allocator = allocator;
-    Py_INCREF(parent_to_increment); // Keep the original as parent
+    Py_XINCREF(parent_to_increment); // Keep the original as parent
 
     return result;
 }
@@ -7647,6 +7781,9 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         break;
     }
 
+    // An empty container has nothing to reorder; allocate(0) would spuriously fail (and count-1 would underflow)
+    if (substrings_count == 0) return (PyObject *)strs_make_empty_fragmented_();
+
     sz_string_view_t *new_spans = (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t),
                                                                          allocator.handle);
     if (new_spans == NULL) {
@@ -7715,7 +7852,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     result->data.fragmented.spans = sorted_spans;
     result->data.fragmented.parent = parent_to_increment;
     result->data.fragmented.allocator = allocator;
-    Py_INCREF(parent_to_increment); // Keep the original as parent
+    Py_XINCREF(parent_to_increment); // Keep the original as parent
 
     return (PyObject *)result;
 }
@@ -7906,6 +8043,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
             return NULL;
         }
         sample_size = PyLong_AsSize_t(sample_size_obj);
+        if (sample_size == (sz_size_t)-1 && PyErr_Occurred()) return NULL; // Reject negative / oversized
     }
     unsigned int seed = (unsigned int)time(NULL); // Default seed
     if (seed_obj) {
@@ -7914,48 +8052,43 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
             return NULL;
         }
         seed = PyLong_AsUnsignedLong(seed_obj);
+        if (PyErr_Occurred()) return NULL; // Reject negative / oversized seed
     }
 
-    // Create a new `Strs` object
-    Strs *result = Strs_alloc_();
-    if (result == NULL) return PyErr_NoMemory();
-
-    // Initialize the memory allocator with default malloc wrapper
-    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
-
-    result->layout = STRS_FRAGMENTED;
-    result->data.fragmented.count = 0;
-    result->data.fragmented.spans = NULL;
-    result->data.fragmented.parent = NULL;
-    if (sample_size == 0) { return (PyObject *)result; }
-
-    // Now create a new Strs object with the sampled strings
-    sz_string_view_t *result_spans = malloc(sample_size * sizeof(sz_string_view_t));
-    if (!result_spans) {
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the sample");
-        return NULL;
-    }
-
-    // Introspect the Strs object to know the from which will be sampling
-    Py_ssize_t count = Strs_len(self);
+    // Introspect the source before allocating, so an empty request or empty source short-circuits
+    Py_ssize_t source_count = Strs_len(self);
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
         PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
         return NULL;
     }
+    if (sample_size == 0 || source_count == 0) return (PyObject *)strs_make_empty_fragmented_();
 
-    // Randomly sample the strings
+    // Allocate the sampled spans with an overflow-checked size
+    if (sample_size > SIZE_MAX / sizeof(sz_string_view_t)) return PyErr_NoMemory();
+    sz_string_view_t *sampled_spans = malloc(sample_size * sizeof(sz_string_view_t));
+    if (!sampled_spans) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the sample");
+        return NULL;
+    }
+
+    Strs *result = strs_make_empty_fragmented_();
+    if (result == NULL) {
+        free(sampled_spans);
+        return NULL;
+    }
+
+    // Randomly sample the strings (with replacement)
     srand(seed);
     PyObject *parent_string;
     for (Py_ssize_t i = 0; i < (Py_ssize_t)sample_size; i++) {
-        sz_size_t index = rand() % count;
-        getter(self, index, count, &parent_string, &result_spans[i].start, &result_spans[i].length);
+        sz_size_t index = rand() % source_count;
+        getter(self, index, source_count, &parent_string, &sampled_spans[i].start, &sampled_spans[i].length);
     }
 
     // Update the `Strs` object
-    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = sample_size;
-    result->data.fragmented.spans = result_spans;
+    result->data.fragmented.spans = sampled_spans;
     result->data.fragmented.parent = parent_string;
     // Hold a reference to the parent backing buffer while this view is alive
     Py_XINCREF(result->data.fragmented.parent);
@@ -8386,6 +8519,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             if (failed_to_allocate_data || !new_offsets) {
                 if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
                 if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
+                Py_DECREF(capsules);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -8418,6 +8552,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             if (failed_to_allocate_data || !new_offsets) {
                 if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
                 if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
+                Py_DECREF(capsules);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -8925,6 +9060,8 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
     return 0;
 }
 
+static void Strs_release_(Strs *self); // Defined alongside Strs_dealloc below
+
 static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // Manual argument parsing for performance
@@ -8959,6 +9096,12 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
         if (view == -1) return -1;
     }
 
+    // Re-initialization: release any state bound by a prior __init__, then reset to the blank state
+    // produced by Strs_alloc_ so the rebind below (or a later dealloc) starts from clean ground.
+    Strs_release_(self);
+    self->layout = STRS_U32_TAPE_VIEW;
+    memset(&self->data, 0, sizeof(self->data));
+
     // If no sequence provided, create empty Strs
     if (!sequence_obj) {
         self->layout = STRS_FRAGMENTED;
@@ -8992,7 +9135,11 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
     return 0;
 }
 
-static void Strs_dealloc(Strs *self) {
+/**
+ *  @brief  Frees the owned data/offsets/spans and releases the parent reference held by a `Strs`,
+ *          per its layout. Shared by `Strs_dealloc` and the `Strs_init` re-initialization guard.
+ */
+static void Strs_release_(Strs *self) {
     switch (self->layout) {
     case STRS_U32_TAPE:
         // Free owned data and offsets
@@ -9042,6 +9189,10 @@ static void Strs_dealloc(Strs *self) {
         Py_XDECREF(self->data.fragmented.parent);
         break;
     }
+}
+
+static void Strs_dealloc(Strs *self) {
+    Strs_release_(self);
 
     // Park the dead header on the free-list instead of freeing it, threading the `next` link through
     // the now-unused `data` union; fall through to a real free when the cache is full or absent.
