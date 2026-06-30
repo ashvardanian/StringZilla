@@ -129,9 +129,22 @@ h.Write([]byte("hello"))
 fmt.Println(h.Hexdigest())
 ```
 
-## UTF-8 Case Operations
+## UTF-8 Operations
 
-These helpers apply full Unicode case folding and are the only UTF-8-aware functions in the binding.
+The binding exposes codepoint counting, Unicode normalization, and full case folding over UTF-8 bytes.
+Counts are scalar values, not bytes; normalization covers all four forms (`NFC`, `NFD`, `NFKC`, `NFKD`).
+
+```go
+sz.Utf8Count("你好世界")    // 4 codepoints
+sz.Utf8Count("Hello🌍")     // 6 — the astral emoji is one scalar
+
+sz.Utf8Normalize("é", sz.NFC)   // "e" + U+0301 → precomposed "é"
+sz.Utf8Normalize("ﬁ", sz.NFKC)  // ligature "ﬁ" → "fi"
+```
+
+### Case Folding
+
+These helpers apply full Unicode case folding.
 Each takes a `validate` flag; when set, inputs are checked and `ErrInvalidUTF8` is returned for malformed UTF-8.
 
 ```go

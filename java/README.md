@@ -74,6 +74,17 @@ for (int segment = 0; segment < count; segment++)
     use(text, (int) starts[segment], (int) lengths[segment]);
 ```
 
+Codepoints count scalar values, not bytes or UTF-16 chars.
+Segmentation *tiles* the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
+
+```java
+StringZilla.countRunes("你好世界".getBytes(UTF_8)); // 4 codepoints
+StringZilla.countRunes("Hello🌍".getBytes(UTF_8));  // 6 — the astral emoji is one scalar
+
+for (MemorySegment cluster : StringZilla.graphemes("👍🏽🇺🇸".getBytes(UTF_8))) use(cluster);   // 👍🏽 (emoji + skin tone), 🇺🇸 (flag)
+for (MemorySegment word : StringZilla.words("Hello, 世界".getBytes(UTF_8))) use(word);      // Latin run, then CJK run
+```
+
 ## Splitting and Iteration
 
 Every factory takes an on-heap `byte[]` or any `MemorySegment` (e.g. an off-heap Spark `UTF8String`, a direct `ByteBuffer`, or an mmap'd file).
@@ -108,9 +119,11 @@ while (splitter.next()) record(splitter.startOffset(), splitter.length());
 Case folding fills a gap: the JDK ships no Unicode case folding.
 
 ```java
-byte[] folded = StringZilla.caseFold(text);                             // ß → "ss"
+byte[] folded = StringZilla.caseFold("Straße".getBytes(UTF_8));         // → "strasse" (ß folds to ss)
 StringZilla.Match match = StringZilla.uncasedIndexOf(haystack, needle); // caseless search
-byte[] composed = StringZilla.normalize(text, StringZilla.NormalForm.NFC);  // cf. java.text.Normalizer
+
+byte[] composed = StringZilla.normalize("é".getBytes(UTF_8), StringZilla.NormalForm.NFC);   // "e" + U+0301 → "é"
+byte[] ascii = StringZilla.normalize("ﬁ".getBytes(UTF_8), StringZilla.NormalForm.NFKC);     // ligature "ﬁ" → "fi"
 ```
 
 ## Sorting and Set Operations
@@ -141,11 +154,11 @@ Pointer-returning search copies an on-heap input once.
 That is one linear copy of the haystack per call, or per `cursor()` for the iterators, never per match.
 Pass a native `MemorySegment` (an off-heap `Arena`, a direct `ByteBuffer`, an `MMapDirectory` slice, or a Spark Tungsten row) and these run fully in place with no copy.
 
-| Input | Value / offset ops (hash, compare, segmentation, token splits, sort) | Pointer search (indexOf, split, matches, partition) |
-|---|---|---|
-| on-heap `byte[]` | zero-copy | one off-heap copy per call / per `cursor()` |
-| heap-backed `MemorySegment` (e.g. Lucene `BytesRef`) | zero-copy | one off-heap copy per call / per `cursor()` |
-| native `MemorySegment` (`Arena`, direct `ByteBuffer`, mmap, Tungsten) | zero-copy | zero-copy |
+| Input                                  | Value / offset ops | Pointer search |
+| -------------------------------------- | ------------------ | -------------- |
+| on-heap `byte[]`                       | zero-copy          | copies once    |
+| heap `MemorySegment` (e.g. `BytesRef`) | zero-copy          | copies once    |
+| native `MemorySegment` (off-heap)      | zero-copy          | zero-copy      |
 
 The copy exists only because the JVM hides the address of pinned heap memory; .NET exposes it, so the C# binding scans `byte[]` with no copy.
 For repeated pointer searches over the same large on-heap buffer, wrap it in a native `MemorySegment` once and reuse it.

@@ -130,6 +130,8 @@ public static unsafe class Sz {
     /// <summary>Counts Unicode scalar values (codepoints) in UTF-8 <paramref name="text"/>.</summary>
     /// <remarks>Like counting <see cref="System.Text.Rune"/>s, but SIMD-accelerated over UTF-8 bytes
     /// with no UTF-16 transcode. Keywords: codepoint, rune count, length.</remarks>
+    /// <example><c>CountRunes("你好世界"u8)</c> is 4; <c>CountRunes("Hello🌍"u8)</c> is 6 — the astral
+    /// emoji is a single scalar.</example>
     public static long CountRunes(ReadOnlySpan<byte> text) {
         fixed (byte* p = text)
             return (long)Native.sz_utf8_count((nint)p, (nuint)text.Length);
@@ -183,6 +185,10 @@ public static unsafe class Sz {
     /// <see cref="System.Globalization.TextElementEnumerator"/>; words/sentences/lines follow
     /// UAX-29 / UAX-14. SIMD-accelerated, deterministic, over UTF-8 bytes (no locale, no transcode).
     /// Keywords: grapheme, word break, sentence, line break, TextElement, BreakIterator.</remarks>
+    /// <example>Segmentation tiles the text — every byte lands in exactly one segment. By
+    /// <see cref="SegmentKind.Graphemes"/>, the flag 🇺🇸 is one cluster spanning two codepoints and "e"+U+0301
+    /// (a decomposed é) is one cluster spanning two; by <see cref="SegmentKind.Words"/>, "Hello, 世界" splits
+    /// the Latin run from the CJK run.</example>
     public static int Segment(ReadOnlySpan<byte> text, SegmentKind kind, Span<long> starts, Span<long> lengths, out long bytesConsumed) {
         int cap = Math.Min(starts.Length, lengths.Length);
         fixed (byte* t = text)
@@ -329,6 +335,8 @@ public static unsafe class Sz {
     /// <summary>Normalizes UTF-8 <paramref name="text"/> to the given form. Returns normalized UTF-8.</summary>
     /// <remarks>Equivalent to <see cref="string.Normalize(System.Text.NormalizationForm)"/>, but over
     /// UTF-8 bytes with no UTF-16 transcode.</remarks>
+    /// <example>Composes "e"+U+0301 into a precomposed "é" under <see cref="NormalForm.Nfc"/> (and back under
+    /// <see cref="NormalForm.Nfd"/>); expands the ligature "ﬁ" into "fi" under <see cref="NormalForm.Nfkc"/>.</example>
     public static byte[] Normalize(ReadOnlySpan<byte> text, NormalForm form) {
         if (text.Length == 0) return Array.Empty<byte>();
         byte[] rent = ArrayPool<byte>.Shared.Rent(text.Length * 18); // worst-case per-codepoint expansion

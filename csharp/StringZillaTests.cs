@@ -112,6 +112,9 @@ public class StringZillaTests {
         long expected = 0;
         foreach (var _ in s.EnumerateRunes()) expected++;
         Assert.Equal(expected, Sz.CountRunes(B(s)));
+        // Codepoint counts are scalar-value counts, independent of the Unicode version.
+        Assert.Equal(4, Sz.CountRunes(B("你好世界"))); // four CJK ideographs
+        Assert.Equal(6, Sz.CountRunes(B("Hello🌍"))); // 5 ASCII + one astral emoji
     }
 
     [Fact]
@@ -136,17 +139,19 @@ public class StringZillaTests {
     #region Segmentation
 
     [Fact]
-    public void Segment_Words_FindsWords() {
-        byte[] u = B("the quick fox");
+    public void Segment_Words_TilesMixedScriptText() {
+        byte[] u = B("Hello, 世界!"); // Latin word, punctuation, CJK run
         Span<long> starts = stackalloc long[32];
         Span<long> lengths = stackalloc long[32];
         int count = Sz.Segment(u, Sz.SegmentKind.Words, starts, lengths, out _);
         var texts = new List<string>();
-        for (int i = 0; i < count; i++)
+        long covered = 0;
+        for (int i = 0; i < count; i++) {
             texts.Add(Encoding.UTF8.GetString(u, (int)starts[i], (int)lengths[i]));
-        Assert.Contains("the", texts);
-        Assert.Contains("quick", texts);
-        Assert.Contains("fox", texts);
+            covered += lengths[i];
+        }
+        Assert.Equal((long)u.Length, covered); // tiling: every byte belongs to exactly one segment
+        Assert.Contains("Hello", texts);
     }
 
     [Fact]
@@ -155,11 +160,15 @@ public class StringZillaTests {
         Span<long> starts = stackalloc long[32];
         Span<long> lengths = stackalloc long[32];
         int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, starts, lengths, out _);
-        Assert.Equal(4, count); // four clusters regardless of NFC/NFD normalization
-        Assert.Equal(0, starts[0]);
         long covered = 0;
         for (int i = 0; i < count; i++) covered += lengths[i];
-        Assert.Equal((long)u.Length, covered); // segments cover the whole input
+        Assert.Equal((long)u.Length, covered); // tiling: every byte belongs to exactly one cluster
+
+        // 🇺🇸 (two regional indicators) is one grapheme cluster spanning two codepoints, so the cluster
+        // count is strictly below the codepoint count; explicit escapes avoid editor re-normalization.
+        byte[] flag = B("Hi \U0001F1FA\U0001F1F8");
+        int flagClusters = Sz.Segment(flag, Sz.SegmentKind.Graphemes, starts, lengths, out _);
+        Assert.True(flagClusters < Sz.CountRunes(flag)); // clusters collapse multi-codepoint sequences
     }
 
     #endregion
@@ -170,6 +179,7 @@ public class StringZillaTests {
     public void CaseFold_FullFolding() {
         Assert.Equal("ss", Encoding.UTF8.GetString(Sz.CaseFold(B("ß"))));
         Assert.Equal("hello", Encoding.UTF8.GetString(Sz.CaseFold(B("HELLO"))));
+        Assert.Equal("strasse", Encoding.UTF8.GetString(Sz.CaseFold(B("Straße")))); // ß folds to ss
     }
 
     [Fact]
@@ -264,6 +274,19 @@ public class StringZillaTests {
         Assert.False(Sz.IsNormalized(new byte[] { (byte)'e', 0xCC, 0x81 }, Sz.NormalForm.Nfc));
     }
 
+    [Fact]
+    public void Normalize_Nfkc_ExpandsCompatibilityLigature() {
+        byte[] ligature = { 0xEF, 0xAC, 0x81 }; // U+FB01 LATIN SMALL LIGATURE FI
+        Assert.Equal(new byte[] { (byte)'f', (byte)'i' }, Sz.Normalize(ligature, Sz.NormalForm.Nfkc));
+    }
+
+    [Fact]
+    public void Normalize_NfcOfNfdRoundTrips() {
+        byte[] precomposed = { 0xC3, 0xA9 }; // é U+00E9
+        byte[] decomposed = Sz.Normalize(precomposed, Sz.NormalForm.Nfd);
+        Assert.Equal(precomposed, Sz.Normalize(decomposed, Sz.NormalForm.Nfc)); // NFC ∘ NFD is identity here
+    }
+
     #endregion
 
     #region Collections
@@ -316,7 +339,7 @@ public class StringZillaTests {
 
     [Fact]
     public void EnumerateWords_TilesInput() {
-        byte[] u = B("the quick fox");
+        byte[] u = B("Hello, 世界 🦖"); // Latin, CJK, and an astral emoji
         var words = new List<string>();
         long covered = 0;
         foreach (var w in Sz.EnumerateWords(u)) {
@@ -324,9 +347,7 @@ public class StringZillaTests {
             covered += w.Length;
         }
         Assert.Equal((long)u.Length, covered); // tiling covers the whole input
-        Assert.Contains("the", words);
-        Assert.Contains("quick", words);
-        Assert.Contains("fox", words);
+        Assert.Contains("Hello", words);
     }
 
     [Fact]

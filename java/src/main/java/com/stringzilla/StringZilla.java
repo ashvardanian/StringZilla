@@ -321,7 +321,8 @@ public final class StringZilla {
     // region UTF-8 Codepoints
 
     /** Counts Unicode scalar values (codepoints). Like {@code String.codePointCount} /
-     *  {@link Character#codePointCount}, SIMD-accelerated over UTF-8 bytes. */
+     *  {@link Character#codePointCount}, SIMD-accelerated over UTF-8 bytes. For example, "你好世界" counts
+     *  4 and "Hello🌍" counts 6 — the astral emoji is a single scalar. */
     public static long countRunes(byte[] text) {
         return countRunes(MemorySegment.ofArray(text));
     }
@@ -408,7 +409,9 @@ public final class StringZilla {
      *  and {@code lengths} arrays and returns the count written. Allocation-free. Resumable: advance
      *  the input by {@code bytesConsumed[0]} and call again until it returns 0. Starts are relative to
      *  {@code textOffset}. Like {@link java.text.BreakIterator} / ICU4J, but deterministic, SIMD-accelerated,
-     *  over UTF-8 bytes (no locale, no transcode). */
+     *  over UTF-8 bytes (no locale, no transcode). Segmentation tiles the text — every byte lands in exactly
+     *  one segment. By {@code GRAPHEMES}, the flag 🇺🇸 is one cluster spanning two codepoints; by
+     *  {@code WORDS}, "Hello, 世界" splits the Latin run from the CJK run. */
     public static int segment(
             byte[] text,
             int textOffset,
@@ -598,7 +601,8 @@ public final class StringZilla {
     }
 
     /** Normalizes {@code text} to the given form. Equivalent to {@link java.text.Normalizer#normalize},
-     *  over UTF-8 bytes with no UTF-16 transcode. */
+     *  over UTF-8 bytes with no UTF-16 transcode. For example, "e"+U+0301 composes into a precomposed "é"
+     *  under {@code NFC} (and back under {@code NFD}); the ligature "ﬁ" expands into "fi" under {@code NFKC}. */
     public static byte[] normalize(byte[] text, NormalForm form) {
         if (text.length == 0) return new byte[0];
         byte[] dst = new byte[text.length * 18]; // worst-case per-codepoint expansion

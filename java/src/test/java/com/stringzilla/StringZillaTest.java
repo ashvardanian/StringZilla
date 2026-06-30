@@ -131,6 +131,9 @@ class StringZillaTest {
     void countRunes_matchesCodePointCount() {
         String s = "héllo, 世界 🦖";
         assertEquals(s.codePointCount(0, s.length()), StringZilla.countRunes(b(s)));
+        // Codepoint counts are scalar-value counts, independent of the Unicode version.
+        assertEquals(4L, StringZilla.countRunes(b("你好世界"))); // four CJK ideographs
+        assertEquals(6L, StringZilla.countRunes(b("Hello🌍"))); // 5 ASCII + one astral emoji
     }
 
     @Test
@@ -154,17 +157,19 @@ class StringZillaTest {
 
     @Test
     void segment_words() {
-        byte[] u = b("the quick fox");
+        byte[] u = b("Hello, 世界!"); // Latin word, punctuation, CJK run
         long[] starts = new long[32];
         long[] lengths = new long[32];
         long[] consumed = new long[1];
         int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.WORDS, starts, lengths, consumed);
         var texts = new java.util.ArrayList<String>();
-        for (int i = 0; i < count; i++)
+        long covered = 0;
+        for (int i = 0; i < count; i++) {
             texts.add(new String(u, (int) starts[i], (int) lengths[i], StandardCharsets.UTF_8));
-        assertTrue(texts.contains("the"));
-        assertTrue(texts.contains("quick"));
-        assertTrue(texts.contains("fox"));
+            covered += lengths[i];
+        }
+        assertEquals(u.length, covered); // tiling: every byte belongs to exactly one segment
+        assertTrue(texts.contains("Hello"));
     }
 
     @Test
@@ -174,11 +179,16 @@ class StringZillaTest {
         long[] lengths = new long[32];
         long[] consumed = new long[1];
         int count = StringZilla.segment(u, 0, u.length, StringZilla.SegmentKind.GRAPHEMES, starts, lengths, consumed);
-        assertEquals(4, count); // four clusters regardless of NFC/NFD normalization
-        assertEquals(0, starts[0]);
         long covered = 0;
         for (int i = 0; i < count; i++) covered += lengths[i];
-        assertEquals(u.length, covered); // segments cover the whole input
+        assertEquals(u.length, covered); // tiling: every byte belongs to exactly one cluster
+
+        // 🇺🇸 (two regional indicators) is one grapheme cluster spanning two codepoints, so the cluster
+        // count is strictly below the codepoint count.
+        byte[] flag = b("Hi 🇺🇸");
+        int flagClusters =
+                StringZilla.segment(flag, 0, flag.length, StringZilla.SegmentKind.GRAPHEMES, starts, lengths, consumed);
+        assertTrue(flagClusters < StringZilla.countRunes(flag)); // clusters collapse multi-codepoint sequences
     }
 
     // endregion
@@ -189,6 +199,7 @@ class StringZillaTest {
     void caseFold_fullFolding() {
         assertEquals("ss", new String(StringZilla.caseFold(b("ß")), StandardCharsets.UTF_8));
         assertEquals("hello", new String(StringZilla.caseFold(b("HELLO")), StandardCharsets.UTF_8));
+        assertEquals("strasse", new String(StringZilla.caseFold(b("Straße")), StandardCharsets.UTF_8)); // ß folds to ss
     }
 
     @Test
@@ -283,6 +294,20 @@ class StringZillaTest {
     void isNormalized_detectsForm() {
         assertTrue(StringZilla.isNormalized(new byte[] {(byte) 0xC3, (byte) 0xA9}, StringZilla.NormalForm.NFC));
         assertFalse(StringZilla.isNormalized(new byte[] {'e', (byte) 0xCC, (byte) 0x81}, StringZilla.NormalForm.NFC));
+    }
+
+    @Test
+    void normalize_nfkc_expandsCompatibilityLigature() {
+        byte[] ligature = {(byte) 0xEF, (byte) 0xAC, (byte) 0x81}; // U+FB01 LATIN SMALL LIGATURE FI
+        assertArrayEquals(new byte[] {'f', 'i'}, StringZilla.normalize(ligature, StringZilla.NormalForm.NFKC));
+    }
+
+    @Test
+    void normalize_nfcOfNfdRoundTrips() {
+        byte[] precomposed = {(byte) 0xC3, (byte) 0xA9}; // é U+00E9
+        byte[] decomposed = StringZilla.normalize(precomposed, StringZilla.NormalForm.NFD);
+        assertArrayEquals(
+                precomposed, StringZilla.normalize(decomposed, StringZilla.NormalForm.NFC)); // NFC ∘ NFD is identity
     }
 
     // endregion

@@ -69,6 +69,17 @@ for (int segment = 0; segment < count; segment++)
 // Kinds: Graphemes (cf. StringInfo), Words, Sentences, LineBreaks (UAX-14), Newlines, Whitespaces, Delimiters
 ```
 
+Codepoints count scalar values, not bytes or UTF-16 chars.
+Segmentation *tiles* the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
+
+```csharp
+Sz.CountRunes("你好世界"u8);                     // 4 codepoints
+Sz.CountRunes("Hello🌍"u8);                      // 6 — the astral emoji is one scalar
+
+foreach (var cluster in Sz.EnumerateGraphemes("👍🏽🇺🇸"u8)) Use(cluster); // 2 clusters: 👍🏽 (emoji + skin tone), 🇺🇸 (flag)
+foreach (var word in Sz.EnumerateWords("Hello, 世界"u8)) Use(word);      // Latin run, then CJK run
+```
+
 ## Splitting and Iteration
 
 The iterators are lazy and allocation-free: each is a `ref struct` enumerator yielding zero-copy `ReadOnlySpan<byte>` views, so a `foreach` never touches the heap.
@@ -103,6 +114,9 @@ needle.IndexIn(document, out long matchedLength);
 
 byte[] composed = Sz.Normalize(text, Sz.NormalForm.Nfc); // cf. string.Normalize
 int written = Sz.Normalize(text, Sz.NormalForm.Nfc, destination); // allocation-free variant
+
+Sz.Normalize("é"u8, Sz.NormalForm.Nfc);  // "e" + U+0301 -> precomposed "é"
+Sz.Normalize("ﬁ"u8, Sz.NormalForm.Nfkc);       // ligature "ﬁ" -> "fi"
 ```
 
 ## Sorting and Set Operations

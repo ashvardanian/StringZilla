@@ -111,8 +111,10 @@ Normalization is driven by `StringZillaNormalizationForm`, one of `.nfc`, `.nfd`
 `utf8Normalized(_:)` returns the normalized UTF-8 bytes and defaults to `.nfc`, `utf8NormalizationViolation(_:)` returns the `Index?` of the first non-conforming byte, and `isUtf8Normalized(_:)` is a convenience `Bool`.
 
 ```swift
-let nfc = "e\u{0301}".utf8Normalized(.nfc)             // composed "é" bytes
-assert("café".isUtf8Normalized(.nfc))                 // already composed
+let nfc = "e\u{0301}".utf8Normalized(.nfc)  // composed "é" bytes
+assert("café".isUtf8Normalized(.nfc))       // already composed
+let fi = "\u{FB01}".utf8Normalized(.nfkc)   // ligature "ﬁ" → "fi" bytes
+assert(fi == Array("fi".utf8))
 let bad = "e\u{0301}".utf8NormalizationViolation(.nfc) // Index of the violation
 assert(bad != nil)
 ```
@@ -124,8 +126,8 @@ These methods return byte-accurate `[Range<Index>]` arrays you can subscript bac
 `utf8Words()` splits into UAX-29 words that tile the input, so every byte belongs to exactly one word.
 
 ```swift
-for range in "Hello, world!".utf8Words() {
-    print("Hello, world!"[range])
+for range in "Hello, 世界!".utf8Words() { // tiles the Latin run and the CJK run
+    print("Hello, 世界!"[range])
 }
 ```
 
