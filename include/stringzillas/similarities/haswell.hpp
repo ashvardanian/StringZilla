@@ -1660,6 +1660,927 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affin
     }
 };
 
+#pragma region Uniform Cost Levenshtein
+
+/**
+ *  @brief Redirects any Haswell uniform-cost minimize-distance scorer to the serial version. The explicit
+ *         `u8`/`u16`/`u32` specializations below are more specialized and win by partial ordering for the hot
+ *         cell widths; this catches the rarely-instantiated rune `u32` cells (and any not-yet-vectorized
+ *         iterator/gap combination) so the dispatch never lands on an undefined template.
+ */
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_, typename gap_costs_type_,
+          sz_capability_t capability_>
+struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, uniform_substitution_costs_t,
+                   gap_costs_type_, sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, uniform_substitution_costs_t,
+                         gap_costs_type_, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using base_t = tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, uniform_substitution_costs_t,
+                               gap_costs_type_, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>;
+    using base_t::base_t;
+    using base_t::operator();
+};
+
+/**
+ *  @brief Haswell @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u16_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer.
+ *
+ *  The Levenshtein twin of the class-based diagonal scorer above, but the two-stage `substitution_lookup_haswell_t`
+ *  cost step collapses to a single `_mm256_cmpeq_epi8` + `_mm256_blendv_epi8` (match vs. mismatch), and the
+ *  objective is minimization, so the recurrence uses `_mm256_min_epu16` with a positive gap. AVX2 has no masked
+ *  loads or stores, so each diagonal is processed in full 32-cell `loadu`/`storeu` slices with a scalar tail.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                                //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                     //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_cost_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_u8_vec = _mm256_blendv_epi8(mismatch_cost_u8_vec, match_cost_u8_vec, equal_vec);
+        __m256i cost_u16_vecs[2];
+        cost_u16_vecs[0] = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(cost_u8_vec, 0));
+        cost_u16_vecs[1] = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(cost_u8_vec, 1));
+
+        for (size_t part = 0; part != 2; ++part) {
+            __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_substitution + part * 16));
+            __m256i pre_insert_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_insertion + part * 16));
+            __m256i pre_delete_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_deletion + part * 16));
+            __m256i cost_if_substitution_vec = _mm256_add_epi16(pre_substitution_vec, cost_u16_vecs[part]);
+            __m256i cost_if_gap_vec = _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec, pre_delete_vec), gap_cost_vec);
+            __m256i cell_score_vec = _mm256_min_epu16(cost_if_substitution_vec, cost_if_gap_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new + part * 16), cell_score_vec);
+        }
+    }
+
+    SZ_INLINE void slice_1cell(                                                  //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,    //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
+        u16_t const *scores_pre_deletion, u16_t *scores_new, u16_t gap) const noexcept {
+        u16_t const cost = first_reversed_slice[i] == second_slice[i] ? (u16_t)this->substituter_.match
+                                                                      : (u16_t)this->substituter_.mismatch;
+        u16_t const if_substitution = (u16_t)(scores_pre_substitution[i] + cost);
+        u16_t const if_gap = (u16_t)(sz_min_of_two(scores_pre_insertion[i], scores_pre_deletion[i]) + gap);
+        scores_new[i] = sz_min_of_two(if_substitution, if_gap);
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                          //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,                    //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,       //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                           //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_cost_vec, //
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,
+                          match_cost_u8_vec, mismatch_cost_u8_vec, gap_cost_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,         //
+        u16_t const *scores_pre_deletion, u16_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u16_t const gap = static_cast<u16_t>(this->gap_costs_.open_or_extend);
+        __m256i const match_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_cost_vec = _mm256_set1_epi16((short)gap);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_new, match_cost_u8_vec, mismatch_cost_u8_vec,
+                                    gap_cost_vec, from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_new, gap);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u32_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Same recurrence as the `u16_t` variant,
+ *        widened to four 8-lane `i32` quarters via `_mm256_cvtepu8_epi32`.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                                //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion, //
+        u32_t const *scores_pre_deletion, u32_t *scores_new,                     //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_cost_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_u8_vec = _mm256_blendv_epi8(mismatch_cost_u8_vec, match_cost_u8_vec, equal_vec);
+        __m128i cost_low_xmm = _mm256_extracti128_si256(cost_u8_vec, 0);
+        __m128i cost_high_xmm = _mm256_extracti128_si256(cost_u8_vec, 1);
+        __m256i cost_u32_vecs[4];
+        cost_u32_vecs[0] = _mm256_cvtepu8_epi32(cost_low_xmm);
+        cost_u32_vecs[1] = _mm256_cvtepu8_epi32(_mm_srli_si128(cost_low_xmm, 8));
+        cost_u32_vecs[2] = _mm256_cvtepu8_epi32(cost_high_xmm);
+        cost_u32_vecs[3] = _mm256_cvtepu8_epi32(_mm_srli_si128(cost_high_xmm, 8));
+
+        for (size_t part = 0; part != 4; ++part) {
+            __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_substitution + part * 8));
+            __m256i pre_insert_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_insertion + part * 8));
+            __m256i pre_delete_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_deletion + part * 8));
+            __m256i cost_if_substitution_vec = _mm256_add_epi32(pre_substitution_vec, cost_u32_vecs[part]);
+            __m256i cost_if_gap_vec = _mm256_add_epi32(_mm256_min_epu32(pre_insert_vec, pre_delete_vec), gap_cost_vec);
+            __m256i cell_score_vec = _mm256_min_epu32(cost_if_substitution_vec, cost_if_gap_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new + part * 8), cell_score_vec);
+        }
+    }
+
+    SZ_INLINE void slice_1cell(                                                  //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,    //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion, //
+        u32_t const *scores_pre_deletion, u32_t *scores_new, u32_t gap) const noexcept {
+        u32_t const cost = first_reversed_slice[i] == second_slice[i] ? (u32_t)this->substituter_.match
+                                                                      : (u32_t)this->substituter_.mismatch;
+        u32_t const if_substitution = scores_pre_substitution[i] + cost;
+        u32_t const if_gap = sz_min_of_two(scores_pre_insertion[i], scores_pre_deletion[i]) + gap;
+        scores_new[i] = sz_min_of_two(if_substitution, if_gap);
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                          //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,                    //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,       //
+        u32_t const *scores_pre_deletion, u32_t *scores_new,                           //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_cost_vec, //
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,
+                          match_cost_u8_vec, mismatch_cost_u8_vec, gap_cost_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,         //
+        u32_t const *scores_pre_deletion, u32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u32_t const gap = static_cast<u32_t>(this->gap_costs_.open_or_extend);
+        __m256i const match_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_cost_vec = _mm256_set1_epi32((int)gap);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_new, match_cost_u8_vec, mismatch_cost_u8_vec,
+                                    gap_cost_vec, from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_new, gap);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b affine-gap uniform-cost diagonal scorer - minimizes Levenshtein over `u16_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Gotoh recurrence with separate
+ *        insertion/deletion gap planes, mirroring the affine class scorer's memory pattern.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                                 //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,               //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,  //
+        u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions, //
+        u16_t const *scores_running_deletions, u16_t *scores_new,                 //
+        u16_t *scores_new_insertions, u16_t *scores_new_deletions,                //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec,                  //
+        __m256i gap_open_vec, __m256i gap_extend_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_u8_vec = _mm256_blendv_epi8(mismatch_cost_u8_vec, match_cost_u8_vec, equal_vec);
+        __m256i cost_u16_vecs[2];
+        cost_u16_vecs[0] = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(cost_u8_vec, 0));
+        cost_u16_vecs[1] = _mm256_cvtepu8_epi16(_mm256_extracti128_si256(cost_u8_vec, 1));
+
+        for (size_t part = 0; part != 2; ++part) {
+            size_t const offset = part * 16;
+            __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_substitution + offset));
+            __m256i pre_insert_open_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_insertion + offset));
+            __m256i pre_delete_open_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_deletion + offset));
+            __m256i run_insert_vec = _mm256_loadu_si256((__m256i const *)(scores_running_insertions + offset));
+            __m256i run_delete_vec = _mm256_loadu_si256((__m256i const *)(scores_running_deletions + offset));
+            __m256i cost_if_insert_vec = _mm256_min_epu16(_mm256_add_epi16(pre_insert_open_vec, gap_open_vec),
+                                                          _mm256_add_epi16(run_insert_vec, gap_extend_vec));
+            __m256i cost_if_delete_vec = _mm256_min_epu16(_mm256_add_epi16(pre_delete_open_vec, gap_open_vec),
+                                                          _mm256_add_epi16(run_delete_vec, gap_extend_vec));
+            __m256i cost_if_substitution_vec = _mm256_add_epi16(pre_substitution_vec, cost_u16_vecs[part]);
+            __m256i cell_score_vec = _mm256_min_epu16(_mm256_min_epu16(cost_if_insert_vec, cost_if_delete_vec),
+                                                      cost_if_substitution_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new + offset), cell_score_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new_insertions + offset), cost_if_insert_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new_deletions + offset), cost_if_delete_vec);
+        }
+    }
+
+    SZ_INLINE void slice_1cell(                                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,     //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,  //
+        u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions, //
+        u16_t const *scores_running_deletions, u16_t *scores_new,                 //
+        u16_t *scores_new_insertions, u16_t *scores_new_deletions,                //
+        u16_t gap_open, u16_t gap_extend) const noexcept {
+        u16_t const cost = first_reversed_slice[i] == second_slice[i] ? (u16_t)this->substituter_.match
+                                                                      : (u16_t)this->substituter_.mismatch;
+        u16_t const if_substitution = (u16_t)(scores_pre_substitution[i] + cost);
+        u16_t const if_insertion = sz_min_of_two((u16_t)(scores_pre_insertion[i] + gap_open),
+                                                 (u16_t)(scores_running_insertions[i] + gap_extend));
+        u16_t const if_deletion = sz_min_of_two((u16_t)(scores_pre_deletion[i] + gap_open),
+                                                (u16_t)(scores_running_deletions[i] + gap_extend));
+        scores_new[i] = sz_min_of_two(sz_min_of_two(if_insertion, if_deletion), if_substitution);
+        scores_new_insertions[i] = if_insertion;
+        scores_new_deletions[i] = if_deletion;
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                     //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,               //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,  //
+        u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions, //
+        u16_t const *scores_running_deletions, u16_t *scores_new,                 //
+        u16_t *scores_new_insertions, u16_t *scores_new_deletions,                //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_open_vec, __m256i gap_extend_vec,
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress,
+                          scores_running_insertions + progress, scores_running_deletions + progress,
+                          scores_new + progress, scores_new_insertions + progress, scores_new_deletions + progress,
+                          match_cost_u8_vec, mismatch_cost_u8_vec, gap_open_vec, gap_extend_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,         //
+        u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions,        //
+        u16_t const *scores_running_deletions, u16_t *scores_new,                        //
+        u16_t *scores_new_insertions, u16_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u16_t const gap_open = static_cast<u16_t>(this->gap_costs_.open);
+        u16_t const gap_extend = static_cast<u16_t>(this->gap_costs_.extend);
+        __m256i const match_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_open_vec = _mm256_set1_epi16((short)gap_open);
+        __m256i const gap_extend_vec = _mm256_set1_epi16((short)gap_extend);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_running_insertions, scores_running_deletions,
+                                    scores_new, scores_new_insertions, scores_new_deletions, match_cost_u8_vec,
+                                    mismatch_cost_u8_vec, gap_open_vec, gap_extend_vec, from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_running_insertions, scores_running_deletions, scores_new, scores_new_insertions,
+                        scores_new_deletions, gap_open, gap_extend);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b affine-gap uniform-cost diagonal scorer - minimizes Levenshtein over `u32_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Same Gotoh recurrence as the `u16_t`
+ *        variant, in four 8-lane `i32` quarters.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                                 //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,               //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,  //
+        u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions, //
+        u32_t const *scores_running_deletions, u32_t *scores_new,                 //
+        u32_t *scores_new_insertions, u32_t *scores_new_deletions,                //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec,                  //
+        __m256i gap_open_vec, __m256i gap_extend_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_u8_vec = _mm256_blendv_epi8(mismatch_cost_u8_vec, match_cost_u8_vec, equal_vec);
+        __m128i cost_low_xmm = _mm256_extracti128_si256(cost_u8_vec, 0);
+        __m128i cost_high_xmm = _mm256_extracti128_si256(cost_u8_vec, 1);
+        __m256i cost_u32_vecs[4];
+        cost_u32_vecs[0] = _mm256_cvtepu8_epi32(cost_low_xmm);
+        cost_u32_vecs[1] = _mm256_cvtepu8_epi32(_mm_srli_si128(cost_low_xmm, 8));
+        cost_u32_vecs[2] = _mm256_cvtepu8_epi32(cost_high_xmm);
+        cost_u32_vecs[3] = _mm256_cvtepu8_epi32(_mm_srli_si128(cost_high_xmm, 8));
+
+        for (size_t part = 0; part != 4; ++part) {
+            size_t const offset = part * 8;
+            __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_substitution + offset));
+            __m256i pre_insert_open_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_insertion + offset));
+            __m256i pre_delete_open_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_deletion + offset));
+            __m256i run_insert_vec = _mm256_loadu_si256((__m256i const *)(scores_running_insertions + offset));
+            __m256i run_delete_vec = _mm256_loadu_si256((__m256i const *)(scores_running_deletions + offset));
+            __m256i cost_if_insert_vec = _mm256_min_epu32(_mm256_add_epi32(pre_insert_open_vec, gap_open_vec),
+                                                          _mm256_add_epi32(run_insert_vec, gap_extend_vec));
+            __m256i cost_if_delete_vec = _mm256_min_epu32(_mm256_add_epi32(pre_delete_open_vec, gap_open_vec),
+                                                          _mm256_add_epi32(run_delete_vec, gap_extend_vec));
+            __m256i cost_if_substitution_vec = _mm256_add_epi32(pre_substitution_vec, cost_u32_vecs[part]);
+            __m256i cell_score_vec = _mm256_min_epu32(_mm256_min_epu32(cost_if_insert_vec, cost_if_delete_vec),
+                                                      cost_if_substitution_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new + offset), cell_score_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new_insertions + offset), cost_if_insert_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new_deletions + offset), cost_if_delete_vec);
+        }
+    }
+
+    SZ_INLINE void slice_1cell(                                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,     //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,  //
+        u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions, //
+        u32_t const *scores_running_deletions, u32_t *scores_new,                 //
+        u32_t *scores_new_insertions, u32_t *scores_new_deletions,                //
+        u32_t gap_open, u32_t gap_extend) const noexcept {
+        u32_t const cost = first_reversed_slice[i] == second_slice[i] ? (u32_t)this->substituter_.match
+                                                                      : (u32_t)this->substituter_.mismatch;
+        u32_t const if_substitution = scores_pre_substitution[i] + cost;
+        u32_t const if_insertion = sz_min_of_two(scores_pre_insertion[i] + gap_open,
+                                                 scores_running_insertions[i] + gap_extend);
+        u32_t const if_deletion = sz_min_of_two(scores_pre_deletion[i] + gap_open,
+                                                scores_running_deletions[i] + gap_extend);
+        scores_new[i] = sz_min_of_two(sz_min_of_two(if_insertion, if_deletion), if_substitution);
+        scores_new_insertions[i] = if_insertion;
+        scores_new_deletions[i] = if_deletion;
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                     //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,               //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,  //
+        u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions, //
+        u32_t const *scores_running_deletions, u32_t *scores_new,                 //
+        u32_t *scores_new_insertions, u32_t *scores_new_deletions,                //
+        __m256i match_cost_u8_vec, __m256i mismatch_cost_u8_vec, __m256i gap_open_vec, __m256i gap_extend_vec,
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress,
+                          scores_running_insertions + progress, scores_running_deletions + progress,
+                          scores_new + progress, scores_new_insertions + progress, scores_new_deletions + progress,
+                          match_cost_u8_vec, mismatch_cost_u8_vec, gap_open_vec, gap_extend_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,         //
+        u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions,        //
+        u32_t const *scores_running_deletions, u32_t *scores_new,                        //
+        u32_t *scores_new_insertions, u32_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u32_t const gap_open = static_cast<u32_t>(this->gap_costs_.open);
+        u32_t const gap_extend = static_cast<u32_t>(this->gap_costs_.extend);
+        __m256i const match_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_u8_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_open_vec = _mm256_set1_epi32((int)gap_open);
+        __m256i const gap_extend_vec = _mm256_set1_epi32((int)gap_extend);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_running_insertions, scores_running_deletions,
+                                    scores_new, scores_new_insertions, scores_new_deletions, match_cost_u8_vec,
+                                    mismatch_cost_u8_vec, gap_open_vec, gap_extend_vec, from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_running_insertions, scores_running_deletions, scores_new, scores_new_insertions,
+                        scores_new_deletions, gap_open, gap_extend);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u8_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. The narrow cell width handles short pairs
+ *        (max distance < 256) with no widening at all: 32 cells live in one register and the recurrence is a
+ *        single `_mm256_min_epu8` pass with saturating `_mm256_adds_epu8` arithmetic.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                              //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,            //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                     //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_vec = _mm256_blendv_epi8(mismatch_cost_vec, match_cost_vec, equal_vec);
+        __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)scores_pre_substitution);
+        __m256i pre_insert_vec = _mm256_loadu_si256((__m256i const *)scores_pre_insertion);
+        __m256i pre_delete_vec = _mm256_loadu_si256((__m256i const *)scores_pre_deletion);
+        __m256i cost_if_substitution_vec = _mm256_adds_epu8(pre_substitution_vec, cost_vec);
+        __m256i cost_if_gap_vec = _mm256_adds_epu8(_mm256_min_epu8(pre_insert_vec, pre_delete_vec), gap_cost_vec);
+        _mm256_storeu_si256((__m256i *)scores_new, _mm256_min_epu8(cost_if_substitution_vec, cost_if_gap_vec));
+    }
+
+    SZ_INLINE void slice_1cell(                                                //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,  //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
+        u8_t const *scores_pre_deletion, u8_t *scores_new, u8_t gap) const noexcept {
+        u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
+                                                                     : (u8_t)this->substituter_.mismatch;
+        u8_t const if_substitution = (u8_t)(scores_pre_substitution[i] + cost);
+        u8_t const if_gap = (u8_t)(sz_min_of_two(scores_pre_insertion[i], scores_pre_deletion[i]) + gap);
+        scores_new[i] = sz_min_of_two(if_substitution, if_gap);
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                    //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,              //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,   //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                       //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec, //
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,
+                          match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,           //
+        u8_t const *scores_pre_deletion, u8_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u8_t const gap = static_cast<u8_t>(this->gap_costs_.open_or_extend);
+        __m256i const match_cost_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_cost_vec = _mm256_set1_epi8((char)gap);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_new, match_cost_vec, mismatch_cost_vec, gap_cost_vec,
+                                    from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_new, gap);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b affine-gap uniform-cost diagonal scorer - minimizes Levenshtein over `u8_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Gotoh recurrence with separate
+ *        insertion/deletion gap planes, all in saturating `u8` arithmetic.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                               //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,             //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_open_vec,
+        __m256i gap_extend_vec) const noexcept {
+
+        __m256i first_vec = _mm256_loadu_si256((__m256i const *)first_reversed_slice);
+        __m256i second_vec = _mm256_loadu_si256((__m256i const *)second_slice);
+        __m256i equal_vec = _mm256_cmpeq_epi8(first_vec, second_vec);
+        __m256i cost_vec = _mm256_blendv_epi8(mismatch_cost_vec, match_cost_vec, equal_vec);
+        __m256i pre_insert_open_vec = _mm256_loadu_si256((__m256i const *)scores_pre_insertion);
+        __m256i pre_delete_open_vec = _mm256_loadu_si256((__m256i const *)scores_pre_deletion);
+        __m256i run_insert_vec = _mm256_loadu_si256((__m256i const *)scores_running_insertions);
+        __m256i run_delete_vec = _mm256_loadu_si256((__m256i const *)scores_running_deletions);
+        __m256i cost_if_insert_vec = _mm256_min_epu8(_mm256_adds_epu8(pre_insert_open_vec, gap_open_vec),
+                                                     _mm256_adds_epu8(run_insert_vec, gap_extend_vec));
+        __m256i cost_if_delete_vec = _mm256_min_epu8(_mm256_adds_epu8(pre_delete_open_vec, gap_open_vec),
+                                                     _mm256_adds_epu8(run_delete_vec, gap_extend_vec));
+        __m256i cost_if_substitution_vec = _mm256_adds_epu8(
+            _mm256_loadu_si256((__m256i const *)scores_pre_substitution), cost_vec);
+        __m256i cell_score_vec = _mm256_min_epu8(_mm256_min_epu8(cost_if_insert_vec, cost_if_delete_vec),
+                                                 cost_if_substitution_vec);
+        _mm256_storeu_si256((__m256i *)scores_new, cell_score_vec);
+        _mm256_storeu_si256((__m256i *)scores_new_insertions, cost_if_insert_vec);
+        _mm256_storeu_si256((__m256i *)scores_new_deletions, cost_if_delete_vec);
+    }
+
+    SZ_INLINE void slice_1cell(                                                 //
+        u8_t const *first_reversed_slice, u8_t const *second_slice, size_t i,   //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
+        u8_t gap_open, u8_t gap_extend) const noexcept {
+        u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
+                                                                     : (u8_t)this->substituter_.mismatch;
+        u8_t const if_substitution = (u8_t)(scores_pre_substitution[i] + cost);
+        u8_t const if_insertion = sz_min_of_two((u8_t)(scores_pre_insertion[i] + gap_open),
+                                                (u8_t)(scores_running_insertions[i] + gap_extend));
+        u8_t const if_deletion = sz_min_of_two((u8_t)(scores_pre_deletion[i] + gap_open),
+                                               (u8_t)(scores_running_deletions[i] + gap_extend));
+        scores_new[i] = sz_min_of_two(sz_min_of_two(if_insertion, if_deletion), if_substitution);
+        scores_new_insertions[i] = if_insertion;
+        scores_new_deletions[i] = if_deletion;
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                   //
+        u8_t const *first_reversed_slice, u8_t const *second_slice,             //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,  //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                 //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_open_vec, __m256i gap_extend_vec, size_t from,
+        size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress,
+                          scores_running_insertions + progress, scores_running_deletions + progress,
+                          scores_new + progress, scores_new_insertions + progress, scores_new_deletions + progress,
+                          match_cost_vec, mismatch_cost_vec, gap_open_vec, gap_extend_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,           //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions,          //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                          //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions,                         //
+        executor_type_ &&executor = {}) noexcept {
+
+        u8_t const *first_reversed = (u8_t const *)first_reversed_slice;
+        u8_t const *second = (u8_t const *)second_slice;
+        u8_t const gap_open = static_cast<u8_t>(this->gap_costs_.open);
+        u8_t const gap_extend = static_cast<u8_t>(this->gap_costs_.extend);
+        __m256i const match_cost_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_open_vec = _mm256_set1_epi8((char)gap_open);
+        __m256i const gap_extend_vec = _mm256_set1_epi8((char)gap_extend);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed, second, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_running_insertions, scores_running_deletions,
+                                    scores_new, scores_new_insertions, scores_new_deletions, match_cost_vec,
+                                    mismatch_cost_vec, gap_open_vec, gap_extend_vec, from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed, second, i, scores_pre_substitution, scores_pre_insertion, scores_pre_deletion,
+                        scores_running_insertions, scores_running_deletions, scores_new, scores_new_insertions,
+                        scores_new_deletions, gap_open, gap_extend);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b UTF-8 uniform-cost diagonal scorer - minimizes rune-level Levenshtein over `u16_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Runes are 32-bit, so each 16-cell half compares
+ *        two `_mm256_cmpeq_epi32` vectors, saturating-packs them to one 16-lane `i16` mask (`_mm256_packs_epi32`
+ *        keeps `-1`/`0` exactly) and `_mm256_permute4x64_epi64(.., 0xD8)` repairs the AVX2 cross-128-bit-lane
+ *        interleave so the lane order is 0..15.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                                //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                     //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec) const noexcept {
+
+        u32_t const *first = (u32_t const *)first_reversed_slice;
+        u32_t const *second = (u32_t const *)second_slice;
+        for (size_t part = 0; part != 2; ++part) {
+            u32_t const *first_part = first + part * 16;
+            u32_t const *second_part = second + part * 16;
+            __m256i equal_low_vec = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first_part + 0)),
+                                                       _mm256_loadu_si256((__m256i const *)(second_part + 0)));
+            __m256i equal_high_vec = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first_part + 8)),
+                                                        _mm256_loadu_si256((__m256i const *)(second_part + 8)));
+            __m256i equal_packed_vec = _mm256_packs_epi32(equal_low_vec, equal_high_vec);
+            __m256i equal_i16_vec = _mm256_permute4x64_epi64(equal_packed_vec, 0xD8);
+            __m256i cost_vec = _mm256_blendv_epi8(mismatch_cost_vec, match_cost_vec, equal_i16_vec);
+            __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_substitution + part * 16));
+            __m256i pre_insert_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_insertion + part * 16));
+            __m256i pre_delete_vec = _mm256_loadu_si256((__m256i const *)(scores_pre_deletion + part * 16));
+            __m256i cost_if_substitution_vec = _mm256_add_epi16(pre_substitution_vec, cost_vec);
+            __m256i cost_if_gap_vec = _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec, pre_delete_vec), gap_cost_vec);
+            __m256i cell_score_vec = _mm256_min_epu16(cost_if_substitution_vec, cost_if_gap_vec);
+            _mm256_storeu_si256((__m256i *)(scores_new + part * 16), cell_score_vec);
+        }
+    }
+
+    SZ_INLINE void slice_1cell(                                                   //
+        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t i, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,  //
+        u16_t const *scores_pre_deletion, u16_t *scores_new, u16_t gap) const noexcept {
+        u16_t const cost = first_reversed_slice[i] == second_slice[i] ? (u16_t)this->substituter_.match
+                                                                      : (u16_t)this->substituter_.mismatch;
+        u16_t const if_substitution = (u16_t)(scores_pre_substitution[i] + cost);
+        u16_t const if_gap = (u16_t)(sz_min_of_two(scores_pre_insertion[i], scores_pre_deletion[i]) + gap);
+        scores_new[i] = sz_min_of_two(if_substitution, if_gap);
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                    //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion, //
+        u16_t const *scores_pre_deletion, u16_t *scores_new,                     //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec, //
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,
+                          match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                         //
+        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t const length, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,             //
+        u16_t const *scores_pre_deletion, u16_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        u16_t const gap = static_cast<u16_t>(this->gap_costs_.open_or_extend);
+        __m256i const match_cost_vec = _mm256_set1_epi16((short)this->substituter_.match);
+        __m256i const mismatch_cost_vec = _mm256_set1_epi16((short)this->substituter_.mismatch);
+        __m256i const gap_cost_vec = _mm256_set1_epi16((short)gap);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed_slice, second_slice, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_new, match_cost_vec, mismatch_cost_vec, gap_cost_vec,
+                                    from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                        scores_pre_deletion, scores_new, gap);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Haswell @b UTF-8 uniform-cost diagonal scorer - minimizes rune-level Levenshtein over `u8_t` cells.
+ *  @note Requires AVX2-capable Haswell generation CPUs or newer. Four `_mm256_cmpeq_epi32` rune compares
+ *        saturating-pack down to one 32-lane `i8` mask via two `_mm256_packs_epi32` + one `_mm256_packs_epi16`,
+ *        each followed by `_mm256_permute4x64_epi64(.., 0xD8)` to repair the AVX2 cross-128-bit-lane interleave.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_haswell_k) != 0>>
+    : public tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr size_t step_k = 32;
+
+    SZ_INLINE void slice_32cells(                                              //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,        //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion, //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                     //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec) const noexcept {
+
+        u32_t const *first = (u32_t const *)first_reversed_slice;
+        u32_t const *second = (u32_t const *)second_slice;
+        __m256i equal_0 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first + 0)),
+                                             _mm256_loadu_si256((__m256i const *)(second + 0)));
+        __m256i equal_1 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first + 8)),
+                                             _mm256_loadu_si256((__m256i const *)(second + 8)));
+        __m256i equal_2 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first + 16)),
+                                             _mm256_loadu_si256((__m256i const *)(second + 16)));
+        __m256i equal_3 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(first + 24)),
+                                             _mm256_loadu_si256((__m256i const *)(second + 24)));
+        __m256i equal_low_i16 = _mm256_permute4x64_epi64(_mm256_packs_epi32(equal_0, equal_1), 0xD8);
+        __m256i equal_high_i16 = _mm256_permute4x64_epi64(_mm256_packs_epi32(equal_2, equal_3), 0xD8);
+        __m256i equal_i8_vec = _mm256_permute4x64_epi64(_mm256_packs_epi16(equal_low_i16, equal_high_i16), 0xD8);
+        __m256i cost_vec = _mm256_blendv_epi8(mismatch_cost_vec, match_cost_vec, equal_i8_vec);
+        __m256i pre_substitution_vec = _mm256_loadu_si256((__m256i const *)scores_pre_substitution);
+        __m256i pre_insert_vec = _mm256_loadu_si256((__m256i const *)scores_pre_insertion);
+        __m256i pre_delete_vec = _mm256_loadu_si256((__m256i const *)scores_pre_deletion);
+        __m256i cost_if_substitution_vec = _mm256_adds_epu8(pre_substitution_vec, cost_vec);
+        __m256i cost_if_gap_vec = _mm256_adds_epu8(_mm256_min_epu8(pre_insert_vec, pre_delete_vec), gap_cost_vec);
+        _mm256_storeu_si256((__m256i *)scores_new, _mm256_min_epu8(cost_if_substitution_vec, cost_if_gap_vec));
+    }
+
+    SZ_INLINE void slice_1cell(                                                   //
+        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t i, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,    //
+        u8_t const *scores_pre_deletion, u8_t *scores_new, u8_t gap) const noexcept {
+        u8_t const cost = first_reversed_slice[i] == second_slice[i] ? (u8_t)this->substituter_.match
+                                                                     : (u8_t)this->substituter_.mismatch;
+        u8_t const if_substitution = (u8_t)(scores_pre_substitution[i] + cost);
+        u8_t const if_gap = (u8_t)(sz_min_of_two(scores_pre_insertion[i], scores_pre_deletion[i]) + gap);
+        scores_new[i] = sz_min_of_two(if_substitution, if_gap);
+    }
+
+    SZ_NOINLINE void score_slice_trampoline_(                                    //
+        rune_t const *first_reversed_slice, rune_t const *second_slice,          //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,   //
+        u8_t const *scores_pre_deletion, u8_t *scores_new,                       //
+        __m256i match_cost_vec, __m256i mismatch_cost_vec, __m256i gap_cost_vec, //
+        size_t from, size_t to) const noexcept {
+        for (size_t idx_slice = from; idx_slice < to; ++idx_slice) {
+            size_t const progress = idx_slice * step_k;
+            slice_32cells(first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress,
+                          scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,
+                          match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        }
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                         //
+        rune_t const *first_reversed_slice, rune_t const *second_slice, size_t const length, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,               //
+        u8_t const *scores_pre_deletion, u8_t *scores_new, executor_type_ &&executor = {}) noexcept {
+
+        u8_t const gap = static_cast<u8_t>(this->gap_costs_.open_or_extend);
+        __m256i const match_cost_vec = _mm256_set1_epi8((char)this->substituter_.match);
+        __m256i const mismatch_cost_vec = _mm256_set1_epi8((char)this->substituter_.mismatch);
+        __m256i const gap_cost_vec = _mm256_set1_epi8((char)gap);
+
+        size_t const count_slices = length / step_k;
+        executor.for_slices(count_slices, [&](size_t from, size_t to) noexcept {
+            score_slice_trampoline_(first_reversed_slice, second_slice, scores_pre_substitution, scores_pre_insertion,
+                                    scores_pre_deletion, scores_new, match_cost_vec, mismatch_cost_vec, gap_cost_vec,
+                                    from, to);
+        });
+        for (size_t i = count_slices * step_k; i < length; ++i)
+            slice_1cell(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                        scores_pre_deletion, scores_new, gap);
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+#pragma endregion // Uniform Cost Levenshtein
+
 /** @brief Redirects the Haswell template specialization to the serial version. */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename gap_costs_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>

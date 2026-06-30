@@ -760,6 +760,7 @@ using malloc_t = std::allocator<char>;
 
 /**
  *  In non-SIMD backends we still leverage multi-threading for parallelism.
+ *  "Affine Levenshtein" combination is rarely used in practice, so that one only has a serial fallback.
  */
 using levenshtein_serial_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using levenshtein_utf8_serial_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
@@ -788,7 +789,6 @@ using smith_waterman_icelake_t =
     smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 using affine_levenshtein_icelake_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
-using affine_levenshtein_utf8_icelake_t = levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 using affine_needleman_wunsch_icelake_t =
     needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
@@ -800,9 +800,13 @@ using affine_smith_waterman_icelake_t =
  *  emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends. The aliases are
  *  always declared (the composite capability is a plain constant); only their instantiation is `SZ_USE_HASWELL`-gated.
  */
+using levenshtein_haswell_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using levenshtein_utf8_haswell_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using needleman_wunsch_haswell_t =
     needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using smith_waterman_haswell_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+
+using affine_levenshtein_haswell_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_needleman_wunsch_haswell_t =
     needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_smith_waterman_haswell_t =
