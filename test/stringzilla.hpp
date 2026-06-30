@@ -417,7 +417,9 @@ inline void test_fatal_signal_handler(int signal_number) noexcept {
  *         Shared by the serial (`.cpp`) and CUDA (`.cu`) test entry points; call once from `main`.
  */
 inline void install_test_signal_handlers() noexcept {
-    std::setvbuf(stdout, nullptr, _IOLBF, 0); // Line-buffer, so progress survives a crash under output redirection.
+    // Line-buffer, so progress survives a crash under output redirection.
+    // Size must be nonzero: Windows ucrt fast-fails on a zero-sized buffering mode.
+    std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
     std::signal(SIGSEGV, test_fatal_signal_handler);
     std::signal(SIGABRT, test_fatal_signal_handler);
 }
