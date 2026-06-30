@@ -397,3 +397,112 @@ def decomposition_pairs(decomposition_mappings: dict, canonical_only: bool = Tru
 
 
 #  endregion Rule-derived generators
+
+
+#  region Prose fixtures
+
+# Realistic multi-script paragraphs (ASCII-source \uXXXX escapes; rendered prose in each comment).
+# Segment counts are asserted live against the ICU / uniseg oracles in the per-family modules.
+
+# Hotel review (German + Japanese): NFD cafe, NBSP-glued units, a sentence-ending abbreviation, a CJK run.
+#   Last spring we strolled down Münchner Straße; the café cortado cost 3,50 € and was unreal. Dr. Vogel, our
+#   guide, swore it's the city's finest. Worth the detour?! Absolutely — and 東京タワー the next week, all 333 m of
+#   it, was breathtaking at dusk…
+PROSE_HOTEL_REVIEW = (
+    "Last spring we strolled down M\u00fcnchner Stra\u00dfe; the cafe\u0301 cortado cost 3,50"
+    "\u00a0\u20ac and was unreal. Dr. Vogel, our guide, swore it's the city's finest. Worth the d"
+    "etour?! Absolutely \u2014 and \u6771\u4eac\u30bf\u30ef\u30fc the next week, all 333\u00a0m o"
+    "f it, was breathtaking at dusk\u2026"
+)
+
+# Pride caption: a ZWJ family and VS16 rainbow flag, a skin-tone modifier, a keycap, an odd regional-indicator run.
+#   Best Pride yet 🏳️‍🌈 — the whole crew showed up. Even my parents 👨‍👩‍👧‍👦 and grandma 👍🏽 came through! We met
+#   at booth 5️⃣, then waved every flag we packed 🇺🇸🇯🇵🇫. Texting ☎︎ over calling ✈️ all day; 10/10, would march
+#   again.
+PROSE_PRIDE_CAPTION = (
+    "Best Pride yet \U0001f3f3\ufe0f\u200d\U0001f308 \u2014 the whole crew showed up. Even my par"
+    "ents \U0001f468\u200d\U0001f469\u200d\U0001f467\u200d\U0001f466 and grandma \U0001f44d"
+    "\U0001f3fd came through! We met at booth 5\ufe0f\u20e3, then waved every flag we packed "
+    "\U0001f1fa\U0001f1f8\U0001f1ef\U0001f1f5\U0001f1eb. Texting \u260e\ufe0e over calling \u2708"
+    "\ufe0f all day; 10/10, would march again."
+)
+
+# Concert post (Korean + Japanese): conjoining L+V+T jamo, a Katakana run, an ideographic stop, a 'p.m.' no-break.
+#   오늘 콘서트, 진짜 미쳤다!! 한국 팬들이 다 모였고, the staff bowed and said 안녕히 가세요. Setlist was pure ハードコア; 今日は最高だった。 We
+#   screamed 사랑해 till 11 p.m. sharp.
+PROSE_CONCERT_POST = (
+    "\uc624\ub298 \ucf58\uc11c\ud2b8, \uc9c4\uc9dc \ubbf8\ucce4\ub2e4!! \u1112\u1161\u11ab\uad6d "
+    "\ud32c\ub4e4\uc774 \ub2e4 \ubaa8\uc600\uace0, the staff bowed and said \uc548\ub155\ud788 "
+    "\uac00\uc138\uc694. Setlist was pure \u30cf\u30fc\u30c9\u30b3\u30a2; \u4eca\u65e5\u306f"
+    "\u6700\u9ad8\u3060\u3063\u305f\u3002 We screamed \uc0ac\ub791\ud574 till 11 p.m. sharp."
+)
+
+# Devanagari note: a virama conjunct, ZWJ/ZWNJ half-forms, a spacing vowel sign, and an NFKC vulgar fraction.
+#   Quick Devanagari tip: क्ष is one cluster (क + ् + ष), not three. Force the half-form with ZWJ — क्‍ष — or
+#   split it with ZWNJ — क्‌ष. The same logic hits क्षत्रिय and spacing vowel signs like की. Renderers disagree,
+#   so test (½ the bugs are font bugs) before you ship!
+PROSE_DEVANAGARI_TIP = (
+    "Quick Devanagari tip: \u0915\u094d\u0937 is one cluster (\u0915 + \u094d + \u0937), not thre"
+    "e. Force the half-form with ZWJ \u2014 \u0915\u094d\u200d\u0937 \u2014 or split it with ZWNJ"
+    " \u2014 \u0915\u094d\u200c\u0937. The same logic hits \u0915\u094d\u0937\u0924\u094d\u0930"
+    "\u093f\u092f and spacing vowel signs like \u0915\u0940. Renderers disagree, so test (\u00bd "
+    "the bugs are font bugs) before you ship!"
+)
+
+# Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom singletons, NBSP, WJ + ZWSP.
+#   The ﬁlm grew at 300 K on a 5 Å buffer (≈ 2² monolayers). Section Ⅻ covers the Ａ-phase; see Fig. 2 for the
+#   Σ-band dispersion. Resistivity scaled as T², vanishing at the 4.2 K transition. Full dataset:
+#   doi:10.1000⁠/​xyz (mirror in Box ②).
+PROSE_SCIENCE_ABSTRACT = (
+    "The \ufb01lm grew at 300\u00a0\u212a on a 5\u00a0\u212b buffer (\u2248 2\u00b2 monolayers). "
+    "Section \u216b covers the \uff21-phase; see Fig. 2 for the \u03a3-band dispersion. Resistivi"
+    "ty scaled as T\u00b2, vanishing at the 4.2\u00a0\u212a transition. Full dataset: doi:10.1000"
+    "\u2060/\u200bxyz (mirror in Box \u2461)."
+)
+
+# News lede: 'U.S.A.' before a lowercase word (no break), curly quotes, thousands, currency, a date range.
+#   The U.S.A. wasn't ready, analysts said. “We lost 1,000 jobs,” the mayor warned. “Recovery starts now.”
+#   Filings spiked 2024/06–2024/09, topping $1,000 per claim. Will it hold?! No one knows for sure.
+PROSE_NEWS_LEDE = (
+    "The U.S.A. wasn't ready, analysts said. \u201cWe lost 1,000 jobs,\u201d the mayor warned. "
+    "\u201cRecovery starts now.\u201d Filings spiked 2024/06\u20132024/09, topping $1,000 per cla"
+    "im. Will it hold?! No one knows for sure."
+)
+
+# Language lesson: a Greek final sigma, Cyrillic case pairs, a Croatian titlecase digraph, and a fold-only match.
+#   Greek lesson: ΟΔΟΣ becomes οδός when lowercased, ending in a final ς. Russian's easy too — МОСКВА ↔ москва,
+#   no drama. Croatian has the digraph Ǆ: titlecase ǅ, lowercase ǆ. Quiz — does “straße” match STRASSE? Yes,
+#   once you fold.
+PROSE_LANGUAGE_LESSON = (
+    "Greek lesson: \u039f\u0394\u039f\u03a3 becomes \u03bf\u03b4\u03cc\u03c2 when lowercased, end"
+    "ing in a final \u03c2. Russian's easy too \u2014 \u041c\u041e\u0421\u041a\u0412\u0410 \u2194"
+    " \u043c\u043e\u0441\u043a\u0432\u0430, no drama. Croatian has the digraph \u01c4: titlecase "
+    "\u01c5, lowercase \u01c6. Quiz \u2014 does \u201cstra\u00dfe\u201d match STRASSE? Yes, once "
+    "you fold."
+)
+
+# RTL scripts: Hebrew gershayim, Arabic, a number-sign Prepend, an NFC niqqud reorder, a Malayalam dot-reph.
+#   Hebrew acronyms take gershayim: צה״ל and ארה״ב aren't typos. Arabic flows right-to-left too — مرحبا بالعالم
+#   — and finance text can carry the number sign ؀٤. Niqqud stacks marks: שָׁלוֹם must reorder under NFC.
+#   Malayalam even has a true prepend, the dot-reph ൎക.
+PROSE_RTL_SCRIPTS = (
+    "Hebrew acronyms take gershayim: \u05e6\u05d4\u05f4\u05dc and \u05d0\u05e8\u05d4\u05f4\u05d1 "
+    "aren't typos. Arabic flows right-to-left too \u2014 \u0645\u0631\u062d\u0628\u0627 \u0628"
+    "\u0627\u0644\u0639\u0627\u0644\u0645 \u2014 and finance text can carry the number sign "
+    "\u0600\u0664. Niqqud stacks marks: \u05e9\u05c1\u05b8\u05dc\u05d5\u05b9\u05dd must reorder u"
+    "nder NFC. Malayalam even has a true prepend, the dot-reph \u0d4e\u0d15."
+)
+
+# A U+2019 contraction tiles as a single word, like the ASCII apostrophe.
+#   it’s worth it
+PROSE_MICRO_APOSTROPHE = "it\u2019s worth it"
+
+# Two Prepend characters (Arabic number sign, Malayalam dot-reph): clusters fewer than codepoints.
+#   ؀٤ ൎക
+PROSE_MICRO_PREPEND = "\u0600\u0664 \u0d4e\u0d15"
+
+# A CR-LF pair and a U+2028 line separator: both Sep (force sentence and line breaks); CR-LF is one grapheme.
+#   A.\r\nB.\u2028C.
+PROSE_MICRO_HARDBREAKS = "A.\u000d\u000aB.\u2028C."
+
+#  endregion

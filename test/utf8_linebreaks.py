@@ -203,3 +203,27 @@ def test_utf8_linewrap_class_adjacency():
 
 
 #  endregion Rule-derived coverage (class adjacency)
+
+
+def test_utf8_linebreaks_prose():
+    """Realistic multi-script paragraphs: line-break (UAX-14) count matches the ICU root oracle; segments tile."""
+    from test.utf8_helpers import (
+        PROSE_HOTEL_REVIEW,
+        PROSE_SCIENCE_ABSTRACT,
+        PROSE_NEWS_LEDE,
+        assert_segments_tile,
+        icu_segmenter,
+    )
+
+    cases = [
+        (PROSE_HOTEL_REVIEW, 45),
+        (PROSE_SCIENCE_ABSTRACT, 43),
+        (PROSE_NEWS_LEDE, 32),
+    ]
+    for text, expected in cases:
+        segments = list(sz.utf8_linebreaks(text))
+        assert_segments_tile(segments, text)
+        assert len(segments) == expected
+    oracle = icu_segmenter("line")
+    for text, _ in cases:
+        assert len(list(sz.utf8_linebreaks(text))) == len(oracle(text))

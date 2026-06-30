@@ -296,3 +296,35 @@ def test_utf8_grapheme_class_adjacency():
 
 
 #  endregion Rule-derived coverage (baseline validation + class adjacency)
+
+
+def test_utf8_graphemes_prose():
+    """Realistic multi-script paragraphs: grapheme count matches the ICU root oracle; clusters != codepoints."""
+    from test.utf8_helpers import (
+        PROSE_PRIDE_CAPTION,
+        PROSE_DEVANAGARI_TIP,
+        PROSE_CONCERT_POST,
+        PROSE_RTL_SCRIPTS,
+        PROSE_MICRO_PREPEND,
+        assert_segments_tile,
+        icu_segmenter,
+    )
+
+    cases = [
+        (PROSE_PRIDE_CAPTION, 206),
+        (PROSE_DEVANAGARI_TIP, 252),
+        (PROSE_CONCERT_POST, 134),
+        (PROSE_RTL_SCRIPTS, 256),
+        (PROSE_MICRO_PREPEND, 3),
+    ]
+    for text, expected in cases:
+        clusters = list(sz.utf8_graphemes(text))
+        assert_segments_tile(clusters, text)
+        assert len(clusters) == expected
+    oracle = icu_segmenter("grapheme")
+    for text, _ in cases:
+        assert len(list(sz.utf8_graphemes(text))) == len(oracle(text))
+
+    # Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
+    assert sz.utf8_count(PROSE_PRIDE_CAPTION) == 222
+    assert sz.utf8_count(PROSE_PRIDE_CAPTION) > sum(1 for _ in sz.utf8_graphemes(PROSE_PRIDE_CAPTION))

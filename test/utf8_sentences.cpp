@@ -74,6 +74,16 @@ void test_utf8_sentences_unit() {
     std::vector<std::string> const sentences =
         sz::string_view("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
     assert(sentences.size() == 2 && "C++ utf8_sentences range");
+
+    // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
+    assert(utf8_prose_hotel_review().utf8_sentences().template to<std::vector<std::string>>().size() == 5 &&
+           "hotel_review sentences");
+    assert(utf8_prose_concert_post().utf8_sentences().template to<std::vector<std::string>>().size() == 4 &&
+           "concert_post sentences");
+    assert(utf8_prose_news_lede().utf8_sentences().template to<std::vector<std::string>>().size() == 6 &&
+           "news_lede sentences");
+    assert(utf8_prose_micro_hardbreaks().utf8_sentences().template to<std::vector<std::string>>().size() == 3 &&
+           "micro_hardbreaks sentences");
 }
 
 #pragma endregion // Unit

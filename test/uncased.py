@@ -466,3 +466,18 @@ def test_utf8_uncased_order():
 
     # Cyrillic with bytes
     assert sz.utf8_uncased_order("ПРИВЕТ".encode(), "привет".encode()) == 0
+
+
+def test_utf8_uncased_prose():
+    """Case-folded search finds realistic terms that a plain byte search misses."""
+    from test.utf8_helpers import PROSE_HOTEL_REVIEW, PROSE_SCIENCE_ABSTRACT, PROSE_LANGUAGE_LESSON
+
+    cases = [
+        (PROSE_HOTEL_REVIEW, "strasse"),
+        (PROSE_SCIENCE_ABSTRACT, "film"),
+        (PROSE_LANGUAGE_LESSON, "strasse"),
+    ]
+    for haystack, needle in cases:
+        assert haystack.find(needle) == -1  # plain byte search misses
+        result = sz.utf8_uncased_search(haystack, needle)
+        assert result is not None and result >= 0

@@ -318,3 +318,30 @@ def test_utf8_word_class_adjacency():
 
 
 #  endregion Rule-derived coverage (class adjacency)
+
+
+def test_utf8_wordbreaks_prose():
+    """Realistic multi-script paragraphs: wordbreak count matches the uniseg UAX-29 oracle; segments tile."""
+    from test.utf8_helpers import (
+        PROSE_HOTEL_REVIEW,
+        PROSE_NEWS_LEDE,
+        PROSE_CONCERT_POST,
+        PROSE_RTL_SCRIPTS,
+        PROSE_MICRO_APOSTROPHE,
+        assert_segments_tile,
+    )
+
+    cases = [
+        (PROSE_HOTEL_REVIEW, 100),
+        (PROSE_NEWS_LEDE, 83),
+        (PROSE_CONCERT_POST, 69),
+        (PROSE_RTL_SCRIPTS, 98),
+        (PROSE_MICRO_APOSTROPHE, 5),
+    ]
+    for text, expected in cases:
+        segments = list(sz.utf8_wordbreaks(text))
+        assert_segments_tile(segments, text)
+        assert len(segments) == expected
+    uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak")
+    for text, _ in cases:
+        assert len(list(sz.utf8_wordbreaks(text))) == len(list(uniseg_wordbreak.words(text)))

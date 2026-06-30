@@ -250,3 +250,29 @@ def test_utf8_sentence_class_adjacency():
 
 
 #  endregion Synthetic corner cases (safety / seam)
+
+
+def test_utf8_sentences_prose():
+    """Realistic multi-script paragraphs: sentence count matches the ICU root oracle; segments tile."""
+    from test.utf8_helpers import (
+        PROSE_HOTEL_REVIEW,
+        PROSE_CONCERT_POST,
+        PROSE_NEWS_LEDE,
+        PROSE_MICRO_HARDBREAKS,
+        assert_segments_tile,
+        icu_segmenter,
+    )
+
+    cases = [
+        (PROSE_HOTEL_REVIEW, 5),
+        (PROSE_CONCERT_POST, 4),
+        (PROSE_NEWS_LEDE, 6),
+        (PROSE_MICRO_HARDBREAKS, 3),
+    ]
+    for text, expected in cases:
+        segments = list(sz.utf8_sentences(text))
+        assert_segments_tile(segments, text)
+        assert len(segments) == expected
+    oracle = icu_segmenter("sentence")
+    for text, _ in cases:
+        assert len(list(sz.utf8_sentences(text))) == len(oracle(text))

@@ -137,6 +137,18 @@ void test_utf8_wordbreaks_unit() {
         for (auto const &s : segments) rejoined += s;
         assert(rejoined == "Hello, world!" && "wordbreaks tile losslessly");
     }
+
+    // Word-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
+    assert(utf8_prose_hotel_review().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 100 &&
+           "hotel_review wordbreaks");
+    assert(utf8_prose_news_lede().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 83 &&
+           "news_lede wordbreaks");
+    assert(utf8_prose_concert_post().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 69 &&
+           "concert_post wordbreaks");
+    assert(utf8_prose_rtl_scripts().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 98 &&
+           "rtl_scripts wordbreaks");
+    assert(utf8_prose_micro_apostrophe().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 5 &&
+           "micro_apostrophe wordbreaks");
 }
 
 #pragma endregion // Unit
