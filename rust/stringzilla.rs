@@ -2722,6 +2722,10 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
         }
 
         if let Some(index) = self.matcher.find(&self.haystack[self.position..]) {
+            debug_assert!(
+                self.position + index + self.matcher.needle_length() <= self.haystack.len(),
+                "matcher returned a match span past the haystack end"
+            );
             let start = self.position + index;
             let end = start + self.matcher.needle_length();
             self.position = start + if O::OVERLAP { 1 } else { self.matcher.needle_length() };
@@ -2799,6 +2803,10 @@ impl<'a, E: EmptySegments, const STEPS: usize> FindSplits<'a, E, STEPS> {
         }
 
         if let Some(index) = self.matcher.find(&self.haystack[self.position..]) {
+            debug_assert!(
+                self.position + index + self.matcher.needle_length() <= self.haystack.len(),
+                "matcher returned a match span past the haystack end"
+            );
             let start = self.position;
             let end = self.position + index;
             self.position = end + self.matcher.needle_length();
@@ -3203,6 +3211,14 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
                 &mut consumed,
             )
         };
+        debug_assert!(self.separators <= STEPS, "segmenter reported more spans than the capacity STEPS");
+        debug_assert!(consumed <= self.region, "segmenter consumed past the region end");
+        debug_assert!(consumed > 0 || self.region == 0, "segmenter made no progress (the iterator would loop forever)");
+        debug_assert!(
+            (0..self.separators).all(|s| self.starts[s] + self.lengths[s] <= self.region
+                && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),
+            "separator spans run past the region, overlap, or are out of order"
+        );
         let eof = consumed == self.region;
         // Boundaries: `0`, then 2 per separator, plus the closing `region` at end-of-text.
         self.spans = 2 * self.separators + if eof { 1 } else { 0 };

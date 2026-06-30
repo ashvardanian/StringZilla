@@ -6440,8 +6440,14 @@ static void Utf8Split_refill_(Utf8Split *self) {
     sz_size_t consumed = 0;
     sz_size_t separators = self->kernel(self->suffix, region, offsets, lengths, sz_iterators_default_steps_k,
                                         &consumed);
+    sz_assert_(separators <= sz_iterators_default_steps_k && "segmenter reported more spans than the requested capacity");
+    sz_assert_(consumed <= region && "segmenter consumed past the region end");
+    sz_assert_((consumed > 0 || region == 0) && "segmenter made no progress (the iterator would loop forever)");
     self->bounds[0] = base;
     for (sz_size_t separator = 0; separator < separators; ++separator) {
+        sz_assert_(offsets[separator] + lengths[separator] <= region && "separator span runs past the region end");
+        sz_assert_((separator == 0 || offsets[separator] >= offsets[separator - 1] + lengths[separator - 1]) &&
+                   "separator spans are out of order or overlap");
         self->bounds[2 * separator + 1] = base + offsets[separator];
         self->bounds[2 * separator + 2] = base + offsets[separator] + lengths[separator];
     }

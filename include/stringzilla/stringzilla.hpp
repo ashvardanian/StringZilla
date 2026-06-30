@@ -1014,9 +1014,11 @@ class utf8_runes_view {
             size_type unpacked_count = 0;
 
             char const *next_ptr = sz_utf8_decode(octets_ptr, chunk_size, runes_, steps_, &unpacked_count);
+            sz_assert_(unpacked_count <= steps_ && "decoder reported more runes than the requested capacity");
 
             // Update position
             size_type bytes_consumed = static_cast<size_type>(next_ptr - octets_ptr);
+            sz_assert_(bytes_consumed <= chunk_size && "decoder consumed past the chunk end");
             octets_offset_ += bytes_consumed;
             runes_offset_ = 0;
 
@@ -1217,9 +1219,16 @@ class utf8_split_view {
             size_type const region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
             size_type const separators = kernel_(suffix_, region, offsets, lengths, steps_, &consumed);
+            sz_assert_(separators <= steps_ && "segmenter reported more spans than the requested capacity");
+            sz_assert_(static_cast<size_type>(consumed) <= region && "segmenter consumed past the region end");
+            sz_assert_((consumed > 0 || region == 0) && "segmenter made no progress (the iterator would loop forever)");
             bounds_[0] = base;
-            for (size_type s = 0; s < separators; ++s)
+            for (size_type s = 0; s < separators; ++s) {
+                sz_assert_(offsets[s] + lengths[s] <= region && "separator span runs past the region end");
+                sz_assert_((s == 0 || offsets[s] >= offsets[s - 1] + lengths[s - 1]) &&
+                           "separator spans are out of order or overlap");
                 bounds_[2 * s + 1] = base + offsets[s], bounds_[2 * s + 2] = base + offsets[s] + lengths[s];
+            }
             size_type boundaries = 2 * separators + 1;
             // At end-of-text append the closing boundary, which materializes the trailing gap (empty if the text
             // ends on a separator - keeping `both_k` lossless). On a partial batch the trailing gap continues into
@@ -1353,8 +1362,20 @@ class utf8_segments_view {
         size_type index_;
 
         void fill_() noexcept {
+            size_type const region = static_cast<size_type>(end_ - suffix_);
             sz_size_t consumed = 0;
-            count_ = kernel_(suffix_, static_cast<size_type>(end_ - suffix_), starts_, lengths_, steps_, &consumed);
+            count_ = kernel_(suffix_, region, starts_, lengths_, steps_, &consumed);
+            sz_assert_(count_ <= steps_ && "segmenter reported more units than the requested capacity");
+            sz_assert_(static_cast<size_type>(consumed) <= region && "segmenter consumed past the region end");
+            sz_assert_((consumed > 0 || region == 0) && "segmenter made no progress (the iterator would loop forever)");
+            // Tiling segmenters cover [0, consumed) contiguously, with no gaps and no zero-length units.
+            for (size_type u = 0; u < count_; ++u) {
+                sz_assert_(lengths_[u] > 0 && "tiling segmenter yielded a zero-length unit");
+                sz_assert_(starts_[u] == (u == 0 ? size_type(0) : starts_[u - 1] + lengths_[u - 1]) &&
+                           "tiling units are not contiguous");
+            }
+            sz_assert_((count_ == 0 || starts_[count_ - 1] + lengths_[count_ - 1] == static_cast<size_type>(consumed)) &&
+                       "tiling units do not cover the consumed region");
             index_ = 0;
         }
 
