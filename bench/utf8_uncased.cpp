@@ -202,6 +202,72 @@ void bench_utf8_uncased_search(environment_t const &env) {
 
 #pragma endregion
 
+#pragma region Uncased Order Functions
+
+/** @brief Wraps a hardware-specific UTF-8 uncased ordering backend. */
+template <sz_utf8_uncased_order_t func_>
+struct utf8_uncased_order_from_sz {
+
+    environment_t const &env;
+
+    utf8_uncased_order_from_sz(environment_t const &env_) : env(env_) {}
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        std::string_view a = env.tokens[token_index];
+        std::string_view b = env.tokens[(token_index + 1) % env.tokens.size()];
+        sz_ordering_t ordering = func_(a.data(), a.size(), b.data(), b.size());
+        do_not_optimize(ordering);
+        // Worst case is a full case-insensitive scan of both operands.
+        std::size_t count_operations = a.size() + b.size();
+        // Fold the {-1,0,+1} verdict into a non-negative check value so SIMD must agree with serial.
+        return {a.size() + b.size(), static_cast<check_value_t>(ordering + 1), count_operations};
+    }
+};
+
+void bench_utf8_uncased_order(environment_t const &env) {
+
+    auto validator = utf8_uncased_order_from_sz<sz_utf8_uncased_order_serial> {env};
+    bench_result_t base = bench_unary(env, "sz_utf8_uncased_order_serial", validator).log();
+
+#if SZ_USE_ICELAKE
+    bench_unary(env, "sz_utf8_uncased_order_icelake", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_icelake> {env})
+        .log(base);
+#endif
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_utf8_uncased_order_haswell", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_NEON
+    bench_unary(env, "sz_utf8_uncased_order_neon", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_V128
+    bench_unary(env, "sz_utf8_uncased_order_v128", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_v128> {env})
+        .log(base);
+#endif
+#if SZ_USE_RVV
+    bench_unary(env, "sz_utf8_uncased_order_rvv", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_rvv> {env})
+        .log(base);
+#endif
+#if SZ_USE_LASX
+    bench_unary(env, "sz_utf8_uncased_order_lasx", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_lasx> {env})
+        .log(base);
+#endif
+#if SZ_USE_POWERVSX
+    bench_unary(env, "sz_utf8_uncased_order_powervsx", validator,
+                utf8_uncased_order_from_sz<sz_utf8_uncased_order_powervsx> {env})
+        .log(base);
+#endif
+}
+
+#pragma endregion
+
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla UTF-8 Case Benchmarks!\n");
@@ -218,6 +284,7 @@ int main(int argc, char const **argv) {
     // Unicode operations
     bench_utf8_uncased_fold(env);
     bench_utf8_uncased_search(env);
+    bench_utf8_uncased_order(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

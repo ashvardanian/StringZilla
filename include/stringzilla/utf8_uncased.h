@@ -833,6 +833,42 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_neon( //
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_neon(sz_cptr_t str, sz_size_t length);
 #endif
 
+#if SZ_USE_V128
+/** @copydoc sz_utf8_uncased_order */
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_v128( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_utf8_find_cased */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_utf8_uncased_order */
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_rvv( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_utf8_find_cased */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_utf8_uncased_order */
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_lasx( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_utf8_find_cased */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_lasx(sz_cptr_t str, sz_size_t length);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_utf8_uncased_order */
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_powervsx( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_utf8_find_cased */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_powervsx(sz_cptr_t str, sz_size_t length);
+#endif
+
 #pragma region Declarations
 
 /**
@@ -953,6 +989,38 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_neon( //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
+#if SZ_USE_V128
+/** @copydoc sz_utf8_uncased_search */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length,         //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_utf8_uncased_search */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_rvv( //
+    sz_cptr_t haystack, sz_size_t haystack_length,    //
+    sz_cptr_t needle, sz_size_t needle_length,        //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_utf8_uncased_search */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_lasx( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length,         //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_utf8_uncased_search */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_powervsx( //
+    sz_cptr_t haystack, sz_size_t haystack_length,         //
+    sz_cptr_t needle, sz_size_t needle_length,             //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
 #pragma endregion // Core API
 
 /*  Backends in serial-first order: every SIMD/ISA header includes `serial.h` for the shared
@@ -1005,7 +1073,23 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_uncased_search(sz_cptr_t haystack, sz_size_t ha
 }
 
 SZ_API_RUNTIME sz_ordering_t sz_utf8_uncased_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+#if SZ_USE_V128
+    return sz_utf8_uncased_order_v128(a, a_length, b, b_length);
+#elif SZ_USE_RVV
+    return sz_utf8_uncased_order_rvv(a, a_length, b, b_length);
+#elif SZ_USE_LASX
+    return sz_utf8_uncased_order_lasx(a, a_length, b, b_length);
+#elif SZ_USE_POWERVSX
+    return sz_utf8_uncased_order_powervsx(a, a_length, b, b_length);
+#elif SZ_USE_ICELAKE
+    return sz_utf8_uncased_order_icelake(a, a_length, b, b_length);
+#elif SZ_USE_HASWELL
+    return sz_utf8_uncased_order_haswell(a, a_length, b, b_length);
+#elif SZ_USE_NEON
+    return sz_utf8_uncased_order_neon(a, a_length, b, b_length);
+#else
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
+#endif
 }
 
 SZ_API_RUNTIME sz_cptr_t sz_utf8_find_cased(sz_cptr_t str, sz_size_t length) {

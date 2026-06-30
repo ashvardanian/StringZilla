@@ -568,6 +568,8 @@ STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "sm
 STRINGZILLAS_CPU_PROVIDER_STEMS = [
     "levenshtein_serial",
     "levenshtein_icelake",
+    "levenshtein_haswell",
+    "levenshtein_neon",
     "needleman_wunsch_serial",
     "needleman_wunsch_icelake",
     "needleman_wunsch_haswell",

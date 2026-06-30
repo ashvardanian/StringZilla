@@ -149,6 +149,16 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_init(                      
                                                                              substitution_costs, affine_costs);
 #endif // SZ_USE_ICELAKE
 
+#if SZ_USE_HASWELL
+    bool const can_use_haswell = (capabilities & sz_cap_haswell_k) == sz_cap_haswell_k;
+    if (can_use_haswell && can_use_linear_costs)
+        return emplace_levenshtein_engine<szs::levenshtein_haswell_t>(engine_punned, error_message, substitution_costs,
+                                                                      linear_costs);
+    else if (can_use_haswell)
+        return emplace_levenshtein_engine<szs::affine_levenshtein_haswell_t>(engine_punned, error_message,
+                                                                             substitution_costs, affine_costs);
+#endif // SZ_USE_HASWELL
+
 #if SZ_USE_NEON
     bool const can_use_neon = (capabilities & sz_cap_neon_k) == sz_cap_neon_k;
     if (can_use_neon && can_use_linear_costs)
@@ -274,6 +284,13 @@ SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_init(                 
         return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_icelake_t>(engine_punned, error_message,
                                                                                 substitution_costs, linear_costs);
 #endif // SZ_USE_ICELAKE
+
+#if SZ_USE_HASWELL
+    bool const can_use_haswell = (capabilities & sz_cap_haswell_k) != 0;
+    if (can_use_haswell && can_use_linear_costs)
+        return emplace_levenshtein_utf8_engine<szs::levenshtein_utf8_haswell_t>(engine_punned, error_message,
+                                                                                substitution_costs, linear_costs);
+#endif // SZ_USE_HASWELL
 
 #if SZ_USE_NEON
     bool const can_use_neon = (capabilities & sz_cap_neon_k) != 0;

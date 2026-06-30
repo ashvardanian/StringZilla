@@ -26,11 +26,17 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
 #endif
 
 #if SZ_USE_ICELAKE
-    if (caps & sz_cap_icelake_k) { impl->utf8_uncased_search = sz_utf8_uncased_search_icelake; }
+    if (caps & sz_cap_icelake_k) {
+        impl->utf8_uncased_search = sz_utf8_uncased_search_icelake;
+        impl->utf8_uncased_order = sz_utf8_uncased_order_icelake;
+    }
 #endif
 
 #if SZ_USE_NEON
-    if (caps & sz_cap_neon_k) { impl->utf8_uncased_search = sz_utf8_uncased_search_neon; }
+    if (caps & sz_cap_neon_k) {
+        impl->utf8_uncased_search = sz_utf8_uncased_search_neon;
+        impl->utf8_uncased_order = sz_utf8_uncased_order_neon;
+    }
 #endif
 
 #if SZ_USE_V128

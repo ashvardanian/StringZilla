@@ -230,6 +230,12 @@ typedef enum {
     sz_join_cross_k = 5,
 } sz_sequence_join_semantics_t;
 
+/** @copydoc sz_sequence_intersect */
+SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                      //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+
 #if SZ_USE_ICELAKE
 
 /** @copydoc sz_sequence_intersect */
