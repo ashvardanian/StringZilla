@@ -657,6 +657,715 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_t
     using base_t::operator();
 };
 
+#pragma region Class Cost Needleman Wunsch and Smith Waterman
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b global Needleman-Wunsch score with class-based
+ *      substitution costs, over `i16_t` cells. Requires the RVV 1.0 Vector extension.
+ *
+ *      The (32 x 32) `class_substitution_costs` matrix is flattened into a resident 1024-entry byte
+ *      table by `prepare`, transposed when the diagonal walker has swapped the shorter/longer operands.
+ *      Every chunk gathers each side's class with one `vluxei8` over the resident 256-entry
+ *      `byte_to_class` map, folds the two classes into one `first_class * 32 + second_class` index with a
+ *      widening multiply-add, then gathers the matching cost with one `vluxei16` over the flattened
+ *      table and sign-extends it into the cell width. The anti-diagonal is swept in `vsetvl`-sized chunks,
+ *      so there is no scalar tail - the last chunk's `vl` is simply shorter than the rest.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
+        i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i16_t const gap = static_cast<i16_t>(this->gap_costs_.open_or_extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_byte_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_byte_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vuint8m2_t const first_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, first_byte_u8m2, vl);
+            vuint8m2_t const second_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, second_byte_u8m2, vl);
+
+            vuint16m4_t const first_class_scaled_u16m4 = __riscv_vwmulu_vx_u16m4(first_class_u8m2,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m4_t const combined_index_u16m4 = __riscv_vwaddu_wv_u16m4(first_class_scaled_u16m4,
+                                                                             second_class_u8m2, vl);
+            vint8m2_t const cost_i8m2 = __riscv_vluxei16_v_i8m2(cost_matrix_1024_, combined_index_u16m4, vl);
+            vint16m4_t const cost_i16m4 = __riscv_vsext_vf2_i16m4(cost_i8m2, vl);
+
+            vint16m4_t const pre_substitution_i16m4 = __riscv_vle16_v_i16m4(scores_pre_substitution + progress, vl);
+            vint16m4_t const pre_insertion_i16m4 = __riscv_vle16_v_i16m4(scores_pre_insertion + progress, vl);
+            vint16m4_t const pre_deletion_i16m4 = __riscv_vle16_v_i16m4(scores_pre_deletion + progress, vl);
+            vint16m4_t const if_substitution_i16m4 = __riscv_vadd_vv_i16m4(pre_substitution_i16m4, cost_i16m4, vl);
+            vint16m4_t const if_gap_i16m4 = __riscv_vadd_vx_i16m4(
+                __riscv_vmax_vv_i16m4(pre_insertion_i16m4, pre_deletion_i16m4, vl), gap, vl);
+            vint16m4_t const cell_i16m4 = __riscv_vmax_vv_i16m4(if_substitution_i16m4, if_gap_i16m4, vl);
+            __riscv_vse16_v_i16m4(scores_new + progress, cell_i16m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b local Smith-Waterman score with class-based
+ *      substitution costs, over `i16_t` cells. Requires the RVV 1.0 Vector extension.
+ *
+ *      Identical recurrence to the global scorer above, but zero-clamps every cell with a signed
+ *      `vmax_vx` against zero, and tracks the running best across the whole matrix with one
+ *      `vredmax` reduction per chunk instead of a scalar walk.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
+        i16_t const *scores_pre_deletion, i16_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i16_t const gap = static_cast<i16_t>(this->gap_costs_.open_or_extend);
+        i16_t running_best = this->best_score_;
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_byte_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_byte_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vuint8m2_t const first_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, first_byte_u8m2, vl);
+            vuint8m2_t const second_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, second_byte_u8m2, vl);
+
+            vuint16m4_t const first_class_scaled_u16m4 = __riscv_vwmulu_vx_u16m4(first_class_u8m2,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m4_t const combined_index_u16m4 = __riscv_vwaddu_wv_u16m4(first_class_scaled_u16m4,
+                                                                             second_class_u8m2, vl);
+            vint8m2_t const cost_i8m2 = __riscv_vluxei16_v_i8m2(cost_matrix_1024_, combined_index_u16m4, vl);
+            vint16m4_t const cost_i16m4 = __riscv_vsext_vf2_i16m4(cost_i8m2, vl);
+
+            vint16m4_t const pre_substitution_i16m4 = __riscv_vle16_v_i16m4(scores_pre_substitution + progress, vl);
+            vint16m4_t const pre_insertion_i16m4 = __riscv_vle16_v_i16m4(scores_pre_insertion + progress, vl);
+            vint16m4_t const pre_deletion_i16m4 = __riscv_vle16_v_i16m4(scores_pre_deletion + progress, vl);
+            vint16m4_t const if_substitution_i16m4 = __riscv_vadd_vv_i16m4(pre_substitution_i16m4, cost_i16m4, vl);
+            vint16m4_t const if_gap_i16m4 = __riscv_vadd_vx_i16m4(
+                __riscv_vmax_vv_i16m4(pre_insertion_i16m4, pre_deletion_i16m4, vl), gap, vl);
+            vint16m4_t cell_i16m4 = __riscv_vmax_vv_i16m4(if_substitution_i16m4, if_gap_i16m4, vl);
+            cell_i16m4 = __riscv_vmax_vx_i16m4(cell_i16m4, 0, vl);
+            __riscv_vse16_v_i16m4(scores_new + progress, cell_i16m4, vl);
+
+            vint16m1_t const running_best_seed_i16m1 = __riscv_vmv_s_x_i16m1(running_best, 1);
+            vint16m1_t const reduced_i16m1 = __riscv_vredmax_vs_i16m4_i16m1(cell_i16m4, running_best_seed_i16m1, vl);
+            running_best = __riscv_vmv_x_s_i16m1_i16(reduced_i16m1);
+
+            progress += vl;
+        }
+
+        this->best_score_ = running_best;
+    }
+};
+
+/**
+ *  @brief Variant of the global diagonal class scorer over @b `i32_t` cells, for inputs whose scores exceed
+ *      the 16-bit range. Mirrors the `i16_t` scorer, but the byte/class vectors keep the narrower `m1`
+ *      grouping that matches an `i32m4` cell width, and the flattened cost byte is sign-extended directly
+ *      into `i32` with one `vsext_vf4`. Requires the RVV 1.0 Vector extension.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
+        i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i32_t const gap = static_cast<i32_t>(this->gap_costs_.open_or_extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_byte_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_byte_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vuint8m1_t const first_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, first_byte_u8m1, vl);
+            vuint8m1_t const second_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, second_byte_u8m1, vl);
+
+            vuint16m2_t const first_class_scaled_u16m2 = __riscv_vwmulu_vx_u16m2(first_class_u8m1,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m2_t const combined_index_u16m2 = __riscv_vwaddu_wv_u16m2(first_class_scaled_u16m2,
+                                                                             second_class_u8m1, vl);
+            vint8m1_t const cost_i8m1 = __riscv_vluxei16_v_i8m1(cost_matrix_1024_, combined_index_u16m2, vl);
+            vint32m4_t const cost_i32m4 = __riscv_vsext_vf4_i32m4(cost_i8m1, vl);
+
+            vint32m4_t const pre_substitution_i32m4 = __riscv_vle32_v_i32m4(scores_pre_substitution + progress, vl);
+            vint32m4_t const pre_insertion_i32m4 = __riscv_vle32_v_i32m4(scores_pre_insertion + progress, vl);
+            vint32m4_t const pre_deletion_i32m4 = __riscv_vle32_v_i32m4(scores_pre_deletion + progress, vl);
+            vint32m4_t const if_substitution_i32m4 = __riscv_vadd_vv_i32m4(pre_substitution_i32m4, cost_i32m4, vl);
+            vint32m4_t const if_gap_i32m4 = __riscv_vadd_vx_i32m4(
+                __riscv_vmax_vv_i32m4(pre_insertion_i32m4, pre_deletion_i32m4, vl), gap, vl);
+            vint32m4_t const cell_i32m4 = __riscv_vmax_vv_i32m4(if_substitution_i32m4, if_gap_i32m4, vl);
+            __riscv_vse32_v_i32m4(scores_new + progress, cell_i32m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Variant of the @b local diagonal class scorer over `i32_t` cells. Mirrors the global `i32_t`
+ *      scorer above, but zero-clamps every cell and reduces the running best with `vredmax` per chunk.
+ *      Requires the RVV 1.0 Vector extension.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, linear_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
+        i32_t const *scores_pre_deletion, i32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i32_t const gap = static_cast<i32_t>(this->gap_costs_.open_or_extend);
+        i32_t running_best = this->best_score_;
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_byte_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_byte_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vuint8m1_t const first_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, first_byte_u8m1, vl);
+            vuint8m1_t const second_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, second_byte_u8m1, vl);
+
+            vuint16m2_t const first_class_scaled_u16m2 = __riscv_vwmulu_vx_u16m2(first_class_u8m1,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m2_t const combined_index_u16m2 = __riscv_vwaddu_wv_u16m2(first_class_scaled_u16m2,
+                                                                             second_class_u8m1, vl);
+            vint8m1_t const cost_i8m1 = __riscv_vluxei16_v_i8m1(cost_matrix_1024_, combined_index_u16m2, vl);
+            vint32m4_t const cost_i32m4 = __riscv_vsext_vf4_i32m4(cost_i8m1, vl);
+
+            vint32m4_t const pre_substitution_i32m4 = __riscv_vle32_v_i32m4(scores_pre_substitution + progress, vl);
+            vint32m4_t const pre_insertion_i32m4 = __riscv_vle32_v_i32m4(scores_pre_insertion + progress, vl);
+            vint32m4_t const pre_deletion_i32m4 = __riscv_vle32_v_i32m4(scores_pre_deletion + progress, vl);
+            vint32m4_t const if_substitution_i32m4 = __riscv_vadd_vv_i32m4(pre_substitution_i32m4, cost_i32m4, vl);
+            vint32m4_t const if_gap_i32m4 = __riscv_vadd_vx_i32m4(
+                __riscv_vmax_vv_i32m4(pre_insertion_i32m4, pre_deletion_i32m4, vl), gap, vl);
+            vint32m4_t cell_i32m4 = __riscv_vmax_vv_i32m4(if_substitution_i32m4, if_gap_i32m4, vl);
+            cell_i32m4 = __riscv_vmax_vx_i32m4(cell_i32m4, 0, vl);
+            __riscv_vse32_v_i32m4(scores_new + progress, cell_i32m4, vl);
+
+            vint32m1_t const running_best_seed_i32m1 = __riscv_vmv_s_x_i32m1(running_best, 1);
+            vint32m1_t const reduced_i32m1 = __riscv_vredmax_vs_i32m4_i32m1(cell_i32m4, running_best_seed_i32m1, vl);
+            running_best = __riscv_vmv_x_s_i32m1_i32(reduced_i32m1);
+
+            progress += vl;
+        }
+
+        this->best_score_ = running_best;
+    }
+};
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b global Needleman-Wunsch score with class-based
+ *      substitution costs and @b affine gaps, over `i16_t` cells. Requires the RVV 1.0 Vector extension.
+ *
+ *      Same class-pair gather as the linear-gap scorer, but threads the separate insertion and deletion
+ *      gap diagonals of the Gotoh recurrence (open vs extend) alongside the main score diagonal.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
+        i16_t const *scores_pre_deletion, i16_t const *scores_running_insertions,        //
+        i16_t const *scores_running_deletions, i16_t *scores_new,                        //
+        i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i16_t const gap_open = static_cast<i16_t>(this->gap_costs_.open);
+        i16_t const gap_extend = static_cast<i16_t>(this->gap_costs_.extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_byte_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_byte_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vuint8m2_t const first_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, first_byte_u8m2, vl);
+            vuint8m2_t const second_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, second_byte_u8m2, vl);
+
+            vuint16m4_t const first_class_scaled_u16m4 = __riscv_vwmulu_vx_u16m4(first_class_u8m2,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m4_t const combined_index_u16m4 = __riscv_vwaddu_wv_u16m4(first_class_scaled_u16m4,
+                                                                             second_class_u8m2, vl);
+            vint8m2_t const cost_i8m2 = __riscv_vluxei16_v_i8m2(cost_matrix_1024_, combined_index_u16m4, vl);
+            vint16m4_t const cost_i16m4 = __riscv_vsext_vf2_i16m4(cost_i8m2, vl);
+
+            vint16m4_t const pre_substitution_i16m4 = __riscv_vle16_v_i16m4(scores_pre_substitution + progress, vl);
+            vint16m4_t const pre_insertion_open_i16m4 = __riscv_vle16_v_i16m4(scores_pre_insertion + progress, vl);
+            vint16m4_t const pre_deletion_open_i16m4 = __riscv_vle16_v_i16m4(scores_pre_deletion + progress, vl);
+            vint16m4_t const running_insertion_i16m4 = __riscv_vle16_v_i16m4(scores_running_insertions + progress, vl);
+            vint16m4_t const running_deletion_i16m4 = __riscv_vle16_v_i16m4(scores_running_deletions + progress, vl);
+
+            vint16m4_t const if_insertion_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vadd_vx_i16m4(pre_insertion_open_i16m4, gap_open, vl),
+                __riscv_vadd_vx_i16m4(running_insertion_i16m4, gap_extend, vl), vl);
+            vint16m4_t const if_deletion_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vadd_vx_i16m4(pre_deletion_open_i16m4, gap_open, vl),
+                __riscv_vadd_vx_i16m4(running_deletion_i16m4, gap_extend, vl), vl);
+            vint16m4_t const if_substitution_i16m4 = __riscv_vadd_vv_i16m4(pre_substitution_i16m4, cost_i16m4, vl);
+            vint16m4_t const cell_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vmax_vv_i16m4(if_insertion_i16m4, if_deletion_i16m4, vl), if_substitution_i16m4, vl);
+
+            __riscv_vse16_v_i16m4(scores_new + progress, cell_i16m4, vl);
+            __riscv_vse16_v_i16m4(scores_new_insertions + progress, if_insertion_i16m4, vl);
+            __riscv_vse16_v_i16m4(scores_new_deletions + progress, if_deletion_i16m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b local Smith-Waterman score with class-based
+ *      substitution costs and @b affine gaps, over `i16_t` cells. Requires the RVV 1.0 Vector extension.
+ *
+ *      Identical to the global affine scorer above, but the zero-reset applies to @b only the
+ *      substitution term (the insertion/deletion gap matrices stay unclamped), and the running best
+ *      across the whole matrix is reduced per chunk with `vredmax`.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i16_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i16_t const *scores_pre_substitution, i16_t const *scores_pre_insertion,         //
+        i16_t const *scores_pre_deletion, i16_t const *scores_running_insertions,        //
+        i16_t const *scores_running_deletions, i16_t *scores_new,                        //
+        i16_t *scores_new_insertions, i16_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i16_t const gap_open = static_cast<i16_t>(this->gap_costs_.open);
+        i16_t const gap_extend = static_cast<i16_t>(this->gap_costs_.extend);
+        i16_t running_best = this->best_score_;
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_byte_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_byte_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vuint8m2_t const first_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, first_byte_u8m2, vl);
+            vuint8m2_t const second_class_u8m2 = __riscv_vluxei8_v_u8m2(byte_to_class, second_byte_u8m2, vl);
+
+            vuint16m4_t const first_class_scaled_u16m4 = __riscv_vwmulu_vx_u16m4(first_class_u8m2,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m4_t const combined_index_u16m4 = __riscv_vwaddu_wv_u16m4(first_class_scaled_u16m4,
+                                                                             second_class_u8m2, vl);
+            vint8m2_t const cost_i8m2 = __riscv_vluxei16_v_i8m2(cost_matrix_1024_, combined_index_u16m4, vl);
+            vint16m4_t const cost_i16m4 = __riscv_vsext_vf2_i16m4(cost_i8m2, vl);
+
+            vint16m4_t const pre_substitution_i16m4 = __riscv_vle16_v_i16m4(scores_pre_substitution + progress, vl);
+            vint16m4_t const pre_insertion_open_i16m4 = __riscv_vle16_v_i16m4(scores_pre_insertion + progress, vl);
+            vint16m4_t const pre_deletion_open_i16m4 = __riscv_vle16_v_i16m4(scores_pre_deletion + progress, vl);
+            vint16m4_t const running_insertion_i16m4 = __riscv_vle16_v_i16m4(scores_running_insertions + progress, vl);
+            vint16m4_t const running_deletion_i16m4 = __riscv_vle16_v_i16m4(scores_running_deletions + progress, vl);
+
+            vint16m4_t const if_insertion_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vadd_vx_i16m4(pre_insertion_open_i16m4, gap_open, vl),
+                __riscv_vadd_vx_i16m4(running_insertion_i16m4, gap_extend, vl), vl);
+            vint16m4_t const if_deletion_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vadd_vx_i16m4(pre_deletion_open_i16m4, gap_open, vl),
+                __riscv_vadd_vx_i16m4(running_deletion_i16m4, gap_extend, vl), vl);
+            // In Local Alignment for SW the zero-reset applies to @b only the substitution term; the
+            // insertion/deletion gap matrices stay unclamped, exactly like the serial scorer.
+            vint16m4_t const if_substitution_i16m4 = __riscv_vmax_vx_i16m4(
+                __riscv_vadd_vv_i16m4(pre_substitution_i16m4, cost_i16m4, vl), 0, vl);
+            vint16m4_t const cell_i16m4 = __riscv_vmax_vv_i16m4(
+                __riscv_vmax_vv_i16m4(if_insertion_i16m4, if_deletion_i16m4, vl), if_substitution_i16m4, vl);
+
+            __riscv_vse16_v_i16m4(scores_new + progress, cell_i16m4, vl);
+            __riscv_vse16_v_i16m4(scores_new_insertions + progress, if_insertion_i16m4, vl);
+            __riscv_vse16_v_i16m4(scores_new_deletions + progress, if_deletion_i16m4, vl);
+
+            vint16m1_t const running_best_seed_i16m1 = __riscv_vmv_s_x_i16m1(running_best, 1);
+            vint16m1_t const reduced_i16m1 = __riscv_vredmax_vs_i16m4_i16m1(cell_i16m4, running_best_seed_i16m1, vl);
+            running_best = __riscv_vmv_x_s_i16m1_i16(reduced_i16m1);
+
+            progress += vl;
+        }
+
+        this->best_score_ = running_best;
+    }
+};
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b global Needleman-Wunsch score with class-based
+ *      substitution costs and @b affine gaps, over `i32_t` cells. Mirrors the `i16_t` affine global
+ *      scorer with the narrower `m1` byte/class grouping and a direct `vsext_vf4` widen of the cost byte.
+ *      Requires the RVV 1.0 Vector extension.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_global_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
+        i32_t const *scores_pre_deletion, i32_t const *scores_running_insertions,        //
+        i32_t const *scores_running_deletions, i32_t *scores_new,                        //
+        i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i32_t const gap_open = static_cast<i32_t>(this->gap_costs_.open);
+        i32_t const gap_extend = static_cast<i32_t>(this->gap_costs_.extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_byte_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_byte_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vuint8m1_t const first_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, first_byte_u8m1, vl);
+            vuint8m1_t const second_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, second_byte_u8m1, vl);
+
+            vuint16m2_t const first_class_scaled_u16m2 = __riscv_vwmulu_vx_u16m2(first_class_u8m1,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m2_t const combined_index_u16m2 = __riscv_vwaddu_wv_u16m2(first_class_scaled_u16m2,
+                                                                             second_class_u8m1, vl);
+            vint8m1_t const cost_i8m1 = __riscv_vluxei16_v_i8m1(cost_matrix_1024_, combined_index_u16m2, vl);
+            vint32m4_t const cost_i32m4 = __riscv_vsext_vf4_i32m4(cost_i8m1, vl);
+
+            vint32m4_t const pre_substitution_i32m4 = __riscv_vle32_v_i32m4(scores_pre_substitution + progress, vl);
+            vint32m4_t const pre_insertion_open_i32m4 = __riscv_vle32_v_i32m4(scores_pre_insertion + progress, vl);
+            vint32m4_t const pre_deletion_open_i32m4 = __riscv_vle32_v_i32m4(scores_pre_deletion + progress, vl);
+            vint32m4_t const running_insertion_i32m4 = __riscv_vle32_v_i32m4(scores_running_insertions + progress, vl);
+            vint32m4_t const running_deletion_i32m4 = __riscv_vle32_v_i32m4(scores_running_deletions + progress, vl);
+
+            vint32m4_t const if_insertion_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vadd_vx_i32m4(pre_insertion_open_i32m4, gap_open, vl),
+                __riscv_vadd_vx_i32m4(running_insertion_i32m4, gap_extend, vl), vl);
+            vint32m4_t const if_deletion_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vadd_vx_i32m4(pre_deletion_open_i32m4, gap_open, vl),
+                __riscv_vadd_vx_i32m4(running_deletion_i32m4, gap_extend, vl), vl);
+            vint32m4_t const if_substitution_i32m4 = __riscv_vadd_vv_i32m4(pre_substitution_i32m4, cost_i32m4, vl);
+            vint32m4_t const cell_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vmax_vv_i32m4(if_insertion_i32m4, if_deletion_i32m4, vl), if_substitution_i32m4, vl);
+
+            __riscv_vse32_v_i32m4(scores_new + progress, cell_i32m4, vl);
+            __riscv_vse32_v_i32m4(scores_new_insertions + progress, if_insertion_i32m4, vl);
+            __riscv_vse32_v_i32m4(scores_new_deletions + progress, if_deletion_i32m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief Variant of `tile_scorer` - maximizes the @b local Smith-Waterman score with class-based
+ *      substitution costs and @b affine gaps, over `i32_t` cells. Mirrors the `i16_t` affine local
+ *      scorer's zero-reset-on-substitution-only and `vredmax` running best, over the wider cell type.
+ *      Requires the RVV 1.0 Vector extension.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                   sz_similarity_local_k, capability_, std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t,
+                         sz_maximize_score_k, sz_similarity_local_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, i32_t, error_costs_32x32_t, affine_gap_costs_t, sz_maximize_score_k,
+                      sz_similarity_local_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    i8_t cost_matrix_1024_[error_costs_classes_count_k * error_costs_classes_count_k];
+
+    void prepare(bool transpose) noexcept {
+        for (size_t first_class = 0; first_class != error_costs_classes_count_k; ++first_class)
+            for (size_t second_class = 0; second_class != error_costs_classes_count_k; ++second_class)
+                cost_matrix_1024_[first_class * error_costs_classes_count_k + second_class] =
+                    transpose ? this->substituter_.class_substitution_costs[second_class][first_class]
+                              : this->substituter_.class_substitution_costs[first_class][second_class];
+        this->transpose_ = transpose;
+    }
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        i32_t const *scores_pre_substitution, i32_t const *scores_pre_insertion,         //
+        i32_t const *scores_pre_deletion, i32_t const *scores_running_insertions,        //
+        i32_t const *scores_running_deletions, i32_t *scores_new,                        //
+        i32_t *scores_new_insertions, i32_t *scores_new_deletions,                       //
+        executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const *const byte_to_class = this->substituter_.byte_to_class;
+        i32_t const gap_open = static_cast<i32_t>(this->gap_costs_.open);
+        i32_t const gap_extend = static_cast<i32_t>(this->gap_costs_.extend);
+        i32_t running_best = this->best_score_;
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_byte_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_byte_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vuint8m1_t const first_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, first_byte_u8m1, vl);
+            vuint8m1_t const second_class_u8m1 = __riscv_vluxei8_v_u8m1(byte_to_class, second_byte_u8m1, vl);
+
+            vuint16m2_t const first_class_scaled_u16m2 = __riscv_vwmulu_vx_u16m2(first_class_u8m1,
+                                                                                 (u8_t)error_costs_classes_count_k, vl);
+            vuint16m2_t const combined_index_u16m2 = __riscv_vwaddu_wv_u16m2(first_class_scaled_u16m2,
+                                                                             second_class_u8m1, vl);
+            vint8m1_t const cost_i8m1 = __riscv_vluxei16_v_i8m1(cost_matrix_1024_, combined_index_u16m2, vl);
+            vint32m4_t const cost_i32m4 = __riscv_vsext_vf4_i32m4(cost_i8m1, vl);
+
+            vint32m4_t const pre_substitution_i32m4 = __riscv_vle32_v_i32m4(scores_pre_substitution + progress, vl);
+            vint32m4_t const pre_insertion_open_i32m4 = __riscv_vle32_v_i32m4(scores_pre_insertion + progress, vl);
+            vint32m4_t const pre_deletion_open_i32m4 = __riscv_vle32_v_i32m4(scores_pre_deletion + progress, vl);
+            vint32m4_t const running_insertion_i32m4 = __riscv_vle32_v_i32m4(scores_running_insertions + progress, vl);
+            vint32m4_t const running_deletion_i32m4 = __riscv_vle32_v_i32m4(scores_running_deletions + progress, vl);
+
+            vint32m4_t const if_insertion_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vadd_vx_i32m4(pre_insertion_open_i32m4, gap_open, vl),
+                __riscv_vadd_vx_i32m4(running_insertion_i32m4, gap_extend, vl), vl);
+            vint32m4_t const if_deletion_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vadd_vx_i32m4(pre_deletion_open_i32m4, gap_open, vl),
+                __riscv_vadd_vx_i32m4(running_deletion_i32m4, gap_extend, vl), vl);
+            // Zero-reset applies to @b only the substitution term, exactly like the serial scorer.
+            vint32m4_t const if_substitution_i32m4 = __riscv_vmax_vx_i32m4(
+                __riscv_vadd_vv_i32m4(pre_substitution_i32m4, cost_i32m4, vl), 0, vl);
+            vint32m4_t const cell_i32m4 = __riscv_vmax_vv_i32m4(
+                __riscv_vmax_vv_i32m4(if_insertion_i32m4, if_deletion_i32m4, vl), if_substitution_i32m4, vl);
+
+            __riscv_vse32_v_i32m4(scores_new + progress, cell_i32m4, vl);
+            __riscv_vse32_v_i32m4(scores_new_insertions + progress, if_insertion_i32m4, vl);
+            __riscv_vse32_v_i32m4(scores_new_deletions + progress, if_deletion_i32m4, vl);
+
+            vint32m1_t const running_best_seed_i32m1 = __riscv_vmv_s_x_i32m1(running_best, 1);
+            vint32m1_t const reduced_i32m1 = __riscv_vredmax_vs_i32m4_i32m1(cell_i32m4, running_best_seed_i32m1, vl);
+            running_best = __riscv_vmv_x_s_i32m1_i32(reduced_i32m1);
+
+            progress += vl;
+        }
+
+        this->best_score_ = running_best;
+    }
+};
+
+#pragma endregion Class Cost Needleman Wunsch and Smith Waterman
+
 #pragma region Uniform Cost Levenshtein
 
 /**
@@ -717,6 +1426,415 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
                                affine_gap_costs_t, objective_, sz_similarity_local_k, sz_cap_serial_k, void>;
     using base_t::base_t;
     using base_t::operator();
+};
+
+/**
+ *  @brief RVV @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u8_t` cells.
+ *      Requires the RVV 1.0 Vector extension.
+ *
+ *      The (32 x 32) class lookup of the Needleman-Wunsch scorers above collapses to a single
+ *      `vmseq` equality mask plus a `vmerge` select between the resident match/mismatch costs, and the
+ *      objective is minimization, so the recurrence uses `vminu` with a positive gap. The text and the
+ *      cell width share the same `m4` register group here, since both are 8-bit.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,           //
+        u8_t const *scores_pre_deletion, u8_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const match = (u8_t)this->substituter_.match;
+        u8_t const mismatch = (u8_t)this->substituter_.mismatch;
+        u8_t const gap = static_cast<u8_t>(this->gap_costs_.open_or_extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e8m4(length - progress);
+
+            vuint8m4_t const first_u8m4 = __riscv_vle8_v_u8m4(first_u8 + progress, vl);
+            vuint8m4_t const second_u8m4 = __riscv_vle8_v_u8m4(second_u8 + progress, vl);
+            vbool2_t const match_b2 = __riscv_vmseq_vv_u8m4_b2(first_u8m4, second_u8m4, vl);
+            vuint8m4_t const cost_u8m4 = __riscv_vmerge_vxm_u8m4(__riscv_vmv_v_x_u8m4(mismatch, vl), match, match_b2,
+                                                                 vl);
+
+            vuint8m4_t const pre_substitution_u8m4 = __riscv_vle8_v_u8m4(scores_pre_substitution + progress, vl);
+            vuint8m4_t const pre_insertion_u8m4 = __riscv_vle8_v_u8m4(scores_pre_insertion + progress, vl);
+            vuint8m4_t const pre_deletion_u8m4 = __riscv_vle8_v_u8m4(scores_pre_deletion + progress, vl);
+            vuint8m4_t const if_substitution_u8m4 = __riscv_vadd_vv_u8m4(pre_substitution_u8m4, cost_u8m4, vl);
+            vuint8m4_t const if_gap_u8m4 = __riscv_vadd_vx_u8m4(
+                __riscv_vminu_vv_u8m4(pre_insertion_u8m4, pre_deletion_u8m4, vl), gap, vl);
+            vuint8m4_t const cell_u8m4 = __riscv_vminu_vv_u8m4(if_substitution_u8m4, if_gap_u8m4, vl);
+            __riscv_vse8_v_u8m4(scores_new + progress, cell_u8m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief RVV @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u16_t` cells.
+ *      Requires the RVV 1.0 Vector extension.
+ *
+ *      The equality mask is computed once over the `u8m2` byte group and reused directly for the `u16m4`
+ *      cost `vmerge`, since both groups share the same vl and the same `SEW / LMUL` ratio - no widening
+ *      pass over the mask is needed.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,         //
+        u16_t const *scores_pre_deletion, u16_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u16_t const match = (u16_t)this->substituter_.match;
+        u16_t const mismatch = (u16_t)this->substituter_.mismatch;
+        u16_t const gap = static_cast<u16_t>(this->gap_costs_.open_or_extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vbool4_t const match_b4 = __riscv_vmseq_vv_u8m2_b4(first_u8m2, second_u8m2, vl);
+            vuint16m4_t const cost_u16m4 = __riscv_vmerge_vxm_u16m4(__riscv_vmv_v_x_u16m4(mismatch, vl), match,
+                                                                    match_b4, vl);
+
+            vuint16m4_t const pre_substitution_u16m4 = __riscv_vle16_v_u16m4(scores_pre_substitution + progress, vl);
+            vuint16m4_t const pre_insertion_u16m4 = __riscv_vle16_v_u16m4(scores_pre_insertion + progress, vl);
+            vuint16m4_t const pre_deletion_u16m4 = __riscv_vle16_v_u16m4(scores_pre_deletion + progress, vl);
+            vuint16m4_t const if_substitution_u16m4 = __riscv_vadd_vv_u16m4(pre_substitution_u16m4, cost_u16m4, vl);
+            vuint16m4_t const if_gap_u16m4 = __riscv_vadd_vx_u16m4(
+                __riscv_vminu_vv_u16m4(pre_insertion_u16m4, pre_deletion_u16m4, vl), gap, vl);
+            vuint16m4_t const cell_u16m4 = __riscv_vminu_vv_u16m4(if_substitution_u16m4, if_gap_u16m4, vl);
+            __riscv_vse16_v_u16m4(scores_new + progress, cell_u16m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief RVV @b uniform-cost diagonal scorer - minimizes the Levenshtein distance over `u32_t` cells.
+ *      Requires the RVV 1.0 Vector extension. Same recurrence as the `u16_t` scorer, with the `u8m1`
+ *      byte group whose `SEW / LMUL` ratio matches the `u32m4` cell width.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,         //
+        u32_t const *scores_pre_deletion, u32_t *scores_new, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u32_t const match = (u32_t)this->substituter_.match;
+        u32_t const mismatch = (u32_t)this->substituter_.mismatch;
+        u32_t const gap = static_cast<u32_t>(this->gap_costs_.open_or_extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vbool8_t const match_b8 = __riscv_vmseq_vv_u8m1_b8(first_u8m1, second_u8m1, vl);
+            vuint32m4_t const cost_u32m4 = __riscv_vmerge_vxm_u32m4(__riscv_vmv_v_x_u32m4(mismatch, vl), match,
+                                                                    match_b8, vl);
+
+            vuint32m4_t const pre_substitution_u32m4 = __riscv_vle32_v_u32m4(scores_pre_substitution + progress, vl);
+            vuint32m4_t const pre_insertion_u32m4 = __riscv_vle32_v_u32m4(scores_pre_insertion + progress, vl);
+            vuint32m4_t const pre_deletion_u32m4 = __riscv_vle32_v_u32m4(scores_pre_deletion + progress, vl);
+            vuint32m4_t const if_substitution_u32m4 = __riscv_vadd_vv_u32m4(pre_substitution_u32m4, cost_u32m4, vl);
+            vuint32m4_t const if_gap_u32m4 = __riscv_vadd_vx_u32m4(
+                __riscv_vminu_vv_u32m4(pre_insertion_u32m4, pre_deletion_u32m4, vl), gap, vl);
+            vuint32m4_t const cell_u32m4 = __riscv_vminu_vv_u32m4(if_substitution_u32m4, if_gap_u32m4, vl);
+            __riscv_vse32_v_u32m4(scores_new + progress, cell_u32m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief RVV @b affine-gap uniform-cost diagonal scorer - minimizes the Levenshtein distance over
+ *      `u8_t` cells. Requires the RVV 1.0 Vector extension. Gotoh recurrence with separate insertion
+ *      and deletion gap planes, all in `u8`.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,           //
+        u8_t const *scores_pre_deletion, u8_t const *scores_running_insertions,          //
+        u8_t const *scores_running_deletions, u8_t *scores_new,                          //
+        u8_t *scores_new_insertions, u8_t *scores_new_deletions, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u8_t const match = (u8_t)this->substituter_.match;
+        u8_t const mismatch = (u8_t)this->substituter_.mismatch;
+        u8_t const gap_open = static_cast<u8_t>(this->gap_costs_.open);
+        u8_t const gap_extend = static_cast<u8_t>(this->gap_costs_.extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e8m4(length - progress);
+
+            vuint8m4_t const first_u8m4 = __riscv_vle8_v_u8m4(first_u8 + progress, vl);
+            vuint8m4_t const second_u8m4 = __riscv_vle8_v_u8m4(second_u8 + progress, vl);
+            vbool2_t const match_b2 = __riscv_vmseq_vv_u8m4_b2(first_u8m4, second_u8m4, vl);
+            vuint8m4_t const cost_u8m4 = __riscv_vmerge_vxm_u8m4(__riscv_vmv_v_x_u8m4(mismatch, vl), match, match_b2,
+                                                                 vl);
+
+            vuint8m4_t const pre_substitution_u8m4 = __riscv_vle8_v_u8m4(scores_pre_substitution + progress, vl);
+            vuint8m4_t const pre_insertion_open_u8m4 = __riscv_vle8_v_u8m4(scores_pre_insertion + progress, vl);
+            vuint8m4_t const pre_deletion_open_u8m4 = __riscv_vle8_v_u8m4(scores_pre_deletion + progress, vl);
+            vuint8m4_t const running_insertion_u8m4 = __riscv_vle8_v_u8m4(scores_running_insertions + progress, vl);
+            vuint8m4_t const running_deletion_u8m4 = __riscv_vle8_v_u8m4(scores_running_deletions + progress, vl);
+
+            vuint8m4_t const if_insertion_u8m4 = __riscv_vminu_vv_u8m4(
+                __riscv_vadd_vx_u8m4(pre_insertion_open_u8m4, gap_open, vl),
+                __riscv_vadd_vx_u8m4(running_insertion_u8m4, gap_extend, vl), vl);
+            vuint8m4_t const if_deletion_u8m4 = __riscv_vminu_vv_u8m4(
+                __riscv_vadd_vx_u8m4(pre_deletion_open_u8m4, gap_open, vl),
+                __riscv_vadd_vx_u8m4(running_deletion_u8m4, gap_extend, vl), vl);
+            vuint8m4_t const if_substitution_u8m4 = __riscv_vadd_vv_u8m4(pre_substitution_u8m4, cost_u8m4, vl);
+            vuint8m4_t const cell_u8m4 = __riscv_vminu_vv_u8m4(
+                __riscv_vminu_vv_u8m4(if_insertion_u8m4, if_deletion_u8m4, vl), if_substitution_u8m4, vl);
+
+            __riscv_vse8_v_u8m4(scores_new + progress, cell_u8m4, vl);
+            __riscv_vse8_v_u8m4(scores_new_insertions + progress, if_insertion_u8m4, vl);
+            __riscv_vse8_v_u8m4(scores_new_deletions + progress, if_deletion_u8m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief RVV @b affine-gap uniform-cost diagonal scorer - minimizes the Levenshtein distance over
+ *      `u16_t` cells. Requires the RVV 1.0 Vector extension. Gotoh recurrence with separate insertion
+ *      and deletion gap planes.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,         //
+        u16_t const *scores_pre_deletion, u16_t const *scores_running_insertions,        //
+        u16_t const *scores_running_deletions, u16_t *scores_new,                        //
+        u16_t *scores_new_insertions, u16_t *scores_new_deletions, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u16_t const match = (u16_t)this->substituter_.match;
+        u16_t const mismatch = (u16_t)this->substituter_.mismatch;
+        u16_t const gap_open = static_cast<u16_t>(this->gap_costs_.open);
+        u16_t const gap_extend = static_cast<u16_t>(this->gap_costs_.extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e16m4(length - progress);
+
+            vuint8m2_t const first_u8m2 = __riscv_vle8_v_u8m2(first_u8 + progress, vl);
+            vuint8m2_t const second_u8m2 = __riscv_vle8_v_u8m2(second_u8 + progress, vl);
+            vbool4_t const match_b4 = __riscv_vmseq_vv_u8m2_b4(first_u8m2, second_u8m2, vl);
+            vuint16m4_t const cost_u16m4 = __riscv_vmerge_vxm_u16m4(__riscv_vmv_v_x_u16m4(mismatch, vl), match,
+                                                                    match_b4, vl);
+
+            vuint16m4_t const pre_substitution_u16m4 = __riscv_vle16_v_u16m4(scores_pre_substitution + progress, vl);
+            vuint16m4_t const pre_insertion_open_u16m4 = __riscv_vle16_v_u16m4(scores_pre_insertion + progress, vl);
+            vuint16m4_t const pre_deletion_open_u16m4 = __riscv_vle16_v_u16m4(scores_pre_deletion + progress, vl);
+            vuint16m4_t const running_insertion_u16m4 = __riscv_vle16_v_u16m4(scores_running_insertions + progress, vl);
+            vuint16m4_t const running_deletion_u16m4 = __riscv_vle16_v_u16m4(scores_running_deletions + progress, vl);
+
+            vuint16m4_t const if_insertion_u16m4 = __riscv_vminu_vv_u16m4(
+                __riscv_vadd_vx_u16m4(pre_insertion_open_u16m4, gap_open, vl),
+                __riscv_vadd_vx_u16m4(running_insertion_u16m4, gap_extend, vl), vl);
+            vuint16m4_t const if_deletion_u16m4 = __riscv_vminu_vv_u16m4(
+                __riscv_vadd_vx_u16m4(pre_deletion_open_u16m4, gap_open, vl),
+                __riscv_vadd_vx_u16m4(running_deletion_u16m4, gap_extend, vl), vl);
+            vuint16m4_t const if_substitution_u16m4 = __riscv_vadd_vv_u16m4(pre_substitution_u16m4, cost_u16m4, vl);
+            vuint16m4_t const cell_u16m4 = __riscv_vminu_vv_u16m4(
+                __riscv_vminu_vv_u16m4(if_insertion_u16m4, if_deletion_u16m4, vl), if_substitution_u16m4, vl);
+
+            __riscv_vse16_v_u16m4(scores_new + progress, cell_u16m4, vl);
+            __riscv_vse16_v_u16m4(scores_new_insertions + progress, if_insertion_u16m4, vl);
+            __riscv_vse16_v_u16m4(scores_new_deletions + progress, if_deletion_u16m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
+};
+
+/**
+ *  @brief RVV @b affine-gap uniform-cost diagonal scorer - minimizes the Levenshtein distance over
+ *      `u32_t` cells. Requires the RVV 1.0 Vector extension. Same Gotoh recurrence as the `u16_t`
+ *      scorer, with the `u8m1` byte group whose `SEW / LMUL` ratio matches the `u32m4` cell width.
+ */
+template <sz_capability_t capability_>
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, capability_,
+                   std::enable_if_t<(capability_ & sz_cap_rvv_k) != 0>>
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    template <typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    void operator()(                                                                     //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,         //
+        u32_t const *scores_pre_deletion, u32_t const *scores_running_insertions,        //
+        u32_t const *scores_running_deletions, u32_t *scores_new,                        //
+        u32_t *scores_new_insertions, u32_t *scores_new_deletions, executor_type_ &&executor = {}) noexcept {
+        sz_unused_(executor);
+
+        u8_t const *const first_u8 = (u8_t const *)first_reversed_slice;
+        u8_t const *const second_u8 = (u8_t const *)second_slice;
+        u32_t const match = (u32_t)this->substituter_.match;
+        u32_t const mismatch = (u32_t)this->substituter_.mismatch;
+        u32_t const gap_open = static_cast<u32_t>(this->gap_costs_.open);
+        u32_t const gap_extend = static_cast<u32_t>(this->gap_costs_.extend);
+
+        for (size_t progress = 0; progress != length;) {
+            size_t const vl = __riscv_vsetvl_e32m4(length - progress);
+
+            vuint8m1_t const first_u8m1 = __riscv_vle8_v_u8m1(first_u8 + progress, vl);
+            vuint8m1_t const second_u8m1 = __riscv_vle8_v_u8m1(second_u8 + progress, vl);
+            vbool8_t const match_b8 = __riscv_vmseq_vv_u8m1_b8(first_u8m1, second_u8m1, vl);
+            vuint32m4_t const cost_u32m4 = __riscv_vmerge_vxm_u32m4(__riscv_vmv_v_x_u32m4(mismatch, vl), match,
+                                                                    match_b8, vl);
+
+            vuint32m4_t const pre_substitution_u32m4 = __riscv_vle32_v_u32m4(scores_pre_substitution + progress, vl);
+            vuint32m4_t const pre_insertion_open_u32m4 = __riscv_vle32_v_u32m4(scores_pre_insertion + progress, vl);
+            vuint32m4_t const pre_deletion_open_u32m4 = __riscv_vle32_v_u32m4(scores_pre_deletion + progress, vl);
+            vuint32m4_t const running_insertion_u32m4 = __riscv_vle32_v_u32m4(scores_running_insertions + progress, vl);
+            vuint32m4_t const running_deletion_u32m4 = __riscv_vle32_v_u32m4(scores_running_deletions + progress, vl);
+
+            vuint32m4_t const if_insertion_u32m4 = __riscv_vminu_vv_u32m4(
+                __riscv_vadd_vx_u32m4(pre_insertion_open_u32m4, gap_open, vl),
+                __riscv_vadd_vx_u32m4(running_insertion_u32m4, gap_extend, vl), vl);
+            vuint32m4_t const if_deletion_u32m4 = __riscv_vminu_vv_u32m4(
+                __riscv_vadd_vx_u32m4(pre_deletion_open_u32m4, gap_open, vl),
+                __riscv_vadd_vx_u32m4(running_deletion_u32m4, gap_extend, vl), vl);
+            vuint32m4_t const if_substitution_u32m4 = __riscv_vadd_vv_u32m4(pre_substitution_u32m4, cost_u32m4, vl);
+            vuint32m4_t const cell_u32m4 = __riscv_vminu_vv_u32m4(
+                __riscv_vminu_vv_u32m4(if_insertion_u32m4, if_deletion_u32m4, vl), if_substitution_u32m4, vl);
+
+            __riscv_vse32_v_u32m4(scores_new + progress, cell_u32m4, vl);
+            __riscv_vse32_v_u32m4(scores_new_insertions + progress, if_insertion_u32m4, vl);
+            __riscv_vse32_v_u32m4(scores_new_deletions + progress, if_deletion_u32m4, vl);
+
+            progress += vl;
+        }
+
+        this->last_score_ = scores_new[length - 1];
+    }
 };
 
 #pragma endregion // Uniform Cost Levenshtein
