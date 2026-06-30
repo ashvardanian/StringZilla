@@ -385,20 +385,28 @@ void test_compare_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps a substring-search backend (find or rfind) by its kernel pointer. */
-template <sz_find_t kernel_>
-struct search_from_sz_ {
+/**
+ *  @brief One substring-search backend (find or rfind), stored by pointer so the differential driver can iterate a
+ *         table. `reference(haystack, hlen, needle, nlen)` invokes the kernel via `operator()`.
+ */
+struct search_backend_t {
+    char const *name;
+    sz_find_t kernel;
     sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, //
                          sz_cptr_t needle, sz_size_t needle_length) const noexcept {
-        return kernel_(haystack, haystack_length, needle, needle_length);
+        return kernel(haystack, haystack_length, needle, needle_length);
     }
 };
 
-/** @brief Wraps a byteset-search backend (find or rfind) by its kernel pointer. */
-template <sz_find_byteset_t kernel_>
-struct byteset_search_from_sz_ {
+/**
+ *  @brief One byteset-search backend (find or rfind), stored by pointer; `reference(haystack, hlen, byteset)`
+ *         invokes the kernel via `operator()`.
+ */
+struct byteset_backend_t {
+    char const *name;
+    sz_find_byteset_t kernel;
     sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *byteset) const noexcept {
-        return kernel_(haystack, haystack_length, byteset);
+        return kernel(haystack, haystack_length, byteset);
     }
 };
 
@@ -769,140 +777,150 @@ void test_lookup_fuzz(std::size_t lookup_tables_to_try, std::size_t slices_per_t
 
 #pragma region Drivers
 
-/**
- *  @brief Drives the serial-vs-SIMD substring-search and byteset-search differential tests across
- *         every search backend compiled on this target. The serial kernel is the reference.
- *
- *  Three ladders run back to back: forward substring search (`sz_find`, with serial, westmere, haswell,
- *  skylake, neon, sve, v128, v128relaxed, rvv, lasx, powervsx tiers), backward substring search
- *  (`sz_rfind`, identical tiers minus sve), and byteset search (`sz_find_byteset` and `sz_rfind_byteset`,
- *  with serial, haswell, icelake, neon, v128, v128relaxed, rvv, lasx, powervsx tiers - no westmere,
- *  skylake, or sve). Each tier is guarded by its matching `SZ_USE_<ISA>` macro.
- */
-void test_find_all() {
-
-    // Forward substring search: `sz_find` tiers.
-    search_from_sz_<sz_find_serial> const find_serial;
+/** @brief Forward substring-search (`sz_find`) backends; `dispatched` first keeps the table non-empty on baseline. */
+static search_backend_t const find_backends[] = {
+    {"dispatched", sz_find},
 #if SZ_USE_WESTMERE
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_westmere> {}, 200);
+    {"westmere", sz_find_westmere},
 #endif
 #if SZ_USE_HASWELL
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_haswell> {}, 200);
+    {"haswell", sz_find_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_skylake> {}, 200);
+    {"skylake", sz_find_skylake},
 #endif
 #if SZ_USE_NEON
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_neon> {}, 200);
+    {"neon", sz_find_neon},
 #endif
 #if SZ_USE_SVE
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_sve> {}, 200);
+    {"sve", sz_find_sve},
 #endif
 #if SZ_USE_V128
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_v128> {}, 200);
+    {"v128", sz_find_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_v128relaxed> {}, 200);
+    {"v128relaxed", sz_find_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_rvv> {}, 200);
+    {"rvv", sz_find_rvv},
 #endif
 #if SZ_USE_LASX
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_lasx> {}, 200);
+    {"lasx", sz_find_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_search_equivalence(find_serial, search_from_sz_<sz_find_powervsx> {}, 200);
+    {"powervsx", sz_find_powervsx},
 #endif
+};
 
-    // Backward substring search: `sz_rfind` tiers (no sve backend).
-    search_from_sz_<sz_rfind_serial> const rfind_serial;
+/** @brief Backward substring-search (`sz_rfind`) backends; same tiers as forward minus SVE. */
+static search_backend_t const rfind_backends[] = {
+    {"dispatched", sz_rfind},
 #if SZ_USE_WESTMERE
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_westmere> {}, 200);
+    {"westmere", sz_rfind_westmere},
 #endif
 #if SZ_USE_HASWELL
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_haswell> {}, 200);
+    {"haswell", sz_rfind_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_skylake> {}, 200);
+    {"skylake", sz_rfind_skylake},
 #endif
 #if SZ_USE_NEON
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_neon> {}, 200);
+    {"neon", sz_rfind_neon},
 #endif
 #if SZ_USE_V128
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_v128> {}, 200);
+    {"v128", sz_rfind_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_v128relaxed> {}, 200);
+    {"v128relaxed", sz_rfind_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_rvv> {}, 200);
+    {"rvv", sz_rfind_rvv},
 #endif
 #if SZ_USE_LASX
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_lasx> {}, 200);
+    {"lasx", sz_rfind_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_search_equivalence(rfind_serial, search_from_sz_<sz_rfind_powervsx> {}, 200);
+    {"powervsx", sz_rfind_powervsx},
 #endif
+};
 
-    // Forward byteset search: `sz_find_byteset` tiers (no westmere, skylake, or sve backend).
-    byteset_search_from_sz_<sz_find_byteset_serial> const find_byteset_serial;
+/** @brief Forward byteset-search (`sz_find_byteset`) backends; no Westmere/Skylake/SVE tiers. */
+static byteset_backend_t const find_byteset_backends[] = {
+    {"dispatched", sz_find_byteset},
 #if SZ_USE_HASWELL
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_haswell> {}, 200);
+    {"haswell", sz_find_byteset_haswell},
 #endif
 #if SZ_USE_ICELAKE
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_icelake> {}, 200);
+    {"icelake", sz_find_byteset_icelake},
 #endif
 #if SZ_USE_NEON
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_neon> {}, 200);
+    {"neon", sz_find_byteset_neon},
 #endif
 #if SZ_USE_V128
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_v128> {}, 200);
+    {"v128", sz_find_byteset_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_v128relaxed> {}, 200);
+    {"v128relaxed", sz_find_byteset_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_rvv> {}, 200);
+    {"rvv", sz_find_byteset_rvv},
 #endif
 #if SZ_USE_LASX
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_lasx> {}, 200);
+    {"lasx", sz_find_byteset_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_byteset_equivalence(find_byteset_serial, byteset_search_from_sz_<sz_find_byteset_powervsx> {}, 200);
+    {"powervsx", sz_find_byteset_powervsx},
 #endif
+};
 
-    // Backward byteset search: `sz_rfind_byteset` tiers (identical to the forward byteset tiers).
-    byteset_search_from_sz_<sz_rfind_byteset_serial> const rfind_byteset_serial;
+/** @brief Backward byteset-search (`sz_rfind_byteset`) backends; identical tiers to the forward byteset table. */
+static byteset_backend_t const rfind_byteset_backends[] = {
+    {"dispatched", sz_rfind_byteset},
 #if SZ_USE_HASWELL
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_haswell> {}, 200);
+    {"haswell", sz_rfind_byteset_haswell},
 #endif
 #if SZ_USE_ICELAKE
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_icelake> {}, 200);
+    {"icelake", sz_rfind_byteset_icelake},
 #endif
 #if SZ_USE_NEON
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_neon> {}, 200);
+    {"neon", sz_rfind_byteset_neon},
 #endif
 #if SZ_USE_V128
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_v128> {}, 200);
+    {"v128", sz_rfind_byteset_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_v128relaxed> {}, 200);
+    {"v128relaxed", sz_rfind_byteset_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_rvv> {}, 200);
+    {"rvv", sz_rfind_byteset_rvv},
 #endif
 #if SZ_USE_LASX
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_lasx> {}, 200);
+    {"lasx", sz_rfind_byteset_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_byteset_equivalence(rfind_byteset_serial, byteset_search_from_sz_<sz_rfind_byteset_powervsx> {}, 200);
+    {"powervsx", sz_rfind_byteset_powervsx},
 #endif
+};
 
-    // Silence "unused variable" diagnostics on targets where the reference is never paired with a candidate.
-    sz_unused_(find_serial);
-    sz_unused_(rfind_serial);
-    sz_unused_(find_byteset_serial);
-    sz_unused_(rfind_byteset_serial);
+/**
+ *  @brief Drives the serial-vs-SIMD substring-search and byteset-search differential tests across every search
+ *         backend compiled on this target (dispatched first). The serial kernel is the reference; four tables run
+ *         back to back — forward/backward substring search and forward/backward byteset search.
+ */
+void test_find_all() {
+    search_backend_t const find_serial {"serial", sz_find_serial};
+    for (search_backend_t const &backend : find_backends) test_search_equivalence(find_serial, backend, 200);
+
+    search_backend_t const rfind_serial {"serial", sz_rfind_serial};
+    for (search_backend_t const &backend : rfind_backends) test_search_equivalence(rfind_serial, backend, 200);
+
+    byteset_backend_t const find_byteset_serial {"serial", sz_find_byteset_serial};
+    for (byteset_backend_t const &backend : find_byteset_backends)
+        test_byteset_equivalence(find_byteset_serial, backend, 200);
+
+    byteset_backend_t const rfind_byteset_serial {"serial", sz_rfind_byteset_serial};
+    for (byteset_backend_t const &backend : rfind_byteset_backends)
+        test_byteset_equivalence(rfind_byteset_serial, backend, 200);
 }
 
 #pragma endregion // Drivers

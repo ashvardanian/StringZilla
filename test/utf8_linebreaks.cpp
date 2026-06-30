@@ -40,26 +40,33 @@ static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
 static constexpr std::size_t utf8_linebreaks_unit_cases_count = sizeof(utf8_linebreaks_unit_cases) /
                                                                 sizeof(utf8_linebreaks_unit_cases[0]);
 
+/**
+ *  @brief The UTF-8 line-break segmenters compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty on a baseline build; the unit / rule-coverage / safety / equivalence drivers all iterate
+ *         this one ladder so their ISA coverage stays in lockstep.
+ */
+static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
+    {"dispatched", sz_utf8_linebreaks},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_linebreaks_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_linebreaks_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_linebreaks_neon},
+#endif
+};
+
 /** @brief Known-answer line-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_linebreaks_unit() {
     std::printf("  - testing UTF-8 line-break known-answer vectors...\n");
 
-    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks, utf8_linebreaks_unit_cases,
-                             utf8_linebreaks_unit_cases_count); // Dispatched
     check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_serial, utf8_linebreaks_unit_cases,
                              utf8_linebreaks_unit_cases_count);
-#if SZ_USE_HASWELL
-    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_haswell, utf8_linebreaks_unit_cases,
-                             utf8_linebreaks_unit_cases_count);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_icelake, utf8_linebreaks_unit_cases,
-                             utf8_linebreaks_unit_cases_count);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_neon, utf8_linebreaks_unit_cases,
-                             utf8_linebreaks_unit_cases_count);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
+        check_utf8_segment_unit_("linewrap", backend.finder, utf8_linebreaks_unit_cases,
+                                 utf8_linebreaks_unit_cases_count);
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
@@ -240,21 +247,10 @@ void test_utf8_linebreaks_rules() {
         "LB15a", "LB15b", "LB16", "LB17", "LB18", "LB19", "LB20",  "LB20a", "LB21", "LB21a", "LB21b", "LB22", "LB23",
         "LB23a", "LB24",  "LB25", "LB26", "LB27", "LB28", "LB28a", "LB29",  "LB30", "LB30a", "LB30b", "LB31",
     };
-#if SZ_USE_HASWELL
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_haswell, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_icelake, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_NEON
-    check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, sz_utf8_linebreaks_neon, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
+        check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, backend.finder, rule_cases,
+                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                                  sizeof(required_rules) / sizeof(required_rules[0]));
 }
 
 #pragma endregion // Rule coverage
@@ -265,16 +261,10 @@ void test_utf8_linebreaks_rules() {
 void test_utf8_linebreaks_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 line kernels...\n");
     check_utf8_segment_safety_("linewrap (serial)", sz_utf8_linebreaks_serial);
-    check_utf8_segment_safety_("linewrap (dispatched)", sz_utf8_linebreaks);
-#if SZ_USE_HASWELL
-    check_utf8_segment_safety_("linewrap (haswell)", sz_utf8_linebreaks_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("linewrap (icelake)", sz_utf8_linebreaks_icelake);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_safety_("linewrap (neon)", sz_utf8_linebreaks_neon);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends) {
+        std::string const label = std::string("linewrap (") + backend.name + ")";
+        check_utf8_segment_safety_(label.c_str(), backend.finder);
+    }
     std::printf("    linewrap safety passed!\n");
 }
 
@@ -285,16 +275,8 @@ void test_utf8_linebreaks_safety() {
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linebreaks_all() {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
-    sz_unused_(corpora);
-#if SZ_USE_HASWELL
-    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_haswell, corpora);
-#endif
-#if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_icelake, corpora);
-#endif
-#if SZ_USE_NEON
-    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, sz_utf8_linebreaks_neon, corpora);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
+        test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, backend.finder, corpora);
 }
 
 #pragma endregion // Drivers

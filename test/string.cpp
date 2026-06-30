@@ -1503,20 +1503,21 @@ void test_string_updates_unit(std::size_t repetitions) {
 
 #pragma region Equivalence
 
-/** @brief Wraps the memory-movement primitives (copy/move/fill) of one backend by their pointers. */
-template <sz_copy_t copy_, sz_move_t move_, sz_fill_t fill_>
-struct memory_from_sz_ {
-    void copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) const noexcept { copy_(target, source, length); }
-    void move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) const noexcept { move_(target, source, length); }
-    void fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) const noexcept { fill_(target, length, value); }
+/**
+ *  @brief One backend's memory-movement primitives (copy/move/fill), stored by pointer so the differential driver
+ *         can iterate a table. Members are named for the call sites (`reference.copy(...)` etc.), invoked directly.
+ */
+struct memory_backend_t {
+    char const *name;
+    sz_copy_t copy;
+    sz_move_t move;
+    sz_fill_t fill;
 };
 
-/** @brief Wraps a byte-lookup (transform) backend by its kernel pointer. */
-template <sz_lookup_t lookup_>
-struct lookup_from_sz_ {
-    void lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lookup_table) const noexcept {
-        lookup_(target, length, source, lookup_table);
-    }
+/** @brief One backend's byte-lookup (transform) kernel, stored by pointer; `reference.lookup(...)` invokes it. */
+struct lookup_backend_t {
+    char const *name;
+    sz_lookup_t lookup;
 };
 
 /**
@@ -1761,78 +1762,87 @@ void test_memory_safety() {
 #pragma region Drivers
 
 /**
- *  @brief Drives the serial-vs-SIMD movement and lookup differential tests across every memory backend
- *         compiled on this target. Copy/move/fill share one tier set; lookup has its own (icelake, no skylake).
+ *  @brief The memory-movement (copy/move/fill) backends compiled on this target. The always-present `dispatched`
+ *         entry keeps the table non-empty on a baseline build. This tier set has Skylake but no Icelake.
  */
-void test_memory_all() {
-
-    using memory_serial_t = memory_from_sz_<sz_copy_serial, sz_move_serial, sz_fill_serial>;
-    memory_serial_t const memory_serial;
-
-    sz_size_t const inputs = (sz_size_t)scale_iterations(2);
-
+static memory_backend_t const memory_backends[] = {
+    {"dispatched", sz_copy, sz_move, sz_fill},
 #if SZ_USE_HASWELL
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_haswell, sz_move_haswell, sz_fill_haswell> {},
-                            inputs);
+    {"haswell", sz_copy_haswell, sz_move_haswell, sz_fill_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_skylake, sz_move_skylake, sz_fill_skylake> {},
-                            inputs);
+    {"skylake", sz_copy_skylake, sz_move_skylake, sz_fill_skylake},
 #endif
 #if SZ_USE_NEON
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_neon, sz_move_neon, sz_fill_neon> {}, inputs);
+    {"neon", sz_copy_neon, sz_move_neon, sz_fill_neon},
 #endif
 #if SZ_USE_SVE
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_sve, sz_move_sve, sz_fill_sve> {}, inputs);
+    {"sve", sz_copy_sve, sz_move_sve, sz_fill_sve},
 #endif
 #if SZ_USE_V128
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_v128, sz_move_v128, sz_fill_v128> {}, inputs);
+    {"v128", sz_copy_v128, sz_move_v128, sz_fill_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_memory_equivalence(memory_serial,
-                            memory_from_sz_<sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed> {}, inputs);
+    {"v128relaxed", sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_rvv, sz_move_rvv, sz_fill_rvv> {}, inputs);
+    {"rvv", sz_copy_rvv, sz_move_rvv, sz_fill_rvv},
 #endif
 #if SZ_USE_LASX
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_lasx, sz_move_lasx, sz_fill_lasx> {}, inputs);
+    {"lasx", sz_copy_lasx, sz_move_lasx, sz_fill_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_memory_equivalence(memory_serial, memory_from_sz_<sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx> {},
-                            inputs);
+    {"powervsx", sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx},
 #endif
+};
 
-    using lookup_serial_t = lookup_from_sz_<sz_lookup_serial>;
-    lookup_serial_t const lookup_serial;
-
+/**
+ *  @brief The byte-lookup (transform) backends compiled on this target. The always-present `dispatched` entry keeps
+ *         the table non-empty on a baseline build. This tier set has Icelake but no Skylake.
+ */
+static lookup_backend_t const lookup_backends[] = {
+    {"dispatched", sz_lookup},
 #if SZ_USE_HASWELL
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_haswell> {}, inputs);
+    {"haswell", sz_lookup_haswell},
 #endif
 #if SZ_USE_ICELAKE
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_icelake> {}, inputs);
+    {"icelake", sz_lookup_icelake},
 #endif
 #if SZ_USE_NEON
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_neon> {}, inputs);
+    {"neon", sz_lookup_neon},
 #endif
 #if SZ_USE_SVE
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_sve> {}, inputs);
+    {"sve", sz_lookup_sve},
 #endif
 #if SZ_USE_V128
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_v128> {}, inputs);
+    {"v128", sz_lookup_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_v128relaxed> {}, inputs);
+    {"v128relaxed", sz_lookup_v128relaxed},
 #endif
 #if SZ_USE_RVV
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_rvv> {}, inputs);
+    {"rvv", sz_lookup_rvv},
 #endif
 #if SZ_USE_LASX
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_lasx> {}, inputs);
+    {"lasx", sz_lookup_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_lookup_equivalence(lookup_serial, lookup_from_sz_<sz_lookup_powervsx> {}, inputs);
+    {"powervsx", sz_lookup_powervsx},
 #endif
+};
+
+/**
+ *  @brief Drives the serial-vs-SIMD movement and lookup differential tests across every backend compiled on this
+ *         target (dispatched first). Copy/move/fill and lookup carry their own (differing) tier sets.
+ */
+void test_memory_all() {
+    sz_size_t const inputs = (sz_size_t)scale_iterations(2);
+
+    memory_backend_t const memory_serial {"serial", sz_copy_serial, sz_move_serial, sz_fill_serial};
+    for (memory_backend_t const &backend : memory_backends) test_memory_equivalence(memory_serial, backend, inputs);
+
+    lookup_backend_t const lookup_serial {"serial", sz_lookup_serial};
+    for (lookup_backend_t const &backend : lookup_backends) test_lookup_equivalence(lookup_serial, backend, inputs);
 }
 
 #pragma endregion // Drivers
