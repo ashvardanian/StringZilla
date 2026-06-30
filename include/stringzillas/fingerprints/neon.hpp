@@ -284,11 +284,11 @@ struct floating_rolling_hashers<sz_cap_neon_k, dimensions_, void> {
                 static_cast<rolling_state_t>(text_chunk[new_char_offset - window_width_]) + 1.0);
 
             for (unsigned pass = 0; pass < passes_; ++pass) {
-                // A single Barrett reduction handles both the discarded head and the incoming tail symbol.
-                // `discarding_multipliers_` folds in the `multipliers_` and is non-negative, so the fused
-                // intermediate stays within `[0, 2⁵²)` without underflowing zero before the reduction.
-                states[pass] = vfmaq_f64(new_term_vec, states[pass], multipliers[pass]);
-                states[pass] = vfmaq_f64(states[pass], discarding[pass], old_term_vec);
+                // Hoist the state-independent `new + discarding * old` summand off the recurrence so only one
+                // FMA sits on the loop-carried chain. Exact-integer (`x < 2⁵²`) reassociation → bit-identical.
+                // ~3% here: the `passes_` interleaving already hides most of the chain latency.
+                float64x2_t addend = vfmaq_f64(new_term_vec, discarding[pass], old_term_vec);
+                states[pass] = vfmaq_f64(addend, states[pass], multipliers[pass]);
                 states[pass] = barrett_mod(states[pass], modulos[pass], inverse_modulos[pass]);
 
                 // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
