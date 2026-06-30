@@ -83,38 +83,48 @@ static void test_utf8_words_classification_() {
     assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
 }
 
+/**
+ *  @brief The UTF-8 word-break segmenters compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty on a baseline build, and the unit / rule-coverage / safety / equivalence drivers below
+ *         all iterate this one ladder so their ISA coverage can never drift apart.
+ */
+static utf8_segment_backend_t const utf8_words_backends[] = {
+    {"dispatched", sz_utf8_wordbreaks},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_wordbreaks_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_wordbreaks_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_wordbreaks_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_wordbreaks_sve2},
+#endif
+#if SZ_USE_V128
+    {"v128", sz_utf8_wordbreaks_v128},
+#endif
+#if SZ_USE_RVV
+    {"rvv", sz_utf8_wordbreaks_rvv},
+#endif
+#if SZ_USE_POWERVSX
+    {"powervsx", sz_utf8_wordbreaks_powervsx},
+#endif
+#if SZ_USE_LASX
+    {"lasx", sz_utf8_wordbreaks_lasx},
+#endif
+};
+
 /** @brief Known-answer word-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_words_unit() {
     std::printf("  - testing UTF-8 word-break known-answer vectors...\n");
 
     test_utf8_words_classification_();
 
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks, utf8_words_unit_cases, utf8_words_unit_cases_count);
     check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#if SZ_USE_HASWELL
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_haswell, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_icelake, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_neon, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_SVE2
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_sve2, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_V128
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_v128, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_RVV
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_rvv, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_POWERVSX
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_powervsx, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
-#if SZ_USE_LASX
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_lasx, utf8_words_unit_cases, utf8_words_unit_cases_count);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_words_backends)
+        check_utf8_segment_unit_("word", backend.finder, utf8_words_unit_cases, utf8_words_unit_cases_count);
 
     // C++ range wrapper known-answer: `utf8_wordbreaks()` faithfully tiles the input into the UAX-29 segments
     // (words and the separators between them); concatenating them reconstructs the input.
@@ -316,46 +326,10 @@ void test_utf8_words_rules() {
         "WB3", "WB3a", "WB3b", "WB3c", "WB3d", "WB4",  "WB5",   "WB6",   "WB7",  "WB7a", "WB7b",  "WB7c",
         "WB8", "WB9",  "WB10", "WB11", "WB12", "WB13", "WB13a", "WB13b", "WB15", "WB16", "WB999",
     };
-#if SZ_USE_HASWELL
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_haswell, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_icelake, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_NEON
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_neon, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_SVE2
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_sve2, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_V128
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_v128, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_RVV
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_rvv, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_POWERVSX
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_powervsx, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_LASX
-    check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_lasx, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_words_backends)
+        check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, backend.finder, rule_cases,
+                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                                  sizeof(required_rules) / sizeof(required_rules[0]));
 }
 
 #pragma endregion // Rule coverage
@@ -366,31 +340,10 @@ void test_utf8_words_rules() {
 void test_utf8_words_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 word kernels...\n");
     check_utf8_segment_safety_("word (serial)", sz_utf8_wordbreaks_serial);
-    check_utf8_segment_safety_("word (dispatched)", sz_utf8_wordbreaks);
-#if SZ_USE_HASWELL
-    check_utf8_segment_safety_("word (haswell)", sz_utf8_wordbreaks_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("word (icelake)", sz_utf8_wordbreaks_icelake);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_safety_("word (neon)", sz_utf8_wordbreaks_neon);
-#endif
-#if SZ_USE_SVE2
-    check_utf8_segment_safety_("word (sve2)", sz_utf8_wordbreaks_sve2);
-#endif
-#if SZ_USE_V128
-    check_utf8_segment_safety_("word (v128)", sz_utf8_wordbreaks_v128);
-#endif
-#if SZ_USE_RVV
-    check_utf8_segment_safety_("word (rvv)", sz_utf8_wordbreaks_rvv);
-#endif
-#if SZ_USE_POWERVSX
-    check_utf8_segment_safety_("word (powervsx)", sz_utf8_wordbreaks_powervsx);
-#endif
-#if SZ_USE_LASX
-    check_utf8_segment_safety_("word (lasx)", sz_utf8_wordbreaks_lasx);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_words_backends) {
+        std::string const label = std::string("word (") + backend.name + ")";
+        check_utf8_segment_safety_(label.c_str(), backend.finder);
+    }
     std::printf("    word safety passed!\n");
 }
 
@@ -401,31 +354,8 @@ void test_utf8_words_safety() {
 /** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
 void test_utf8_words_all() {
     utf8_segment_corpora_t const corpora = utf8_words_corpora_();
-    sz_unused_(corpora);
-#if SZ_USE_HASWELL
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_haswell, corpora);
-#endif
-#if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_icelake, corpora);
-#endif
-#if SZ_USE_NEON
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_neon, corpora);
-#endif
-#if SZ_USE_SVE2
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_sve2, corpora);
-#endif
-#if SZ_USE_V128
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_v128, corpora);
-#endif
-#if SZ_USE_RVV
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_rvv, corpora);
-#endif
-#if SZ_USE_POWERVSX
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_powervsx, corpora);
-#endif
-#if SZ_USE_LASX
-    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, sz_utf8_wordbreaks_lasx, corpora);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_words_backends)
+        test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, backend.finder, corpora);
 }
 
 #pragma endregion // Drivers

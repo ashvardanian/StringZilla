@@ -652,41 +652,58 @@ static void check_utf8_runes_safety_(sz_utf8_count_t count, sz_utf8_decode_t unp
     }
 }
 
+/**
+ *  @brief One UTF-8 codepoint backend: its three kernels plus whether its streaming decoder is hardened against
+ *         malformed input. Built once here and iterated by every driver, so the unit/safety and equivalence
+ *         passes can never drift apart in which ISAs they cover. The always-present `dispatched` entry keeps the
+ *         table non-empty (and the helpers live) even on a baseline target with no SIMD tier compiled in.
+ */
+struct utf8_runes_backend_t {
+    char const *name;
+    sz_utf8_count_t count;
+    sz_utf8_seek_t seek;
+    sz_utf8_decode_t decode; // Streaming decoder, or `SZ_NULL` when the backend has none (e.g. `v128relaxed`).
+};
+
+static utf8_runes_backend_t const utf8_runes_backends[] = {
+    {"dispatched", sz_utf8_count, sz_utf8_seek, sz_utf8_decode},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell, sz_utf8_decode_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake, sz_utf8_decode_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_count_sve2, sz_utf8_seek_sve2, sz_utf8_decode_sve2},
+#endif
+#if SZ_USE_V128
+    {"v128", sz_utf8_count_v128, sz_utf8_seek_v128, sz_utf8_decode_v128},
+#endif
+#if SZ_USE_V128RELAXED
+    {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_seek_v128relaxed, SZ_NULL},
+#endif
+#if SZ_USE_RVV
+    {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv},
+#endif
+#if SZ_USE_LASX
+    {"lasx", sz_utf8_count_lasx, sz_utf8_seek_lasx, sz_utf8_decode_lasx},
+#endif
+#if SZ_USE_POWERVSX
+    {"powervsx", sz_utf8_count_powervsx, sz_utf8_seek_powervsx, sz_utf8_decode_powervsx},
+#endif
+};
+
 /** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_runes_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 codepoint kernels...\n");
 
-    // Serial baseline and the dispatched (automatic kernel resolution) entry points face the same contract.
+    // Serial is the reference contract; the dispatched and native backends below face the same probe.
     check_utf8_runes_safety_(sz_utf8_count_serial, sz_utf8_decode_serial);
-    check_utf8_runes_safety_(sz_utf8_count, sz_utf8_decode);
-
-#if SZ_USE_HASWELL
-    check_utf8_runes_safety_(sz_utf8_count_haswell, sz_utf8_decode_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_runes_safety_(sz_utf8_count_icelake, sz_utf8_decode_icelake);
-#endif
-#if SZ_USE_NEON
-    check_utf8_runes_safety_(sz_utf8_count_neon, SZ_NULL);
-#endif
-#if SZ_USE_SVE2
-    check_utf8_runes_safety_(sz_utf8_count_sve2, SZ_NULL);
-#endif
-#if SZ_USE_V128
-    check_utf8_runes_safety_(sz_utf8_count_v128, SZ_NULL);
-#endif
-#if SZ_USE_V128RELAXED
-    check_utf8_runes_safety_(sz_utf8_count_v128relaxed, SZ_NULL);
-#endif
-#if SZ_USE_RVV
-    check_utf8_runes_safety_(sz_utf8_count_rvv, SZ_NULL);
-#endif
-#if SZ_USE_LASX
-    check_utf8_runes_safety_(sz_utf8_count_lasx, SZ_NULL);
-#endif
-#if SZ_USE_POWERVSX
-    check_utf8_runes_safety_(sz_utf8_count_powervsx, SZ_NULL);
-#endif
+    for (utf8_runes_backend_t const &backend : utf8_runes_backends)
+        check_utf8_runes_safety_(backend.count, backend.decode);
 
     std::printf("    malformed-input safety passed!\n");
 }
@@ -701,48 +718,13 @@ void test_utf8_runes_safety() {
  */
 void test_utf8_runes_all() {
     sz_size_t const inputs = (sz_size_t)scale_iterations(200);
-    sz_unused_(inputs);
 
-#if SZ_USE_HASWELL
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_haswell, //
-                                sz_utf8_seek_serial, sz_utf8_seek_haswell,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_haswell, inputs);
-#endif
-#if SZ_USE_ICELAKE
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_icelake, //
-                                sz_utf8_seek_serial, sz_utf8_seek_icelake,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_icelake, inputs);
-#endif
-#if SZ_USE_NEON
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_neon, //
-                                sz_utf8_seek_serial, sz_utf8_seek_neon,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_neon, inputs);
-#endif
-#if SZ_USE_SVE2
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_sve2, //
-                                sz_utf8_seek_serial, sz_utf8_seek_sve2,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_sve2, inputs);
-#endif
-#if SZ_USE_V128
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_v128, //
-                                sz_utf8_seek_serial, sz_utf8_seek_v128,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_v128, inputs);
-#endif
-#if SZ_USE_RVV
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_rvv, //
-                                sz_utf8_seek_serial, sz_utf8_seek_rvv,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_rvv, inputs);
-#endif
-#if SZ_USE_POWERVSX
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_powervsx, //
-                                sz_utf8_seek_serial, sz_utf8_seek_powervsx,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_powervsx, inputs);
-#endif
-#if SZ_USE_LASX
-    test_utf8_runes_equivalence(sz_utf8_count_serial, sz_utf8_count_lasx, //
-                                sz_utf8_seek_serial, sz_utf8_seek_lasx,   //
-                                sz_utf8_decode_serial, sz_utf8_decode_lasx, inputs);
-#endif
+    // Serial is the reference; the dispatched entry and every native backend are differenced against it. A
+    // `SZ_NULL` decoder (e.g. `v128relaxed`) simply skips the streaming-decode leg inside the helper.
+    for (utf8_runes_backend_t const &backend : utf8_runes_backends)
+        test_utf8_runes_equivalence(sz_utf8_count_serial, backend.count, //
+                                    sz_utf8_seek_serial, backend.seek,   //
+                                    sz_utf8_decode_serial, backend.decode, inputs);
 
     // Fold in the moved large-buffer count agreement (serial == dispatched == C++ wrapper == known total).
     test_utf8_runes_large_count();

@@ -160,15 +160,15 @@ void test_utf8_norm_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps the UTF-8 normalization and normalization-violation kernels of one backend by their pointers. */
-template <sz_utf8_norm_t norm_, sz_utf8_find_denormalized_t violation_>
-struct norm_from_sz_ {
-    sz_size_t form(sz_cptr_t text, sz_size_t length, sz_normal_form_t normal_form, sz_ptr_t output) const noexcept {
-        return norm_(text, length, normal_form, output);
-    }
-    sz_cptr_t violation(sz_cptr_t text, sz_size_t length, sz_normal_form_t normal_form) const noexcept {
-        return violation_(text, length, normal_form);
-    }
+/**
+ *  @brief One backend's UTF-8 normalization + violation kernels, stored by pointer so the differential driver can
+ *         iterate a table. The members are named for the call sites (`reference.form(...)`,
+ *         `reference.violation(...)`), so each function-pointer member is invoked directly — the harness is unchanged.
+ */
+struct utf8_norm_backend_t {
+    char const *name;
+    sz_utf8_norm_t form;
+    sz_utf8_find_denormalized_t violation;
 };
 
 /**
@@ -372,43 +372,51 @@ void test_utf8_norm_safety() {
 
 #pragma region Drivers
 
-/** @brief Run the normalization differential fuzz against every compiled SIMD backend. */
-void test_utf8_norm_all() {
-    using reference_t = norm_from_sz_<sz_utf8_norm_serial, sz_utf8_find_denormalized_serial>;
+/**
+ *  @brief The UTF-8 normalization backends compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty on a baseline build; the differential below runs serial vs each.
+ */
+static utf8_norm_backend_t const utf8_norm_backends[] = {
+    {"dispatched", sz_utf8_norm, sz_utf8_find_denormalized},
 #if SZ_USE_HASWELL
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_haswell, sz_utf8_find_denormalized_haswell> {});
+    {"haswell", sz_utf8_norm_haswell, sz_utf8_find_denormalized_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_skylake, sz_utf8_find_denormalized_skylake> {});
+    {"skylake", sz_utf8_norm_skylake, sz_utf8_find_denormalized_skylake},
 #endif
 #if SZ_USE_ICELAKE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_icelake, sz_utf8_find_denormalized_icelake> {});
+    {"icelake", sz_utf8_norm_icelake, sz_utf8_find_denormalized_icelake},
 #endif
 #if SZ_USE_NEON
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_neon, sz_utf8_find_denormalized_neon> {});
+    {"neon", sz_utf8_norm_neon, sz_utf8_find_denormalized_neon},
 #endif
 #if SZ_USE_SVE
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve, sz_utf8_find_denormalized_sve> {});
+    {"sve", sz_utf8_norm_sve, sz_utf8_find_denormalized_sve},
 #endif
 #if SZ_USE_SVE2
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_sve2, sz_utf8_find_denormalized_sve2> {});
+    {"sve2", sz_utf8_norm_sve2, sz_utf8_find_denormalized_sve2},
 #endif
 #if SZ_USE_RVV
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_rvv, sz_utf8_find_denormalized_rvv> {});
+    {"rvv", sz_utf8_norm_rvv, sz_utf8_find_denormalized_rvv},
 #endif
 #if SZ_USE_V128
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_v128, sz_utf8_find_denormalized_v128> {});
+    {"v128", sz_utf8_norm_v128, sz_utf8_find_denormalized_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_norm_equivalence(reference_t {},
-                          norm_from_sz_<sz_utf8_norm_v128relaxed, sz_utf8_find_denormalized_v128relaxed> {});
+    {"v128relaxed", sz_utf8_norm_v128relaxed, sz_utf8_find_denormalized_v128relaxed},
 #endif
 #if SZ_USE_LASX
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_lasx, sz_utf8_find_denormalized_lasx> {});
+    {"lasx", sz_utf8_norm_lasx, sz_utf8_find_denormalized_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_norm_equivalence(reference_t {}, norm_from_sz_<sz_utf8_norm_powervsx, sz_utf8_find_denormalized_powervsx> {});
+    {"powervsx", sz_utf8_norm_powervsx, sz_utf8_find_denormalized_powervsx},
 #endif
+};
+
+/** @brief Run the normalization differential fuzz against every compiled backend (dispatched first). */
+void test_utf8_norm_all() {
+    utf8_norm_backend_t const serial {"serial", sz_utf8_norm_serial, sz_utf8_find_denormalized_serial};
+    for (utf8_norm_backend_t const &backend : utf8_norm_backends) test_norm_equivalence(serial, backend);
 }
 
 #pragma endregion // Drivers

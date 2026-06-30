@@ -50,26 +50,33 @@ static utf8_unit_case_t const utf8_graphemes_unit_cases[] = {
 static constexpr std::size_t utf8_graphemes_unit_cases_count = sizeof(utf8_graphemes_unit_cases) /
                                                                sizeof(utf8_graphemes_unit_cases[0]);
 
+/**
+ *  @brief The UTF-8 grapheme-cluster segmenters compiled on this target. The always-present `dispatched` entry keeps
+ *         the table non-empty on a baseline build; the unit / rule-coverage / safety / equivalence drivers all
+ *         iterate this one ladder so their ISA coverage stays in lockstep.
+ */
+static utf8_segment_backend_t const utf8_graphemes_backends[] = {
+    {"dispatched", sz_utf8_graphemes},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_graphemes_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_graphemes_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_graphemes_neon},
+#endif
+};
+
 /** @brief Known-answer grapheme-cluster vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_graphemes_unit() {
     std::printf("  - testing UTF-8 grapheme-cluster known-answer vectors...\n");
 
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes, utf8_graphemes_unit_cases,
-                             utf8_graphemes_unit_cases_count); // Dispatched
     check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, utf8_graphemes_unit_cases,
                              utf8_graphemes_unit_cases_count);
-#if SZ_USE_HASWELL
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_haswell, utf8_graphemes_unit_cases,
-                             utf8_graphemes_unit_cases_count);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_icelake, utf8_graphemes_unit_cases,
-                             utf8_graphemes_unit_cases_count);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_neon, utf8_graphemes_unit_cases,
-                             utf8_graphemes_unit_cases_count);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
+        check_utf8_segment_unit_("grapheme", backend.finder, utf8_graphemes_unit_cases,
+                                 utf8_graphemes_unit_cases_count);
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
@@ -273,21 +280,10 @@ void test_utf8_graphemes_rules() {
     char const *const required_rules[] = {
         "GB3", "GB4", "GB5", "GB6", "GB7", "GB8", "GB9", "GB9a", "GB9b", "GB9c", "GB11", "GB12", "GB13", "GB999",
     };
-#if SZ_USE_HASWELL
-    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_haswell, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
-#if SZ_USE_NEON
-    check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, sz_utf8_graphemes_neon, rule_cases,
-                              sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                              sizeof(required_rules) / sizeof(required_rules[0]));
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
+        check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, backend.finder, rule_cases,
+                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
+                                  sizeof(required_rules) / sizeof(required_rules[0]));
 }
 
 #pragma endregion // Rule coverage
@@ -298,16 +294,10 @@ void test_utf8_graphemes_rules() {
 void test_utf8_graphemes_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 grapheme kernels...\n");
     check_utf8_segment_safety_("grapheme (serial)", sz_utf8_graphemes_serial);
-    check_utf8_segment_safety_("grapheme (dispatched)", sz_utf8_graphemes);
-#if SZ_USE_HASWELL
-    check_utf8_segment_safety_("grapheme (haswell)", sz_utf8_graphemes_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_segment_safety_("grapheme (icelake)", sz_utf8_graphemes_icelake);
-#endif
-#if SZ_USE_NEON
-    check_utf8_segment_safety_("grapheme (neon)", sz_utf8_graphemes_neon);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends) {
+        std::string const label = std::string("grapheme (") + backend.name + ")";
+        check_utf8_segment_safety_(label.c_str(), backend.finder);
+    }
     std::printf("    grapheme safety passed!\n");
 }
 
@@ -318,16 +308,8 @@ void test_utf8_graphemes_safety() {
 /** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    sz_unused_(corpora);
-#if SZ_USE_HASWELL
-    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_haswell, corpora);
-#endif
-#if SZ_USE_ICELAKE
-    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_icelake, corpora);
-#endif
-#if SZ_USE_NEON
-    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, sz_utf8_graphemes_neon, corpora);
-#endif
+    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
+        test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, backend.finder, corpora);
 }
 
 #pragma endregion // Drivers

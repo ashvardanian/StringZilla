@@ -434,18 +434,16 @@ void test_utf8_tokens_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps the UTF-8 counting and boundary-finding kernels of one backend by their pointers. */
-template <sz_utf8_count_t count_, sz_utf8_segmenter_t newlines_, sz_utf8_segmenter_t whitespaces_>
-struct utf8_from_sz_ {
-    sz_size_t count(sz_cptr_t text, sz_size_t length) const noexcept { return count_(text, length); }
-    sz_size_t newlines(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, //
-                       sz_size_t capacity, sz_size_t *bytes_consumed) const noexcept {
-        return newlines_(text, length, offsets, lengths, capacity, bytes_consumed);
-    }
-    sz_size_t whitespaces(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths, //
-                          sz_size_t capacity, sz_size_t *bytes_consumed) const noexcept {
-        return whitespaces_(text, length, offsets, lengths, capacity, bytes_consumed);
-    }
+/**
+ *  @brief One backend's UTF-8 count / newline / whitespace kernels, stored by pointer so the differential driver
+ *         can iterate a table. The members are named for the call sites (`reference.count(...)` etc.), so a
+ *         function-pointer member is invoked directly — no wrapper methods, and the equivalence harness is unchanged.
+ */
+struct utf8_tokens_backend_t {
+    char const *name;
+    sz_utf8_count_t count;
+    sz_utf8_segmenter_t newlines;
+    sz_utf8_segmenter_t whitespaces;
 };
 
 /**
@@ -782,46 +780,47 @@ void test_utf8_tokens_safety() {
 
 #pragma region Drivers
 
-/** @brief Run the UTF-8 count/newline/whitespace differential against every compiled SIMD backend. */
-void test_utf8_tokens_all() {
-    using reference_t = utf8_from_sz_<sz_utf8_count_serial, sz_utf8_newlines_serial, sz_utf8_whitespaces_serial>;
+/**
+ *  @brief The UTF-8 count/newline/whitespace backends compiled on this target. The always-present `dispatched` entry
+ *         keeps the table non-empty on a baseline build. There are no relaxed-SIMD newline/whitespace kernels, so
+ *         `v128relaxed` reuses the `v128` segmenters (only its counter differs).
+ */
+static utf8_tokens_backend_t const utf8_tokens_backends[] = {
+    {"dispatched", sz_utf8_count, sz_utf8_newlines, sz_utf8_whitespaces},
 #if SZ_USE_HASWELL
-    test_utf8_tokens_equivalence(
-        reference_t {}, utf8_from_sz_<sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell> {});
+    {"haswell", sz_utf8_count_haswell, sz_utf8_newlines_haswell, sz_utf8_whitespaces_haswell},
 #endif
 #if SZ_USE_ICELAKE
-    test_utf8_tokens_equivalence(
-        reference_t {}, utf8_from_sz_<sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake> {});
+    {"icelake", sz_utf8_count_icelake, sz_utf8_newlines_icelake, sz_utf8_whitespaces_icelake},
 #endif
 #if SZ_USE_NEON
-    test_utf8_tokens_equivalence(reference_t {},
-                                 utf8_from_sz_<sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon> {});
+    {"neon", sz_utf8_count_neon, sz_utf8_newlines_neon, sz_utf8_whitespaces_neon},
 #endif
 #if SZ_USE_SVE2
-    test_utf8_tokens_equivalence(reference_t {},
-                                 utf8_from_sz_<sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2> {});
+    {"sve2", sz_utf8_count_sve2, sz_utf8_newlines_sve2, sz_utf8_whitespaces_sve2},
 #endif
 #if SZ_USE_V128
-    test_utf8_tokens_equivalence(reference_t {},
-                                 utf8_from_sz_<sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128> {});
+    {"v128", sz_utf8_count_v128, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128},
 #endif
 #if SZ_USE_V128RELAXED
-    test_utf8_tokens_equivalence(
-        reference_t {}, utf8_from_sz_<sz_utf8_count_v128relaxed, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128> {});
+    {"v128relaxed", sz_utf8_count_v128relaxed, sz_utf8_newlines_v128, sz_utf8_whitespaces_v128},
 #endif
 #if SZ_USE_RVV
-    test_utf8_tokens_equivalence(reference_t {},
-                                 utf8_from_sz_<sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv> {});
+    {"rvv", sz_utf8_count_rvv, sz_utf8_newlines_rvv, sz_utf8_whitespaces_rvv},
 #endif
 #if SZ_USE_LASX
-    test_utf8_tokens_equivalence(reference_t {},
-                                 utf8_from_sz_<sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx> {});
+    {"lasx", sz_utf8_count_lasx, sz_utf8_newlines_lasx, sz_utf8_whitespaces_lasx},
 #endif
 #if SZ_USE_POWERVSX
-    test_utf8_tokens_equivalence(
-        reference_t {},
-        utf8_from_sz_<sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx> {});
+    {"powervsx", sz_utf8_count_powervsx, sz_utf8_newlines_powervsx, sz_utf8_whitespaces_powervsx},
 #endif
+};
+
+/** @brief Run the UTF-8 count/newline/whitespace differential against every compiled backend (dispatched first). */
+void test_utf8_tokens_all() {
+    utf8_tokens_backend_t const serial {"serial", sz_utf8_count_serial, sz_utf8_newlines_serial,
+                                        sz_utf8_whitespaces_serial};
+    for (utf8_tokens_backend_t const &backend : utf8_tokens_backends) test_utf8_tokens_equivalence(serial, backend);
 }
 
 #pragma endregion // Drivers
@@ -1010,36 +1009,43 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
     }
 }
 
+/**
+ *  @brief The UTF-8 delimiter segmenters compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty (and `test_utf8_delimiters_equivalence` live) on a baseline build with no SIMD tier, and
+ *         the single ladder is shared by the safety and equivalence drivers so their ISA coverage cannot diverge.
+ */
+struct utf8_delimiters_backend_t {
+    char const *name;
+    sz_utf8_segmenter_t finder;
+};
+
+static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
+    {"dispatched", sz_utf8_delimiters},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_delimiters_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_delimiters_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_delimiters_neon},
+#endif
+};
+
 /** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_delimiters_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 delimiter kernels...\n");
     check_utf8_delimiters_safety_(sz_utf8_delimiters_serial);
-    check_utf8_delimiters_safety_(sz_utf8_delimiters);
-#if SZ_USE_HASWELL
-    check_utf8_delimiters_safety_(sz_utf8_delimiters_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    check_utf8_delimiters_safety_(sz_utf8_delimiters_icelake);
-#endif
-#if SZ_USE_NEON
-    check_utf8_delimiters_safety_(sz_utf8_delimiters_neon);
-#endif
+    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
+        check_utf8_delimiters_safety_(backend.finder);
     std::printf("    malformed-input safety passed!\n");
 }
 
 /** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */
 void test_utf8_delimiters_all() {
     sz_size_t const inputs = (sz_size_t)scale_iterations(200);
-    sz_unused_(inputs);
-#if SZ_USE_HASWELL
-    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_haswell, inputs);
-#endif
-#if SZ_USE_ICELAKE
-    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_icelake, inputs);
-#endif
-#if SZ_USE_NEON
-    test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, sz_utf8_delimiters_neon, inputs);
-#endif
+    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
+        test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, backend.finder, inputs);
 }
 
 #pragma endregion // Delimiters

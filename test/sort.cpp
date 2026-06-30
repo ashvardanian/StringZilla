@@ -521,20 +521,15 @@ void test_intersect_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps a sequence argsort backend (byte or uncased) by its kernel pointer. */
-template <sz_sequence_argsort_t argsort_>
-struct sequence_argsort_from_sz_ {
-    sz_status_t operator()(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
-                           sz_size_t top, sz_bool_t reverse) const noexcept {
-        return argsort_(sequence, alloc, order, top, reverse);
-    }
-};
-
-/** @brief Bundles a backend's byte arg-sort and uncased arg-sort under a single name. */
-template <sz_sequence_argsort_t argsort_, sz_sequence_argsort_t argsort_uncased_>
-struct sequence_sort_from_sz_ {
-    sequence_argsort_from_sz_<argsort_> argsort;
-    sequence_argsort_from_sz_<argsort_uncased_> argsort_uncased;
+/**
+ *  @brief One backend's byte + uncased sequence arg-sort kernels, stored by pointer so the differential driver can
+ *         iterate a table. The members are named for the call sites (`reference.argsort(...)`,
+ *         `reference.argsort_uncased(...)`), so each function-pointer member is invoked directly.
+ */
+struct sequence_sort_backend_t {
+    char const *name;
+    sz_sequence_argsort_t argsort;
+    sz_sequence_argsort_t argsort_uncased;
 };
 
 /**
@@ -617,33 +612,36 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
 #pragma region Drivers
 
-/** @brief Runs `test_sort_equivalence` (serial reference vs. every enabled SIMD backend candidate). */
-void test_sort_all() {
-    sequence_sort_from_sz_<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial> reference {};
-    // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
-    constexpr sz_size_t repetitions = 1;
+/**
+ *  @brief The sequence arg-sort backends compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty on a baseline build; the differential runs serial vs each.
+ */
+static sequence_sort_backend_t const sequence_sort_backends[] = {
+    {"dispatched", sz_sequence_argsort, sz_sequence_argsort_uncased},
 #if SZ_USE_HASWELL
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell> {},
-                          repetitions);
+    {"haswell", sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell},
 #endif
 #if SZ_USE_SKYLAKE
-    test_sort_equivalence(reference,
-                          sequence_sort_from_sz_<sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake> {},
-                          repetitions);
+    {"skylake", sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake},
 #endif
 #if SZ_USE_SVE
-    test_sort_equivalence(
-        reference, sequence_sort_from_sz_<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve> {}, repetitions);
+    {"sve", sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve},
 #endif
 #if SZ_USE_NEON
-    test_sort_equivalence(
-        reference, sequence_sort_from_sz_<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon> {}, repetitions);
+    {"neon", sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon},
 #endif
 #if SZ_USE_RVV
-    test_sort_equivalence(
-        reference, sequence_sort_from_sz_<sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv> {}, repetitions);
+    {"rvv", sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv},
 #endif
+};
+
+/** @brief Runs `test_sort_equivalence` (serial reference vs every compiled backend, dispatched first). */
+void test_sort_all() {
+    sequence_sort_backend_t const serial {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
+    // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
+    constexpr sz_size_t repetitions = 1;
+    for (sequence_sort_backend_t const &backend : sequence_sort_backends)
+        test_sort_equivalence(serial, backend, repetitions);
 }
 
 #pragma endregion // Drivers

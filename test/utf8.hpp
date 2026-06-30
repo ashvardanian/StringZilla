@@ -402,6 +402,18 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
 
 #pragma endregion // Lazy streaming comparison
 
+/**
+ *  @brief One segmentation backend (its named `sz_utf8_segmenter_t`) for a kernel family. Each family builds a
+ *         file-local table of these — one entry per ISA compiled in, plus an always-present `dispatched` entry so
+ *         the table is never empty on a baseline target — and its unit / rule-coverage / safety / equivalence
+ *         drivers all iterate the SAME table. That keeps the four drivers' ISA coverage in lockstep and removes the
+ *         per-driver `#if` ladders (and the dead-code they create when no SIMD tier is compiled).
+ */
+struct utf8_segment_backend_t {
+    char const *name;
+    sz_utf8_segmenter_t finder;
+};
+
 #pragma region Unit driver
 
 /**

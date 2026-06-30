@@ -1927,23 +1927,6 @@ void test_uncased_unit() {
 
 #pragma region Equivalence
 
-/** @brief Wraps a UTF-8 case-folding backend by its kernel pointer. */
-template <sz_utf8_uncased_fold_t fold_>
-struct uncased_fold_from_sz_ {
-    sz_size_t operator()(sz_cptr_t text, sz_size_t length, sz_ptr_t output) const noexcept {
-        return fold_(text, length, output);
-    }
-};
-
-/** @brief Wraps a UTF-8 uncased-find backend by its kernel pointer. */
-template <sz_utf8_uncased_search_t find_>
-struct uncased_find_from_sz_ {
-    sz_cptr_t operator()(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-                         sz_utf8_uncased_needle_metadata_t *metadata, sz_size_t *matched_length) const noexcept {
-        return find_(haystack, haystack_length, needle, needle_length, metadata, matched_length);
-    }
-};
-
 /**
  *  @brief Tests equivalence of case folding implementations (reference vs candidate).
  *
@@ -2156,17 +2139,16 @@ void test_uncased_invariant_reference() {
 
 #pragma region Safety
 
-/** @brief Wraps the uncased fold/find/violation kernels of one backend by their pointers. */
-template <sz_utf8_uncased_fold_t fold_, sz_utf8_uncased_search_t find_, sz_utf8_find_cased_t violation_>
-struct uncased_from_sz_ {
-    sz_size_t fold(sz_cptr_t text, sz_size_t length, sz_ptr_t output) const noexcept {
-        return fold_(text, length, output);
-    }
-    sz_cptr_t find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-                   sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) const noexcept {
-        return find_(haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-    }
-    sz_cptr_t violation(sz_cptr_t text, sz_size_t length) const noexcept { return violation_(text, length); }
+/**
+ *  @brief One backend's uncased fold / find / violation kernels for the safety probe, stored by pointer so the
+ *         driver can iterate a table. Members are named for the call sites (`candidate.fold(...)` etc.), so each
+ *         function-pointer member is invoked directly — `check_uncased_safety_` is unchanged.
+ */
+struct uncased_safety_backend_t {
+    char const *name;
+    sz_utf8_uncased_fold_t fold;
+    sz_utf8_uncased_search_t find;
+    sz_utf8_find_cased_t violation;
 };
 
 /**
@@ -2243,28 +2225,33 @@ static void check_uncased_safety_(candidate_ candidate, std::size_t random_input
 }
 
 /**
- *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
- *
- *  Mirrors `test_memory_safety()` / `test_utf8_runes_safety()`: the registered no-arg driver owns the per-ISA
- *  ladder while the file-local `check_uncased_safety_` checker runs the actual probes. The serial backend
- *  faces the same invalid-input contract as the SIMD ones, then one `#if SZ_USE_*` block per ISA.
+ *  @brief The uncased fold/find/violation backends probed for invalid-input safety on this target. The
+ *         always-present `dispatched` entry keeps the table non-empty on a baseline build.
  */
-void test_uncased_safety() {
-
-    check_uncased_safety_(
-        uncased_from_sz_<sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial, sz_utf8_find_cased_serial> {});
+static uncased_safety_backend_t const uncased_safety_backends[] = {
+    {"dispatched", sz_utf8_uncased_fold, sz_utf8_uncased_search, sz_utf8_find_cased},
 #if SZ_USE_HASWELL
-    check_uncased_safety_(
-        uncased_from_sz_<sz_utf8_uncased_fold_haswell, sz_utf8_uncased_search_haswell, sz_utf8_find_cased_haswell> {});
+    {"haswell", sz_utf8_uncased_fold_haswell, sz_utf8_uncased_search_haswell, sz_utf8_find_cased_haswell},
 #endif
 #if SZ_USE_ICELAKE
-    check_uncased_safety_(
-        uncased_from_sz_<sz_utf8_uncased_fold_icelake, sz_utf8_uncased_search_icelake, sz_utf8_find_cased_icelake> {});
+    {"icelake", sz_utf8_uncased_fold_icelake, sz_utf8_uncased_search_icelake, sz_utf8_find_cased_icelake},
 #endif
 #if SZ_USE_NEON
-    check_uncased_safety_(
-        uncased_from_sz_<sz_utf8_uncased_fold_neon, sz_utf8_uncased_search_neon, sz_utf8_find_cased_neon> {});
+    {"neon", sz_utf8_uncased_fold_neon, sz_utf8_uncased_search_neon, sz_utf8_find_cased_neon},
 #endif
+};
+
+/**
+ *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
+ *
+ *  Mirrors `test_memory_safety()` / `test_utf8_runes_safety()`: the serial backend faces the same invalid-input
+ *  contract as the dispatched and native ones, which are then probed by iterating `uncased_safety_backends`.
+ */
+void test_uncased_safety() {
+    uncased_safety_backend_t const serial {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial,
+                                           sz_utf8_find_cased_serial};
+    check_uncased_safety_(serial);
+    for (uncased_safety_backend_t const &backend : uncased_safety_backends) check_uncased_safety_(backend);
 }
 
 #pragma endregion // Safety
@@ -2272,57 +2259,64 @@ void test_uncased_safety() {
 #pragma region Drivers
 
 /**
+ *  @brief One UTF-8 case-folding + case-insensitive search backend compiled on this target. The struct doubles as
+ *         the fold functor for `test_fold_equivalence` (via `operator()`), so the differential and the find battery
+ *         iterate one table; the always-present `dispatched` entry keeps it non-empty on a baseline build.
+ */
+struct uncased_backend_t {
+    char const *name;
+    sz_utf8_uncased_fold_t fold;
+    sz_utf8_uncased_search_t search;
+    sz_size_t operator()(sz_cptr_t text, sz_size_t length, sz_ptr_t output) const noexcept {
+        return fold(text, length, output);
+    }
+};
+
+static uncased_backend_t const uncased_backends[] = {
+    {"dispatched", sz_utf8_uncased_fold, sz_utf8_uncased_search},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_uncased_fold_haswell, sz_utf8_uncased_search_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_uncased_fold_icelake, sz_utf8_uncased_search_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_uncased_fold_neon, sz_utf8_uncased_search_neon},
+#endif
+#if SZ_USE_V128
+    {"v128", sz_utf8_uncased_fold_v128, sz_utf8_uncased_search_v128},
+#endif
+#if SZ_USE_RVV
+    {"rvv", sz_utf8_uncased_fold_rvv, sz_utf8_uncased_search_rvv},
+#endif
+#if SZ_USE_LASX
+    {"lasx", sz_utf8_uncased_fold_lasx, sz_utf8_uncased_search_lasx},
+#endif
+#if SZ_USE_POWERVSX
+    {"powervsx", sz_utf8_uncased_fold_powervsx, sz_utf8_uncased_search_powervsx},
+#endif
+};
+
+/**
  *  @brief Drives the serial-vs-SIMD uncased fold/find differentials and the structured adversarial find
  *         enumerators across every backend compiled on this target.
  *
- *  Mirrors the per-ISA ladder of the legacy `test_equivalence`: the backend-independent fold-table
- *  closure always runs, then each `#if SZ_USE_*` block exercises that ISA's fold equivalence
- *  (serial = reference, ISA = candidate) and its full find battery. The invalid-input safety probes
- *  live in their own registered driver, `test_uncased_safety`.
+ *  The backend-independent fold-table closure always runs, then the table (dispatched first) exercises each
+ *  backend's fold equivalence (serial = reference, backend = candidate) and its full find battery. The
+ *  invalid-input safety probes live in their own registered driver, `test_uncased_safety`.
  */
 void test_uncased_all() {
+    uncased_backend_t const serial {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial};
 
-    using fold_serial_t = uncased_fold_from_sz_<sz_utf8_uncased_fold_serial>;
-    fold_serial_t const fold_serial;
-
-    // Backend-independent: the fold table and the case-invariant classifier must stay closed
+    // Backend-independent: the fold table and the case-invariant classifier must stay closed.
     test_uncased_invariant_reference();
 
-#if SZ_USE_HASWELL
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_haswell> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_haswell);
-#endif
-#if SZ_USE_ICELAKE
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_icelake> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_icelake);
-#endif
-#if SZ_USE_NEON
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_neon> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_neon);
-#endif
-#if SZ_USE_V128
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_v128> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_v128);
-#endif
-#if SZ_USE_RVV
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_rvv> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_rvv);
-#endif
-#if SZ_USE_LASX
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_lasx> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_lasx);
-#endif
-#if SZ_USE_POWERVSX
-    test_fold_equivalence(fold_serial, uncased_fold_from_sz_<sz_utf8_uncased_fold_powervsx> {}, 4000,
-                          scale_iterations(10000));
-    run_uncased_find_battery_(sz_utf8_uncased_search_powervsx);
-#endif
+    // Serial reference vs every compiled backend (dispatched first): the case-fold differential and the full find
+    // battery, paired per backend so their ISA coverage stays in lockstep.
+    for (uncased_backend_t const &backend : uncased_backends) {
+        test_fold_equivalence(serial, backend, 4000, scale_iterations(10000));
+        run_uncased_find_battery_(backend.search);
+    }
 }
 
 #pragma endregion // Drivers
