@@ -511,7 +511,7 @@ Sz.Hash("hello"u8);                             // fast 64-bit hash
 ```
 
 Zero-copy over `ReadOnlySpan<byte>` (and Unity's `NativeArray<byte>`); `net8.0`, NativeAOT-friendly.
-Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, and sorting.
+Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, sorting, and allocation-free splitting and iteration.
 
 ### Java
 

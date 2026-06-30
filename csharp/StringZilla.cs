@@ -148,11 +148,16 @@ public static unsafe class Sz {
     /// ill-formed sequences become U+FFFD). Returns the count written.</summary>
     /// <remarks>Like <see cref="System.Text.Rune.DecodeFromUtf8"/> in bulk, SIMD-accelerated. Emitted
     /// values are valid Unicode scalars (incl. U+FFFD): wrap with <c>new Rune(cp)</c>.</remarks>
-    public static int Decode(ReadOnlySpan<byte> text, Span<int> destination) {
+    public static int Decode(ReadOnlySpan<byte> text, Span<int> destination) => Decode(text, destination, out _);
+
+    /// <summary>As <see cref="Decode(System.ReadOnlySpan{byte},System.Span{int})"/>, also reporting how
+    /// many input bytes were consumed so callers can resume. Backs the streaming rune enumerator.</summary>
+    public static int Decode(ReadOnlySpan<byte> text, Span<int> destination, out long bytesConsumed) {
         fixed (byte* p = text)
         fixed (int* d = destination) {
             nuint unpacked;
-            Native.sz_utf8_decode((nint)p, (nuint)text.Length, (nint)d, (nuint)destination.Length, (nint)(&unpacked));
+            nint cursor = Native.sz_utf8_decode((nint)p, (nuint)text.Length, (nint)d, (nuint)destination.Length, (nint)(&unpacked));
+            bytesConsumed = cursor == 0 ? text.Length : (long)((byte*)cursor - p);
             return (int)unpacked;
         }
     }
@@ -392,6 +397,44 @@ public static unsafe class Sz {
         return count == n ? order : order.AsSpan(0, count).ToArray();
     }
 
+    /// <summary>Sorts the segments of a single buffer in place — given per-segment <paramref name="starts"/>
+    /// and <paramref name="lengths"/> (as produced by the split iterators), writes their sorting permutation
+    /// into <paramref name="order"/> and returns the count. Zero-copy: no segment bytes are materialised.</summary>
+    /// <remarks>Sort the lines of a file without building a <c>byte[][]</c>: collect ranges from a
+    /// <see cref="SplitEnumerator"/>, then sort them here.</remarks>
+    public static int ArgSort(
+        ReadOnlySpan<byte> text,
+        ReadOnlySpan<long> starts,
+        ReadOnlySpan<long> lengths,
+        Span<long> order,
+        bool reverse = false,
+        long top = 0,
+        bool uncased = false) {
+        int n = starts.Length;
+        if (n == 0) return 0;
+        if (lengths.Length < n) throw new ArgumentException($"lengths must hold at least {n} entries", nameof(lengths));
+        if (order.Length < n) throw new ArgumentException($"order must hold at least {n} entries", nameof(order));
+        fixed (byte* basePtr = text)
+        fixed (long* segmentStarts = starts)
+        fixed (long* segmentLengths = lengths)
+        fixed (long* ord = order) {
+            SeqRangeContext ctx;
+            ctx.Base = basePtr;
+            ctx.Starts = segmentStarts;
+            ctx.Lengths = segmentLengths;
+            SzSequence seq;
+            seq.Handle = &ctx;
+            seq.Count = (nuint)n;
+            seq.GetStart = &SeqCallbacks.GetRangeStart;
+            seq.GetLength = &SeqCallbacks.GetRangeLength;
+            int status = uncased
+                ? Native.sz_sequence_argsort_uncased((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0)
+                : Native.sz_sequence_argsort((nint)(&seq), nint.Zero, (nint)ord, (nuint)top, reverse ? 1 : 0);
+            if (status != 0) throw new InvalidOperationException($"sz_sequence_argsort failed with status {status}");
+        }
+        return top > 0 ? (int)Math.Min(top, n) : n;
+    }
+
     /// <summary>Inner-joins two de-duplicated sequences, writing matching index pairs into
     /// <paramref name="firstPositions"/> / <paramref name="secondPositions"/> (each must hold ≥
     /// min(a.Count, b.Count) entries) and returns the match count. Allocation-free for the result.</summary>
@@ -446,6 +489,95 @@ public static unsafe class Sz {
 
     #endregion
 
+    #region Iteration
+
+    /// <summary>Lazily enumerates the Unicode codepoints of <paramref name="text"/> as
+    /// <see cref="System.Text.Rune"/>s (ill-formed sequences yield U+FFFD).</summary>
+    /// <remarks>Like <see cref="string.EnumerateRunes"/>, over UTF-8 bytes; batches 64 per native call.
+    /// Allocation-free; synchronous <c>foreach</c> only (the enumerator is a ref struct).</remarks>
+    public static RuneEnumerable EnumerateRunes(ReadOnlySpan<byte> text) => new(text);
+
+    /// <summary>Lazily enumerates UAX-29 word segments as byte-slice views (tiling; no empty segments).</summary>
+    /// <remarks>Like iterating <see cref="System.Globalization.StringInfo"/> word elements, but over UTF-8 bytes.</remarks>
+    public static SegmentEnumerable EnumerateWords(ReadOnlySpan<byte> text) => new(text, SegmentKind.Words);
+
+    /// <summary>Lazily enumerates UAX-29 grapheme clusters as byte-slice views (tiling).</summary>
+    /// <remarks>Like <see cref="System.Globalization.StringInfo.GetTextElementEnumerator(string)"/>, over UTF-8 bytes.</remarks>
+    public static SegmentEnumerable EnumerateGraphemes(ReadOnlySpan<byte> text) => new(text, SegmentKind.Graphemes);
+
+    /// <summary>Lazily enumerates UAX-29 sentences as byte-slice views (tiling).</summary>
+    public static SegmentEnumerable EnumerateSentences(ReadOnlySpan<byte> text) => new(text, SegmentKind.Sentences);
+
+    /// <summary>Lazily enumerates UAX-14 line-break units as byte-slice views (tiling).</summary>
+    public static SegmentEnumerable EnumerateLineBreaks(ReadOnlySpan<byte> text) => new(text, SegmentKind.LineBreaks);
+
+    #endregion
+
+    #region Splitting
+
+    /// <summary>Lazily splits <paramref name="text"/> on each occurrence of <paramref name="separator"/>,
+    /// yielding the segments between separators as byte-slice views. Empty segments are kept by default
+    /// (like <see cref="string.Split(string[],System.StringSplitOptions)"/>); chain <c>.SkipEmpty()</c>,
+    /// <c>.KeepSeparator()</c>, or <c>.WithMaxSplit(n)</c> to change behaviour.</summary>
+    public static SplitEnumerable Split(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) =>
+        SplitEnumerable.Substring(text, separator, reverse: false);
+
+    /// <summary>As <see cref="Split"/> but scanning from the end; yields the last segment first.</summary>
+    public static SplitEnumerable RSplit(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) =>
+        SplitEnumerable.Substring(text, separator, reverse: true);
+
+    /// <summary>Lazily splits on any byte in <paramref name="separators"/> (like splitting on a character set).</summary>
+    public static SplitEnumerable SplitAny(ReadOnlySpan<byte> text, Byteset separators) =>
+        SplitEnumerable.OfByteset(text, separators, reverse: false);
+
+    /// <summary>As <see cref="SplitAny"/> but scanning from the end.</summary>
+    public static SplitEnumerable RSplitAny(ReadOnlySpan<byte> text, Byteset separators) =>
+        SplitEnumerable.OfByteset(text, separators, reverse: true);
+
+    /// <summary>Lazily enumerates the byte offsets of every (non-overlapping) match of
+    /// <paramref name="needle"/> in <paramref name="haystack"/>; chain <c>.Overlapping()</c> for overlaps.
+    /// Counting the result is the occurrence count.</summary>
+    public static MatchEnumerable EnumerateMatches(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle) =>
+        new(haystack, needle, overlapping: false);
+
+    /// <summary>Lazily splits on Unicode newline runs, yielding the lines between them. Chain
+    /// <c>.WithSeparators()</c> for a lossless interleave or <c>.SkipEmpty()</c> to drop blanks.</summary>
+    public static TokenSplitEnumerable SplitNewlines(ReadOnlySpan<byte> text) =>
+        new(text, SegmentKind.Newlines, SplitParts.Between, skipEmpty: false);
+
+    /// <summary>Lazily splits on Unicode whitespace runs, yielding the fields between them.</summary>
+    public static TokenSplitEnumerable SplitWhitespaces(ReadOnlySpan<byte> text) =>
+        new(text, SegmentKind.Whitespaces, SplitParts.Between, skipEmpty: false);
+
+    /// <summary>Lazily splits on Unicode delimiter runs (punctuation/symbols/separators).</summary>
+    public static TokenSplitEnumerable SplitDelimiters(ReadOnlySpan<byte> text) =>
+        new(text, SegmentKind.Delimiters, SplitParts.Between, skipEmpty: false);
+
+    /// <summary>Lazily enumerates case-insensitive (full-fold) matches of <paramref name="needle"/>,
+    /// yielding each match's offset and matched length (which may differ from the needle length due to
+    /// folding, e.g. "ß" matching "SS"). Chain <c>.Overlapping()</c> for overlapping matches.</summary>
+    public static UncasedMatchEnumerable EnumerateUncasedMatches(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle) =>
+        new(haystack, needle, overlapping: false);
+
+    /// <summary>Splits at the first occurrence of <paramref name="separator"/> into (before, separator,
+    /// after) views; if absent, returns (<paramref name="text"/>, empty, empty). Mirrors Python's
+    /// <c>str.partition</c>.</summary>
+    public static Partition Partition(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) {
+        long at = IndexOf(text, separator);
+        if (at < 0) return new Partition(text, default, default);
+        return new Partition(text.Slice(0, (int)at), text.Slice((int)at, separator.Length), text.Slice((int)at + separator.Length));
+    }
+
+    /// <summary>As <see cref="Partition"/> but at the last occurrence; if absent, returns
+    /// (empty, empty, <paramref name="text"/>). Mirrors Python's <c>str.rpartition</c>.</summary>
+    public static Partition RPartition(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) {
+        long at = LastIndexOf(text, separator);
+        if (at < 0) return new Partition(default, default, text);
+        return new Partition(text.Slice(0, (int)at), text.Slice((int)at, separator.Length), text.Slice((int)at + separator.Length));
+    }
+
+    #endregion
+
     #region Library Metadata
 
     /// <summary>Active SIMD backend(s), e.g. "serial,haswell,skylake,icelake".</summary>
@@ -456,6 +588,523 @@ public static unsafe class Sz {
         new(Native.sz_version_major(), Native.sz_version_minor(), Native.sz_version_patch());
 
     #endregion
+}
+
+/// <summary>Stack-only batch buffer of 64 longs for the segmentation/split enumerators.</summary>
+[System.Runtime.CompilerServices.InlineArray(64)]
+internal struct LongBuf64 {
+    private long _element0;
+}
+
+/// <summary>Stack-only batch buffer of 64 Int32 codepoints for the rune enumerator.</summary>
+[System.Runtime.CompilerServices.InlineArray(64)]
+internal struct IntBuf64 {
+    private int _element0;
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over UTF-8 codepoints. See <see cref="Sz.EnumerateRunes"/>.</summary>
+public readonly ref struct RuneEnumerable {
+    private readonly ReadOnlySpan<byte> _text;
+
+    public RuneEnumerable(ReadOnlySpan<byte> text) => _text = text;
+
+    public RuneEnumerator GetEnumerator() => new(_text);
+}
+
+/// <summary>Ref-struct enumerator yielding <see cref="Rune"/>s, batched 64 per native call.</summary>
+public ref struct RuneEnumerator {
+    private readonly ReadOnlySpan<byte> _text;
+    private long _cursor;
+    private IntBuf64 _buffer;
+    private int _count;
+    private int _index;
+
+    internal RuneEnumerator(ReadOnlySpan<byte> text) {
+        _text = text;
+        _cursor = 0;
+        _count = 0;
+        _index = 0;
+        _buffer = default;
+        Current = default;
+    }
+
+    public Rune Current { get; private set; }
+
+    public bool MoveNext() {
+        while (true) {
+            if (_index < _count) {
+                Current = new Rune(_buffer[_index]);
+                _index++;
+                return true;
+            }
+            if (_cursor >= _text.Length) return false;
+            _count = Sz.Decode(_text[(int)_cursor..], _buffer[..], out long consumed);
+            if (_count == 0 || consumed == 0) return false;
+            _index = 0;
+            _cursor += consumed;
+        }
+    }
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over UTF-8 segments. See <see cref="Sz.EnumerateWords"/>.</summary>
+public readonly ref struct SegmentEnumerable {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly Sz.SegmentKind _kind;
+
+    public SegmentEnumerable(ReadOnlySpan<byte> text, Sz.SegmentKind kind) {
+        _text = text;
+        _kind = kind;
+    }
+
+    public SegmentEnumerator GetEnumerator() => new(_text, _kind);
+}
+
+/// <summary>Ref-struct enumerator yielding byte-slice views of segments, batched 64 per native call.</summary>
+public ref struct SegmentEnumerator {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly Sz.SegmentKind _kind;
+    private long _cursor;
+    private long _chunkBase;
+    private LongBuf64 _starts;
+    private LongBuf64 _lengths;
+    private int _count;
+    private int _index;
+
+    internal SegmentEnumerator(ReadOnlySpan<byte> text, Sz.SegmentKind kind) {
+        _text = text;
+        _kind = kind;
+        _cursor = 0;
+        _chunkBase = 0;
+        _count = 0;
+        _index = 0;
+        _starts = default;
+        _lengths = default;
+        Current = default;
+    }
+
+    public ReadOnlySpan<byte> Current { get; private set; }
+
+    public bool MoveNext() {
+        while (true) {
+            if (_index < _count) {
+                Current = _text.Slice((int)(_chunkBase + _starts[_index]), (int)_lengths[_index]);
+                _index++;
+                return true;
+            }
+            if (_cursor >= _text.Length) return false;
+            _chunkBase = _cursor;
+            _count = Sz.Segment(_text[(int)_cursor..], _kind, _starts[..], _lengths[..], out long consumed);
+            if (_count == 0 || consumed == 0) return false;
+            _index = 0;
+            _cursor += consumed;
+        }
+    }
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over split segments. See <see cref="Sz.Split"/>.</summary>
+public readonly ref struct SplitEnumerable {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly ReadOnlySpan<byte> _separator;
+    private readonly Byteset _byteset;
+    private readonly bool _isByteset;
+    private readonly bool _reverse;
+    private readonly bool _keepSeparator;
+    private readonly bool _skipEmpty;
+    private readonly long _maxSplit;
+
+    private SplitEnumerable(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator, Byteset byteset,
+        bool isByteset, bool reverse, bool keepSeparator, bool skipEmpty, long maxSplit) {
+        _text = text;
+        _separator = separator;
+        _byteset = byteset;
+        _isByteset = isByteset;
+        _reverse = reverse;
+        _keepSeparator = keepSeparator;
+        _skipEmpty = skipEmpty;
+        _maxSplit = maxSplit;
+    }
+
+    internal static SplitEnumerable Substring(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator, bool reverse) =>
+        new(text, separator, default, false, reverse, false, false, long.MaxValue);
+
+    internal static SplitEnumerable OfByteset(ReadOnlySpan<byte> text, Byteset set, bool reverse) =>
+        new(text, default, set, true, reverse, false, false, long.MaxValue);
+
+    /// <summary>Drop zero-length segments.</summary>
+    public SplitEnumerable SkipEmpty() =>
+        new(_text, _separator, _byteset, _isByteset, _reverse, _keepSeparator, true, _maxSplit);
+
+    /// <summary>Keep the separator attached to each segment: the trailing separator when splitting forward,
+    /// the leading separator when splitting in reverse.</summary>
+    public SplitEnumerable KeepSeparator() =>
+        new(_text, _separator, _byteset, _isByteset, _reverse, true, _skipEmpty, _maxSplit);
+
+    /// <summary>Stop after <paramref name="maxSplit"/> splits; the rest becomes one final segment.</summary>
+    public SplitEnumerable WithMaxSplit(long maxSplit) =>
+        new(_text, _separator, _byteset, _isByteset, _reverse, _keepSeparator, _skipEmpty, maxSplit);
+
+    public SplitEnumerator GetEnumerator() =>
+        new(_text, _separator, _byteset, _isByteset, _reverse, _keepSeparator, _skipEmpty, _maxSplit);
+}
+
+/// <summary>Ref-struct enumerator yielding split segments as byte-slice views.</summary>
+public ref struct SplitEnumerator {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly ReadOnlySpan<byte> _separator;
+    private Byteset _byteset;
+    private readonly bool _isByteset;
+    private readonly bool _reverse;
+    private readonly bool _keepSeparator;
+    private readonly bool _skipEmpty;
+    private long _remainingSplits;
+    private long _cursor; // forward: start of remaining text; reverse: exclusive end of remaining text
+    private bool _done;
+
+    internal SplitEnumerator(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator, Byteset byteset,
+        bool isByteset, bool reverse, bool keepSeparator, bool skipEmpty, long maxSplit) {
+        _text = text;
+        _separator = separator;
+        _byteset = byteset;
+        _isByteset = isByteset;
+        _reverse = reverse;
+        _keepSeparator = keepSeparator;
+        _skipEmpty = skipEmpty;
+        _remainingSplits = maxSplit;
+        _cursor = reverse ? text.Length : 0;
+        _done = false;
+        Current = default;
+    }
+
+    public ReadOnlySpan<byte> Current { get; private set; }
+
+    public bool MoveNext() => _reverse ? MoveNextReverse() : MoveNextForward();
+
+    private bool MoveNextForward() {
+        while (true) {
+            if (_done) return false;
+            ReadOnlySpan<byte> remaining = _text.Slice((int)_cursor);
+            long found = (_remainingSplits <= 0 || (!_isByteset && _separator.Length == 0))
+                ? -1
+                : _isByteset ? Sz.IndexOfAny(remaining, ref _byteset) : Sz.IndexOf(remaining, _separator);
+            if (found < 0) {
+                _done = true;
+                if (_skipEmpty && remaining.Length == 0) return false;
+                Current = remaining;
+                return true;
+            }
+            int separatorLength = _isByteset ? 1 : _separator.Length;
+            ReadOnlySpan<byte> segment = remaining.Slice(0, (int)found + (_keepSeparator ? separatorLength : 0));
+            _cursor += found + separatorLength;
+            _remainingSplits--;
+            if (_skipEmpty && segment.Length == 0) continue;
+            Current = segment;
+            return true;
+        }
+    }
+
+    private bool MoveNextReverse() {
+        while (true) {
+            if (_done) return false;
+            ReadOnlySpan<byte> remaining = _text.Slice(0, (int)_cursor);
+            long found = (_remainingSplits <= 0 || (!_isByteset && _separator.Length == 0))
+                ? -1
+                : _isByteset ? Sz.LastIndexOfAny(remaining, ref _byteset) : Sz.LastIndexOf(remaining, _separator);
+            if (found < 0) {
+                _done = true;
+                if (_skipEmpty && remaining.Length == 0) return false;
+                Current = remaining;
+                return true;
+            }
+            int separatorLength = _isByteset ? 1 : _separator.Length;
+            int segmentStart = _keepSeparator ? (int)found : (int)found + separatorLength;
+            Current = _text.Slice(segmentStart, (int)_cursor - segmentStart);
+            _cursor = found;
+            _remainingSplits--;
+            if (_skipEmpty && Current.Length == 0) continue;
+            return true;
+        }
+    }
+
+    public SplitEnumerator GetEnumerator() => this;
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over match offsets. See <see cref="Sz.EnumerateMatches"/>.</summary>
+public readonly ref struct MatchEnumerable {
+    private readonly ReadOnlySpan<byte> _haystack;
+    private readonly ReadOnlySpan<byte> _needle;
+    private readonly bool _overlapping;
+
+    internal MatchEnumerable(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle, bool overlapping) {
+        _haystack = haystack;
+        _needle = needle;
+        _overlapping = overlapping;
+    }
+
+    /// <summary>Report overlapping matches (advance by one byte instead of the needle length).</summary>
+    public MatchEnumerable Overlapping() => new(_haystack, _needle, true);
+
+    public MatchEnumerator GetEnumerator() => new(_haystack, _needle, _overlapping);
+}
+
+/// <summary>Ref-struct enumerator yielding the byte offset of each match.</summary>
+public ref struct MatchEnumerator {
+    private readonly ReadOnlySpan<byte> _haystack;
+    private readonly ReadOnlySpan<byte> _needle;
+    private readonly bool _overlapping;
+    private long _cursor;
+
+    internal MatchEnumerator(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle, bool overlapping) {
+        _haystack = haystack;
+        _needle = needle;
+        _overlapping = overlapping;
+        _cursor = 0;
+        Current = -1;
+    }
+
+    public long Current { get; private set; }
+
+    public bool MoveNext() {
+        if (_needle.Length == 0 || _cursor > _haystack.Length) return false;
+        ReadOnlySpan<byte> remaining = _haystack.Slice((int)_cursor);
+        long found = Sz.IndexOf(remaining, _needle);
+        if (found < 0) return false;
+        Current = _cursor + found;
+        _cursor = Current + (_overlapping ? 1 : _needle.Length);
+        return true;
+    }
+
+    public MatchEnumerator GetEnumerator() => this;
+}
+
+/// <summary>Which spans a separator-token split yields: the gaps, the separator runs, or both (lossless).</summary>
+public enum SplitParts {
+    Between,
+    Separators,
+    Both,
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over separator-token splits. See <see cref="Sz.SplitWhitespaces"/>.</summary>
+public readonly ref struct TokenSplitEnumerable {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly Sz.SegmentKind _kind;
+    private readonly SplitParts _parts;
+    private readonly bool _skipEmpty;
+
+    internal TokenSplitEnumerable(ReadOnlySpan<byte> text, Sz.SegmentKind kind, SplitParts parts, bool skipEmpty) {
+        _text = text;
+        _kind = kind;
+        _parts = parts;
+        _skipEmpty = skipEmpty;
+    }
+
+    /// <summary>Also yield the separator runs, interleaved with the gaps (lossless reconstruction).</summary>
+    public TokenSplitEnumerable WithSeparators() => new(_text, _kind, SplitParts.Both, _skipEmpty);
+
+    /// <summary>Yield only the separator runs.</summary>
+    public TokenSplitEnumerable OnlySeparators() => new(_text, _kind, SplitParts.Separators, _skipEmpty);
+
+    /// <summary>Drop zero-length segments.</summary>
+    public TokenSplitEnumerable SkipEmpty() => new(_text, _kind, _parts, true);
+
+    public TokenSplitEnumerator GetEnumerator() => new(_text, _kind, _parts, _skipEmpty);
+}
+
+/// <summary>Ref-struct enumerator yielding separator-token split spans, batched 64 separators per call.</summary>
+public ref struct TokenSplitEnumerator {
+    private readonly ReadOnlySpan<byte> _text;
+    private readonly Sz.SegmentKind _kind;
+    private readonly SplitParts _parts;
+    private readonly bool _skipEmpty;
+    private LongBuf64 _starts;
+    private LongBuf64 _lengths;
+    private int _count;
+    private int _index;
+    private long _scanCursor;
+    private long _chunkBase;
+    private long _prevEnd; // absolute end of the previous separator run (start of the pending gap)
+    private bool _atSeparator; // sticky only when a gap was emitted: resume by emitting the separator run
+    private bool _exhausted;
+    private bool _emittedTail;
+
+    internal TokenSplitEnumerator(ReadOnlySpan<byte> text, Sz.SegmentKind kind, SplitParts parts, bool skipEmpty) {
+        _text = text;
+        _kind = kind;
+        _parts = parts;
+        _skipEmpty = skipEmpty;
+        _starts = default;
+        _lengths = default;
+        _count = 0;
+        _index = 0;
+        _scanCursor = 0;
+        _chunkBase = 0;
+        _prevEnd = 0;
+        _atSeparator = false;
+        _exhausted = false;
+        _emittedTail = false;
+        Current = default;
+    }
+
+    public ReadOnlySpan<byte> Current { get; private set; }
+
+    public bool MoveNext() {
+        while (true) {
+            if (!_exhausted && _index >= _count) {
+                if (_scanCursor >= _text.Length) {
+                    _exhausted = true;
+                }
+                else {
+                    _chunkBase = _scanCursor;
+                    _count = Sz.Segment(_text.Slice((int)_scanCursor), _kind, _starts[..], _lengths[..], out long consumed);
+                    if (_count == 0 || consumed == 0)
+                        _exhausted = true;
+                    else {
+                        _index = 0;
+                        _scanCursor += consumed;
+                    }
+                }
+            }
+            if (_exhausted) {
+                if (_emittedTail) return false;
+                _emittedTail = true;
+                if (_parts != SplitParts.Separators) {
+                    ReadOnlySpan<byte> tail = _text.Slice((int)_prevEnd);
+                    if (!(_skipEmpty && tail.Length == 0)) {
+                        Current = tail;
+                        return true;
+                    }
+                }
+                return false;
+            }
+            long runStart = _chunkBase + _starts[_index];
+            long runEnd = runStart + _lengths[_index];
+            if (!_atSeparator) {
+                _atSeparator = true;
+                if (_parts != SplitParts.Separators) {
+                    ReadOnlySpan<byte> gap = _text.Slice((int)_prevEnd, (int)(runStart - _prevEnd));
+                    if (!(_skipEmpty && gap.Length == 0)) {
+                        Current = gap;
+                        return true;
+                    }
+                }
+            }
+            _atSeparator = false;
+            _prevEnd = runEnd;
+            _index++;
+            if (_parts != SplitParts.Between) {
+                ReadOnlySpan<byte> run = _text.Slice((int)runStart, (int)(runEnd - runStart));
+                if (!(_skipEmpty && run.Length == 0)) {
+                    Current = run;
+                    return true;
+                }
+            }
+        }
+    }
+
+    public TokenSplitEnumerator GetEnumerator() => this;
+}
+
+/// <summary>Stack-only 64-byte scratch buffer holding cached uncased-needle metadata across match steps.</summary>
+[System.Runtime.CompilerServices.InlineArray(64)]
+internal struct ByteBuf64 {
+    private byte _element0;
+}
+
+/// <summary>A single split point: the spans before, of, and after a separator. See <see cref="Sz.Partition"/>.</summary>
+public readonly ref struct Partition {
+    public readonly ReadOnlySpan<byte> Before;
+    public readonly ReadOnlySpan<byte> Separator;
+    public readonly ReadOnlySpan<byte> After;
+
+    public Partition(ReadOnlySpan<byte> before, ReadOnlySpan<byte> separator, ReadOnlySpan<byte> after) {
+        Before = before;
+        Separator = separator;
+        After = after;
+    }
+
+    public void Deconstruct(out ReadOnlySpan<byte> before, out ReadOnlySpan<byte> separator, out ReadOnlySpan<byte> after) {
+        before = Before;
+        separator = Separator;
+        after = After;
+    }
+}
+
+/// <summary>One case-insensitive match: its byte offset and matched length (folding may make the latter
+/// differ from the needle length).</summary>
+public readonly struct UncasedMatch {
+    public readonly long Offset;
+    public readonly long Length;
+
+    public UncasedMatch(long offset, long length) {
+        Offset = offset;
+        Length = length;
+    }
+}
+
+/// <summary>Allocation-free <c>foreach</c> source over uncased matches. See <see cref="Sz.EnumerateUncasedMatches"/>.</summary>
+public readonly ref struct UncasedMatchEnumerable {
+    private readonly ReadOnlySpan<byte> _haystack;
+    private readonly ReadOnlySpan<byte> _needle;
+    private readonly bool _overlapping;
+
+    internal UncasedMatchEnumerable(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle, bool overlapping) {
+        _haystack = haystack;
+        _needle = needle;
+        _overlapping = overlapping;
+    }
+
+    /// <summary>Report overlapping matches (advance by one byte) instead of skipping past each match.</summary>
+    public UncasedMatchEnumerable Overlapping() => new(_haystack, _needle, true);
+
+    public UncasedMatchEnumerator GetEnumerator() => new(_haystack, _needle, _overlapping);
+}
+
+/// <summary>Ref-struct enumerator yielding <see cref="UncasedMatch"/>es, reusing one cached metadata buffer.</summary>
+public unsafe ref struct UncasedMatchEnumerator {
+    private readonly ReadOnlySpan<byte> _haystack;
+    private readonly ReadOnlySpan<byte> _needle;
+    private readonly bool _overlapping;
+    private long _cursor;
+    private ByteBuf64 _meta; // populated on first search, reused thereafter
+
+    internal UncasedMatchEnumerator(ReadOnlySpan<byte> haystack, ReadOnlySpan<byte> needle, bool overlapping) {
+        _haystack = haystack;
+        _needle = needle;
+        _overlapping = overlapping;
+        _cursor = 0;
+        _meta = default;
+        Current = default;
+    }
+
+    public UncasedMatch Current { get; private set; }
+
+    public bool MoveNext() {
+        if (_cursor > _haystack.Length) return false;
+        Span<byte> meta = _meta[..];
+        fixed (byte* hayBase = _haystack)
+        fixed (byte* needlePtr = _needle)
+        fixed (byte* metaPtr = meta) {
+            nuint matchedLength;
+            nint found = Native.sz_utf8_uncased_search(
+                (nint)(hayBase + _cursor), (nuint)(_haystack.Length - _cursor),
+                (nint)needlePtr, (nuint)_needle.Length,
+                (nint)metaPtr, (nint)(&matchedLength));
+            if (found == 0) {
+                _cursor = _haystack.Length + 1;
+                return false;
+            }
+            long offset = (long)((byte*)found - hayBase);
+            Current = new UncasedMatch(offset, (long)matchedLength);
+            // Overlapping advances one codepoint (not one byte): caseless folding is Unicode-aware, so the
+            // next search must start on a UTF-8 boundary rather than mid-codepoint.
+            _cursor = offset + (_overlapping ? Utf8LeadWidth(_haystack[(int)offset]) : Math.Max((long)matchedLength, 1));
+            return true;
+        }
+    }
+
+    private static int Utf8LeadWidth(byte lead) =>
+        (lead & 0x80) == 0 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 1;
+
+    public UncasedMatchEnumerator GetEnumerator() => this;
 }
 
 /// <summary>A 256-bit set of byte values (mirrors C <c>sz_byteset_t</c>).</summary>
@@ -757,4 +1406,24 @@ internal static unsafe class SeqCallbacks {
         var c = (SeqContext*)handle;
         return c->Lengths[index];
     }
+
+    [UnmanagedCallersOnly]
+    public static nint GetRangeStart(void* handle, nuint index) {
+        var c = (SeqRangeContext*)handle;
+        return (nint)(c->Base + c->Starts[index]);
+    }
+
+    [UnmanagedCallersOnly]
+    public static nuint GetRangeLength(void* handle, nuint index) {
+        var c = (SeqRangeContext*)handle;
+        return (nuint)c->Lengths[index];
+    }
+}
+
+/// <summary>Backs a <c>sz_sequence_t</c> over (start, length) ranges into one caller-pinned buffer; the
+/// callbacks index it without copying any segment bytes.</summary>
+internal unsafe struct SeqRangeContext {
+    public byte* Base;
+    public long* Starts;
+    public long* Lengths;
 }

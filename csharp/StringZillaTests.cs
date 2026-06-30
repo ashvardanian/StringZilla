@@ -302,4 +302,241 @@ public class StringZillaTests {
     }
     #endregion
 
+    #region Iteration
+
+    [Fact]
+    public void EnumerateRunes_MatchesEnumerateRunes() {
+        string s = "héllo, 世界 🦖";
+        var expected = new List<int>();
+        foreach (var r in s.EnumerateRunes()) expected.Add(r.Value);
+        var actual = new List<int>();
+        foreach (var r in Sz.EnumerateRunes(B(s))) actual.Add(r.Value);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void EnumerateWords_TilesInput() {
+        byte[] u = B("the quick fox");
+        var words = new List<string>();
+        long covered = 0;
+        foreach (var w in Sz.EnumerateWords(u)) {
+            words.Add(Encoding.UTF8.GetString(w));
+            covered += w.Length;
+        }
+        Assert.Equal((long)u.Length, covered); // tiling covers the whole input
+        Assert.Contains("the", words);
+        Assert.Contains("quick", words);
+        Assert.Contains("fox", words);
+    }
+
+    [Fact]
+    public void EnumerateGraphemes_MatchesSegmentPrimitive() {
+        byte[] u = B("éllo, world!");
+        var viaEnumerator = new List<int>();
+        foreach (var g in Sz.EnumerateGraphemes(u)) viaEnumerator.Add(g.Length);
+        Span<long> starts = stackalloc long[64];
+        Span<long> lengths = stackalloc long[64];
+        int count = Sz.Segment(u, Sz.SegmentKind.Graphemes, starts, lengths, out _);
+        Assert.Equal(count, viaEnumerator.Count);
+        for (int i = 0; i < count; i++) Assert.Equal((int)lengths[i], viaEnumerator[i]);
+    }
+
+    [Fact]
+    public void EnumerateWords_RefillsAcrossBatches() {
+        var builder = new StringBuilder();
+        for (int i = 0; i < 200; i++) builder.Append('w').Append(i).Append(' ');
+        byte[] u = B(builder.ToString());
+        int wordCount = 0;
+        foreach (var word in Sz.EnumerateWords(u))
+            if (word.Length > 0 && word[0] == (byte)'w') wordCount++;
+        Assert.Equal(200, wordCount); // forces multiple 64-entry batch refills
+    }
+
+    [Fact]
+    public void EnumerateRunes_RefillsBeyondBatch() {
+        var builder = new StringBuilder();
+        for (int i = 0; i < 200; i++) builder.Append('世'); // 200 multibyte codepoints > one 64-rune batch
+        int count = 0;
+        foreach (var rune in Sz.EnumerateRunes(B(builder.ToString()))) {
+            Assert.Equal(0x4E16, rune.Value);
+            count++;
+        }
+        Assert.Equal(200, count);
+    }
+
+    #endregion
+
+    #region Splitting
+
+    private static List<string> SplitToList(SplitEnumerable splits) {
+        var parts = new List<string>();
+        foreach (var part in splits) parts.Add(Encoding.UTF8.GetString(part));
+        return parts;
+    }
+
+    [Fact]
+    public void Split_KeepsEmptySegments() {
+        Assert.Equal(new[] { "a", "bb", "", "c" }, SplitToList(Sz.Split(B("a,bb,,c"), ","u8)));
+    }
+
+    [Fact]
+    public void Split_SkipEmpty() {
+        Assert.Equal(new[] { "a", "b" }, SplitToList(Sz.Split(B("a,,b,"), ","u8).SkipEmpty()));
+    }
+
+    [Fact]
+    public void Split_MaxSplit() {
+        Assert.Equal(new[] { "a", "b", "c,d" }, SplitToList(Sz.Split(B("a,b,c,d"), ","u8).WithMaxSplit(2)));
+    }
+
+    [Fact]
+    public void Split_KeepSeparator() {
+        Assert.Equal(new[] { "a,", "b,", "c" }, SplitToList(Sz.Split(B("a,b,c"), ","u8).KeepSeparator()));
+    }
+
+    [Fact]
+    public void RSplit_ReverseOrder() {
+        Assert.Equal(new[] { "c", "b", "a" }, SplitToList(Sz.RSplit(B("a,b,c"), ","u8)));
+    }
+
+    [Fact]
+    public void RSplit_MaxSplitKeepsLeftRemainder() {
+        Assert.Equal(new[] { "d", "a,b,c" }, SplitToList(Sz.RSplit(B("a,b,c,d"), ","u8).WithMaxSplit(1)));
+    }
+
+    [Fact]
+    public void SplitAny_OnByteset() {
+        Assert.Equal(new[] { "a", "b", "c" }, SplitToList(Sz.SplitAny(B("a-b_c"), Byteset.FromBytes("-_"u8))));
+    }
+
+    [Fact]
+    public void EnumerateMatches_FindsAllOffsets() {
+        var offsets = new List<long>();
+        foreach (long at in Sz.EnumerateMatches(B("abababab"), "ab"u8)) offsets.Add(at);
+        Assert.Equal(new long[] { 0, 2, 4, 6 }, offsets);
+    }
+
+    [Fact]
+    public void EnumerateMatches_OverlappingVsNot() {
+        int nonOverlapping = 0;
+        foreach (var _ in Sz.EnumerateMatches(B("aaaa"), "aa"u8)) nonOverlapping++;
+        int overlapping = 0;
+        foreach (var _ in Sz.EnumerateMatches(B("aaaa"), "aa"u8).Overlapping()) overlapping++;
+        Assert.Equal(2, nonOverlapping);
+        Assert.Equal(3, overlapping);
+    }
+
+    [Fact]
+    public void SplitNewlines_YieldsLines() {
+        var lines = new List<string>();
+        foreach (var line in Sz.SplitNewlines(B("a\nbb\nc"))) lines.Add(Encoding.UTF8.GetString(line));
+        Assert.Equal(new[] { "a", "bb", "c" }, lines);
+    }
+
+    [Fact]
+    public void SplitWhitespaces_SkipEmptyDropsRuns() {
+        var words = new List<string>();
+        foreach (var word in Sz.SplitWhitespaces(B("  the   quick  ")).SkipEmpty())
+            words.Add(Encoding.UTF8.GetString(word));
+        Assert.Equal(new[] { "the", "quick" }, words);
+    }
+
+    [Fact]
+    public void SplitWhitespaces_WithSeparatorsRoundTrips() {
+        var rebuilt = new StringBuilder();
+        foreach (var part in Sz.SplitWhitespaces(B("the quick fox")).WithSeparators())
+            rebuilt.Append(Encoding.UTF8.GetString(part));
+        Assert.Equal("the quick fox", rebuilt.ToString());
+    }
+
+    [Fact]
+    public void RSplit_KeepSeparatorKeepsLeading() {
+        Assert.Equal(new[] { ",c", ",b", "a" }, SplitToList(Sz.RSplit(B("a,b,c"), ","u8).KeepSeparator()));
+    }
+
+    [Fact]
+    public void Split_MaxSplitZeroYieldsWhole() {
+        Assert.Equal(new[] { "a,b,c" }, SplitToList(Sz.Split(B("a,b,c"), ","u8).WithMaxSplit(0)));
+    }
+
+    [Fact]
+    public void SplitDelimiters_OnlySeparatorsYieldsEachDelimiter() {
+        var separators = new List<string>();
+        foreach (var run in Sz.SplitDelimiters(B("a-b.c")).OnlySeparators())
+            separators.Add(Encoding.UTF8.GetString(run));
+        Assert.Equal(new[] { "-", "." }, separators);
+    }
+
+    #endregion
+
+    #region Uncased Matching, Partition, and Segment Sorting
+
+    [Fact]
+    public void EnumerateUncasedMatches_FindsCaseInsensitive() {
+        var offsets = new List<long>();
+        foreach (var match in Sz.EnumerateUncasedMatches(B("Hello hello HELLO"), "hello"u8))
+            offsets.Add(match.Offset);
+        Assert.Equal(new long[] { 0, 6, 12 }, offsets);
+    }
+
+    [Fact]
+    public void EnumerateUncasedMatches_ReportsFoldedLength() {
+        // "ß" (U+00DF, two bytes at offset 4) folds to "ss"; searching "SS" matches it.
+        var matches = new List<(long Offset, long Length)>();
+        foreach (var match in Sz.EnumerateUncasedMatches(B("Straße"), "SS"u8))
+            matches.Add((match.Offset, match.Length));
+        Assert.Single(matches);
+        Assert.Equal(4, matches[0].Offset);
+        Assert.Equal(2, matches[0].Length);
+    }
+
+    [Fact]
+    public void EnumerateUncasedMatches_OverlappingStaysCodepointAligned() {
+        int overlapping = 0;
+        foreach (var _ in Sz.EnumerateUncasedMatches(B("AAAA"), "aa"u8).Overlapping()) overlapping++;
+        Assert.Equal(3, overlapping); // "aa" at 0,1,2
+
+        // Multibyte (each Ä is two bytes): overlapping advances by a codepoint, so offsets stay aligned.
+        var offsets = new List<long>();
+        foreach (var match in Sz.EnumerateUncasedMatches(B("ÄÄÄ"), "ä"u8).Overlapping()) offsets.Add(match.Offset);
+        Assert.Equal(new long[] { 0, 2, 4 }, offsets);
+    }
+
+    [Fact]
+    public void Partition_SplitsAtFirst() {
+        var (before, separator, after) = Sz.Partition(B("key=value=tail"), "="u8);
+        Assert.Equal("key", Encoding.UTF8.GetString(before));
+        Assert.Equal("=", Encoding.UTF8.GetString(separator));
+        Assert.Equal("value=tail", Encoding.UTF8.GetString(after));
+    }
+
+    [Fact]
+    public void RPartition_SplitsAtLast() {
+        var (before, separator, after) = Sz.RPartition(B("a/b/c"), "/"u8);
+        Assert.Equal("a/b", Encoding.UTF8.GetString(before));
+        Assert.Equal("/", Encoding.UTF8.GetString(separator));
+        Assert.Equal("c", Encoding.UTF8.GetString(after));
+    }
+
+    [Fact]
+    public void Partition_MissingSeparatorKeepsWhole() {
+        var (before, separator, after) = Sz.Partition(B("nodelim"), "="u8);
+        Assert.Equal("nodelim", Encoding.UTF8.GetString(before));
+        Assert.True(separator.IsEmpty);
+        Assert.True(after.IsEmpty);
+    }
+
+    [Fact]
+    public void ArgSort_SortsBufferSegments() {
+        byte[] text = B("banana\napple\ncherry");
+        Span<long> starts = stackalloc long[] { 0, 7, 13 };
+        Span<long> lengths = stackalloc long[] { 6, 5, 6 };
+        Span<long> order = stackalloc long[3];
+        int count = Sz.ArgSort(text, starts, lengths, order);
+        Assert.Equal(3, count);
+        Assert.Equal(new long[] { 1, 0, 2 }, order.ToArray()); // apple, banana, cherry
+    }
+
+    #endregion
+
 }
