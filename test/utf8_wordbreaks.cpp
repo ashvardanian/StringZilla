@@ -1,7 +1,7 @@
 /**
  *  @brief  UAX-29 word-boundary (Word_Break) tests: known-answer goldens, malformed-input safety, and the
  *          serial-vs-ISA differential over hardened corpora.
- *  @file   scripts/test_utf8_words.cpp
+ *  @file   scripts/test_utf8_wordbreaks.cpp
  *  @author Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -29,7 +29,7 @@
 #pragma region Unit
 
 /** @brief Hand-checked UAX-29 word-break golden vectors: each source text and its expected word segments. */
-static utf8_unit_case_t const utf8_words_unit_cases[] = {
+static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
     {""_sv, {}},
     {"a"_sv, {"a"_sv}},
     {"don't"_sv, {"don't"_sv}},                                              // WB6/7: apostrophe bridges letter runs
@@ -40,11 +40,11 @@ static utf8_unit_case_t const utf8_words_unit_cases[] = {
     {"\xE4\xBD\xA0\xE5\xA5\xBD"_sv, {"\xE4\xBD\xA0"_sv, "\xE5\xA5\xBD"_sv}}, // CJK: each ideograph is its own word
     {"Hello, world!"_sv, {"Hello"_sv, ","_sv, " "_sv, "world"_sv, "!"_sv}},  // letter/punct/space boundaries
 };
-static constexpr std::size_t utf8_words_unit_cases_count = sizeof(utf8_words_unit_cases) /
-                                                           sizeof(utf8_words_unit_cases[0]);
+static constexpr std::size_t utf8_wordbreaks_unit_cases_count = sizeof(utf8_wordbreaks_unit_cases) /
+                                                                sizeof(utf8_wordbreaks_unit_cases[0]);
 
 /** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
-static void test_utf8_words_classification_() {
+static void test_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
     assert(sz_rune_is_word_char('A') == sz_true_k);
     assert(sz_rune_is_word_char('z') == sz_true_k);
@@ -88,7 +88,7 @@ static void test_utf8_words_classification_() {
  *         table non-empty on a baseline build, and the unit / rule-coverage / safety / equivalence drivers below
  *         all iterate this one ladder so their ISA coverage can never drift apart.
  */
-static utf8_segment_backend_t const utf8_words_backends[] = {
+static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
     {"dispatched", sz_utf8_wordbreaks},
 #if SZ_USE_HASWELL
     {"haswell", sz_utf8_wordbreaks_haswell},
@@ -117,14 +117,15 @@ static utf8_segment_backend_t const utf8_words_backends[] = {
 };
 
 /** @brief Known-answer word-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
-void test_utf8_words_unit() {
+void test_utf8_wordbreaks_unit() {
     std::printf("  - testing UTF-8 word-break known-answer vectors...\n");
 
-    test_utf8_words_classification_();
+    test_utf8_wordbreaks_classification_();
 
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, utf8_words_unit_cases, utf8_words_unit_cases_count);
-    for (utf8_segment_backend_t const &backend : utf8_words_backends)
-        check_utf8_segment_unit_("word", backend.finder, utf8_words_unit_cases, utf8_words_unit_cases_count);
+    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, utf8_wordbreaks_unit_cases,
+                             utf8_wordbreaks_unit_cases_count);
+    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
+        check_utf8_segment_unit_("word", backend.finder, utf8_wordbreaks_unit_cases, utf8_wordbreaks_unit_cases_count);
 
     // C++ range wrapper known-answer: `utf8_wordbreaks()` faithfully tiles the input into the UAX-29 segments
     // (words and the separators between them); concatenating them reconstructs the input.
@@ -143,7 +144,7 @@ void test_utf8_words_unit() {
 #pragma region Equivalence
 
 /** @brief UAX-29 word-break corner motifs (sprinkled into the random corpus): Mid-bridges, MidNum, RI parity, etc. */
-static sz::string_view const utf8_words_motifs[] = {
+static sz::string_view const utf8_wordbreaks_motifs[] = {
     "don't"_sv,                                // WB6/7: apostrophe bridges two letter runs
     "l'avion"_sv,                              // WB7a/b: leading apostrophe shape
     "can't_stop"_sv,                           // WB13a/b: ExtendNumLet underscore keeps the word whole
@@ -160,14 +161,15 @@ static sz::string_view const utf8_words_motifs[] = {
     "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv, // RI ASCII RI: parity reset between flags
     "word\xC2\xB7word"_sv,                     // U+00B7 MIDDLE DOT as MidLetter between letters
 };
-static constexpr std::size_t utf8_words_motifs_count = sizeof(utf8_words_motifs) / sizeof(utf8_words_motifs[0]);
+static constexpr std::size_t utf8_wordbreaks_motifs_count = sizeof(utf8_wordbreaks_motifs) /
+                                                            sizeof(utf8_wordbreaks_motifs[0]);
 
 /**
  *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and WB6/7/11/12
  *         Mid-bridge carry once miscounted across the 64-byte window boundary. Stored as raw bytes so the
  *         differential driver feeds them to serial-vs-ISA directly (no inline agreement asserts).
  */
-static sz::string_view const utf8_words_seam_regressions[] = {
+static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
     // ri_after_newline (65 bytes)
     "\xE3\x82\xAB\x2D\x0A\xF0\x9F\x87\xA6\x62\xC2\xAD\xF0\x9F\x87\xA6\xCC\x80\x0A\x5F\xF0\x9F\x87\xA6" //
     "\xF0\x9F\x87\xA6\xC2\xAD\x0A\xCC\x88\xF0\x9F\x87\xBA\xF0\x9F\x8F\xBB\xCC\x88\xC2\xAD\xE2\x81\xA0" //
@@ -183,17 +185,17 @@ static sz::string_view const utf8_words_seam_regressions[] = {
     "\x8F\xBB\xCC\x88\xE2\x81\xA0\xCC\x80\xCC\x81\x27\x35\xCC\x80\xE4\xB8\xAD\xCC\x81\xE2\x80\x8D\xC3" //
     "\xA9\xE3\x80\x80\x35\x27"_sv,
 };
-static constexpr std::size_t utf8_words_seam_regressions_count = sizeof(utf8_words_seam_regressions) /
-                                                                 sizeof(utf8_words_seam_regressions[0]);
+static constexpr std::size_t utf8_wordbreaks_seam_regressions_count = sizeof(utf8_wordbreaks_seam_regressions) /
+                                                                      sizeof(utf8_wordbreaks_seam_regressions[0]);
 
 /** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
-static void utf8_words_dense_katakana_(std::string &out, std::size_t link_count) {
+static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x30AB); // カ
 }
 
 /** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), into @p out. */
-static void utf8_words_dense_numeric_(std::string &out, std::size_t link_count) {
+static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         out.append("12");
@@ -203,7 +205,7 @@ static void utf8_words_dense_numeric_(std::string &out, std::size_t link_count) 
 }
 
 /** @brief MidLetter (`'` and U+00B7) between letters, dense across @p link_count groups (WB6/7), into @p out. */
-static void utf8_words_dense_midletter_(std::string &out, std::size_t link_count) {
+static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         append_codepoint_(out, 0x0061);                         // 'a'
@@ -213,7 +215,7 @@ static void utf8_words_dense_midletter_(std::string &out, std::size_t link_count
 }
 
 /** @brief Hebrew letters bridged by single-quote, @p link_count groups (WB7a Hebrew_Letter MidLetter), into @p out. */
-static void utf8_words_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
+static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         append_codepoint_(out, 0x05D0); // א
@@ -223,27 +225,27 @@ static void utf8_words_dense_hebrew_quote_(std::string &out, std::size_t link_co
 }
 
 /** @brief Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_words_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
     utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_words_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_words_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_words_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
-    utf8_words_dense_hebrew_quote_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_wordbreaks_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_wordbreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_wordbreaks_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
+    utf8_wordbreaks_dense_hebrew_quote_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_words_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
     utf8_dense_regional_indicators_(scratch, rng, gap);
     scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
     sink(context, scratch.data(), scratch.size());
-    utf8_words_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_wordbreaks_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Word-biased random-corpus snippets: apostrophe/underscore bridges, numeric groups, CJK/Hangul/Hebrew/Katakana. */
-static char const *const utf8_words_snippets[] = {
+static char const *const utf8_wordbreaks_snippets[] = {
     "don't ",
     "can't_stop ",
     "3,14 ",
@@ -259,24 +261,24 @@ static char const *const utf8_words_snippets[] = {
 };
 
 /** @brief Word family alphabet: weights bias toward the family snippets and motifs (WB6/7/11/12/13/15/16). */
-static utf8_corpus_alphabet_t const utf8_words_alphabet = {
-    utf8_words_snippets,
-    sizeof(utf8_words_snippets) / sizeof(utf8_words_snippets[0]),
+static utf8_corpus_alphabet_t const utf8_wordbreaks_alphabet = {
+    utf8_wordbreaks_snippets,
+    sizeof(utf8_wordbreaks_snippets) / sizeof(utf8_wordbreaks_snippets[0]),
     utf8_default_boundary_codepoints,
     sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
     {40, 15, 10, 30, 5}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the word family's differential corpora (motifs + dense + straddle + seam regressions + alphabet). */
-static utf8_segment_corpora_t utf8_words_corpora_() {
+static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
     utf8_segment_corpora_t corpora = {"word",
-                                      utf8_words_motifs,
-                                      utf8_words_motifs_count,
-                                      &utf8_words_dense_runs_,
-                                      &utf8_words_straddles_,
-                                      utf8_words_seam_regressions,
-                                      utf8_words_seam_regressions_count,
-                                      &utf8_words_alphabet};
+                                      utf8_wordbreaks_motifs,
+                                      utf8_wordbreaks_motifs_count,
+                                      &utf8_wordbreaks_dense_runs_,
+                                      &utf8_wordbreaks_straddles_,
+                                      utf8_wordbreaks_seam_regressions,
+                                      utf8_wordbreaks_seam_regressions_count,
+                                      &utf8_wordbreaks_alphabet};
     return corpora;
 }
 
@@ -285,7 +287,7 @@ static utf8_segment_corpora_t utf8_words_corpora_() {
 #pragma region Rule coverage
 
 /** @brief Rule-coverage gate: every WB rule motif agrees serial-vs-ISA (at window phases), no rule left unexercised. */
-void test_utf8_words_rules() {
+void test_utf8_wordbreaks_rules() {
     std::printf("  - testing UTF-8 word rule-coverage matrix...\n");
 
     // One motif per UAX-29 Word_Break rule, tagged with the direction it demonstrates; rules with both senses also
@@ -326,7 +328,7 @@ void test_utf8_words_rules() {
         "WB3", "WB3a", "WB3b", "WB3c", "WB3d", "WB4",  "WB5",   "WB6",   "WB7",  "WB7a", "WB7b",  "WB7c",
         "WB8", "WB9",  "WB10", "WB11", "WB12", "WB13", "WB13a", "WB13b", "WB15", "WB16", "WB999",
     };
-    for (utf8_segment_backend_t const &backend : utf8_words_backends)
+    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
         check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, backend.finder, rule_cases,
                                   sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
                                   sizeof(required_rules) / sizeof(required_rules[0]));
@@ -337,10 +339,10 @@ void test_utf8_words_rules() {
 #pragma region Safety
 
 /** @brief Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
-void test_utf8_words_safety() {
+void test_utf8_wordbreaks_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 word kernels...\n");
     check_utf8_segment_safety_("word (serial)", sz_utf8_wordbreaks_serial);
-    for (utf8_segment_backend_t const &backend : utf8_words_backends) {
+    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends) {
         std::string const label = std::string("word (") + backend.name + ")";
         check_utf8_segment_safety_(label.c_str(), backend.finder);
     }
@@ -352,9 +354,9 @@ void test_utf8_words_safety() {
 #pragma region Drivers
 
 /** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
-void test_utf8_words_all() {
-    utf8_segment_corpora_t const corpora = utf8_words_corpora_();
-    for (utf8_segment_backend_t const &backend : utf8_words_backends)
+void test_utf8_wordbreaks_all() {
+    utf8_segment_corpora_t const corpora = utf8_wordbreaks_corpora_();
+    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
         test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, backend.finder, corpora);
 }
 

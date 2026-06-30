@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""UAX-29 word-boundary tests: utf8_words behavior, official WordBreakTest conformance, and differential
+"""UAX-29 word-boundary tests: utf8_wordbreaks behavior, official WordBreakTest conformance, and differential
 fuzz against uniseg. Words are NOT validated against ICU (its word iterator is editor-tailored, ~17-20%
 off raw UAX-29); WordBreakTest.txt + uniseg are the bit-exact oracles. Adds malformed/seam safety sweeps.
 
-Mirrors the C++ test/utf8_words.cpp translation unit.
+Mirrors the C++ test/utf8_wordbreaks.cpp translation unit.
 """
 
 from random import Random, choice, randint, seed
@@ -30,7 +30,7 @@ from test.utf8_helpers import (
 )
 
 
-def test_utf8_words_basic():
+def test_utf8_wordbreaks_basic():
     """Test basic word iteration."""
     # Simple two words
     result = [str(w) for w in sz.utf8_wordbreaks("hello world")]
@@ -45,7 +45,7 @@ def test_utf8_words_basic():
     assert result == ["a"]
 
 
-def test_utf8_words_skip_empty():
+def test_utf8_wordbreaks_skip_empty():
     """Test skip_empty parameter."""
     result = [str(w) for w in sz.utf8_wordbreaks("hello  world")]
     # Should skip empty segments at boundaries
@@ -53,7 +53,7 @@ def test_utf8_words_skip_empty():
     assert all(len(s) > 0 for s in result)
 
 
-def test_utf8_words_contractions():
+def test_utf8_wordbreaks_contractions():
     """Test English contractions per TR29 rules."""
     # Per TR29, apostrophe between letters should not break
     result = [str(w) for w in sz.utf8_wordbreaks("don't")]
@@ -61,7 +61,7 @@ def test_utf8_words_contractions():
     assert "don't" in result or result == ["don't"]
 
 
-def test_utf8_words_unicode():
+def test_utf8_wordbreaks_unicode():
     """Test UTF-8 multi-byte characters."""
     # German with eszett
     result = [str(w) for w in sz.utf8_wordbreaks("Größe")]
@@ -77,7 +77,7 @@ def test_utf8_words_unicode():
     assert len(result) >= 1
 
 
-def test_utf8_words_emoji():
+def test_utf8_wordbreaks_emoji():
     """Test emoji handling."""
     # Simple emoji
     result = [str(w) for w in sz.utf8_wordbreaks("hello 👋 world")]
@@ -85,7 +85,7 @@ def test_utf8_words_emoji():
     assert "world" in result
 
 
-def test_utf8_words_numbers():
+def test_utf8_wordbreaks_numbers():
     """Test numeric handling per TR29."""
     result = [str(w) for w in sz.utf8_wordbreaks("test123")]
     # ALetter followed by Numeric should not break (WB9)
@@ -96,7 +96,7 @@ def test_utf8_words_numbers():
     assert "3.14" in result or len(result) <= 3
 
 
-def test_utf8_words_str_method():
+def test_utf8_wordbreaks_str_method():
     """Test the Str.utf8_wordbreaks() method."""
     s = Str("hello world")
     # Method requires text argument, even when called on Str object

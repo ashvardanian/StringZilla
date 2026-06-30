@@ -6627,7 +6627,7 @@ static PyObject *Utf8WordbreaksType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8Words[] =                                       //
+static char const doc_Utf8Wordbreaks[] =                                       //
     "Utf8Wordbreaks(string, ...)\n"                                       //
     "\n"                                                                  //
     "UTF-8 aware word boundary iterator per Unicode TR29 algorithm.\n"    //
@@ -6653,7 +6653,7 @@ static PyTypeObject Utf8WordbreaksType = {
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)Utf8WordbreaksType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8Words,
+    .tp_doc = doc_Utf8Wordbreaks,
     .tp_iter = Utf8WordbreaksType_iter,
     .tp_iternext = (iternextfunc)Utf8WordbreaksType_next,
 };

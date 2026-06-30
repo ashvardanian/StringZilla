@@ -192,10 +192,10 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_tokens_unit", test_utf8_tokens_unit);
     failures += run_test("test_utf8_tokens_safety", test_utf8_tokens_safety);
     failures += run_test("test_utf8_tokens_all", test_utf8_tokens_all);
-    failures += run_test("test_utf8_words_unit", test_utf8_words_unit);
-    failures += run_test("test_utf8_words_rules", test_utf8_words_rules);
-    failures += run_test("test_utf8_words_safety", test_utf8_words_safety);
-    failures += run_test("test_utf8_words_all", test_utf8_words_all);
+    failures += run_test("test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
+    failures += run_test("test_utf8_wordbreaks_rules", test_utf8_wordbreaks_rules);
+    failures += run_test("test_utf8_wordbreaks_safety", test_utf8_wordbreaks_safety);
+    failures += run_test("test_utf8_wordbreaks_all", test_utf8_wordbreaks_all);
     failures += run_test("test_utf8_graphemes_unit", test_utf8_graphemes_unit);
     failures += run_test("test_utf8_graphemes_rules", test_utf8_graphemes_rules);
     failures += run_test("test_utf8_graphemes_safety", test_utf8_graphemes_safety);

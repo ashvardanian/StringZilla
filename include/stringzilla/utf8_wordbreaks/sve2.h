@@ -3,8 +3,8 @@
  *  @file include/stringzilla/utf8_wordbreaks/sve2.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_WORDS_SVE2_H_
-#define STRINGZILLA_UTF8_WORDS_SVE2_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_wordbreaks/tables.h"
@@ -218,4 +218,4 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(   //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_SVE2_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_

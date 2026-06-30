@@ -4,7 +4,7 @@ Shared UTF-8 segmentation test driver for the per-family test modules.
 The Python analog of the C++ `scripts/test_utf8.hpp`: a single place that owns the boundary-relevant
 palettes, the SMP/astral fixtures, the malformed-UTF-8 corpus generators, the window-seam length sweep,
 the adversarial-byte battery, and the metamorphic tiling invariant — so every family TU
-(test_utf8_words.py, test_utf8_graphemes.py, …) shares one driver instead of copying corpora.
+(test_utf8_wordbreaks.py, test_utf8_graphemes.py, …) shares one driver instead of copying corpora.
 
 Differential oracles live here too: `icu_segmenter` / `icu_normalizer` wrap PyICU (skipped when absent),
 generalizing the sentence-only ICU idiom that previously lived inline in the monolith.

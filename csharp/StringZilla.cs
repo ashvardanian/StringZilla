@@ -193,7 +193,7 @@ public static unsafe class Sz {
     private static nuint SegmentChunk(SegmentKind kind, nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed) =>
         kind switch {
             SegmentKind.Graphemes => Native.sz_utf8_graphemes(text, len, starts, lengths, cap, consumed),
-            SegmentKind.Words => Native.sz_utf8_words(text, len, starts, lengths, cap, consumed),
+            SegmentKind.Words => Native.sz_utf8_wordbreaks(text, len, starts, lengths, cap, consumed),
             SegmentKind.Sentences => Native.sz_utf8_sentences(text, len, starts, lengths, cap, consumed),
             SegmentKind.LineBreaks => Native.sz_utf8_linebreaks(text, len, starts, lengths, cap, consumed),
             SegmentKind.Newlines => Native.sz_utf8_newlines(text, len, starts, lengths, cap, consumed),
@@ -687,7 +687,7 @@ internal static unsafe partial class Native {
 
     #region UTF-8 Segmentation
     [LibraryImport(Lib)] internal static partial nuint sz_utf8_graphemes(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
-    [LibraryImport(Lib)] internal static partial nuint sz_utf8_words(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
+    [LibraryImport(Lib)] internal static partial nuint sz_utf8_wordbreaks(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
     [LibraryImport(Lib)] internal static partial nuint sz_utf8_sentences(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
     [LibraryImport(Lib)] internal static partial nuint sz_utf8_linebreaks(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);
     [LibraryImport(Lib)] internal static partial nuint sz_utf8_newlines(nint text, nuint len, nint starts, nint lengths, nuint cap, nint consumed);

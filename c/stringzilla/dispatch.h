@@ -6,7 +6,7 @@
  *
  *  The compiled StringZilla library is split into one translation unit per domain
  *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`,
- *  `utf8_tokens.c`, `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`,
+ *  `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`,
  *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
  *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
@@ -71,7 +71,7 @@ typedef struct sz_implementations_t {
     sz_utf8_uncased_fold_t utf8_uncased_fold;
     sz_utf8_uncased_search_t utf8_uncased_search;
 
-    sz_utf8_segmenter_t utf8_words;
+    sz_utf8_segmenter_t utf8_wordbreaks;
     sz_utf8_segmenter_t utf8_graphemes;
     sz_utf8_segmenter_t utf8_sentences;
     sz_utf8_segmenter_t utf8_linebreaks;
@@ -100,7 +100,7 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_runes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps);
-SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_words_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_wordbreaks_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t caps);

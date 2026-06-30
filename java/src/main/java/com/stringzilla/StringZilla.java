@@ -89,7 +89,7 @@ public final class StringZilla {
 
     // region UTF-8 Segmentation
     private static final MethodHandle SZ_UTF8_GRAPHEMES = downSeg("sz_utf8_graphemes");
-    private static final MethodHandle SZ_UTF8_WORDS = downSeg("sz_utf8_words");
+    private static final MethodHandle SZ_UTF8_WORDBREAKS = downSeg("sz_utf8_wordbreaks");
     private static final MethodHandle SZ_UTF8_SENTENCES = downSeg("sz_utf8_sentences");
     private static final MethodHandle SZ_UTF8_LINEBREAKS = downSeg("sz_utf8_linebreaks");
     private static final MethodHandle SZ_UTF8_NEWLINES = downSeg("sz_utf8_newlines");
@@ -375,7 +375,7 @@ public final class StringZilla {
     private static MethodHandle segHandle(SegmentKind k) {
         return switch (k) {
             case GRAPHEMES -> SZ_UTF8_GRAPHEMES;
-            case WORDS -> SZ_UTF8_WORDS;
+            case WORDS -> SZ_UTF8_WORDBREAKS;
             case SENTENCES -> SZ_UTF8_SENTENCES;
             case LINE_BREAKS -> SZ_UTF8_LINEBREAKS;
             case NEWLINES -> SZ_UTF8_NEWLINES;

@@ -3,8 +3,8 @@
  *  @file include/stringzilla/utf8_wordbreaks/rvv.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_WORDS_RVV_H_
-#define STRINGZILLA_UTF8_WORDS_RVV_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_RVV_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_RVV_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
@@ -377,4 +377,4 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t lengt
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_RVV_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_RVV_H_

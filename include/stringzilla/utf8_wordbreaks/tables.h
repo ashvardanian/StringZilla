@@ -49,8 +49,8 @@
  *  astral_leaf_packed = pad64([leaf_cells[2 * i] | (leaf_cells[2 * i + 1] << 4) for i in range(len(leaf_cells) // 2)])
  *  @endcode
  */
-#ifndef STRINGZILLA_UTF8_WORDS_TABLES_H_
-#define STRINGZILLA_UTF8_WORDS_TABLES_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_TABLES_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_TABLES_H_
 
 #include "stringzilla/types.h"
 
@@ -1236,4 +1236,4 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage4_groups_[3328] = {
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_TABLES_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_TABLES_H_

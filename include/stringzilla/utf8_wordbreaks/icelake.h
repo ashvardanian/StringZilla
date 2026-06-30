@@ -52,8 +52,8 @@
  *  classifier, the page LUT, the trie, the per-lead validity machinery and the partition fixpoint are all rare-class
  *  gated, so the per-window cost is proportional to the window's content, not to the size of the Unicode tables.
  */
-#ifndef STRINGZILLA_UTF8_WORDS_ICELAKE_H_
-#define STRINGZILLA_UTF8_WORDS_ICELAKE_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_wordbreaks/tables.h"
@@ -634,4 +634,4 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_ICELAKE_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_

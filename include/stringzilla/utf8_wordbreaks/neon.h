@@ -15,8 +15,8 @@
  *  `want_pictographic`, exactly as in haswell. Dense-compaction of the boundary mask uses the substrate's sparse
  *  `ctz` index loop (NEON has no `vpcompressb` / BMI2 `pext`).
  */
-#ifndef STRINGZILLA_UTF8_WORDS_NEON_H_
-#define STRINGZILLA_UTF8_WORDS_NEON_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_NEON_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_NEON_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_wordbreaks/tables.h"
@@ -547,4 +547,4 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(   //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_NEON_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_NEON_H_
