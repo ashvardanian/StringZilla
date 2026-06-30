@@ -21,7 +21,7 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
     sz_size_t char_count = 0;
@@ -41,7 +41,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
  *  Single-window O(1) locate mirroring the RVV backend: each window zero-extends `svcntw()` bytes into 32-bit
  *  lanes (SVE2 has no `svcompact_u8`, so the index domain is 32-bit), skips whole windows by lead popcount, then
  *  `svcompact_u32` packs the lead-lane iota and `svlastb` reads the `n`-th packed lane. Byte-exact to serial. */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const window_bytes = svcntw(); // one byte per 32-bit lane
     svuint32_t const lane_iota = svindex_u32(0, 1);
@@ -75,13 +75,13 @@ SZ_PUBLIC sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_
 /** @brief  Right-shift a per-byte-lane value vector by @p amount lanes (toward lower indices), zero-filling the
  *          high edge - the SVE2 value-domain twin of the icelake `mask >> amount`. Lanes that would read a wrapped
  *          negative or `>= VL` index resolve to 0 under `svtbl`, exactly "no source lane there". */
-SZ_INTERNAL svuint8_t sz_utf8_shift_value_down_sve2_(svuint8_t value, sz_u8_t amount, svuint8_t lane_iota) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_down_sve2_(svuint8_t value, sz_u8_t amount, svuint8_t lane_iota) {
     return svtbl_u8(value, svadd_n_u8_x(svptrue_b8(), lane_iota, amount));
 }
 
 /** @brief  Left-shift a per-byte-lane value vector by @p amount lanes (toward higher indices), zero-filling the
  *          low edge - the SVE2 value-domain twin of the icelake `mask << amount`. */
-SZ_INTERNAL svuint8_t sz_utf8_shift_value_up_sve2_(svuint8_t value, sz_u8_t amount, svuint8_t lane_iota) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_sve2_(svuint8_t value, sz_u8_t amount, svuint8_t lane_iota) {
     return svtbl_u8(value, svsub_n_u8_x(svptrue_b8(), lane_iota, amount));
 }
 
@@ -100,7 +100,7 @@ SZ_INTERNAL svuint8_t sz_utf8_shift_value_up_sve2_(svuint8_t value, sz_u8_t amou
  *          limit - the driver simply takes more windows.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_sve2_(                                    //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_sve2_(                                 //
     svuint8_t bytes, svuint8_t next1, svuint8_t next2, svuint8_t next3,            //
     svbool_t emit_starts_b32, svuint8_t ill_formed_v, svuint8_t consumed_length_v, //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
@@ -181,9 +181,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_sve2_(                                 
  *          the first lead's declared sequence crosses the window edge (a boundary truncation), which the public
  *          entry finalizes without a serial re-decode.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_sve2_( //
-    sz_cptr_t text, sz_size_t length,            //
-    sz_rune_t *runes, sz_size_t runes_capacity,  //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_sve2_( //
+    sz_cptr_t text, sz_size_t length,               //
+    sz_rune_t *runes, sz_size_t runes_capacity,     //
     sz_size_t *runes_unpacked) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -344,7 +344,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_sve2_( //
  *          breaks and awaits more bytes; a bad/overlong truncated lead at the edge finalizes to one U+FFFD over its
  *          maximal ill-formed subpart - a bounded <=3-byte finalize, never a serial window re-decode.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_sve2(        //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {

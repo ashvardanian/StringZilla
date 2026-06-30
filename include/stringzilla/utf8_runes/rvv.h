@@ -29,7 +29,7 @@ extern "C" {
  *  straight into the rune output; any non-ASCII byte takes a single serial `sz_rune_decode` step.
  */
 /** @brief Widen `count` ASCII bytes (u8 -> u16 -> u32) and store them as runes. */
-SZ_INTERNAL void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t const *src, sz_size_t count) {
+SZ_HELPER_AUTO void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t const *src, sz_size_t count) {
     sz_size_t done = 0;
     while (done < count) {
         sz_size_t widened_vector_length = __riscv_vsetvl_e8m2(count - done);
@@ -59,7 +59,7 @@ SZ_INTERNAL void sz_utf8_decode_ascii_run_rvv_(sz_rune_t *runes_out, sz_u8_t con
  *  @param  consumed_bytes  Set to `2 * runes_emitted` (the byte span of the decoded prefix).
  *  @return Number of runes emitted (0 if the very first pair is not a well-formed 2-byte sequence).
  */
-SZ_INTERNAL sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
     sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     sz_u8_t const *bytes = (sz_u8_t const *)text;
@@ -127,7 +127,7 @@ SZ_INTERNAL sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
  *  @param  consumed_bytes    Set to the byte span the emitted runes cover (the resume-cursor delta).
  *  @return Number of runes emitted.
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_rvv_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_rvv_( //
     vuint8m1_t window_bytes, vbool8_t emit_mask, vbool8_t ill_mask, vuint8m1_t consumed_length, sz_size_t decodable,
     sz_size_t vector_length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
@@ -210,9 +210,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_rvv_( //
  *          (`*runes_unpacked == 0`, cursor unchanged) ONLY when the first lead's declared sequence crosses the window
  *          edge (a boundary truncation), which the public entry finalizes without a serial re-decode.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_rvv_( //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_rvv_( //
+    sz_cptr_t text, sz_size_t length,              //
+    sz_rune_t *runes, sz_size_t runes_capacity,    //
     sz_size_t *runes_unpacked) {
 
     // Cap the window at 192 bytes so every lane index, length, and `lane + length` stays exact in the `u8` domain
@@ -392,7 +392,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_rvv_( //
  *  very first lead declares a sequence crossing the window edge (a boundary truncation), which the public entry
  *  finalizes with a single bounded `sz_utf8_maximal_subpart_` step - never a per-codepoint serial re-decode.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_rvv(         //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {
@@ -463,7 +463,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_rvv(         //
 }
 
 /** @brief Count UTF-8 codepoints: `vcpop` the leading (non-continuation) bytes per strip. */
-SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t count = 0;
     while (length) {
@@ -485,7 +485,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length) {
  *  (the lane that is a lead and whose prefix count equals the target). Runs at `e8m4` so the `vbool2`
  *  lead mask pairs with a `u16m8` iota whose lane count never overflows the prefix counts.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t seen = 0;
     while (length) {

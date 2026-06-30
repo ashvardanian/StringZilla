@@ -21,7 +21,8 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length,
+                                                        sz_ptr_t destination) {
     return sz_utf8_uncased_fold_serial(source, source_length, destination);
 }
 

@@ -21,7 +21,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
@@ -33,7 +33,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
  *  into per-length delimiter-start masks, narrowed to a nibble bitmask (stride 4, one set bit per match), and the
  *  trusted lanes [0,13] are SIMD left-packed by the peel; the `< 16`-byte remainder goes to the serial helper. */
 
-SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
     sz_u128_vec_t text_vec, headers_vec, continuation_vec;
     uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
@@ -62,7 +62,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length) {
  *  @brief  Locate the start byte of the @p n -th codepoint (0-indexed) in @p text, or `SZ_NULL_CHAR` if
  *          @p n is past the codepoint count. Byte-exact to `sz_utf8_seek_serial`.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
 
@@ -115,7 +115,7 @@ typedef struct sz_utf8_rune_window_neon_t {
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of `srl8_`.
  *          `vshrq_n_u8` needs an immediate shift; the shift amounts used by the segmentation classifiers (2 for the
  *          decode 3-byte high reconstruction, 4 for the line-break 4-byte plane reconstruction) are spelled out. */
-SZ_INTERNAL uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t keep) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t keep) {
     uint8x16_t shifted_u8x16;
     switch (shift) {
     case 2: shifted_u8x16 = vshrq_n_u8(value, 2); break;
@@ -134,7 +134,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t k
  *  half), then `vaddv` each half to collapse the eight in-position bits into one byte: the low half becomes mask bits
  *  [0,8), the high half bits [8,16). No multiply, no `vshrn`; two `vaddv_u8` horizontal adds.
  */
-SZ_INTERNAL sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
     uint8x16_t const isolated_u8x16 = vandq_u8(boolean_lanes, bit_position_u8x16);
@@ -145,7 +145,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
 
 /** @brief  Combine the four per-quarter NEON movemasks into one 64-bit lane mask: quarter `q` -> bits [16*q, 16*q+16).
  *          The NEON twin of @ref sz_utf8_mask_combine_haswell_ (which OR-combines two 32-bit halves). */
-SZ_INTERNAL sz_u64_t sz_utf8_mask_combine_neon_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
     uint8x16_t quarter0, uint8x16_t quarter1, uint8x16_t quarter2, uint8x16_t quarter3) {
     sz_u64_t mask = sz_utf8_movemask16_neon_(quarter0);
     mask |= sz_utf8_movemask16_neon_(quarter1) << 16;
@@ -157,7 +157,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_mask_combine_neon_( //
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
  *          `_mm512_maskz_loadu_epi8`). A zero-initialized vector union stages the partial tail so we never read past
  *          `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
-SZ_INTERNAL void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out) {
+SZ_HELPER_AUTO void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out) {
     if (loaded >= 64) {
         out[0] = vld1q_u8(text + 0);
         out[1] = vld1q_u8(text + 16);
@@ -181,7 +181,7 @@ SZ_INTERNAL void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded
  *          shifted span; the successor of the last quarter wraps to quarter 0 (byte 64 aliases byte 0). The three
  *          neighbour distances are provided because the family classifiers need up to `next3` (4-byte sequences).
  */
-SZ_INTERNAL void sz_utf8_forward_neighbours_neon_( //
+SZ_HELPER_AUTO void sz_utf8_forward_neighbours_neon_( //
     uint8x16_t const *window, uint8x16_t *next1, uint8x16_t *next2, uint8x16_t *next3) {
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const here_u8x16 = window[quarter];
@@ -194,7 +194,7 @@ SZ_INTERNAL void sz_utf8_forward_neighbours_neon_( //
 
 /** @brief  Load up to 64 bytes (masked tail) and decode every lane into byte-domain halves — the NEON twin of
  *          @ref sz_utf8_rune_decode_window_, bit-identical to it (and to `_haswell_`) on every lane. */
-SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
+SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     sz_u8_t const *text, sz_size_t available) {
     sz_utf8_rune_window_neon_t result;
     result.loaded = available < 64 ? available : 64;
@@ -271,7 +271,7 @@ SZ_INTERNAL sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
  *          `uint8x16_t` and shuffled by @p within via `vqtbl1q_u8`, then blended in for the lanes whose @p selector
  *          picks that row. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`. @p within / @p selector address one
  *          quarter; the caller iterates the four quarters. */
-SZ_INTERNAL uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
+SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     sz_u8_t const *table, int tile_count, uint8x16_t selector, uint8x16_t within) {
     uint8x16_t result_u8x16 = vdupq_n_u8(0);
     for (int tile = 0; tile < tile_count; ++tile) {
@@ -287,7 +287,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
  *          Four `vqtbl4q_u8` reads over the four resident 64-byte quads; `vqtbl4q_u8` returns zero for indices >= 64,
  *          so subtracting 64/128/192 routes each lane to exactly one quad and the four results OR together. The NEON
  *          twin of the substrate `lut256` leaf. @p index addresses one quarter. */
-SZ_INTERNAL uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index) {
+SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index) {
     uint8x16x4_t const quad0_u8x16x4 = vld1q_u8_x4(group_base + 0 * 64);
     uint8x16x4_t const quad1_u8x16x4 = vld1q_u8_x4(group_base + 1 * 64);
     uint8x16x4_t const quad2_u8x16x4 = vld1q_u8_x4(group_base + 2 * 64);
@@ -307,7 +307,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint
  *          table (zero for indices >= 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for callers whose
  *          table is only one quad wide - e.g. a 128-entry property table read as two 64-byte halves - so the load
  *          never over-reads past the array. @p group_base must point to at least 64 valid bytes. */
-SZ_INTERNAL uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index) {
     return vqtbl4q_u8(vld1q_u8_x4(group_base), index);
 }
 
@@ -319,7 +319,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8
  *          NEON has no `vpcompressb`/`pext`: pull the lowest set bit's index via `ctz`, clear it via `mask & (mask-1)`.
  *          This matches the AVX2 `sz_utf8_unpack_indices_haswell_` BMI2 path semantically; on AArch64
  *          `ctz` lowers to `rbit`+`clz`, and the loop trip count is the boundary popcount (sparse for real text). */
-SZ_INTERNAL void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_AUTO void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
         *out++ = (sz_u8_t)sz_u64_ctz(mask);
         mask &= mask - 1; // clear the lowest set bit
@@ -338,7 +338,7 @@ SZ_INTERNAL void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
 /** @brief  Expand the low 16 bits of @p submask into a `uint8x16_t` whose lane `i` is 0xFF when bit `i` is set, else 0
  *          - the inverse of @ref sz_utf8_movemask16_neon_. Broadcasts the two mask bytes across the two
  *          8-lane halves, ANDs each lane's bit-position {1,2,..,128}, and `vceqq` against it (gather-free, no scalar).*/
-SZ_INTERNAL uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
     uint8x8_t const low_byte_u8x8 = vdup_n_u8((sz_u8_t)(submask & 0xFF));
@@ -347,7 +347,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_expand16_neon_(sz_u32_t submask) {
     return vceqq_u8(vandq_u8(per_half_u8x16, bit_position_u8x16), bit_position_u8x16);
 }
 
-SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out) {
     static sz_u8_t const leftpack8[256 * 8] = {
         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x00
         0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, // 0x01
@@ -645,7 +645,7 @@ SZ_INTERNAL sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *out
  *          (start, length) per set boundary lane (ascending), honoring @p capacity and the carried previous-boundary
  *          via @p previous_io; bit-exact with the Ice Lake leaf. Indices are unpacked once, then each segment's
  *          (start, length) is computed from the carried previous boundary. */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_forward_neon_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
     sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount(boundary);
@@ -693,7 +693,7 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
  *  @return Number of runes emitted (<= min(emit_count, capacity)).
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                              //
     uint8x16_t const *window, sz_u64_t emit_starts, uint8x16_t const *ill_byte, //
     int has_three, int has_four, sz_u8_t const *consumed_length,                //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
@@ -839,9 +839,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_neon_(                                 
  *          surrogate / out-of-range / framing) or truncated-only window declines (`*runes_unpacked == 0`, cursor
  *          unchanged) and the public entry hands the remainder to the serial reference (the U+FFFD oracle).
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
-    sz_cptr_t text, sz_size_t length,            //
-    sz_rune_t *runes, sz_size_t runes_capacity,  //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
+    sz_cptr_t text, sz_size_t length,               //
+    sz_rune_t *runes, sz_size_t runes_capacity,     //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;
@@ -1028,7 +1028,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_neon_( //
     return text + consumed;
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_neon(        //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_neon(  //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked) {

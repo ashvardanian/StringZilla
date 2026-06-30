@@ -31,7 +31,7 @@ extern "C" {
  *      printf("String has %zu characters\n", char_count);
  *  @endcode
  */
-SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
+SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief Skip forward to the Nth UTF-8 character.
@@ -55,7 +55,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length);
  *      size_t truncated_bytes = end ? (end - text) : length;
  *  @endcode
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n);
 
 /**
  *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
@@ -93,7 +93,7 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n)
  *  @param runes_unpacked Number of runes unpacked.
  *  @return Pointer to the byte after the last unpacked byte in @p text (the resume cursor).
  */
-SZ_DYNAMIC sz_cptr_t sz_utf8_decode(            //
+SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(        //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
     sz_size_t *runes_unpacked);
@@ -103,56 +103,56 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_decode(            //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_count */
-SZ_PUBLIC sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_serial(      //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_serial( //
+    sz_cptr_t text, sz_size_t length,            //
+    sz_rune_t *runes, sz_size_t runes_capacity,  //
     sz_size_t *runes_unpacked);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_count */
-SZ_PUBLIC sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_size_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_haswell( //
-    sz_cptr_t text, sz_size_t length,       //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_haswell( //
+    sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_count */
-SZ_PUBLIC sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_icelake( //
-    sz_cptr_t text, sz_size_t length,       //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_icelake( //
+    sz_cptr_t text, sz_size_t length,             //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_count */
-SZ_PUBLIC sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_size_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_neon( //
-    sz_cptr_t text, sz_size_t length,    //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_neon( //
+    sz_cptr_t text, sz_size_t length,          //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
 #if SZ_USE_SVE2
 /** @copydoc sz_utf8_count */
-SZ_PUBLIC sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
+SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_utf8_seek */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n);
 /** @copydoc sz_utf8_decode */
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_sve2( //
-    sz_cptr_t text, sz_size_t length,    //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
+    sz_cptr_t text, sz_size_t length,          //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
@@ -174,7 +174,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_decode_sve2( //
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
+SZ_API_RUNTIME sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_V128RELAXED
     return sz_utf8_count_v128relaxed(text, length);
 #elif SZ_USE_V128
@@ -198,7 +198,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_count(sz_cptr_t text, sz_size_t length) {
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_RUNTIME sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n) {
 #if SZ_USE_V128RELAXED
     return sz_utf8_seek_v128relaxed(text, length, n);
 #elif SZ_USE_V128
@@ -222,8 +222,8 @@ SZ_DYNAMIC sz_cptr_t sz_utf8_seek(sz_cptr_t text, sz_size_t length, sz_size_t n)
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_utf8_decode(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
-                                    sz_size_t *runes_unpacked) {
+SZ_API_RUNTIME sz_cptr_t sz_utf8_decode(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t runes_capacity,
+                                        sz_size_t *runes_unpacked) {
 #if SZ_USE_V128
     return sz_utf8_decode_v128(text, length, runes, runes_capacity, runes_unpacked);
 #elif SZ_USE_RVV

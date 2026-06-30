@@ -73,6 +73,10 @@ def _parallel_compiler_compile(
     """A parallel drop-in for `distutils.ccompiler.CCompiler.compile`, which compiles the sources of one
     extension serially. Reuses the compiler's own `_setup_compile` / `_get_cc_args` / `_compile`, so the exact
     flags distutils would pass are preserved; only the per-object loop is spread across a thread pool."""
+    is_msvc = getattr(self, "compiler_type", "") == "msvc"
+    if is_msvc and not self.initialized:
+        self.initialize()
+
     macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
         output_dir, macros, include_dirs, sources, depends, extra_postargs
     )
@@ -82,15 +86,38 @@ def _parallel_compiler_compile(
     # a translation unit whose object is newer than every source AND header (distutils' own check tracks sources
     # only, which is why a header-only edit otherwise needs `--force`). MSVC has no `-MMD`, so it keeps the
     # source-only behavior. `_sz_force` mirrors `build_ext --force`.
-    use_depfiles = getattr(self, "compiler_type", "") != "msvc"
+    use_depfiles = not is_msvc
     force = getattr(self, "_sz_force", False)
+
+    # MSVC's `_compile` is a no-op — it does all work inside its `compile()` override. Build the per-object
+    # command template once so each thread can compile independently.
+    if is_msvc:
+        msvc_compile_opts = list(extra_preargs or [])
+        msvc_compile_opts.append("/c")
+        if debug:
+            msvc_compile_opts.extend(self.compile_options_debug)
+        else:
+            msvc_compile_opts.extend(self.compile_options)
 
     def _compile_one(obj):
         try:
             src, ext = build[obj]
         except KeyError:
             return
-        if use_depfiles:
+        if is_msvc:
+            if ext in self._c_extensions:
+                input_opt = "/Tc" + src
+            elif ext in self._cpp_extensions:
+                input_opt = "/Tp" + src
+            else:
+                return
+            args = [self.cc] + msvc_compile_opts + pp_opts
+            if ext in self._cpp_extensions:
+                args.append("/EHsc")
+            args.extend([input_opt, "/Fo" + obj])
+            args.extend(extra_postargs)
+            self.spawn(args)
+        elif use_depfiles:
             dep_path = obj + ".d"
             if not force and _object_is_fresh(obj, dep_path):
                 return
@@ -231,6 +258,24 @@ class CudaBuildExtension(NumpyBuildExt):
         # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
         # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
         host_cxx = os.environ.get("CUDAHOSTCXX")
+        is_msvc = getattr(self.compiler, "compiler_type", "") == "msvc"
+        # Host-compiler flags nvcc must forward to cl.exe / gcc, mirroring CMake and build.rs. On a Windows (MSVC)
+        # host, CUDA 13.3 / CCCL 3.x needs the standard-conforming preprocessor, accurate `__cplusplus`, and UTF-8
+        # source reading; `/Oi-` (MSVC) and `-fno-builtin-mem*` (GCC/Clang) stop the compiler from substituting
+        # builtins for StringZilla's bytewise primitives. `-fPIC` is a GCC/Clang-only flag.
+        if is_msvc:
+            host_compiler_flags = ["/Zc:preprocessor", "/Zc:__cplusplus", "/utf-8", "/Oi-"]
+        else:
+            host_compiler_flags = [
+                "-fPIC",
+                "-fno-builtin-memcmp",
+                "-fno-builtin-memchr",
+                "-fno-builtin-memcpy",
+                "-fno-builtin-memset",
+            ]
+        # nvcc forwards `-MMD` to a gcc host (Linux) but a cl host rejects it (`nvcc fatal: Unknown option '-MMD'`),
+        # so gate the depfile off on MSVC — matching the C/C++ path's `use_depfiles = not is_msvc`.
+        use_depfiles = not is_msvc
         objects = []
         nvcc_jobs = []
         for cuda_source in cuda_sources:
@@ -245,8 +290,6 @@ class CudaBuildExtension(NumpyBuildExt):
                 cuda_source,
                 "-o",
                 obj_path,
-                "--compiler-options",
-                "-fPIC",
                 "-std=c++20",
                 "-O2",
                 "--use_fast_math",
@@ -254,10 +297,10 @@ class CudaBuildExtension(NumpyBuildExt):
                 "-arch=sm_90a",  # Default to Hopper
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
-                "-MMD",  # emit a depfile so incremental rebuilds can skip translation units with no changed header
-                "-MF",
-                dep_path,
             ]
+            if use_depfiles:
+                # Emit a depfile so incremental rebuilds can skip translation units with no changed header.
+                nvcc_cmd.extend(["-MMD", "-MF", dep_path])
             if host_cxx:
                 nvcc_cmd.extend(["-ccbin", host_cxx])
             for inc_dir in ext.include_dirs:
@@ -267,8 +310,10 @@ class CudaBuildExtension(NumpyBuildExt):
                     nvcc_cmd.append(f"-D{define[0]}={define[1]}")
                 else:
                     nvcc_cmd.append(f"-D{define[0]}")
+            for flag in host_compiler_flags:
+                nvcc_cmd.extend(["-Xcompiler", flag])
 
-            if not self.force and _object_is_fresh(obj_path, dep_path):
+            if use_depfiles and not self.force and _object_is_fresh(obj_path, dep_path):
                 print(f"Skipping {cuda_source} (object up to date)")
                 continue
             nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
@@ -588,13 +633,21 @@ elif sz_target == "stringzillas-cuda":
     # toolkit whose `libcudart` the installed driver supports (mismatched runtimes raise
     # `cudaErrorInsufficientDriver` at load). Falls back to the `/usr/local/cuda` symlink.
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
+    # MSVC and the GNU/Clang toolchains spell library search paths and names differently. On Windows the CUDA
+    # runtime + driver import libraries live under `lib\x64` and link.exe wants `/LIBPATH:` plus bare `*.lib`
+    # names; elsewhere it is the usual `-L.../lib64 -l...`. The C++ runtime links implicitly under MSVC, so the
+    # explicit `-lstdc++` is GNU/Clang-only.
+    if os.name == "nt":
+        cuda_link_args = link_args + [f"/LIBPATH:{os.path.join(cuda_home, 'lib', 'x64')}", "cudart.lib", "cuda.lib"]
+    else:
+        cuda_link_args = link_args + [f"-L{cuda_home}/lib64", "-lcudart", "-lcuda", "-lstdc++"]
     ext_modules = [
         Extension(
             "stringzillas",
             ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
             include_dirs=["include", "c/stringzillas", "fork_union/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
-            extra_link_args=link_args + [f"-L{cuda_home}/lib64", "-lcudart", "-lcuda", "-lstdc++"],
+            extra_link_args=cuda_link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),

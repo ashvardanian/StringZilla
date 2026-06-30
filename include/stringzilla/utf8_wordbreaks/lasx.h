@@ -18,7 +18,7 @@ extern "C" {
 #if SZ_USE_LASX
 /** @brief  Per-class 32-bit lane boundary mask over an all-ASCII LASX byte compare. Each Word_Break class is a
  *          small ASCII byte set (ALetter A-Za-z, Numeric 0-9, ExtendNumLet '_', Mid* punctuation, CR and LF). */
-SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_lasx_(__m256i window) {
+SZ_HELPER_AUTO sz_u32_t sz_utf8_word_break_boundary_mask_lasx_(__m256i window) {
     __m256i lowered = __lasx_xvor_v(window, __lasx_xvreplgr2vr_b(0x20)); // fold A-Z onto a-z
     sz_u64_t aletter_mask = (sz_u64_t)sz_xvmovemask_b_utf8_lasx_(__lasx_xvand_v(
         __lasx_xvsle_bu(__lasx_xvreplgr2vr_b(0x61), lowered), __lasx_xvsle_bu(lowered, __lasx_xvreplgr2vr_b(0x7A))));
@@ -45,7 +45,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_lasx_(__m256i window) {
 /** @brief  Ascending dword-index left-pack permutation for `__lasx_xvperm_w`: row `[submask]` gathers the
  *          `submask`-selected u64 lanes (of 4) to the front in LOW-to-HIGH lane order. Mirrors the Haswell
  *          `sz_utf8_word_compact4_permutation_haswell_` table. */
-SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_lasx_(sz_u32_t submask) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_compact4_permutation_lasx_(sz_u32_t submask) {
     static sz_u32_t const compact_lut[16][8] = {
         {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
         {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
@@ -58,7 +58,7 @@ SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_lasx_(sz_u32_t submask) {
 /** @brief  Descending-order counterpart of `sz_utf8_word_compact4_permutation_lasx_`: row `[submask]` gathers
  *          the `submask`-selected u64 lanes (of 4) to the front in HIGH-to-LOW lane order, for the reverse
  *          word scan. Mirrors the Haswell `sz_utf8_word_compact4_permutation_descending_haswell_` table. */
-SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_descending_lasx_(sz_u32_t submask) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_compact4_permutation_descending_lasx_(sz_u32_t submask) {
     static sz_u32_t const compact_lut[16][8] = {
         {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 1, 0, 0, 0, 0},
         {4, 5, 0, 0, 0, 0, 0, 0}, {4, 5, 0, 1, 0, 0, 0, 0}, {4, 5, 2, 3, 0, 0, 0, 0}, {4, 5, 2, 3, 0, 1, 0, 0},
@@ -70,13 +70,13 @@ SZ_INTERNAL __m256i sz_utf8_word_compact4_permutation_descending_lasx_(sz_u32_t 
 
 /** @brief  Shift the four u64 lanes of `boundaries` right by one (lanes 1..3 ← 0..2) and insert `carry` into
  *          lane 0 — the LASX form of Haswell's `lane_shift_right` permute + lane-0 blend. */
-SZ_INTERNAL __m256i sz_utf8_word_shift_right_insert_lasx_(__m256i boundaries, sz_size_t carry) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_shift_right_insert_lasx_(__m256i boundaries, sz_size_t carry) {
     static sz_u32_t const lane_shift_right[8] = {0, 0, 0, 1, 2, 3, 4, 5};
     __m256i const shifted = __lasx_xvperm_w(boundaries, __lasx_xvld(lane_shift_right, 0));
     return __lasx_xvinsgr2vr_d(shifted, (long long)carry, 0);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_lasx(         //
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(   //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

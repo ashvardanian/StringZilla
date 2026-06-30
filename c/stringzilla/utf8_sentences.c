@@ -23,9 +23,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_sentences_update_(sz_capability_t cap
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                       sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                       sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                           sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_sentences(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                             bytes_consumed);
 }

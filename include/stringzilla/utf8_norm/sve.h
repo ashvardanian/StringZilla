@@ -42,7 +42,7 @@ extern "C" {
  *  4-way range-blend so the 64-entry LUT spans any VL); the cold per-codepoint verify carries the
  *  combining class across vectors and reports order or quick-check violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *const end = text_u8 + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -116,11 +116,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_t lengt
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                           sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_sve_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_sve_);
 }
 

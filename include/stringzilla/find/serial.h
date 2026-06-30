@@ -32,8 +32,8 @@ extern "C" {
  *  @param second Output offset of the second anomalous byte.
  *  @param third Output offset of the third anomalous byte.
  */
-SZ_INTERNAL void sz_locate_needle_anomalies_( //
-    sz_cptr_t start, sz_size_t length,        //
+SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
+    sz_cptr_t start, sz_size_t length,           //
     sz_size_t *first, sz_size_t *second, sz_size_t *third) {
 
     *first = 0;
@@ -95,31 +95,24 @@ SZ_INTERNAL void sz_locate_needle_anomalies_( //
     }
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_byteset_contains(set, *text)) return text;
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Warray-bounds"
-#endif
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     sz_cptr_t const end = text;
     for (text += length; text != end;)
         if (sz_byteset_contains(set, *(text -= 1))) return text;
     return SZ_NULL_CHAR;
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
 }
 
 /*  Find the first occurrence of a @b single-character needle in an arbitrary length haystack.
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memchr(haystack, needle[0], haystack_length)`.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
     if (!haystack_length) return SZ_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
@@ -193,7 +186,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz
  *  @brief 2-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 2-byte group signifies a match.
  */
-SZ_INTERNAL sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each 2-byte group is set.
@@ -203,14 +196,14 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b
     return vec;
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_INTERNAL sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                             sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                    sz_size_t needle_length) {
     sz_unused_(needle_length); //? We keep this argument only for `sz_rfind_t` signature compatibility.
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
@@ -219,8 +212,8 @@ SZ_INTERNAL sz_cptr_t sz_rfind_1byte_serial_(sz_cptr_t haystack, sz_size_t hayst
  *  @brief Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     sz_assert_(haystack_length >= 2 && "The haystack is too short.");
@@ -267,7 +260,7 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t haysta
  *  @brief 4-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 4-byte group signifies a match.
  */
-SZ_INTERNAL sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each 4-byte group is set.
@@ -281,8 +274,8 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 4 && "The haystack is too short.");
@@ -351,7 +344,7 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t haysta
  *  @brief 3-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 3-byte group signifies a match.
  */
-SZ_INTERNAL sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each 4-byte group is set.
@@ -365,8 +358,8 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief Find the first occurrence of a @b three-character needle in an arbitrary length haystack.
  *         This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                   sz_size_t needle_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     sz_assert_(haystack_length >= 3 && "The haystack is too short.");
@@ -437,8 +430,8 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_size_t haysta
  *  @param needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
     // Several popular string matching algorithms are using a bad-character shift table.
@@ -500,8 +493,8 @@ SZ_INTERNAL sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
  *  @param needle_length Length of the needle in bytes (must be <= 256).
  *  @return Pointer to last match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,             //
+SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                    //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
     union {
@@ -563,7 +556,7 @@ SZ_INTERNAL sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
  *  @param prefix_length Length of the prefix to search for.
  *  @return Pointer to first match, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_find_with_prefix_( //
+SZ_HELPER_AUTO sz_cptr_t sz_find_with_prefix_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, sz_find_t find_prefix,
     sz_size_t prefix_length) {
 
@@ -598,8 +591,9 @@ SZ_INTERNAL sz_cptr_t sz_find_with_prefix_( //
  *  @param suffix_length Length of the suffix to search for.
  *  @return Pointer to last match start, or SZ_NULL_CHAR if none.
  */
-SZ_INTERNAL sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length, sz_find_t find_suffix, sz_size_t suffix_length) {
+SZ_HELPER_AUTO sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length, sz_find_t find_suffix,
+                                               sz_size_t suffix_length) {
 
     sz_size_t prefix_length = needle_length - suffix_length;
     while (1) {
@@ -619,25 +613,25 @@ SZ_INTERNAL sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t haysta
     return SZ_NULL_CHAR;
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                  sz_size_t needle_length) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_over_4bytes_serial_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length, (sz_find_t)sz_find_4byte_serial_, 4);
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
+SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_find_with_prefix_(haystack, haystack_length, needle, needle_length,
                                 sz_find_horspool_upto_256bytes_serial_, 256);
 }
 
-SZ_INTERNAL sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
+SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length) {
     return sz_rfind_with_suffix_(haystack, haystack_length, needle, needle_length,
                                  sz_rfind_horspool_upto_256bytes_serial_, 256);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                   sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                         sz_size_t needle_length) {
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
 
@@ -663,8 +657,8 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length
         (needle_length > 8) + (needle_length > 256)](haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                    sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;

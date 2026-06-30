@@ -34,7 +34,7 @@ extern "C" {
  *
  *  @note No zero-length sentences are emitted; @p length == 0 returns 0. Sentence segmentation is forward-only.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_sentences(                      //
+SZ_API_RUNTIME sz_size_t sz_utf8_sentences(                  //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed);
@@ -44,29 +44,29 @@ SZ_DYNAMIC sz_size_t sz_utf8_sentences(                      //
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_sentences */
-SZ_PUBLIC sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                             sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                             sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_serial(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                   sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                   sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_sentences */
-SZ_PUBLIC sz_size_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                              sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                    sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                    sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_sentences */
-SZ_PUBLIC sz_size_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                           sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                 sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                 sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_sentences */
-SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                              sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                    sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                    sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -81,9 +81,9 @@ SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t length, 
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
-                                       sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
-                                       sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                           sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                           sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_sentences_icelake(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                      bytes_consumed);

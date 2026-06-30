@@ -25,7 +25,7 @@ extern "C" {
 
 /*  x86-`movemask`-equivalent for VSX gathering each byte's MSB into bit `i` via `vec_vbpermq`; named distinctly
  *  from `find/powervsx.h`'s identical helper so both coexist in one translation unit. */
-SZ_INTERNAL sz_u64_t sz_utf8_movemask_powervsx_(__vector unsigned char compared) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
     __vector unsigned long long const gathered = vec_vbpermq(compared, indices);
 #if SZ_IS_BIG_ENDIAN_
@@ -39,7 +39,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_movemask_powervsx_(__vector unsigned char compared)
  *  VSX range/equality compares; the eight per-class lane bitmasks are extracted with the single-instruction
  *  `vec_vbpermq` movemask and fed to the shared portable join routine - matching the Haswell/v128/LASX path
  *  (extracting to the wide integer ALU measured faster than evaluating the rules in-vector). */
-SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigned char bytes_vec) {
+SZ_HELPER_AUTO sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigned char bytes_vec) {
     __vector unsigned char lowered = vec_or(bytes_vec, vec_splats((unsigned char)0x20));
     __vector unsigned char is_aletter = vec_and(
         (__vector unsigned char)vec_cmpge(lowered, vec_splats((unsigned char)0x61)),
@@ -67,9 +67,9 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_powervsx_(__vector unsigne
     return (sz_u32_t)((~join) & 0x7FFCu); // trusted lanes [2,14]
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_powervsx(     //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *word_starts, sz_size_t *word_lengths, //
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *word_starts, sz_size_t *word_lengths,   //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;

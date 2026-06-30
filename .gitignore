@@ -1,5 +1,6 @@
 # Primary root-level build folders
 /build*/
+/target*/
 
 # Yes, everyone loves keeping this file in the history.
 # But with a very minimalistic binding and just a couple of dependencies
@@ -21,11 +22,23 @@ CMakeCache.txt
 cmake_install.cmake
 CMakeFiles
 *.so
+*.dll
+*.dylib
 *.egg-info
 *.whl
 *.pyd
 .venv/*
 node_modules/
+
+# .NET / C# build output
+bin/
+obj/
+TestResults/
+*.dmp
+
+# Native binaries are CI/pack-time artifacts — never commit them
+/csharp/runtimes/
+/java/src/main/resources/native/
 .vs/
 *.tar.gz
 .tmp/

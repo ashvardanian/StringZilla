@@ -571,7 +571,7 @@ void permute(sz_string_view_t *array, sz_sorted_idx_t *order, sz_size_t length) 
  *          Returns sz_true_k if the object is mutable (can be written to), sz_false_k if immutable.
  *          Sets a Python exception if immutable.
  */
-SZ_INTERNAL sz_bool_t sz_py_is_mutable(PyObject *object) {
+SZ_HELPER_AUTO sz_bool_t sz_py_is_mutable(PyObject *object) {
     if (PyUnicode_Check(object)) {
         PyErr_SetString(PyExc_TypeError, "str objects are immutable (use bytearray instead)");
         return sz_false_k;
@@ -595,7 +595,7 @@ SZ_INTERNAL sz_bool_t sz_py_is_mutable(PyObject *object) {
  *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
  *          On failure, sets a Python exception and returns 0.
  */
-SZ_DYNAMIC sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
+SZ_API_RUNTIME sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python `str` object
         Py_ssize_t signed_length;
@@ -687,7 +687,7 @@ sz_size_t sz_py_strs_sequence_member_length_if_fragmented(void const *sequence_p
 /**
  *  @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`.
  */
-SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
+SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
     if (!sequence) return sz_false_k;
 
     if (PyObject_TypeCheck(object, &StrsType)) {
@@ -707,8 +707,8 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_seque
 /**
  *  @brief  Helper function to export a `Strs` object into `sz_sequence_u32tape_t` components.
  */
-SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
-                                                     sz_size_t *count) {
+SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
+                                                         sz_size_t *count) {
 
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
@@ -732,8 +732,8 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t
 /**
  *  @brief  Helper function to export a `Strs` object into `sz_sequence_u64tape_t` components.
  */
-SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
-                                                     sz_size_t *count) {
+SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
+                                                         sz_size_t *count) {
 
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
@@ -1004,7 +1004,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
  *  - `STRS_U64_TAPE` remains, if the allocator is different.
  *  - `STRS_FRAGMENTED` becomes a `STRS_U32_TAPE` or `STRS_U64_TAPE` depending on the content size.
  */
-SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
+SZ_API_RUNTIME sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
     if (!object || !allocator) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
 
@@ -6440,7 +6440,8 @@ static void Utf8Split_refill_(Utf8Split *self) {
     sz_size_t consumed = 0;
     sz_size_t separators = self->kernel(self->suffix, region, offsets, lengths, sz_iterators_default_steps_k,
                                         &consumed);
-    sz_assert_(separators <= sz_iterators_default_steps_k && "segmenter reported more spans than the requested capacity");
+    sz_assert_(separators <= sz_iterators_default_steps_k &&
+               "segmenter reported more spans than the requested capacity");
     sz_assert_(consumed <= region && "segmenter consumed past the region end");
     sz_assert_((consumed > 0 || region == 0) && "segmenter made no progress (the iterator would loop forever)");
     self->bounds[0] = base;

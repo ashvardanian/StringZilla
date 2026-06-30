@@ -448,10 +448,12 @@ void test_hash_all() {
     hash_serial_t const hash_serial;
     sz_unused_(hash_serial); // Used only by the SIMD differential blocks below; unreferenced on no-SIMD-tier targets.
 
-    // Number of random-length inputs to fuzz per differential test, scaled by the global multiplier.
+    // Number of random-length inputs to fuzz per differential test, scaled by the global multiplier. Consumed only by
+    // the SIMD differential blocks below, so all three are unreferenced on targets with no compiled SIMD hash tier.
     sz_size_t const hash_inputs = (sz_size_t)scale_iterations(200);
     sz_size_t const random_inputs = (sz_size_t)scale_iterations(200);
     sz_size_t const sha256_inputs = (sz_size_t)scale_iterations(256);
+    sz_unused_(hash_inputs), sz_unused_(random_inputs), sz_unused_(sha256_inputs);
 
     // Ensure the seed affects hash results
     assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));

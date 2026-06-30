@@ -36,7 +36,7 @@ extern "C" {
  *  Runtime caveat: some engines (node/wasmtime on x86) currently lower the i8 relaxed-dot through a
  *  multi-instruction sequence and may be SLOWER than the baseline `extadd` path; native relaxed-simd
  *  engines lower it to a single MAC and win. The level is exposed regardless; correctness is exact. */
-SZ_PUBLIC sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
     v128_t const ones_vec = wasm_i8x16_splat(1);
     v128_t const bit7_vec = wasm_i8x16_splat((sz_i8_t)0x80);
 
@@ -87,7 +87,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length) {
  *  to `sz_emulate_aesenc_si128_serial_`), so these relaxed kernels match the serial reference exactly. */
 
 /** @brief `relaxed_swizzle` counterpart of `sz_aes_linear_v128_`. */
-SZ_INTERNAL v128_t sz_aes_linear_v128relaxed_(v128_t low_table, v128_t high_table, v128_t x) {
+SZ_HELPER_INLINE v128_t sz_aes_linear_v128relaxed_(v128_t low_table, v128_t high_table, v128_t x) {
     v128_t low_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
     v128_t high_nibbles = wasm_u8x16_shr(x, 4);
     return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(low_table, low_nibbles),
@@ -95,7 +95,7 @@ SZ_INTERNAL v128_t sz_aes_linear_v128relaxed_(v128_t low_table, v128_t high_tabl
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_aes_gf4_mul_v128_`. */
-SZ_INTERNAL v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a, v128_t b) {
+SZ_HELPER_AUTO v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a, v128_t b) {
     static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
                                                         0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
     static sz_align_(16) sz_u8_t const exp_lo_table[16] = {0x01, 0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b,
@@ -118,7 +118,7 @@ SZ_INTERNAL v128_t sz_aes_gf4_mul_v128relaxed_(v128_t a, v128_t b) {
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_emulate_aesenc_v128_` (bit-exact with the serial round). */
-SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     static sz_align_(16) sz_u8_t const fwd_lo[16] = {0x00, 0x01, 0x20, 0x21, 0x46, 0x47, 0x66, 0x67,
                                                      0x4c, 0x4d, 0x6c, 0x6d, 0x0a, 0x0b, 0x2a, 0x2b};
     static sz_align_(16) sz_u8_t const fwd_hi[16] = {0x00, 0x3c, 0xd5, 0xe9, 0x34, 0x08, 0xe1, 0xdd,
@@ -183,22 +183,22 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_v128relaxed_(sz_u128_vec_t state_vec
 }
 
 /** @brief `relaxed_swizzle` counterpart of `sz_emulate_shuffle_epi8_v128_` (order indices are in [0,15]). */
-SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_v128relaxed_(sz_u128_vec_t state_vec, v128_t order) {
+SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128relaxed_(sz_u128_vec_t state_vec, v128_t order) {
     sz_u128_vec_t result;
     result.v128 = wasm_i8x16_relaxed_swizzle(state_vec.v128, order);
     return result;
 }
 
-SZ_INTERNAL void sz_hash_state_short_update_v128relaxed_(sz_hash_state_aligned_for_short_t_ *state,
-                                                         sz_u128_vec_t block) {
+SZ_HELPER_AUTO void sz_hash_state_short_update_v128relaxed_(sz_hash_state_aligned_for_short_t_ *state,
+                                                            sz_u128_vec_t block) {
     v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     state->aes = sz_emulate_aesenc_v128relaxed_(state->aes, block);
     state->sum = sz_emulate_shuffle_epi8_v128relaxed_(state->sum, shuffle);
     state->sum.v128 = wasm_i64x2_add(state->sum.v128, block.v128);
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_aligned_for_short_t_ const *state,
-                                                               sz_size_t length) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_aligned_for_short_t_ const *state,
+                                                                  sz_size_t length) {
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
     sz_u128_vec_t mixed = sz_emulate_aesenc_v128relaxed_(state->sum, state->aes);
@@ -208,7 +208,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_v128relaxed_(sz_hash_state_ali
 }
 
 /** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
-SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_v128relaxed_(sz_hash_state_t const *packed) {
+SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_v128relaxed_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t_ state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -222,7 +222,7 @@ SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_v128relaxed_(sz_hash_sta
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state. */
-SZ_INTERNAL void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         wasm_v128_store(packed->aes + offset, state->aes.u128s[lane_index].v128);
@@ -233,7 +233,7 @@ SZ_INTERNAL void sz_hash_state_store_v128relaxed_(sz_hash_state_t *packed, sz_ha
     packed->ins_length = state->ins_length;
 }
 
-SZ_INTERNAL void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t_ *state) {
+SZ_HELPER_AUTO void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t_ *state) {
     v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_u128_vec_t ins_vec = state->ins.u128s[lane_index];
@@ -243,7 +243,7 @@ SZ_INTERNAL void sz_hash_state_update_v128relaxed_(sz_hash_state_aligned_t_ *sta
     }
 }
 
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_aligned_t_ state) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_aligned_t_ state) {
     v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -282,7 +282,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_v128relaxed_(sz_hash_state_aligned_t
     return mixed_in_register.u64s[0];
 }
 
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128relaxed(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128relaxed(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
         sz_hash_state_short_init_serial_(&state, seed);
@@ -353,11 +353,11 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128relaxed(sz_cptr_t start, sz
     }
 }
 
-SZ_PUBLIC void sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_API_COMPTIME void sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_serial(state, seed);
 }
 
-SZ_PUBLIC void sz_hash_state_update_v128relaxed(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME void sz_hash_state_update_v128relaxed(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t_ state = sz_hash_state_load_v128relaxed_(packed);
 
@@ -384,7 +384,7 @@ SZ_PUBLIC void sz_hash_state_update_v128relaxed(sz_hash_state_t *packed, sz_cptr
     sz_hash_state_store_v128relaxed_(packed, &state);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *packed) {
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t_ state = sz_hash_state_load_v128relaxed_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
@@ -420,7 +420,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *packe
     }
 }
 
-SZ_PUBLIC void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_API_COMPTIME void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
@@ -437,8 +437,9 @@ SZ_PUBLIC void sz_fill_random_v128relaxed(sz_ptr_t text, sz_size_t length, sz_u6
  *  @brief Replays prepared text-lanes through the relaxed-SIMD minimal AES state for a single seed.
  *  @return 64-bit hash, bit-identical to `sz_hash_v128relaxed(text, length, seed)` (hence to serial).
  */
-SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
-                                                           sz_size_t length, sz_u64_t seed) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *text_lanes,
+                                                              sz_size_t text_lanes_count, sz_size_t length,
+                                                              sz_u64_t seed) {
     sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
     sz_hash_state_short_init_serial_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
@@ -446,9 +447,9 @@ SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t const *
     return sz_hash_state_short_finalize_v128relaxed_(&state, length);
 }
 
-SZ_PUBLIC void sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length,             //
-                                             sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                             sz_u64_t *hashes) {
+SZ_API_COMPTIME void sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length,             //
+                                                   sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                   sz_u64_t *hashes) {
     if (seeds_count == 0) return;
     if (seeds_count == 1) {
         hashes[0] = sz_hash_v128relaxed(text, length, seeds[0]);

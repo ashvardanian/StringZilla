@@ -1,0 +1,26 @@
+# StringZilla C# style — mirrors the C/C++ .clang-format base (4-space, 120 cols, K&R braces).
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+tab_width = 4
+max_line_length = 120
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# K&R braces: opening brace on the same line (matches clang-format AfterFunction/AfterClass = false).
+csharp_new_line_before_open_brace = none
+# else/catch/finally on a new line (matches clang-format BeforeElse/BeforeCatch = true).
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_within_query_expression_clauses = true
+
+# Prefer modern, terse C# where it reads like the C code.
+csharp_prefer_braces = when_multiline:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+csharp_using_directive_placement = outside_namespace:suggestion
+dotnet_sort_system_directives_first = true

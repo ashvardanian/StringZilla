@@ -62,7 +62,7 @@ extern "C" {
  *  @param chunk_size Number of bytes in the current chunk (returned when all loaded bytes are valid).
  *  @return Index of the first invalid byte, or chunk_size if all loaded bytes are valid.
  */
-SZ_INTERNAL sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
+SZ_HELPER_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
     sz_u64_t invalid_mask = ~is_valid | ~load_mask;
     return invalid_mask ? (sz_size_t)sz_u64_ctz(invalid_mask) : chunk_size;
 }
@@ -86,7 +86,7 @@ enum sz_utf8_fold_lead_family_t_ {
 };
 
 /** @brief OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
-SZ_INTERNAL sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
     __m256i upper_ymm = _mm512_extracti64x4_epi64(flags_zmm, 1);
     __m256i or256_ymm = _mm256_or_si256(_mm512_castsi512_si256(flags_zmm), upper_ymm);
     __m128i or128_xmm = _mm_or_si128(_mm256_castsi256_si128(or256_ymm), _mm256_extracti128_si256(or256_ymm, 1));
@@ -101,8 +101,8 @@ SZ_INTERNAL sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_zmm) {
  *      Folds ASCII A-Z in place and copies everything else, trimming incomplete trailing sequences.
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
-    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size,  //
+SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
+    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size,     //
     __mmask64 is_two_byte_lead_mask, __mmask64 is_three_byte_lead_mask, __mmask64 malformed_lead_mask,
     sz_ptr_t target) {
 
@@ -138,8 +138,8 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(   //
-    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size, //
+SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
+    __m512i source_zmm, __mmask64 load_mask, sz_size_t chunk_size,  //
     __mmask64 is_continuation_mask, __mmask64 is_three_byte_lead_mask, __mmask64 malformed_lead_mask, sz_ptr_t target) {
 
     __m512i const a_upper_vec = _mm512_set1_epi8('A');
@@ -257,7 +257,7 @@ SZ_INTERNAL sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_(   //
     return fold_length;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // This algorithm exploits the idea, that most text in a single ZMM register is either:
     //
     // 1. All ASCII single-byte codepoints

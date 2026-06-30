@@ -24,11 +24,11 @@ extern "C" {
  *  relaxed op), so they delegate to the baseline SIMD128. The multistep newline/whitespace iterators are not
  *  defined here at all: the dispatch table routes the `v128relaxed` capability straight to the `v128` kernels. */
 
-SZ_PUBLIC sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
     return sz_utf8_count_v128(text, length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     return sz_utf8_seek_v128(text, length, n);
 }
 

@@ -1,0 +1,125 @@
+# StringZilla 🦖 for C# / .NET
+
+Zero-copy .NET bindings for StringZilla.
+SIMD-accelerated search, comparison, hashing, UTF-8 segmentation, case-folding, normalization, and sorting, operating directly on UTF-8 `byte` spans with no UTF-16 transcode and no copy.
+
+## Installation
+
+```sh
+dotnet add package StringZilla
+```
+
+The package targets .NET 8+ (`net8.0`) and is NativeAOT- and trimming-compatible.
+Native libraries for `win-x64`, `linux-x64`, `osx-arm64`, and more are bundled in the package.
+
+```csharp
+using StringZilla;
+
+ReadOnlySpan<byte> text = "the quick brown fox"u8;
+long position = Sz.IndexOf(text, "brown"u8); // first match, as a UTF-8 byte offset
+ulong digest = Sz.Hash(text);                // fast 64-bit AES hash
+```
+
+All offsets are UTF-8 byte offsets, not UTF-16 char indices.
+The zero-copy surface is `ReadOnlySpan<byte>`; `string` overloads transcode and are a convenience, not the fast path.
+Buffer-filling operations write into a caller-provided `Span<T>` and return a count, so steady-state usage allocates nothing.
+
+## Searching and Counting
+
+```csharp
+long position = Sz.IndexOf(haystack, needle);     // first match, or -1 (cf. MemoryExtensions.IndexOf)
+long last = Sz.LastIndexOf(haystack, needle);
+Byteset vowels = Byteset.FromBytes("aeiou"u8);
+long anyVowel = Sz.IndexOfAny(haystack, ref vowels); // first byte in the set (cf. SearchValues<byte>)
+```
+
+## Comparison and Equality
+
+```csharp
+bool same = Sz.Equal(left, right);    // cf. ReadOnlySpan<byte>.SequenceEqual
+int ordering = Sz.Compare(left, right); // -1 / 0 / 1 (cf. SequenceCompareTo)
+```
+
+## Hashing and Checksums
+
+```csharp
+ulong digest = Sz.Hash(data, seed: 42);
+
+using Hasher hasher = new(seed: 42); // streaming
+hasher.Update(firstChunk);
+hasher.Update(secondChunk);
+ulong streamed = hasher.Digest();
+
+byte[] sha = Sha256.HashData(data); // cf. System.Security.Cryptography.SHA256
+```
+
+## UTF-8 Codepoints and Segmentation
+
+The segmentation primitive is allocation-free: it fills the caller's spans and returns the count.
+
+```csharp
+long runeCount = Sz.CountRunes(text);    // cf. counting System.Text.Rune
+int decoded = Sz.Decode(text, codepoints); // fill a Span<int>; ill-formed -> U+FFFD
+
+Span<long> starts = stackalloc long[64];
+Span<long> lengths = stackalloc long[64];
+int count = Sz.Segment(text, Sz.SegmentKind.Words, starts, lengths, out long consumed); // UAX-29
+for (int segment = 0; segment < count; segment++)
+    Use(text.Slice((int)starts[segment], (int)lengths[segment]));
+// Kinds: Graphemes (cf. StringInfo), Words, Sentences, LineBreaks (UAX-14), Newlines, Whitespaces, Delimiters
+```
+
+## Case Folding and Normalization
+
+Case folding fills a gap: .NET has no public Unicode case-folding API.
+
+```csharp
+byte[] folded = Sz.CaseFold("Straße"u8);              // -> "strasse"
+long position = Sz.UncasedIndexOf(haystack, "WÖRLD"u8, out long matched); // caseless search
+
+using UncasedNeedle needle = new("fox"u8); // reuse across haystacks
+needle.IndexIn(document, out long matchedLength);
+
+byte[] composed = Sz.Normalize(text, Sz.NormalForm.Nfc); // cf. string.Normalize
+int written = Sz.Normalize(text, Sz.NormalForm.Nfc, destination); // allocation-free variant
+```
+
+## Sorting and Set Operations
+
+These take a caller-provided result buffer and return the count; allocating convenience overloads also exist.
+
+```csharp
+long[] order = new long[items.Count];
+int sorted = Sz.ArgSort(items, order, top: 10, uncased: true); // cf. Array.Sort + StringComparer.Ordinal
+
+long[] firstPositions = new long[Math.Min(left.Count, right.Count)];
+long[] secondPositions = new long[firstPositions.Length];
+int matches = Sz.Intersect(left, right, firstPositions, secondPositions); // matching index pairs
+```
+
+## Zero-Copy in Unity
+
+StringZilla's native byte kernels are a strong fit for Unity's `NativeArray<byte>` (loaded text assets, network buffers), searched and hashed without marshalling.
+
+```csharp
+using StringZilla;
+using Unity.Collections;
+
+NativeArray<byte> asset = LoadUtf8Asset();
+ReadOnlySpan<byte> text = asset.AsReadOnlySpan(); // no copy
+long position = Sz.IndexOf(text, "player_id"u8);
+ulong identifier = Sz.Hash(text);
+```
+
+The managed package targets `net8.0`, which loads on Unity 6.2+ with the CoreCLR/.NET runtime.
+On older Unity (Mono/IL2CPP), drop the platform native library into `Assets/Plugins/<platform>/` and call the same API.
+The native binary itself is Unity-compatible; only the managed wrapper's target framework is the gate.
+
+## Runtime Dispatch
+
+The bundled library auto-selects the best SIMD backend for the host CPU at load time.
+
+```csharp
+Console.WriteLine(Sz.Backend); // e.g. "serial,haswell,skylake,icelake"
+Console.WriteLine(Sz.Version);
+```

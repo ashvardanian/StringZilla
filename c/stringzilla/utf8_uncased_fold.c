@@ -45,6 +45,6 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t 
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     return sz_dispatch_table.utf8_uncased_fold(source, source_length, destination);
 }

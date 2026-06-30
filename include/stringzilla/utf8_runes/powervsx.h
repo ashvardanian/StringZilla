@@ -21,7 +21,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t char_count = 0;
 
@@ -62,7 +62,7 @@ SZ_PUBLIC sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length) {
  *  byte → bit 0) via `vec_vbpermq`, identical to `sz_utf8_movemask_powervsx_` below but reachable before its
  *  first user (`sz_utf8_seek_powervsx` and the multistep iterators); distinctly named so both coexist in
  *  one translation unit. */
-SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = vec_vbpermq(compared, gather_indices_u8x16);
@@ -78,7 +78,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char c
  *         Per tile a code-point-start bitmask `~continuation_mask` is popcounted to skip whole tiles; the
  *         n-th start's lane comes from `sz_u32_nth_set_bit`. The `< 16` tail defers to the serial reference.
  */
-SZ_PUBLIC sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     __vector unsigned char const header_mask_u8x16 = vec_splats((unsigned char)0xC0);
@@ -377,7 +377,7 @@ static sz_u8_t const sz_utf8_compress8_powervsx_[256][8] = {{255, 255, 255, 255,
 /** @brief  Reduce the 16 byte-lane booleans (0x00/0xFF) of @p compared into a 16-bit lane mask (bit `i` <=> lane `i`,
  *          lowest-addressed byte → bit 0), the VSX `vpmovmskb` via `vec_vbpermq`. Mirror of
  *          @ref sz_utf8_iterate_movemask_powervsx_ but kept local to the decode path for clarity at the call sites. */
-SZ_INTERNAL sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char compared) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = vec_vbpermq(compared, gather_indices_u8x16);
@@ -386,7 +386,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char compare
 
 /** @brief  Combine the four per-register VSX movemasks of @p booleans into one 64-bit lane mask: register `r` → bits
  *          [16*r, 16*r+16). The VSX twin of the NEON `mask_combine` and the Ice Lake native `__mmask64`. */
-SZ_INTERNAL sz_u64_t sz_utf8_mask_combine_powervsx_( //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_powervsx_( //
     __vector unsigned char const *booleans) {
     sz_u64_t mask = (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[0]);
     mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[1]) << 16;
@@ -399,7 +399,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_mask_combine_powervsx_( //
  *          gather-free. VSX `vec_perm` addresses only a 32-byte register pair, so the low half `(regs[0],regs[1])`
  *          and high half `(regs[2],regs[3])` are each permuted and the per-lane `index >= 32` predicate selects the
  *          half. Lanes whose offset runs past the window read the zero padding (the value is discarded downstream). */
-SZ_INTERNAL __vector unsigned char sz_utf8_gather16_powervsx_( //
+SZ_HELPER_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
     __vector unsigned char const *regs, __vector unsigned char index) {
     __vector unsigned char const half_select_threshold_u8x16 = vec_splats((unsigned char)32);
     __vector unsigned char const gathered_low_u8x16 = vec_perm(regs[0], regs[1], index);
@@ -415,7 +415,7 @@ SZ_INTERNAL __vector unsigned char sz_utf8_gather16_powervsx_( //
  *          analogue: split @p emit16 into low8 / high8, `vec_perm` the byte-index identity vector by the matching
  *          2 KB shuffle-LUT rows, add the register base @p base, and stitch the two halves by `popcount(low8)`.
  */
-SZ_INTERNAL sz_size_t sz_utf8_compress_starts_powervsx_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_compress_starts_powervsx_( //
     sz_u32_t emit16, int base, sz_u8_t *packed, sz_size_t produced) {
     sz_u32_t const low8 = emit16 & 0xFFu;
     sz_u32_t const high8 = (emit16 >> 8) & 0xFFu;
@@ -455,7 +455,7 @@ SZ_INTERNAL sz_size_t sz_utf8_compress_starts_powervsx_( //
  *          length), so an ill-formed trailing lane never skips bytes owed their own next U+FFFD.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
-SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_powervsx_( //
     __vector unsigned char const *regs, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length,
     int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
     sz_size_t *consumed_bytes) {
@@ -579,9 +579,9 @@ SZ_INTERNAL sz_size_t sz_utf8_rune_drain_powervsx_( //
  *          unchanged) ONLY when the first lead's declared sequence crosses the window edge (a boundary truncation),
  *          which the public entry finalizes without a serial re-decode.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_rune_t *runes, sz_size_t runes_capacity,      //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_powervsx_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_rune_t *runes, sz_size_t runes_capacity,         //
     sz_size_t *runes_unpacked) {
 
     sz_size_t const chunk = length < 64 ? length : 64;
@@ -767,9 +767,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_decode_once_powervsx_( //
 
 #endif // !SZ_IS_BIG_ENDIAN_
 
-SZ_PUBLIC sz_cptr_t sz_utf8_decode_powervsx(    //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_rune_t *runes, sz_size_t runes_capacity, //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
+    sz_cptr_t text, sz_size_t length,              //
+    sz_rune_t *runes, sz_size_t runes_capacity,    //
     sz_size_t *runes_unpacked) {
 #if !SZ_IS_BIG_ENDIAN_
     sz_cptr_t cursor = text;

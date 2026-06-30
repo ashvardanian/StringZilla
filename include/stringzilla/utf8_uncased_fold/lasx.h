@@ -15,7 +15,7 @@ extern "C" {
 
 #if SZ_USE_LASX
 
-SZ_PUBLIC sz_size_t sz_utf8_uncased_fold_lasx(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_lasx(sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination) {
     return sz_utf8_uncased_fold_serial(source, source_length, destination);
 }
 

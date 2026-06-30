@@ -22,13 +22,13 @@ extern "C" {
 #pragma GCC target("sse4.2")
 #endif
 
-SZ_PUBLIC sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
         while (a != a_end && *a == *b) a++, b++;

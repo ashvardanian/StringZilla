@@ -23,7 +23,7 @@ extern "C" {
  *  for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral range list,
  *  defaulting to Other for everything else.
  */
-SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
+SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_word_break_big_count_k; ++range)
         if (rune >= sz_utf8_word_break_big_lo_[range] && rune <= sz_utf8_word_break_big_hi_[range])
             return sz_utf8_word_break_big_cls_[range];
@@ -51,7 +51,7 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
 /**
  *  @brief Check if a codepoint is a "word character" (has a word-forming Word_Break property).
  */
-SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
+SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     sz_u8_t property = sz_rune_word_break_property(rune);
     // Word characters: ALetter(8), Hebrew_Letter(9), Numeric(10), Katakana(11),
     // ExtendNumLet(12), MidLetter(13), MidNum(14), MidNumLet/Quotes(15)
@@ -62,7 +62,7 @@ SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
  *  @brief Check if @p rune is Extended_Pictographic (UAX-29 WB3c). Not part of the 4-bit Word_Break model, so it is
  *         resolved by binary search over the sorted Extended_Pictographic range table.
  */
-SZ_PUBLIC sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
+SZ_API_COMPTIME sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
     int low = 0, high = (int)sz_utf8_word_break_pict_u32_count_k - 1;
     while (low <= high) {
         int const mid = low + (high - low) / 2;
@@ -74,7 +74,7 @@ SZ_PUBLIC sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
 }
 
 /** @brief Check if @p rune is WSegSpace (UAX-29 WB3d); resolved by range membership (six ranges). */
-SZ_PUBLIC sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
+SZ_API_COMPTIME sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
     for (int range = 0; range < (int)sz_utf8_word_break_wseg_u32_count_k; ++range)
         if ((sz_u32_t)rune >= sz_utf8_word_break_wseg_u32_lo_[range] &&
             (sz_u32_t)rune <= sz_utf8_word_break_wseg_u32_hi_[range])
@@ -94,12 +94,12 @@ enum {
 };
 
 /** @brief Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
-SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_ignorable_set_k >> property) & 1u);
 }
 
 /** @brief Check if a property is AHLetter (ALetter or Hebrew_Letter). */
-SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_aletter_or_hebrew_set_k >> property) & 1u);
 }
 
@@ -107,7 +107,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property)
  *  @brief Check if a property is MidNumLetQ (MidNumLet or Single_Quote).
  *         In our encoding, MID_QUOTES (15) covers MidNumLet + quotes.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_mid_quotes_set_k >> property) & 1u);
 }
 
@@ -118,7 +118,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
  *  suppressed by a no-break rule. ASCII never triggers WB4 or WB15/16, so the rules reduce to neighbour shifts;
  *  the result is exact only for lanes whose i-2 and i+1 neighbours are in-window.
  */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_from_class_masks_(                                        //
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_join_from_class_masks_(                                   //
     sz_u64_t aletter_mask, sz_u64_t numeric_mask, sz_u64_t extendnumlet_mask, sz_u64_t midletter_mask, //
     sz_u64_t midnum_mask, sz_u64_t mid_quotes_mask, sz_u64_t carriage_return_mask, sz_u64_t line_feed_mask) {
     sz_u64_t mid_letter_or_quotes_mask = midletter_mask | mid_quotes_mask;
@@ -141,7 +141,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_join_from_class_masks_(                 
  *  @brief Skip forward past WB4-ignorable characters (Extend, Format, ZWJ).
  *  @return Position after ignorables, or original position if none.
  */
-SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     while (position < length) {
         sz_size_t next_position = position;
         sz_rune_t rune = sz_utf8_next_rune_(text, length, &next_position);
@@ -156,8 +156,8 @@ SZ_INTERNAL sz_size_t sz_utf8_skip_ignorables_forward_(sz_cptr_t text, sz_size_t
  *  @brief Get the effective property at position, skipping WB4 ignorables.
  *         Returns the property and updates next_pos to position after ignorables.
  */
-SZ_INTERNAL sz_u8_t sz_utf8_word_break_effective_property_(sz_cptr_t text, sz_size_t length, sz_size_t position,
-                                                           sz_size_t *next_position) {
+SZ_HELPER_AUTO sz_u8_t sz_utf8_word_break_effective_property_(sz_cptr_t text, sz_size_t length, sz_size_t position,
+                                                              sz_size_t *next_position) {
     sz_size_t current = position;
     sz_rune_t rune = sz_utf8_next_rune_(text, length, &current);
     sz_u8_t property = sz_rune_word_break_property(rune);
@@ -176,7 +176,7 @@ SZ_INTERNAL sz_u8_t sz_utf8_word_break_effective_property_(sz_cptr_t text, sz_si
  *  @brief Look back to find the previous non-ignorable property.
  *  @return The property of the previous significant character, or sz_utf8_word_break_other_k if none.
  */
-SZ_INTERNAL sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_size_t position) {
+SZ_HELPER_AUTO sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_size_t position) {
     if (position == 0) return sz_utf8_word_break_other_k;
 
     // Scan backward to find start of previous codepoint
@@ -211,7 +211,7 @@ SZ_INTERNAL sz_u8_t sz_utf8_word_break_previous_property_(sz_cptr_t text, sz_siz
 /**
  *  @brief Count Regional Indicators before position (for WB15/16).
  */
-SZ_INTERNAL sz_size_t sz_utf8_word_break_count_regional_indicators_before_(sz_cptr_t text, sz_size_t position) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_count_regional_indicators_before_(sz_cptr_t text, sz_size_t position) {
     sz_size_t count = 0;
     sz_size_t current = position;
 
@@ -258,7 +258,7 @@ typedef struct sz_word_element_t {
 } sz_word_element_t;
 
 /** @brief True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
-SZ_INTERNAL sz_bool_t sz_word_is_newline_(sz_u8_t property) {
+SZ_HELPER_INLINE sz_bool_t sz_word_is_newline_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
                        property == sz_utf8_word_break_newline_k);
 }
@@ -266,13 +266,13 @@ SZ_INTERNAL sz_bool_t sz_word_is_newline_(sz_u8_t property) {
 /*  The 4-bit model lumps Single_Quote (U+0027), Double_Quote (U+0022), and MidNumLet into MID_QUOTES, so the
  *  WB6/WB7/WB7a-c/WB11/WB12 distinctions are recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote,
  *  i.e. every MID_QUOTES codepoint that is NOT the Double_Quote. */
-SZ_INTERNAL sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
 }
-SZ_INTERNAL sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0022u);
 }
-SZ_INTERNAL sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
@@ -283,7 +283,7 @@ SZ_INTERNAL sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t code
  *         continuation-skip would absorb a stray into the previous codepoint and SKIP it during the backward look-back,
  *         crossing a streamed resume point and forging a WB5/6/7 join the forward pass never sees - that asymmetry is
  *         the capacity-dependence. Treating every stray as its own non-skippable U+FFFD makes resume reproduce. */
-SZ_INTERNAL sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
+SZ_HELPER_AUTO sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
     sz_size_t lead = position - 1;
     while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
     sz_size_t reach = lead;
@@ -292,7 +292,7 @@ SZ_INTERNAL sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position
 }
 
 /** @brief The element whose final codepoint ends just before @p position (sot sentinel when @p position == 0). */
-SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
+SZ_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     if (position == 0) return element;
@@ -324,7 +324,7 @@ SZ_INTERNAL sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_
 }
 
 /** @brief The element following the one whose base is at @p position (eot sentinel at end of text). */
-SZ_INTERNAL sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_AUTO sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     sz_size_t cursor = position;
@@ -349,7 +349,7 @@ SZ_INTERNAL sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t le
 }
 
 /** @brief Count of contiguous Regional_Indicator elements immediately before @p position (for WB15/WB16 parity). */
-SZ_INTERNAL sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
+SZ_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
     sz_size_t count = 0;
     sz_size_t cursor = position;
     for (;;) {
@@ -366,7 +366,7 @@ SZ_INTERNAL sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t pos
  *         the WB4 element model; used unchanged by the forward and reverse drivers (and every backend that
  *         delegates here), so segmentation is identical in either direction.
  */
-SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // WB1
     if (position >= length) return sz_true_k; // WB2
     // Never split INSIDE a codepoint - but only a continuation byte genuinely covered by a preceding lead's
@@ -497,7 +497,7 @@ typedef struct sz_word_serial_state_t {
 
 /** @brief Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new element base,
  *         maintaining the two-back base chain, the Regional_Indicator parity, and the raw-previous fields. */
-SZ_INTERNAL void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
+SZ_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property, sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
     sz_bool_t const is_ignorable = sz_utf8_word_break_is_ignorable_(property);
@@ -521,9 +521,9 @@ SZ_INTERNAL void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t 
 /** @brief Boundary decision (WB3..WB999) between @p state's previous codepoint and the @p next codepoint. The only
  *         right-context rules (WB6 / WB7b / WB12) reuse the bounded `sz_word_next_element_` forward fold; all left
  *         context comes from @p state. Byte-identical to `sz_utf8_is_word_boundary_serial`. */
-SZ_INTERNAL sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
-                                               sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
-                                               sz_size_t position) {
+SZ_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
+                                                  sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
+                                                  sz_size_t position) {
     sz_u8_t const immediate_property = state->previous_raw_property;
     sz_rune_t const immediate_codepoint = state->previous_raw_codepoint;
     if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
@@ -602,7 +602,7 @@ SZ_INTERNAL sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *sta
  *  position. On a full buffer `*bytes_consumed` is the start of the first word that did not fit - always a true TR29
  *  boundary - so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder.
  */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_serial(       //
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
@@ -672,8 +672,9 @@ SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_serial(       //
  *  @param claims_full  Lead lanes whose full declared multi-byte sequence is well-formed; a length>=2 lead NOT in this
  *                      set collapses to a 1-byte U+FFFD.
  */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_u64_t length_two, sz_u64_t length_three,
-                                                        sz_u64_t length_four, sz_u64_t claims_full, sz_u64_t valid) {
+SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_u64_t length_two,
+                                                           sz_u64_t length_three, sz_u64_t length_four,
+                                                           sz_u64_t claims_full, sz_u64_t valid) {
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t const sub1 = length_one | (length_ge_two & ~claims_full);
     sz_u64_t const sub2 = length_two & claims_full;
@@ -712,7 +713,7 @@ typedef struct sz_utf8_word_break_partition_t {
  *          distinguishes a benign interior straddle from a true end-of-text truncation. Bit-exact with the legacy
  *          `partition_icelake_`.
  */
-SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
+SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
     sz_u64_t real_continuation, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
     sz_u64_t bad_second_byte, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const length_one = valid & ~length_two & ~length_three & ~length_four;
@@ -801,7 +802,7 @@ typedef struct sz_utf8_word_break_window_t {
 } sz_utf8_word_break_window_t;
 
 /** @brief  Start-of-text carry: no previous element, all runs closed. */
-SZ_INTERNAL sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
+SZ_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
     sz_utf8_word_break_carry_t carry;
     carry.bridge_open = 0;
     carry.bridge_kind = sz_utf8_word_break_bridge_none_k;
@@ -820,7 +821,7 @@ SZ_INTERNAL sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
  *          lane, computed in log-depth Kogge-Stone doubling (no per-lane loop). @p ri lanes are RI codepoint
  *          starts; ignorables/continuations between two RIs are part of the same run via @p run_gate.
  */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_ri_join_( //
+SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_ri_join_( //
     sz_u64_t ri, sz_u64_t run_gate, sz_u8_t inbound_parity, sz_u64_t *inclusive_parity_out) {
     sz_u64_t bits = ri;
     sz_u64_t reach = run_gate;
@@ -874,7 +875,7 @@ typedef struct sz_utf8_word_break_frame_t {
  *  edge undecided, in which case `resolved` is clamped before that lane so the next, fully-contextual window
  *  re-resolves it. @p carry is updated from the trailing run-state read at the block edge by plain shifts.
  */
-SZ_FORCE_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( //
+SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( //
     sz_utf8_word_break_frame_t const *frame, sz_u64_t start_bytes_all, sz_u64_t continuation_all, sz_u64_t forced_other,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, sz_size_t loaded,
     sz_utf8_word_break_carry_t *carry, sz_bool_t more_text) {

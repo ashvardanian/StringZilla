@@ -28,21 +28,21 @@ extern "C" {
  *  baseline. `relaxed_swizzle` is the one find-family win, and it is already used by the byteset kernels
  *  below (their bit-table index is provably in `[0, 7]`, so relaxed equals strict). */
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     return sz_find_byte_v128(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     return sz_rfind_byte_v128(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_size_t needle_length) {
     return sz_find_v128(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                         sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length) {
     return sz_rfind_v128(haystack, haystack_length, needle, needle_length);
 }
 
@@ -62,7 +62,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_
  *  @param set_bottom_vec Bottom half of the byteset (byte indices 16..31).
  *  @return 0xFF per lane where the byte belongs to the set, 0x00 otherwise.
  */
-SZ_INTERNAL v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_vec, v128_t set_top_vec, v128_t set_bottom_vec) {
+SZ_HELPER_AUTO v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_vec, v128_t set_top_vec,
+                                                         v128_t set_bottom_vec) {
     v128_t byte_index_vec = wasm_u8x16_shr(haystack_vec, 3); // c >> 3, in [0, 31]
     v128_t bit_table_vec = wasm_i8x16_make(1, 2, 4, 8, 16, 32, 64, (sz_i8_t)128, 0, 0, 0, 0, 0, 0, 0, 0);
     // Index `c & 7` is in [0, 7] -> always in range -> relaxed swizzle is exact.
@@ -75,8 +76,8 @@ SZ_INTERNAL v128_t sz_find_byteset_match_v128relaxed_(v128_t haystack_vec, v128_
     return wasm_i8x16_ne(wasm_v128_and(matches_vec, byte_mask_vec), wasm_i8x16_splat(0));
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                      sz_byteset_t const *set) {
     v128_t set_top_vec = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_vec = wasm_v128_load(&set->_u8s[16]);
 
@@ -110,8 +111,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t ha
     return sz_find_byteset_serial(haystack, haystack_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                 sz_byteset_t const *set) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                       sz_byteset_t const *set) {
     v128_t set_top_vec = wasm_v128_load(&set->_u8s[0]);
     v128_t set_bottom_vec = wasm_v128_load(&set->_u8s[16]);
 

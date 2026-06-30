@@ -6,9 +6,10 @@
 #ifndef STRINGZILLAS_TYPES_HPP_
 #define STRINGZILLAS_TYPES_HPP_
 
-#include <thread>  // `std::thread::hardware_concurrency`
-#include <atomic>  // `std::atomic`, `std::memory_order`
-#include <cstdlib> // `std::malloc`, `std::free`
+#include <thread>   // `std::thread::hardware_concurrency`
+#include <atomic>   // `std::atomic`, `std::memory_order`
+#include <concepts> // `std::convertible_to`, `std::same_as`
+#include <cstdlib>  // `std::malloc`, `std::free`
 
 #include "stringzilla/types.hpp"
 
@@ -112,13 +113,9 @@ struct dummy_executor_t {
 #if SZ_HAS_CONCEPTS_
 
 template <typename executor_type_>
-concept executor_like = requires(executor_type_ executor) {
+concept executor_like = requires(std::remove_reference_t<executor_type_> &executor) {
     { executor.threads_count() } -> std::convertible_to<size_t>;
-    typename executor_type_::prong_t;
-    executor.for_n(0u, [](typename executor_type_::prong_t) {});
-    executor.for_slices(0u, [](typename executor_type_::prong_t, size_t) {});
-    executor.for_n_dynamic(0u, [](typename executor_type_::prong_t) {});
-    executor.for_threads([](size_t) {});
+    typename std::remove_reference_t<executor_type_>::prong_t;
 };
 
 template <typename results_type_>

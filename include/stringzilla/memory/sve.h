@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     svuint8_t value_u8x = svdup_u8(value);
     sz_size_t vector_length = svcntb(); // Vector length in bytes (scalable)
 
@@ -52,7 +52,7 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     }
 }
 
-SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -88,7 +88,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     }
 }
 
-SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -152,7 +152,8 @@ SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     }
 }
 
-SZ_PUBLIC void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                   char const lut[sz_at_least_(256)]) {
 
     if (length <= 128) {
         sz_lookup_serial(target, length, source, lut);

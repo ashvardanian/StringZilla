@@ -40,7 +40,7 @@ extern "C" {
  *  uses a 16-byte all-ASCII gate plus a 4x16-swizzle lead-classify; the cold per-codepoint verify
  *  carries the canonical combining class across windows and reports order or quick-check violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -91,11 +91,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t leng
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                            sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_v128_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_v128_);
 }
 

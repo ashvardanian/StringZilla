@@ -676,7 +676,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
 void test_utf8_tokens_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 newline/whitespace kernels...\n");
 
-    std::size_t const max_input_length = 70;
+    static constexpr std::size_t max_input_length = 70;
 
     // Drive every newline/whitespace boundary finder shipped on this target over one malformed input.
     auto check = [&](char const *input, std::size_t input_length) {
@@ -965,7 +965,7 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 /** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
 static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
                                           std::size_t random_inputs = scale_iterations(10000)) {
-    std::size_t const max_input_length = 70;
+    static constexpr std::size_t max_input_length = 70;
     std::vector<sz_size_t> offsets, lengths;
 
     auto check = [&](char const *input, std::size_t input_length) {

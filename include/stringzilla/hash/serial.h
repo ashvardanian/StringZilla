@@ -46,7 +46,7 @@ sz_static_assert(offsetof(sz_hash_state_aligned_t_, ins_length) == offsetof(sz_h
                  hash_aligned_ins_length_offset);
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length) {
     sz_u64_t bytesum = 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *text_end = text_u8 + length;
@@ -60,7 +60,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length) {
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`.
  *  @see Based on Jean-Philippe Aumasson's reference implementation: https://github.com/veorq/aesenc-noNI
  */
-SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     static sz_u8_t const sbox[256] = {
         // 0     1    2      3     4    5     6     7      8    9     A      B     C     D     E     F
         0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76, //
@@ -152,8 +152,8 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_ve
  *  @param order Permutation table: order[i] gives the source byte index for output byte i.
  *  @return Shuffled 128-bit vector.
  */
-SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
-                                                          sz_u8_t const order[sz_at_least_(16)]) {
+SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
+                                                             sz_u8_t const order[sz_at_least_(16)]) {
     sz_u128_vec_t result;
     // Unroll the loop for 16 bytes
     result.u8s[0] = state_vec.u8s[order[0]];
@@ -203,7 +203,7 @@ SZ_INTERNAL sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_ve
  *       https://giordano.github.io/blog/2017-11-21-hexadecimal-pi/
  *
  */
-SZ_INTERNAL sz_u64_t const *sz_hash_pi_constants_(void) {
+SZ_HELPER_INLINE sz_u64_t const *sz_hash_pi_constants_(void) {
     static sz_align_(64) sz_u64_t const pi[16] = {
         0x243F6A8885A308D3ull, 0x13198A2E03707344ull, 0xA4093822299F31D0ull, 0x082EFA98EC4E6C89ull,
         0x452821E638D01377ull, 0xBE5466CF34E90C6Cull, 0xC0AC29B7C97C50DDull, 0x3F84D5B5B5470917ull,
@@ -217,7 +217,7 @@ SZ_INTERNAL sz_u64_t const *sz_hash_pi_constants_(void) {
  *  @brief Provides a shuffle mask for the additive part, identical to "aHash" in a single lane.
  *  @return Pointer aligned to 64 bytes on SIMD-capable platforms.
  */
-SZ_INTERNAL sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
+SZ_HELPER_INLINE sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
     static sz_align_(64) sz_u8_t const shuffle[64] = {
         0x04, 0x0b, 0x09, 0x06, 0x08, 0x0d, 0x0f, 0x05, //
         0x0e, 0x03, 0x01, 0x0c, 0x00, 0x07, 0x0a, 0x02, //
@@ -236,7 +236,7 @@ SZ_INTERNAL sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
  *  @return Pointer to 8x 32-bit constants, aligned to 64 bytes.
  *  @see FIPS 180-4 Section 5.3.3
  */
-SZ_INTERNAL sz_u32_t const *sz_sha256_initial_hash_(void) {
+SZ_HELPER_INLINE sz_u32_t const *sz_sha256_initial_hash_(void) {
     static sz_align_(64) sz_u32_t const h[8] = {
         0x6a09e667ul, 0xbb67ae85ul, 0x3c6ef372ul, 0xa54ff53aul, //
         0x510e527ful, 0x9b05688cul, 0x1f83d9abul, 0x5be0cd19ul, //
@@ -249,7 +249,7 @@ SZ_INTERNAL sz_u32_t const *sz_sha256_initial_hash_(void) {
  *  @return Pointer to 64x 32-bit constants, aligned to 64 bytes.
  *  @see FIPS 180-4 Section 4.2.2
  */
-SZ_INTERNAL sz_u32_t const *sz_sha256_round_constants_(void) {
+SZ_HELPER_INLINE sz_u32_t const *sz_sha256_round_constants_(void) {
     static sz_align_(64) sz_u32_t const k[64] = {
         0x428a2f98ul, 0x71374491ul, 0xb5c0fbcful, 0xe9b5dba5ul, //
         0x3956c25bul, 0x59f111f1ul, 0x923f82a4ul, 0xab1c5ed5ul, //
@@ -276,7 +276,7 @@ SZ_INTERNAL sz_u32_t const *sz_sha256_round_constants_(void) {
  *  @param state Pointer to the minimal hash state to initialize.
  *  @param seed 64-bit seed value mixed with Pi constants to form the initial state.
  */
-SZ_INTERNAL void sz_hash_state_short_init_serial_(sz_hash_state_aligned_for_short_t_ *state, sz_u64_t seed) {
+SZ_HELPER_AUTO void sz_hash_state_short_init_serial_(sz_hash_state_aligned_for_short_t_ *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     state->key.u64s[1] = seed;
@@ -295,7 +295,7 @@ SZ_INTERNAL void sz_hash_state_short_init_serial_(sz_hash_state_aligned_for_shor
  *  @param state Pointer to the minimal hash state.
  *  @param block 128-bit data block to absorb.
  */
-SZ_INTERNAL void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_short_t_ *state, sz_u128_vec_t block) {
+SZ_HELPER_AUTO void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_short_t_ *state, sz_u128_vec_t block) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_si128_serial_(state->aes, block);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
@@ -308,8 +308,8 @@ SZ_INTERNAL void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_sh
  *  @param length Total number of bytes hashed, mixed into the key for length sensitivity.
  *  @return 64-bit hash value.
  */
-SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_aligned_for_short_t_ const *state,
-                                                          sz_size_t length) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_aligned_for_short_t_ const *state,
+                                                             sz_size_t length) {
     // Mix the length into the key
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
@@ -329,7 +329,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_aligned_
  *  @param vec Pointer to the 128-bit vector to shift in place.
  *  @param shift_bytes Number of bytes to shift right (0–15); shifting by 0 is a no-op.
  */
-SZ_INTERNAL void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
+SZ_HELPER_AUTO void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
     // One of the ridiculous things about x86, the `bsrli` instruction requires its operand to be an immediate.
     // On GCC and Clang, we could use the provided `__int128` type, but MSVC doesn't support it.
     // So we need to emulate it with 2x 64-bit shifts.
@@ -343,7 +343,7 @@ SZ_INTERNAL void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift
     }
 }
 
-SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     sz_u64_t *key_u64s = (sz_u64_t *)state->key;
@@ -365,7 +365,7 @@ SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) 
 /**
  *  @brief Loads the packed public state into the aligned internal twin (serial: 8x `sz_u64_load` per 64-byte field).
  */
-SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_serial_(sz_hash_state_t const *packed) {
+SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_serial_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t_ state;
     sz_cptr_t const aes = (sz_cptr_t)packed->aes, sum = (sz_cptr_t)packed->sum, ins = (sz_cptr_t)packed->ins;
     for (int word = 0; word < 8; ++word) {
@@ -380,7 +380,7 @@ SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_serial_(sz_hash_state_t 
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state. */
-SZ_INTERNAL void sz_hash_state_store_serial_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO void sz_hash_state_store_serial_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
     sz_ptr_t const aes = (sz_ptr_t)packed->aes, sum = (sz_ptr_t)packed->sum, ins = (sz_ptr_t)packed->ins;
     for (int word = 0; word < 8; ++word) {
         sz_u64_store(aes + word * 8, state->aes.u64s[word]);
@@ -396,7 +396,7 @@ SZ_INTERNAL void sz_hash_state_store_serial_(sz_hash_state_t *packed, sz_hash_st
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
  */
-SZ_INTERNAL void sz_hash_state_update_serial_(sz_hash_state_aligned_t_ *state) {
+SZ_HELPER_AUTO void sz_hash_state_update_serial_(sz_hash_state_aligned_t_ *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
     // First 128-bit block
@@ -429,7 +429,7 @@ SZ_INTERNAL void sz_hash_state_update_serial_(sz_hash_state_aligned_t_ *state) {
  *  @param state Pointer to the (const) hash state.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned_t_ state) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned_t_ state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
     // Mix the length into the key
@@ -473,7 +473,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned_t_ sta
     return mixed_in_register.u64s[0];
 }
 
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
@@ -585,7 +585,7 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_
     }
 }
 
-SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t_ state = sz_hash_state_load_serial_(packed);
     while (length) {
@@ -606,7 +606,7 @@ SZ_PUBLIC void sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t te
     sz_hash_state_store_serial_(packed, &state);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *packed) {
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t_ state = sz_hash_state_load_serial_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
@@ -663,7 +663,8 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *packed) {
  *        yields exactly `sz_hash(text, length, seed)` for each seed.
  *  @sa sz_hash_multiseed, sz_hash_multiseed_replay_serial_
  */
-SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_t length,
+                                                           sz_u512_vec_t *text_lanes) {
     sz_assert_(length <= 64 && "The text-lane form only covers the minimal (<= 64 byte) path");
 
     // Zero the whole 64-byte register first, so trailing bytes of the last partial lane are defined.
@@ -688,8 +689,8 @@ SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_
  *  @param seed 64-bit seed for this output.
  *  @return 64-bit hash, identical to `sz_hash_serial(text, length, seed)`.
  */
-SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
-                                                      sz_size_t length, sz_u64_t seed) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
+                                                         sz_size_t length, sz_u64_t seed) {
     sz_hash_state_aligned_for_short_t_ state;
     sz_hash_state_short_init_serial_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
@@ -697,9 +698,9 @@ SZ_INTERNAL sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_
     return sz_hash_state_short_finalize_serial_(&state, length);
 }
 
-SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,             //
-                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                        sz_u64_t *hashes) {
+SZ_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,             //
+                                              sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                              sz_u64_t *hashes) {
     // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
     if (seeds_count == 0) return;
     if (seeds_count == 1) {
@@ -725,33 +726,33 @@ SZ_PUBLIC void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,       
 #pragma region Serial SHA256 Implementation
 
 /** @brief SHA256 rotate right operation. */
-SZ_INTERNAL sz_u32_t sz_sha256_rotr_(sz_u32_t value, sz_u32_t count) {
+SZ_HELPER_INLINE sz_u32_t sz_sha256_rotr_(sz_u32_t value, sz_u32_t count) {
     return (value >> count) | (value << (32 - count));
 }
 
 /** @brief SHA256 Ch (choose) function: (x AND y) XOR (NOT x AND z). */
-SZ_INTERNAL sz_u32_t sz_sha256_ch_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (~x & z); }
+SZ_HELPER_INLINE sz_u32_t sz_sha256_ch_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (~x & z); }
 
 /** @brief SHA256 Maj (majority) function: (x AND y) XOR (x AND z) XOR (y AND z). */
-SZ_INTERNAL sz_u32_t sz_sha256_maj_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
+SZ_HELPER_INLINE sz_u32_t sz_sha256_maj_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
 
 /** @brief SHA256 Sigma0 function: ROTR(x,2) XOR ROTR(x,13) XOR ROTR(x,22). */
-SZ_INTERNAL sz_u32_t sz_sha256_sigma0_(sz_u32_t x) {
+SZ_HELPER_INLINE sz_u32_t sz_sha256_sigma0_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 2) ^ sz_sha256_rotr_(x, 13) ^ sz_sha256_rotr_(x, 22);
 }
 
 /** @brief SHA256 Sigma1 function: ROTR(x,6) XOR ROTR(x,11) XOR ROTR(x,25). */
-SZ_INTERNAL sz_u32_t sz_sha256_sigma1_(sz_u32_t x) {
+SZ_HELPER_INLINE sz_u32_t sz_sha256_sigma1_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 6) ^ sz_sha256_rotr_(x, 11) ^ sz_sha256_rotr_(x, 25);
 }
 
 /** @brief SHA256 sigma0 function: ROTR(x,7) XOR ROTR(x,18) XOR SHR(x,3). */
-SZ_INTERNAL sz_u32_t sz_sha256_sigma0_lower_(sz_u32_t x) {
+SZ_HELPER_INLINE sz_u32_t sz_sha256_sigma0_lower_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 7) ^ sz_sha256_rotr_(x, 18) ^ (x >> 3);
 }
 
 /** @brief SHA256 sigma1 function: ROTR(x,17) XOR ROTR(x,19) XOR SHR(x,10). */
-SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
+SZ_HELPER_INLINE sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 17) ^ sz_sha256_rotr_(x, 19) ^ (x >> 10);
 }
 
@@ -760,8 +761,8 @@ SZ_INTERNAL sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
  *  @param hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param block Pointer to 64-byte message block.
  */
-SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
-                                                 sz_u8_t const block[sz_at_least_(64)]) {
+SZ_HELPER_AUTO void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
+                                                    sz_u8_t const block[sz_at_least_(64)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_u32_t message_schedule[16];
     sz_u32_t a, b, c, d, e, f, g, h, temp1, temp2;
@@ -806,7 +807,7 @@ SZ_INTERNAL void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8)],
     hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
 }
 
-SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
+SZ_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
     // Vectorize the load/store of 8x u32s as 4x u64s
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     sz_u64_t const *source = (sz_u64_t const *)initial_hash;
@@ -815,7 +816,7 @@ SZ_PUBLIC void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
+SZ_API_COMPTIME void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / 64;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / 64;
@@ -866,7 +867,8 @@ SZ_PUBLIC void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cp
     state_ptr->hash[7] = hash[7];
 }
 
-SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr,
+                                                   sz_u8_t digest[sz_at_least_(32)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -935,7 +937,7 @@ SZ_PUBLIC void sz_sha256_state_digest_serial(sz_sha256_state_t const *state_ptr,
 
 #pragma endregion // Serial SHA256 Implementation
 
-SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {

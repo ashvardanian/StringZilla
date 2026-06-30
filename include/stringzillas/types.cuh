@@ -27,13 +27,32 @@
 #include <cub/device/device_run_length_encode.cuh> // `cub::DeviceRunLengthEncode` — warp-tier group run lengths
 #include <cub/device/device_scan.cuh>              // `cub::DeviceScan` — group begin offsets via exclusive sum
 #include <cub/device/device_segmented_reduce.cuh>  // `cub::DeviceSegmentedReduce` — per-group max memory requirement
+
+// CUB 3+ (CCCL 3.x / CUDA 13+) moved iterator types from cub:: to cuda::
+#if CUB_MAJOR_VERSION < 3
 #include <cub/iterator/counting_input_iterator.cuh>
 #include <cub/iterator/transform_input_iterator.cuh>
+#else
+#include <cuda/iterator>
+#endif
 
 namespace ashvardanian {
 namespace stringzillas {
 
 using namespace stringzilla;
+
+// Project-local iterator aliases so the rest of the codebase is CUB-version-agnostic.
+#if CUB_MAJOR_VERSION < 3
+template <typename value_type_>
+using counting_iterator = cub::CountingInputIterator<value_type_>;
+template <typename value_type_, typename conversion_op_, typename input_iterator_>
+using transform_input_iterator = cub::TransformInputIterator<value_type_, conversion_op_, input_iterator_>;
+#else
+template <typename value_type_>
+using counting_iterator = ::cuda::counting_iterator<value_type_>;
+template <typename value_type_, typename conversion_op_, typename input_iterator_>
+using transform_input_iterator = ::cuda::transform_iterator<conversion_op_, input_iterator_>;
+#endif
 
 /**
  *  @brief A custom allocator that uses CUDA Unified Memory for allocation.
@@ -524,7 +543,7 @@ struct cuda_launch_t {
  *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
  *  @see https://stackoverflow.com/a/40198552/2766161
  */
-__forceinline__ __device__ u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
+SZ_DEVICE_INLINE u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
     // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
     // four consecutive bytes into a 32-bit register.
     u32_vec_t result;
@@ -647,7 +666,7 @@ struct warp_tasks_group_descriptor_t {
 template <typename task_type_>
 struct warp_tasks_group_key_functor_ {
     task_type_ const *tasks = nullptr;
-    __host__ __device__ __forceinline__ u32_t operator()(size_t index) const noexcept {
+    __host__ SZ_DEVICE_INLINE u32_t operator()(size_t index) const noexcept {
         task_type_ const &task = tasks[index];
         return (static_cast<u32_t>(task.bytes_per_cell) << 8) | static_cast<u32_t>(task.density);
     }
@@ -656,7 +675,7 @@ struct warp_tasks_group_key_functor_ {
 /** @brief Reads one warp task's `memory_requirement` for the per-group `cub::DeviceSegmentedReduce::Max`. */
 template <typename task_type_>
 struct warp_tasks_memory_requirement_functor_ {
-    __host__ __device__ __forceinline__ size_t operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE size_t operator()(task_type_ const &task) const noexcept {
         return task.memory_requirement;
     }
 };
@@ -664,7 +683,7 @@ struct warp_tasks_memory_requirement_functor_ {
 /** @brief `cub::DevicePartition::If` predicate selecting device-level tasks (whole-device cooperative). */
 template <typename task_type_>
 struct task_is_device_level_functor_ {
-    __host__ __device__ __forceinline__ bool operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
         return task.density == warps_working_together_k;
     }
 };
@@ -672,7 +691,7 @@ struct task_is_device_level_functor_ {
 /** @brief `cub::DevicePartition::If` predicate selecting non-empty tasks (a pre-seeded cell is `infinite_*`). */
 template <typename task_type_>
 struct task_is_non_empty_functor_ {
-    __host__ __device__ __forceinline__ bool operator()(task_type_ const &task) const noexcept {
+    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
         return task.density != infinite_warps_per_multiprocessor_k;
     }
 };
@@ -816,9 +835,9 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     size_t *const group_max_memory = begin_offsets + (warp_level_count + 1);
 
     warp_tasks_group_key_functor_<task_t> const key_functor {warp_tasks_begin};
-    cub::CountingInputIterator<size_t> counting_iterator(0);
-    cub::TransformInputIterator<u32_t, warp_tasks_group_key_functor_<task_t>, cub::CountingInputIterator<size_t>>
-        key_iterator(counting_iterator, key_functor);
+    counting_iterator<size_t> iota(0);
+    transform_input_iterator<u32_t, warp_tasks_group_key_functor_<task_t>, counting_iterator<size_t>> key_iterator(
+        iota, key_functor);
     {
         size_t rle_bytes = 0;
         if (cub::DeviceRunLengthEncode::Encode(nullptr, rle_bytes, key_iterator, unique_keys, run_lengths,
@@ -837,7 +856,7 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
 
     {
         warp_tasks_memory_requirement_functor_<task_t> const memory_functor {};
-        cub::TransformInputIterator<size_t, warp_tasks_memory_requirement_functor_<task_t>, task_t const *>
+        transform_input_iterator<size_t, warp_tasks_memory_requirement_functor_<task_t>, task_t const *>
             memory_iterator(warp_tasks_begin, memory_functor);
         // Size BOTH the exclusive-sum (group begin offsets) and the segmented Max (per-group shared-memory footprint)
         // up front, then grow the shared CUB scratch ONCE to the larger - so no `try_resize` (a `cudaFree`/`cudaMalloc`

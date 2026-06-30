@@ -9,7 +9,7 @@
  *  `utf8_tokens.c`, `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`,
  *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
- *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_DYNAMIC` public
+ *  `sz_dispatch_table` via `sz_dispatch_<domain>_update_`, and defines the `SZ_API_RUNTIME` public
  *  wrappers that call through the table. The thin `runtime.c` owns the table definition and the
  *  one-time initialization.
  */

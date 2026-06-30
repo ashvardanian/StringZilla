@@ -118,7 +118,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
     }
 
     template <typename executor_type_ = dummy_executor_t>
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,           //
         u8_t const *scores_pre_deletion, u8_t *scores_new,                               //
@@ -265,7 +265,7 @@ struct tile_scorer<rune_t const *, rune_t const *, u8_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-    inline void operator()(                                                                  //
+    void operator()(                                                                         //
         rune_t const *first_reversed_slice, rune_t const *second_slice, size_t const length, //
         u8_t const *scores_pre_substitution, u8_t const *scores_pre_insertion,               //
         u8_t const *scores_pre_deletion, u8_t *scores_new,                                   //
@@ -428,7 +428,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,         //
         u16_t const *scores_pre_deletion, u16_t *scores_new,                             //
@@ -590,7 +590,7 @@ struct tile_scorer<rune_t const *, rune_t const *, u16_t, uniform_substitution_c
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    inline void operator()(                                                                  //
+    void operator()(                                                                         //
         rune_t const *first_reversed_slice, rune_t const *second_slice, size_t const length, //
         u16_t const *scores_pre_substitution, u16_t const *scores_pre_insertion,             //
         u16_t const *scores_pre_deletion, u16_t *scores_new,                                 //
@@ -752,7 +752,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u32_t const *scores_pre_substitution, u32_t const *scores_pre_insertion,         //
         u32_t const *scores_pre_deletion, u32_t *scores_new,                             //
@@ -877,7 +877,7 @@ struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_
     }
 
     template <typename executor_type_ = dummy_executor_t>
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u8_t const *scores_pre_substitution,                                             //
         u8_t const *scores_pre_insertion,                                                //
@@ -1019,7 +1019,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u16_t const *scores_pre_substitution,                                            //
         u16_t const *scores_pre_insertion,                                               //
@@ -1165,7 +1165,7 @@ struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    inline void operator()(                                                              //
+    void operator()(                                                                     //
         char const *first_reversed_slice, char const *second_slice, size_t const length, //
         u32_t const *scores_pre_substitution,                                            //
         u32_t const *scores_pre_insertion,                                               //
@@ -2910,10 +2910,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
      *      writes it into the strided @p results matrix (plus the mirror slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -3065,9 +3064,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into a per-worker slice; `for_slices` invokes the body at most `threads_count`
         // times, and the atomic counter hands each invocation a disjoint slice (no aliasing, no per-worker alloc).
@@ -4232,10 +4231,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
      *      slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -4445,9 +4443,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into a per-worker slice; `for_slices` invokes the body at most `threads_count`
         // times, and the atomic counter hands each invocation a disjoint slice (no aliasing, no per-worker alloc).
@@ -4834,14 +4832,14 @@ struct substitution_lookup_icelake_t {
     u512_vec_t is_third_or_fourth_vec_, is_second_or_fourth_vec_;
     u512_vec_t cost_windows_vecs_[16];
 
-    inline substitution_lookup_icelake_t() noexcept {
+    substitution_lookup_icelake_t() noexcept {
         char is_third_or_fourth_check, is_second_or_fourth_check;
         *(u8_t *)&is_third_or_fourth_check = 0x80, *(u8_t *)&is_second_or_fourth_check = 0x40;
         is_third_or_fourth_vec_.zmm = _mm512_set1_epi8(is_third_or_fourth_check);
         is_second_or_fourth_vec_.zmm = _mm512_set1_epi8(is_second_or_fourth_check);
     }
 
-    inline void reload_classes(u8_t const *byte_to_class) noexcept {
+    void reload_classes(u8_t const *byte_to_class) noexcept {
         byte_to_class_vecs_[0].zmm = _mm512_loadu_si512(byte_to_class + 64 * 0);
         byte_to_class_vecs_[1].zmm = _mm512_loadu_si512(byte_to_class + 64 * 1);
         byte_to_class_vecs_[2].zmm = _mm512_loadu_si512(byte_to_class + 64 * 2);
@@ -4854,7 +4852,7 @@ struct substitution_lookup_icelake_t {
      *         still returns the original `class_substitution_costs[first][second]` even when the diagonal walker
      *         has swapped the shorter and longer strings (which flips the order of the two class operands).
      */
-    inline void reload_costs(
+    void reload_costs(
         error_cost_t const (&class_substitution_costs)[error_costs_classes_count_k][error_costs_classes_count_k],
         bool transpose) noexcept {
         alignas(64) error_cost_t windows[16 * 64];
@@ -4870,7 +4868,7 @@ struct substitution_lookup_icelake_t {
             cost_windows_vecs_[window].zmm = _mm512_load_si512(windows + window * 64);
     }
 
-    inline u512_vec_t classify64(u512_vec_t const &text_vec) const noexcept {
+    SZ_INLINE u512_vec_t classify64(u512_vec_t const &text_vec) const noexcept {
 
         u512_vec_t shuffled_class_vecs[4];
         u512_vec_t class_vec;
@@ -4892,7 +4890,8 @@ struct substitution_lookup_icelake_t {
         return class_vec;
     }
 
-    inline u512_vec_t lookup64(u512_vec_t const &first_class_vec, u512_vec_t const &second_class_vec) const noexcept {
+    SZ_INLINE u512_vec_t lookup64(u512_vec_t const &first_class_vec,
+                                  u512_vec_t const &second_class_vec) const noexcept {
 
         u512_vec_t index_vec, substituted_vec;
         u512_vec_t permuted_vecs[16], blend4_vecs[8], blend3_vecs[4], blend2_vecs[2];

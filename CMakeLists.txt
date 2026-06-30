@@ -22,9 +22,10 @@
 #
 # Tests for parallel algorithms:
 #
-# * stringzillas_test_cpp17 / stringzillas_test_cpp20: Parallel-algorithm tests for the host's best CPU backend.
-# * stringzillas_test_cu17 / stringzillas_test_cu20: Parallel-algorithm tests on CUDA-capable GPUs (base SIMT, Kepler,
-#   and Hopper tiers selected at runtime).
+# * stringzillas_test_cpp20 (and stringzillas_test_cpp23 where the compiler advertises C++23): Parallel-algorithm tests
+#   for the host's best CPU backend.
+# * stringzillas_test_cu20 (and stringzillas_test_cu23 where nvcc advertises CUDA23): Parallel-algorithm tests on
+#   CUDA-capable GPUs (base SIMT, Kepler, and Hopper tiers selected at runtime).
 #
 # Serial Benchmarks:
 #
@@ -34,9 +35,12 @@
 # * stringzilla_bench_container_cpp20: A benchmark for STL containers powered by StringZilla.
 # * stringzilla_bench_memory_cpp20: A benchmark for LibC-style low-level memory operations.
 # * stringzilla_bench_utf8_uncased_cpp20: A benchmark for the `sz_utf8_uncased_*` folding/search family.
-# * stringzilla_bench_utf8_traverse_cpp20: A benchmark for the `sz_utf8_*` traversal/transcode family (count/seek/decode).
-# * stringzilla_bench_utf8_scan_cpp20: A benchmark for the `sz_utf8_*` class-scan family (newlines/whitespaces/delimiters).
-# * stringzilla_bench_utf8_segment_cpp20: A benchmark for the `sz_utf8_*` boundary-segmentation family (words/graphemes/sentences/linebreaks).
+# * stringzilla_bench_utf8_traverse_cpp20: A benchmark for the `sz_utf8_*` traversal/transcode family
+#   (count/seek/decode).
+# * stringzilla_bench_utf8_scan_cpp20: A benchmark for the `sz_utf8_*` class-scan family
+#   (newlines/whitespaces/delimiters).
+# * stringzilla_bench_utf8_segment_cpp20: A benchmark for the `sz_utf8_*` boundary-segmentation family
+#   (words/graphemes/sentences/linebreaks).
 # * stringzilla_bench_utf8_norm_cpp20: A benchmark for the `sz_utf8_norm` normalization family.
 #
 # Parallel Benchmarks:
@@ -152,14 +156,13 @@ option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZI
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
 option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
 
-# Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only):
-#   cmake -B build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++
-#   cmake --build build_cov --target stringzilla_test_cpp17 -j
-#   LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp17
-#   llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata
-#   llvm-cov report ./build_cov/stringzilla_test_cpp17 -instr-profile=/tmp/sz.profdata include/stringzilla/
-# `-march=native` compiles out the non-native backends, so a faithful picture needs `llvm-profdata merge`
-# across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV qemu toolchain).
+# Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
+# build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
+# build_cov --target stringzilla_test_cpp17 -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp17
+# llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test_cpp17
+# -instr-profile=/tmp/sz.profdata include/stringzilla/ `-march=native` compiles out the non-native backends, so a
+# faithful picture needs `llvm-profdata merge` across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV
+# qemu toolchain).
 option(STRINGZILLA_BUILD_COVERAGE "Instrument with Clang source-based coverage" OFF)
 set(STRINGZILLA_TARGET_ARCH
     ""
@@ -178,6 +181,14 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_ARCHITECTURES 90a) # Hopper is the newest architecture we specialize for
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
+    # CUDA 13+ / CCCL 3.x ships CUB, Thrust, and libcudacxx under include/cccl/
+    find_path(
+        STRINGZILLA_CCCL_INCLUDE_DIR
+        NAMES cuda/iterator
+        PATHS ${CUDAToolkit_INCLUDE_DIRS}
+        PATH_SUFFIXES cccl
+        NO_DEFAULT_PATH
+    )
     message(STATUS "CUDA support enabled")
     message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
     message(STATUS "CUDA Compiler ID: ${CMAKE_CUDA_COMPILER_ID}")
@@ -235,8 +246,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         if (compiler_id STREQUAL "NVIDIA")
             set_target_properties(${target} PROPERTIES CUDA_STANDARD ${cpp_standard})
         elseif (compiler_id MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts
-            target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
+            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts. MSVC has no
+            # `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
+            if (cpp_standard GREATER_EQUAL 23)
+                target_compile_options(${target} PRIVATE "/std:c++latest")
+            else ()
+                target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
+            endif ()
         else ()
             set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
         endif ()
@@ -257,10 +273,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # MSVC uses numeric values: > 4068 for "unknown pragmas". > 4146 for "unary minus operator applied to unsigned type,
     # result still unsigned". We also specify `/utf-8` to properly UTF-8 symbols in tests.
     if (compiler_id STREQUAL "GNU")
+        # `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector
+        # loads near a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible
+        # warning, not a build-breaking error.
         target_compile_options(
             ${target}
             PRIVATE
-                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion"
+                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
         )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
@@ -272,6 +291,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             ${target}
             PRIVATE "/Bt" # Display build timings
                     "/wd4068" # Disable warning: unknown pragma
+                    "/wd5030" # Disable warning: attribute is not recognized
+                    "/wd5051" # Disable warning: attribute requires a newer standard (e.g. [[maybe_unused]] in C++11/14)
                     "/wd4146" # Disable warning: unary minus operator applied to unsigned type
                     "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
                     "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
@@ -280,11 +301,19 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                     "/WX" # Treat warnings as errors
         )
     elseif (compiler_id STREQUAL "NVIDIA")
-        target_compile_options(
-            ${target}
-            PRIVATE
-                "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
-        )
+        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            target_compile_options(
+                ${target}
+                PRIVATE
+                    "-Xcompiler=/Zc:preprocessor;-Xcompiler=/Zc:__cplusplus;-Xcompiler=/W3;-Xcompiler=/WX;-Xcompiler=/wd4068;-Xcompiler=/wd5030;-Xcompiler=/wd5051;-Xcompiler=/wd4146;-Xcompiler=/wd4996;-Xcompiler=/wd4244;-Xcompiler=/wd4267;-Xcompiler=/utf-8"
+            )
+        else ()
+            target_compile_options(
+                ${target}
+                PRIVATE
+                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+            )
+        endif ()
     endif ()
 
     # Set optimization options for different compilers differently
@@ -309,29 +338,50 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             target_compile_options(${target} PRIVATE "-O2")
         endif ()
     elseif (compiler_id STREQUAL "NVIDIA")
-        target_compile_options(
-            ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
-                              "-Xcompiler=-Wextra" # Extra warnings (host)
-        )
-
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+                target_compile_options(
+                    ${target}
+                    PRIVATE "-G" # Device debug symbols
+                            "-no-compress" # No compression of debug info
+                            "-Xcompiler=/Zi" # Host debugging symbols
+                            "-Xcompiler=/Oy-" # Frame pointers for stack traces
+                            "-Xcompiler=/Ob0" # Prevent host inlining
+                            "-maxrregcount=0" # No register count limits
+                )
+            endif ()
+            if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+                target_compile_options(
+                    ${target}
+                    PRIVATE "-O2" # NVCC optimizations
+                            "-Xptxas=-O2" # PTX assembler optimizations
+                            "-Xcompiler=/O2" # Host optimizations
+                )
+            endif ()
+        else ()
             target_compile_options(
-                ${target}
-                PRIVATE "-G" # Device debug symbols, which will add `-lineinfo` symbols to PTX
-                        "-no-compress" # No compression of debug info
-                        "-Xcompiler=-g" # Host debugging symbols explicitly
-                        "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                        "-Xcompiler=-fno-inline" # Prevent host inlining
-                        "-maxrregcount=0" # No register count limits
+                ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
+                                  "-Xcompiler=-Wextra" # Extra warnings (host)
             )
-        endif ()
-        if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-            target_compile_options(
-                ${target}
-                PRIVATE "-O2" # Disable NVCC optimizations explicitly
-                        "-Xptxas=-O2" # Disable PTX assembler optimizations
-                        "-Xcompiler=-O2" # Host optimizations off
-            )
+            if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+                target_compile_options(
+                    ${target}
+                    PRIVATE "-G" # Device debug symbols
+                            "-no-compress" # No compression of debug info
+                            "-Xcompiler=-g" # Host debugging symbols explicitly
+                            "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+                            "-Xcompiler=-fno-inline" # Prevent host inlining
+                            "-maxrregcount=0" # No register count limits
+                )
+            endif ()
+            if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+                target_compile_options(
+                    ${target}
+                    PRIVATE "-O2" # NVCC optimizations
+                            "-Xptxas=-O2" # PTX assembler optimizations
+                            "-Xcompiler=-O2" # Host optimizations
+                )
+            endif ()
         endif ()
     endif ()
 
@@ -344,6 +394,15 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # Avoid builtin functions where we know what we are doing.
     if (compiler_id MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Oi-")
+    elseif (compiler_id STREQUAL "NVIDIA")
+        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            target_compile_options(${target} PRIVATE "-Xcompiler=/Oi-")
+        else ()
+            target_compile_options(
+                ${target} PRIVATE "-Xcompiler=-fno-builtin-memcmp" "-Xcompiler=-fno-builtin-memchr"
+                                  "-Xcompiler=-fno-builtin-memcpy" "-Xcompiler=-fno-builtin-memset"
+            )
+        endif ()
     else ()
         target_compile_options(${target} PRIVATE "-fno-builtin-memcmp")
         target_compile_options(${target} PRIVATE "-fno-builtin-memchr")
@@ -380,11 +439,19 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                                                             ${CMAKE_HOST_SYSTEM_PROCESSOR})
         )
             if (compiler_id STREQUAL "NVIDIA")
-                # For NVCC, pass native flag to host compiler
-                include(CheckCXXCompilerFlag)
-                check_cxx_compiler_flag("-march=native" supports_march_native)
-                if (supports_march_native)
-                    target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
+                # For NVCC, pass architecture flag to host compiler
+                if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+                    if (SZ_IS_64BIT_ARM_)
+                        target_compile_options(${target} PRIVATE "-Xcompiler=/arch:armv8.0")
+                    else ()
+                        target_compile_options(${target} PRIVATE "-Xcompiler=/arch:AVX2")
+                    endif ()
+                else ()
+                    include(CheckCXXCompilerFlag)
+                    check_cxx_compiler_flag("-march=native" supports_march_native)
+                    if (supports_march_native)
+                        target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
+                    endif ()
                 endif ()
             elseif (NOT (compiler_id MATCHES "MSVC"))
                 include(CheckCXXCompilerFlag)
@@ -406,7 +473,11 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             target_compile_options(${target} PRIVATE "/arch:${target_arch}")
         elseif (compiler_id STREQUAL "NVIDIA")
             # NVCC handles CPU architecture through host compiler flags
-            target_compile_options(${target} PRIVATE "-Xcompiler=-march=${target_arch}")
+            if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+                target_compile_options(${target} PRIVATE "-Xcompiler=/arch:${target_arch}")
+            else ()
+                target_compile_options(${target} PRIVATE "-Xcompiler=-march=${target_arch}")
+            endif ()
         else ()
             target_compile_options(${target} PRIVATE "-march=${target_arch}")
         endif ()
@@ -460,7 +531,10 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
     set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
     target_compile_definitions(${exec_name} PRIVATE "SZ_USE_CUDA=1")
     set_target_properties(${exec_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-    target_include_directories(${exec_name} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    target_include_directories(
+        ${exec_name} PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
+                             $<$<BOOL:${STRINGZILLA_CCCL_INCLUDE_DIR}>:${STRINGZILLA_CCCL_INCLUDE_DIR}>
+    )
     set_compiler_flags(${exec_name} ${cuda_standard} "${target_arch}" "${CMAKE_CUDA_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE CUDA::cudart CUDA::cuda_driver)
     # Match the StringZillas CUDA static library's base tier (real SASS for Ampere sm_80 and Hopper sm_90), so the test
@@ -532,12 +606,15 @@ function (set_architecture_simd_definitions target)
         target_compile_definitions(
             ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=1" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
         )
-    elseif (CMAKE_SYSTEM_NAME STREQUAL "WASI" OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten" OR CMAKE_SYSTEM_PROCESSOR
-                                                                                            MATCHES "wasm")
-        # WebAssembly: the toolchain passes `-msimd128` (+ `-mrelaxed-simd`), and `types.h` auto-enables
-        # SZ_USE_V128 / SZ_USE_V128RELAXED from the predefined `__wasm_simd128__` / `__wasm_relaxed_simd__`
-        # macros. Leave those to auto-detect; just disable every native tier. wasm has no runtime probe, so
-        # the header-only test/bench TUs use compile-time dispatch (SZ_DYNAMIC_DISPATCH defaults to 0).
+    elseif (
+        CMAKE_SYSTEM_NAME STREQUAL "WASI"
+        OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten"
+        OR CMAKE_SYSTEM_PROCESSOR MATCHES "wasm"
+    )
+        # WebAssembly: the toolchain passes `-msimd128` (+ `-mrelaxed-simd`), and `types.h` auto-enables SZ_USE_V128 /
+        # SZ_USE_V128RELAXED from the predefined `__wasm_simd128__` / `__wasm_relaxed_simd__` macros. Leave those to
+        # auto-detect; just disable every native tier. wasm has no runtime probe, so the header-only test/bench TUs use
+        # compile-time dispatch (SZ_DYNAMIC_DISPATCH defaults to 0).
         target_compile_definitions(
             ${target}
             PRIVATE "SZ_IS_64BIT_X86_=0"
@@ -770,6 +847,10 @@ function (define_stringzillas_cuda_objects name sources gpu_archs)
                    CUDA_ARCHITECTURES "${gpu_archs}"
     )
     target_include_directories(${name} PRIVATE include fork_union/include)
+    target_include_directories(
+        ${name} SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
+                               $<$<BOOL:${STRINGZILLA_CCCL_INCLUDE_DIR}>:${STRINGZILLA_CCCL_INCLUDE_DIR}>
+    )
     target_compile_definitions(
         ${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0" "FU_ENABLE_NUMA=0"
     )
@@ -884,30 +965,22 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_memory_cpp20 bench/memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Parallel benchmarks link the precompiled static libraries when those are built.
-    define_launcher(
-        stringzillas_bench_similarities_cpp20 bench/similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
-    )
-    define_launcher(
-        stringzillas_bench_fingerprints_cpp20 bench/fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
-    )
+    define_launcher(stringzillas_bench_similarities_cpp20 bench/similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_bench_fingerprints_cpp20 bench/fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_bench_similarities_cpp20 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(
-            stringzillas_bench_similarities_cu20 bench/similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}"
-        )
-        define_gpu_launcher(
-            stringzillas_bench_fingerprints_cu20 bench/fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}"
-        )
+        define_gpu_launcher(stringzillas_bench_similarities_cu20 bench/similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringzillas_bench_fingerprints_cu20 bench/fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}")
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzillas_cuda_static)
         endif ()
-        # The host object pulls in `std::log` etc.; unlike the host-compiler driver used for the `cpp20`
-        # benches, nvcc's final link does not implicitly add libm. Link it only where it exists as a
-        # separate library (Linux/glibc); on macOS/MSVC the math symbols live in the C runtime.
+        # The host object pulls in `std::log` etc.; unlike the host-compiler driver used for the `cpp20` benches, nvcc's
+        # final link does not implicitly add libm. Link it only where it exists as a separate library (Linux/glibc); on
+        # macOS/MSVC the math symbols live in the C runtime.
         find_library(STRINGZILLA_LIBM m)
         if (STRINGZILLA_LIBM)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE ${STRINGZILLA_LIBM})
@@ -917,9 +990,9 @@ if (STRINGZILLA_BUILD_BENCHMARK)
 endif ()
 
 if (STRINGZILLA_BUILD_TEST)
-    # The serial test suite is split across per-domain translation units that compile into the same binary,
-    # so the standards-matrix builds below parallelize and rebuild incrementally instead of recompiling one
-    # 5K-line file. `define_launcher`'s `target_sources` accepts this list verbatim.
+    # The serial test suite is split across per-domain translation units that compile into the same binary, so the
+    # standards-matrix builds below parallelize and rebuild incrementally instead of recompiling one 5K-line file.
+    # `define_launcher`'s `target_sources` accepts this list verbatim.
     set(STRINGZILLA_TEST_SOURCES
         test/stringzilla.cpp
         test/hash.cpp
@@ -942,22 +1015,32 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzilla_test_cpp17 "${STRINGZILLA_TEST_SOURCES}" 17 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
 
-    # Test parallel algorithms separately; link the static archive when the libraries are built.
-    define_launcher(stringzillas_test_cpp17 test/stringzillas.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    # Test parallel algorithms separately; link the static archive when the libraries are built. StringZillas requires
+    # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We also test
+    # C++23 to validate forward compatibility, but only where the toolchain actually advertises support for it — older
+    # MSVC and nvcc releases lack a C++23 dialect, and forcing it there silently decays to an earlier standard or hard
+    # errors at configure time.
     define_launcher(stringzillas_test_cpp20 test/stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (STRINGZILLAS_BUILD_SHARED)
-        target_link_libraries(stringzillas_test_cpp17 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
+    if ("cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+        define_launcher(stringzillas_test_cpp23 test/stringzillas.cpp 23 "${STRINGZILLA_TARGET_ARCH}")
+        if (STRINGZILLAS_BUILD_SHARED)
+            target_link_libraries(stringzillas_test_cpp23 PRIVATE stringzillas_cpus_static)
+        endif ()
+    endif ()
 
-    # We only target C++14 and newer so `constexpr` functions compile on both host and device without `__device__`
-    # annotations, and C++17 and newer so the `if constexpr` compile-time SIMD dispatch works.
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzillas_test_cu17 test/stringzillas.cu 17 "${STRINGZILLA_TARGET_ARCH}")
         define_gpu_launcher(stringzillas_test_cu20 test/stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
         if (STRINGZILLAS_BUILD_SHARED)
-            target_link_libraries(stringzillas_test_cu17 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)
+        endif ()
+        if ("cuda_std_23" IN_LIST CMAKE_CUDA_COMPILE_FEATURES)
+            define_gpu_launcher(stringzillas_test_cu23 test/stringzillas.cu 23 "${STRINGZILLA_TARGET_ARCH}")
+            if (STRINGZILLAS_BUILD_SHARED)
+                target_link_libraries(stringzillas_test_cu23 PRIVATE stringzillas_cuda_static)
+            endif ()
         endif ()
     endif ()
 endif ()

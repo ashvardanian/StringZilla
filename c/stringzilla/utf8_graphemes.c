@@ -23,9 +23,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t cap
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
-                                       sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
-                                       sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                           sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                           sz_size_t *bytes_consumed) {
     return sz_dispatch_table.utf8_graphemes(text, length, cluster_starts, cluster_lengths, clusters_capacity,
                                             bytes_consumed);
 }

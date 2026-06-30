@@ -84,8 +84,8 @@ extern "C" {
  *  @sa sz_sequence_argsort_serial, sz_sequence_argsort_skylake, sz_sequence_argsort_sve
  *  @sa sz_sequence_argsort_uncased
  */
-SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                           sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_RUNTIME sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /**
  *  @brief Faster @b stable @b uncased arg-sort for a UTF-8 @b string sequence, using QuickSort.
@@ -111,16 +111,16 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *  @sa sz_utf8_uncased_fold, sz_utf8_uncased_order
  *  @sa sz_sequence_argsort_uncased_serial
  */
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_uncased(              //
+SZ_API_RUNTIME sz_status_t sz_sequence_argsort_uncased(          //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                 sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                       sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_serial(        //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial(  //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
@@ -138,91 +138,91 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_serial(        //
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
  */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                            sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                  sz_sorted_idx_t *order);
 
 #if SZ_USE_HASWELL
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                        sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_haswell(       //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_haswell( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_pgrams_sort_serial */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_haswell(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                   sz_sorted_idx_t *order);
 
 #endif
 
 #if SZ_USE_SKYLAKE
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                        sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_skylake(       //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_skylake( //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_pgrams_sort_serial */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                   sz_sorted_idx_t *order);
 
 #endif
 
 #if SZ_USE_SVE
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                              sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_sve(           //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_sve(     //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_pgrams_sort_serial */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                         sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                               sz_sorted_idx_t *order);
 
 #endif
 
 #if SZ_USE_NEON
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_neon(          //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_pgrams_sort_serial */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                          sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                                sz_sorted_idx_t *order);
 
 #endif
 
 #if SZ_USE_RVV
 
 /** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                              sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_sequence_argsort_uncased */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_uncased_rvv(           //
+SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_rvv(     //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
 
 /** @copydoc sz_pgrams_sort_serial */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                         sz_sorted_idx_t *order);
+SZ_API_COMPTIME sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                               sz_sorted_idx_t *order);
 
 #endif
 
@@ -241,8 +241,8 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t count, sz
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                           sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+SZ_API_RUNTIME sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                               sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE
     return sz_sequence_argsort_skylake(sequence, alloc, order, top_count, reverse);
 #elif SZ_USE_HASWELL
@@ -258,7 +258,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_uncased(              //
+SZ_API_RUNTIME sz_status_t sz_sequence_argsort_uncased(          //
     sz_sequence_t const *sequence, sz_memory_allocator_t *alloc, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 #if SZ_USE_SKYLAKE

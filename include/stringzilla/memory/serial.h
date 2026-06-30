@@ -13,8 +13,8 @@
 extern "C" {
 #endif
 
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                char const lut[sz_at_least_(256)]) {
+SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                      char const lut[sz_at_least_(256)]) {
     sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
     sz_u8_t const *source_u8 = (sz_u8_t const *)source;
     sz_u8_t *target_u8 = (sz_u8_t *)target;
@@ -25,7 +25,7 @@ SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t sou
 #if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
 #pragma optimize("", off)
 #endif
-SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
     // If the size is larger than 2 words, then at least 1 of them will be aligned.
@@ -45,14 +45,14 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
 #pragma optimize("", on)
 #endif
 
-SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_MISALIGNED_LOADS
     while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
 #endif
     while (length--) *(target++) = *(source++);
 }
 
-SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
     // Existing implementations often have two passes, in normal and reversed order,
     // depending on the relation of `target` and `source` addresses.

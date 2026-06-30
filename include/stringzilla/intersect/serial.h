@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                                 //
+SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                           //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {

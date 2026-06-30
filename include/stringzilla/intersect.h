@@ -80,9 +80,10 @@ extern "C" {
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa sz_sequence_intersect_serial, sz_sequence_intersect_icelake, sz_sequence_intersect_sve
  */
-SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-                                             sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
-                                             sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence,
+                                                 sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
+                                                 sz_u64_t seed, sz_size_t *intersection_size,
+                                                 sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 /**
  *  @brief Defines various JOIN semantics for string sequences, including handling of duplicates.
@@ -232,7 +233,7 @@ typedef enum {
 #if SZ_USE_ICELAKE
 
 /** @copydoc sz_sequence_intersect */
-SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                           //
+SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                     //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
@@ -242,7 +243,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_icelake(                           /
 #if SZ_USE_SVE
 
 /** @copydoc sz_sequence_intersect */
-SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(                               //
+SZ_API_COMPTIME sz_status_t sz_sequence_intersect_sve(                         //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
@@ -261,9 +262,10 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(                               /
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-                                             sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
-                                             sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
+SZ_API_RUNTIME sz_status_t sz_sequence_intersect(sz_sequence_t const *first_sequence,
+                                                 sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
+                                                 sz_u64_t seed, sz_size_t *intersection_size,
+                                                 sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
 #if SZ_USE_ICELAKE
     return sz_sequence_intersect_icelake( //
         first_sequence, second_sequence,  //

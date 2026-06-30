@@ -1805,6 +1805,7 @@ where
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
+#[cfg(feature = "std")]
 fn replace_all_with_finder<F, R>(
     buffer: &mut Vec<u8>,
     needle_length: usize,
@@ -1932,6 +1933,7 @@ where
 /// - longer replacements count matches once, resize once, and rewrite from the back.
 ///
 /// Returns the number of replacements performed.
+#[cfg(feature = "std")]
 pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) -> Result<usize, Status> {
     replace_all_with_finder(
         buffer,
@@ -1958,6 +1960,7 @@ pub fn try_replace_all(buffer: &mut Vec<u8>, needle: &[u8], replacement: &[u8]) 
 ///
 /// Uses the same three-way strategy as [`try_replace_all`]. If the byteset is empty, the buffer is
 /// left untouched. Returns the number of replacements performed.
+#[cfg(feature = "std")]
 pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replacement: &[u8]) -> Result<usize, Status> {
     if byteset.bits.iter().all(|&b| b == 0) {
         return Ok(0);
@@ -3211,9 +3214,15 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
                 &mut consumed,
             )
         };
-        debug_assert!(self.separators <= STEPS, "segmenter reported more spans than the capacity STEPS");
+        debug_assert!(
+            self.separators <= STEPS,
+            "segmenter reported more spans than the capacity STEPS"
+        );
         debug_assert!(consumed <= self.region, "segmenter consumed past the region end");
-        debug_assert!(consumed > 0 || self.region == 0, "segmenter made no progress (the iterator would loop forever)");
+        debug_assert!(
+            consumed > 0 || self.region == 0,
+            "segmenter made no progress (the iterator would loop forever)"
+        );
         debug_assert!(
             (0..self.separators).all(|s| self.starts[s] + self.lengths[s] <= self.region
                 && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),

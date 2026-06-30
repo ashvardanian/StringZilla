@@ -42,7 +42,7 @@ extern "C" {
  *         offset = codepoint - 0x10000 (s0 -> s1 -> s2 -> leaf). Re-init-free: every tile is read straight from
  *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with the legacy
  *         618-range linear astral fold; replaces that per-window scan. */
-SZ_INTERNAL __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints) {
+SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints) {
     __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
     __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_line_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
@@ -65,7 +65,7 @@ SZ_INTERNAL __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints)
  *         are gone. This mirrors `sz_utf8_rune_trie_walk_icelake_` exactly with `block = superblock = 8` and
  *         `offset = (high << 8) | low`; the substrate function bakes in a hard `-0x800`, so the zero-base form lives
  *         here. Lanes whose codepoint is >= 0x10000 are undefined (the caller blends in the astral path). */
-SZ_INTERNAL __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i low) {
+SZ_HELPER_AUTO __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i low) {
     __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_block_k));
     __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_subblock_k));
     __m512i const within_mask = _mm512_set1_epi16((short)(sz_utf8_line_break_trie_block_k - 1));
@@ -119,7 +119,7 @@ SZ_INTERNAL __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i 
  *         2-byte scripts, ASCII-interleaved runs) cannot fit one 16-bit register and fall back to the unconditional
  *         two-pass walk, which costs no more than today. Continuation lanes hold an undefined index (never consumed:
  *         `base` is a subset of `starts`). Bit-identical to the two-pass walk on every start lane. */
-SZ_INTERNAL __m512i sz_line_break_bmp_full_index_compact_icelake_(__m512i high, __m512i low, sz_u64_t starts) {
+SZ_HELPER_AUTO __m512i sz_line_break_bmp_full_index_compact_icelake_(__m512i high, __m512i low, sz_u64_t starts) {
     if (_mm_popcnt_u64(starts) > 32) return sz_line_break_bmp_full_index_icelake_(high, low);
     __mmask64 const start_mask = _cvtu64_mask64(starts);
     __m512i const high_packed = _mm512_maskz_compress_epi8(start_mask, high);
@@ -160,8 +160,8 @@ SZ_INTERNAL __m512i sz_line_break_bmp_full_index_compact_icelake_(__m512i high, 
  *         the engine side byte, both as 16-bit lanes, plus the per-lane DottedCircle predicate. Applies the serial
  *         resolution aliasing (SA->AL/CM, AI/SG/XX->AL, CJ->NS); Pi/Pf/EAW/Cn|Ext side bits come from descriptor
  *         bits 6/7/8/9; RI/ZWJ side from the raw class; CM|ZWJ -> mark side bit; DottedCircle from bit 13. */
-SZ_INTERNAL void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors, __m512i *classes_out,
-                                                               __m512i *side_out, __mmask32 *dotted_out) {
+SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors, __m512i *classes_out,
+                                                                    __m512i *side_out, __mmask32 *dotted_out) {
     __m512i classes = _mm512_and_si512(descriptors, _mm512_set1_epi16(0x3F));
     __mmask32 const is_sa = _mm512_cmpeq_epi16_mask(classes, _mm512_set1_epi16(sz_line_break_sa_k));
     __mmask32 const sa_is_mark = _mm512_test_epi16_mask(descriptors, _mm512_set1_epi16(1 << 12));
@@ -218,8 +218,8 @@ typedef struct sz_line_break_classified_t {
  *          icelake agree on malformed input. Valid leads classify by decoded VALUE (page / trie / big / astral),
  *          matching the serial resolution precedence. The BMP trie uses the shared substrate `trie_walk_icelake_`.
  */
-SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
-                                                                              __m512i lane_identity) {
+SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
+                                                                                 __m512i lane_identity) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_(window.loaded);
     sz_u64_t const continuation = _cvtmask64_u64(window.continuation) & loaded_mask;
     sz_u64_t const two_byte = _cvtmask64_u64(window.two_byte_starts);
@@ -411,18 +411,18 @@ SZ_INTERNAL sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz
 #pragma region Mask algebra rule engine
 
 /** @brief Build a 64-bit "lane class == @p cls" mask with one `vpcmpeqb` -> kmask. */
-SZ_INTERNAL sz_u64_t sz_line_break_class_mask_icelake_(__m512i classes, sz_u8_t cls) {
+SZ_HELPER_INLINE sz_u64_t sz_line_break_class_mask_icelake_(__m512i classes, sz_u8_t cls) {
     return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes, _mm512_set1_epi8((char)cls)));
 }
 
 /** @brief The class/side byte held at lane @p lane, extracted in-register by a single byte permute (no scalar loop). */
-SZ_INTERNAL sz_u8_t sz_line_break_byte_at_icelake_(__m512i lanes, sz_size_t lane) {
+SZ_HELPER_INLINE sz_u8_t sz_line_break_byte_at_icelake_(__m512i lanes, sz_size_t lane) {
     __m512i const broadcast = _mm512_permutexvar_epi8(_mm512_set1_epi8((char)lane), lanes);
     return (sz_u8_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(broadcast));
 }
 
 /** @brief Build a 64-bit "lane (side & @p bit) != 0" mask with one `vptestmb` -> kmask. */
-SZ_INTERNAL sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo, sz_u8_t bit) {
+SZ_HELPER_INLINE sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo, sz_u8_t bit) {
     __m512i const masked = _mm512_and_si512(side_lo, _mm512_set1_epi8((char)bit));
     return _cvtmask64_u64(_mm512_test_epi8_mask(masked, masked));
 }
@@ -430,7 +430,7 @@ SZ_INTERNAL sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo, sz_u8_t b
 /** @brief Build a 64-bit "lane class is in the inclusive byte range [@p lo, @p hi]" mask with two `vpcmpub` -> kmask.
  *         Used as a cheap combined presence test that gates the rarely-fired script blocks (Hangul, Brahmic) without
  *         extracting each individual per-class mask on the common Latin/CJK path. */
-SZ_INTERNAL sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classes, sz_u8_t lo, sz_u8_t hi) {
+SZ_HELPER_INLINE sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classes, sz_u8_t lo, sz_u8_t hi) {
     __mmask64 const ge = _mm512_cmp_epu8_mask(classes, _mm512_set1_epi8((char)lo), _MM_CMPINT_NLT);
     __mmask64 const le = _mm512_cmp_epu8_mask(classes, _mm512_set1_epi8((char)hi), _MM_CMPINT_LE);
     return _cvtmask64_u64(_kand_mask64(ge, le));
@@ -447,7 +447,7 @@ typedef struct sz_line_break_byte_frame_t {
         lone_mark; /**< LB10 lone marks reclassified to AL; their side bits must be cleared (serial zeros the descriptor). */
 } sz_line_break_byte_frame_t;
 
-SZ_INTERNAL sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
+SZ_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
     sz_u64_t const mark_start = (sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_cm_k) |
                                  sz_line_break_class_mask_icelake_(classified.classes, sz_line_break_zwj_k)) &
@@ -484,9 +484,9 @@ SZ_INTERNAL sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line
  *          carry-out reads. All `__m512i` -> `sz_u64_t` work lives here; the rule engine that consumes the frame is
  *          fully portable.
  */
-SZ_FORCE_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_line_break_classified_t classified,
-                                                                         sz_u8_t *effective_class_byte_out,
-                                                                         sz_u8_t *side_byte_out) {
+SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_line_break_classified_t classified,
+                                                                          sz_u8_t *effective_class_byte_out,
+                                                                          sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_t const byte_frame = sz_line_break_byte_frame_icelake_(classified);
     __m512i const classes = byte_frame.classes;
     //  LB10 reclassifies a lone CM/ZWJ to AL; its descriptor side bits (EAW/Pi/Pf/...) must go with it, else LB19/LB15
@@ -528,11 +528,11 @@ SZ_FORCE_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_line
  *          LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. Kept as the driver's call target so the
  *          forward driver is unchanged.
  */
-SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_break_classified_t classified,
-                                                                            sz_line_break_carry_t carry,
-                                                                            sz_line_break_carry_t *carry_out,
-                                                                            sz_size_t complete_limit,
-                                                                            sz_bool_t more_text) {
+SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_break_classified_t classified,
+                                                                             sz_line_break_carry_t carry,
+                                                                             sz_line_break_carry_t *carry_out,
+                                                                             sz_size_t complete_limit,
+                                                                             sz_bool_t more_text) {
     sz_u8_t effective_class_byte[64], side_byte[64];
     sz_line_break_frame_t const frame = sz_line_break_build_frame_icelake_(classified, effective_class_byte, side_byte);
     return sz_line_break_decide_window_(&frame, effective_class_byte, side_byte, carry, carry_out, complete_limit,
@@ -548,7 +548,7 @@ SZ_FORCE_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_l
  *          64-byte edge). Mirrors the word kernel's complete-limit: a declared-length lead whose span exceeds `loaded`
  *          ends the trusted region just before it; with no more text the whole window is complete. Never below 1.
  */
-SZ_INTERNAL sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
+SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_(loaded);
@@ -574,9 +574,9 @@ SZ_INTERNAL sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window
  *          re-read (no `start_at_or_before_`, no left-context back-walk): the carry alone supplies lane-0 left context.
  *          `bytes_consumed` is always a confirmed break (`line_start`), so resume is bit-identical and capacity-free.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
-    sz_cptr_t text, sz_size_t length,                  //
-    sz_size_t *starts, sz_size_t *lengths,             //
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *starts, sz_size_t *lengths,                   //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -632,9 +632,9 @@ SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
  *  (no halo back-scan), so throughput is flat in run length. Emits at most @p capacity segments; sets
  *  *@p bytes_consumed to the resume.
  */
-SZ_PUBLIC sz_size_t sz_utf8_linebreaks_icelake( //
-    sz_cptr_t text, sz_size_t length,           //
-    sz_size_t *starts, sz_size_t *lengths,      //
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *starts, sz_size_t *lengths,            //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     return sz_utf8_linebreaks_icelake_bytes_(text, length, starts, lengths, capacity, bytes_consumed);

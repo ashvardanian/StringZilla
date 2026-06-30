@@ -35,31 +35,31 @@ extern "C" {
 #pragma region Helpers
 
 /** @brief `result[0] = carry`, `result[i] = vector[i-1]` — slide-up carrying a real predecessor across windows. */
-SZ_INTERNAL v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector, sz_u8_t carry) {
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
                               13, 14);
 }
 
 /** @brief 0/1 byte (not 0xFF): 1 where `bytes == value`. */
-SZ_INTERNAL v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes, sz_u8_t value) {
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes, sz_u8_t value) {
     return wasm_v128_and(wasm_i8x16_eq(bytes, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
 }
 /** @brief 0/1 byte: 1 where `bytes` in `[start, start+length)`. */
-SZ_INTERNAL v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes, sz_u8_t start, sz_u8_t length) {
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes, sz_u8_t start, sz_u8_t length) {
     return wasm_v128_and(sz_utf8_in_range_v128_(bytes, start, length), wasm_i8x16_splat(1));
 }
 
 /** @brief Zero a scratch buffer then copy `length` bytes, so strip kernels can read one byte past. */
-SZ_INTERNAL sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
-                                                             sz_size_t buffer_capacity) {
+SZ_HELPER_AUTO sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
+                                                                sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
 }
 
 /** @brief Gather the C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits (irregular flag kept). */
-SZ_INTERNAL v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source, v128_t after_c4, v128_t after_c5, v128_t after_c6,
-                                                     v128_t is_continuation) {
+SZ_HELPER_AUTO v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source, v128_t after_c4, v128_t after_c5,
+                                                        v128_t after_c6, v128_t is_continuation) {
     v128_t low6 = wasm_v128_and(source, wasm_i8x16_splat(0x3F));
     v128_t c4 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
                                        wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
@@ -88,7 +88,7 @@ typedef struct {
 } sz_utf8_uncased_window_v128_t_;
 
 /** @brief Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
-SZ_INTERNAL sz_utf8_uncased_window_v128_t_ sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
+SZ_HELPER_INLINE sz_utf8_uncased_window_v128_t_ sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
     sz_utf8_uncased_window_v128_t_ window;
     window.source = wasm_v128_load(src + pos);
     window.previous = sz_utf8_uncased_slide1up_v128_(window.source, pos > 0 ? src[pos - 1] : 0);
@@ -100,15 +100,16 @@ SZ_INTERNAL sz_utf8_uncased_window_v128_t_ sz_utf8_uncased_load_window_v128_(sz_
 
 #pragma region Per script fold strips
 
-SZ_INTERNAL void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                               sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_store_partial_v128_((sz_ptr_t)(dst + pos), sz_ascii_fold_v128_(wasm_v128_load(src + pos)), window);
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                 sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                        sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t_ chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -127,8 +128,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                 sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                        sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t_ chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -151,7 +152,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                  sz_u8_t *dst) {
     static sz_align_(16) sz_u8_t const offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     v128_t offsets_lut = wasm_v128_load(offsets);
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
@@ -170,7 +172,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, s
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                               sz_u8_t *dst) {
     // Greek monotonic second-byte deltas after a CE lead, indexed by `text & 0x3F`.
     static sz_align_(16) sz_u8_t const ce_deltas[64] = {
         0,    0,    0,    0,    0,    0,    0x26, 0,    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
@@ -226,7 +229,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *src, sz_s
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length, sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                  sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t_ chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -248,8 +252,8 @@ SZ_INTERNAL void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, s
     }
 }
 
-SZ_INTERNAL void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                             sz_u8_t *dst) {
+SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                    sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source = wasm_v128_load(src + pos);
@@ -281,7 +285,7 @@ SZ_INTERNAL void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src,
 #pragma region Per script alarm strips
 
 /** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
-SZ_INTERNAL void sz_utf8_uncased_alarm_window_(v128_t danger_second, sz_size_t pos, sz_size_t window, long *best) {
+SZ_HELPER_AUTO void sz_utf8_uncased_alarm_window_(v128_t danger_second, sz_size_t pos, sz_size_t window, long *best) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second, wasm_i8x16_splat(0)));
     if (window < 16) bits &= ((sz_u32_t)1 << window) - 1;
     while (bits) {
@@ -295,7 +299,7 @@ SZ_INTERNAL void sz_utf8_uncased_alarm_window_(v128_t danger_second, sz_size_t p
     }
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -322,7 +326,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const 
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -346,7 +350,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const 
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -361,7 +365,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const *src, 
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1, blanket = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -396,7 +400,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_
     return best < blanket ? best : blanket;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -412,7 +416,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src, 
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -445,7 +449,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src
     return best;
 }
 
-SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -470,7 +474,7 @@ SZ_INTERNAL long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, 
 typedef void (*sz_utf8_uncased_fold_strip_v128_t_)(sz_u8_t const *, sz_size_t, sz_u8_t *);
 typedef long (*sz_utf8_uncased_alarm_strip_v128_t_)(sz_u8_t const *, sz_size_t);
 
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                                  //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                             //
     sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,       //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
@@ -563,11 +567,11 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                    
 
 #pragma endregion // Scripted driver
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_v128(   //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length,         //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
 
     if (needle_length == 0) {
@@ -634,11 +638,11 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_v128(   //
 #pragma region Case Invariance
 
 /** @brief 32-bit movemask of two 16-byte registers: bit `i` = lane `i` of `low`, bit `16+i` = lane `i` of `high`. */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low, v128_t high) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low, v128_t high) {
     return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low) | ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high) << 16);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     while (length) {
         sz_size_t block_length = length < 29 ? length : 29;
@@ -727,7 +731,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
 
 #pragma endregion // Case Invariance
 
-SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 

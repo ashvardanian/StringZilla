@@ -31,7 +31,7 @@ extern "C" {
 
 /*  See `utf8_runes/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane
  *  16-bit mask (word 0 = low lane, word 4 = high lane), recombined to match AVX2's `_mm256_movemask_epi8`. */
-SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended) {
     __m256i collected = __lasx_xvmskltz_b(sign_extended);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 4);
@@ -49,8 +49,8 @@ SZ_INTERNAL sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended) {
  *  re-bases the index onto [0, 32) over tables 32..47 and 48..63. `__lasx_xvbitsel_v` then picks the high
  *  select wherever bit five of the index is set (index >= 32).
  */
-SZ_INTERNAL __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index, __m256i table_low_0, __m256i table_low_1,
-                                                   __m256i table_high_0, __m256i table_high_1) {
+SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index, __m256i table_low_0, __m256i table_low_1,
+                                                        __m256i table_high_0, __m256i table_high_1) {
     __m256i families_low = __lasx_xvshuf_b(table_low_1, table_low_0, index);
     __m256i families_high = __lasx_xvshuf_b(table_high_1, table_high_0, index);
     // Bit five (value 0x20) of the index is set exactly for index >= 32: select the high half there.
@@ -65,7 +65,7 @@ SZ_INTERNAL __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index, __m256i table_
  *  uses a 32-byte window gate plus the two-table `__lasx_xvshuf_b` lead-classify; the cold per-codepoint
  *  verify carries the combining class across windows and reports order or quick-check violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -119,11 +119,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t leng
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                            sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_lasx_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_lasx_);
 }
 

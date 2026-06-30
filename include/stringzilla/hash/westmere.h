@@ -29,7 +29,8 @@ extern "C" {
  *  @param state Pointer to the aligned minimal hash state to initialize.
  *  @param seed 64-bit seed value XOR-ed with Pi constants to form the initial state.
  */
-SZ_INTERNAL void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_aligned_for_short_t_ *state, sz_u64_t seed) {
+SZ_HELPER_AUTO void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_aligned_for_short_t_ *state,
+                                                               sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m128i seed_vec = _mm_set1_epi64x(seed);
@@ -53,8 +54,8 @@ SZ_INTERNAL void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_aligne
  *  @param block 128-bit data block to absorb.
  *  @param order Shuffle permutation for the additive accumulator lane (loaded from `sz_hash_u8x16x4_shuffle_`).
  */
-SZ_INTERNAL void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_aligned_for_short_t_ *state_ptr,
-                                                              __m128i block, __m128i order) {
+SZ_HELPER_AUTO void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_aligned_for_short_t_ *state_ptr,
+                                                                 __m128i block, __m128i order) {
     state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block);
     state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order), block);
 }
@@ -65,8 +66,8 @@ SZ_INTERNAL void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_alig
  *  @param length Total number of bytes hashed, mixed into the key for length sensitivity.
  *  @return 64-bit hash value.
  */
-SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(sz_hash_state_aligned_for_short_t_ const *state,
-                                                                    sz_size_t length) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(sz_hash_state_aligned_for_short_t_ const *state,
+                                                                       sz_size_t length) {
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
     // Combine the "sum" and the "AES" blocks
@@ -78,7 +79,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(sz_hash_stat
     return _mm_cvtsi128_si64(mixed_in_register);
 }
 
-SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed) {
+SZ_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m128i seed_vec = _mm_set1_epi64x(seed);
 
@@ -107,7 +108,7 @@ SZ_PUBLIC void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed
 /**
  *  @brief Loads the packed public state into the aligned internal twin (4x `_mm_lddqu_si128` per 64-byte field).
  */
-SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_westmere_(sz_hash_state_t const *packed) {
+SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_westmere_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t_ state;
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         state.aes.xmms[lane_index] = _mm_lddqu_si128((__m128i const *)&packed->aes[lane_index * 16]);
@@ -120,7 +121,7 @@ SZ_INTERNAL sz_hash_state_aligned_t_ sz_hash_state_load_westmere_(sz_hash_state_
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (4x `_mm_storeu_si128` per field). */
-SZ_INTERNAL void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         _mm_storeu_si128((__m128i *)&packed->aes[lane_index * 16], state->aes.xmms[lane_index]);
         _mm_storeu_si128((__m128i *)&packed->sum[lane_index * 16], state->sum.xmms[lane_index]);
@@ -134,7 +135,7 @@ SZ_INTERNAL void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_hash_
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
  */
-SZ_INTERNAL void sz_hash_state_update_westmere_(sz_hash_state_aligned_t_ *state) {
+SZ_HELPER_AUTO void sz_hash_state_update_westmere_(sz_hash_state_aligned_t_ *state) {
     __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.xmms[0] = _mm_aesenc_si128(state->aes.xmms[0], state->ins.xmms[0]);
     state->aes.xmms[1] = _mm_aesenc_si128(state->aes.xmms[1], state->ins.xmms[1]);
@@ -151,7 +152,7 @@ SZ_INTERNAL void sz_hash_state_update_westmere_(sz_hash_state_aligned_t_ *state)
  *  @param state Pointer to the (const) aligned hash state; lanes are read directly.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
-SZ_INTERNAL sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_aligned_t_ const *state) {
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, state->ins_length));
 
@@ -188,7 +189,7 @@ SZ_INTERNAL sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_aligned_t_ c
     return _mm_cvtsi128_si64(mixed_in_register);
 }
 
-SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
@@ -293,7 +294,8 @@ SZ_PUBLIC SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_si
  *         the `< 16` case, where a 16-byte SSE load could read past the input.
  *  @return The number of populated text-lanes (1..4).
  */
-SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length,
+                                                             sz_u512_vec_t *text_lanes) {
     if (length <= 16) {
         sz_u128_vec_t lane;
         if (length == 16) { lane.xmm = _mm_lddqu_si128((__m128i const *)text); }
@@ -314,9 +316,9 @@ SZ_INTERNAL sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_siz
     return text_lanes_count;
 }
 
-SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,             //
-                                          sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                          sz_u64_t *hashes) {
+SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,             //
+                                                sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                sz_u64_t *hashes) {
     // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
     if (seeds_count == 0) return;
     if (seeds_count == 1) {
@@ -356,7 +358,7 @@ SZ_PUBLIC void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,     
     }
 }
 
-SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length) {
 
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is one 64-byte block; track how many bytes it holds (0..64; 64 == a full block deferred by an earlier
@@ -383,7 +385,7 @@ SZ_PUBLIC void sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr
     sz_hash_state_store_westmere_(state_ptr, &state);
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_ptr) {
+SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_ptr) {
     sz_hash_state_aligned_t_ state = sz_hash_state_load_westmere_(state_ptr);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
@@ -423,7 +425,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_pt
     }
 }
 
-SZ_PUBLIC void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_API_COMPTIME void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
     if (length <= 16) {
         __m128i input = _mm_set1_epi64x(nonce);

@@ -46,8 +46,10 @@ extern "C" {
  *  yields exactly ONE bit per byte, so the probe filter's scalar shifts by runtime probe offsets
  *  port from the AVX2 driver unchanged.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t low_cmp_u8x16, uint8x16_t high_cmp_u8x16) {
-    uint8x16_t const bit_weights_u8x16 = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t low_cmp_u8x16, uint8x16_t high_cmp_u8x16) {
+    // MSVC's ARM64 `uint8x16_t` is a `__n128` struct that rejects scalar brace-init, so load from `.rodata`.
+    static sz_u8_t const bit_weights[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    uint8x16_t const bit_weights_u8x16 = vld1q_u8(bit_weights);
     uint8x16_t low_bits_u8x16 = vandq_u8(low_cmp_u8x16, bit_weights_u8x16);
     uint8x16_t high_bits_u8x16 = vandq_u8(high_cmp_u8x16, bit_weights_u8x16);
     sz_u32_t low_mask = (sz_u32_t)vaddv_u8(vget_low_u8(low_bits_u8x16)) |
@@ -62,8 +64,8 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t low_cmp_u
  *      NEON has unsigned byte compares, so `(x − start) < length` is one wrap-around subtraction
  *      plus one `VCLT`: bytes below `start` wrap above `length` and drop out.
  */
-SZ_INTERNAL uint8x16_t sz_utf8_uncased_neon_in_byte_range_u8x16_(uint8x16_t values_u8x16, sz_u8_t range_start,
-                                                                 sz_u8_t range_length) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_uncased_neon_in_byte_range_u8x16_(uint8x16_t values_u8x16, sz_u8_t range_start,
+                                                                      sz_u8_t range_length) {
     return vcltq_u8(vsubq_u8(values_u8x16, vdupq_n_u8(range_start)), vdupq_n_u8(range_length));
 }
 
@@ -77,7 +79,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_uncased_neon_in_byte_range_u8x16_(uint8x16_t valu
  *      where the lead byte's fold never needs its predecessor; the candidate-window re-fold uses
  *      the same zero-predecessor convention, so both agree at every real match position.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_previous_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
+SZ_HELPER_INLINE uint8x16x2_t sz_utf8_uncased_neon_previous_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16x2_t result_u8x16x2;
     result_u8x16x2.val[0] = vextq_u8(zero_u8x16, source_u8x16x2.val[0], 15);
@@ -90,7 +92,7 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_previous_bytes_u8x16x2_(uint8x16x2
  *      the high register receives zero; lane 15 of the low register receives the high register's
  *      lane 0. Vector-domain equivalent of Ice Lake's `k-mask >> 1`.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_next_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
+SZ_HELPER_INLINE uint8x16x2_t sz_utf8_uncased_neon_next_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16x2_t result_u8x16x2;
     result_u8x16x2.val[0] = vextq_u8(source_u8x16x2.val[0], source_u8x16x2.val[1], 1);
@@ -99,7 +101,7 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_next_bytes_u8x16x2_(uint8x16x2_t s
 }
 
 /** @brief First N bits set, defined for `n == 32` (where `(1u << n) − 1` is undefined). */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_neon_mask_until_(sz_size_t n) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_neon_mask_until_(sz_size_t n) {
     return n >= 32 ? 0xFFFFFFFFu : ((sz_u32_t)1 << n) - 1;
 }
 
@@ -109,7 +111,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_neon_mask_until_(sz_size_t n) {
  *      probe inside a valid window and trip no alarm, so tail chunks reuse the main-loop logic
  *      unchanged instead of branching into a separate epilogue.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_load_padded_u8x16x2_(sz_cptr_t source, sz_size_t length) {
+SZ_HELPER_AUTO uint8x16x2_t sz_utf8_uncased_neon_load_padded_u8x16x2_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t buffer[32] = {0};
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return vld1q_u8_x2(buffer);
@@ -120,7 +122,7 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_neon_load_padded_u8x16x2_(sz_cptr_t sou
  *      haystack: the fast full load is taken whenever 16 bytes remain, and only the last few
  *      candidates near the haystack end pay for the zero-padded stack copy.
  */
-SZ_INTERNAL uint8x16_t sz_utf8_uncased_neon_load_window_u8x16_(sz_cptr_t source, sz_size_t available) {
+SZ_HELPER_AUTO uint8x16_t sz_utf8_uncased_neon_load_window_u8x16_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return vld1q_u8((sz_u8_t const *)source);
     sz_u8_t buffer[16] = {0};
     for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
@@ -136,7 +138,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_uncased_neon_load_window_u8x16_(sz_cptr_t source,
  *  @brief Fold a 32-byte chunk using ASCII case folding rules.
  *  @sa sz_utf8_uncased_rune_ascii_invariant_k
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_AUTO uint8x16x2_t sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2;
     // Only fold bytes in range A-Z; the masked add stays branch-free across both registers
     result_u8x16x2.val[0] = sz_utf8_fold_neon_ascii_(text_u8x16x2.val[0]);
@@ -153,10 +155,10 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(uint8x1
  *  32-bit movemask integers: with windows ≤ 16 bytes every chunk still exposes ≥ 17 valid start
  *  positions per iteration.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_ascii_3probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,    //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_ascii_3probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                  //
+    sz_cptr_t needle, sz_size_t needle_length,                      //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,       //
     sz_size_t *matched_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
@@ -249,12 +251,12 @@ typedef sz_u32_t (*sz_utf8_uncased_alarm_u8x16x2_t_)(uint8x16x2_t text_u8x16x2, 
  *  @param alarm Script-specific danger detection callback, or NULL if the script has no
  *      danger characters: the danger branch disappears and the full step is used.
  */
-SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
-    sz_utf8_uncased_fold_u8x16x2_t_ fold,                        //
-    sz_utf8_uncased_alarm_u8x16x2_t_ alarm,                      //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,    //
+SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
+    sz_utf8_uncased_fold_u8x16x2_t_ fold,                         //
+    sz_utf8_uncased_alarm_u8x16x2_t_ alarm,                       //
+    sz_cptr_t haystack, sz_size_t haystack_length,                //
+    sz_cptr_t needle, sz_size_t needle_length,                    //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
     sz_size_t *matched_length) {
 
     sz_assert_(needle_metadata && "needle_metadata must be provided");
@@ -269,7 +271,8 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
     // window edge never borrows fold context from haystack bytes outside the window
     sz_u32_t const folded_window_mask = sz_utf8_uncased_neon_mask_until_(folded_window_length);
     uint8x16_t const needle_window_u8x16 = vld1q_u8((sz_u8_t const *)needle_metadata->folded_slice);
-    uint8x16_t const lane_indices_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    static sz_u8_t const lane_indices[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const lane_indices_u8x16 = vld1q_u8(lane_indices);
     uint8x16_t const window_keep_u8x16 = vcltq_u8(lane_indices_u8x16, vdupq_n_u8((sz_u8_t)folded_window_length));
 
     // 4 probe positions
@@ -395,10 +398,10 @@ SZ_FORCE_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
  *      and no alarm - ASCII never changes byte width when folded, so the danger machinery
  *      compiles away entirely and the step covers every valid start position.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,               //
-    sz_cptr_t needle, sz_size_t needle_length,                   //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,    //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                  //
+    sz_cptr_t needle, sz_size_t needle_length,                      //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,       //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_,
@@ -418,7 +421,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
  *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where BOTH bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
@@ -471,8 +474,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2
  *  as Ice Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to
  *  the next (overlapping) chunk.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                               sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                      sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // The driver only tests the danger mask for non-emptiness, so the whole alarm stays in the
@@ -514,10 +517,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_(u
  *  @brief Western European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_western_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                    //
+    sz_cptr_t needle, sz_size_t needle_length,                        //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,         //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2_,
@@ -563,7 +566,7 @@ static sz_u8_t const sz_utf8_uncased_neon_central_c5_deltas_lut_[64] = {
  *  - C5 8A-B6 (U+014A-U+0176): uppercase = EVEN ('Ŋ'-'Ŷ')
  *  - C5 B9-BD (U+0179-U+017D): uppercase = ODD ('Ź','Ż','Ž')
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_neon_central_c4_deltas_lut_);
@@ -610,8 +613,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                               sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                      sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Byte-mask danger detection anchored at the second byte; the lead comes from the `previous`
@@ -649,10 +652,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_(u
  *  @brief Central European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,      //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                    //
+    sz_cptr_t needle, sz_size_t needle_length,                        //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,         //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_,
@@ -674,13 +677,14 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_central_europe_( //
  *  lookup over a 16-entry table replaces 3 range comparisons + 3 masked adds. Extended Cyrillic
  *  (D2/D3) needles are BANNED at classification time, so only D0 continuations need folding.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
     uint8x16x2_t next_bytes_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
 
     // Second-byte offsets keyed by the high nibble: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0)
-    uint8x16_t const cyrillic_offset_lut_u8x16 = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    static sz_u8_t const cyrillic_offset_lut[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
+    uint8x16_t const cyrillic_offset_lut_u8x16 = vld1q_u8(cyrillic_offset_lut);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
@@ -716,8 +720,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_(uint
  *  absent from virtually all real Cyrillic text, so the third-byte refinement hides behind
  *  a branch and the hot path is two compares.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                         sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // E1 B2 is dangerous only when the third (next) byte folds, i.e. lands in 80-88. Anchored at the
@@ -740,10 +744,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_(uint8x1
  *  @brief Cyrillic uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_cyrillic_(  //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
-    sz_cptr_t needle, sz_size_t needle_length,                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,              //
+    sz_cptr_t needle, sz_size_t needle_length,                  //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,   //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_,
@@ -769,7 +773,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_cyrillic_(  //
  *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the reference:
  *  valid continuation bytes never exceed BF.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
@@ -817,8 +821,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_(uint
  *  EF AC neighbors are the Latin/Hebrew presentation forms, which never appear inside Armenian
  *  haystacks, so the coarser test costs nothing in practice.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                         sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Two two-byte pairs anchored at their second byte; lead from `previous`, gated by `vmaxvq_u8`.
@@ -841,10 +845,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_(uint8x1
  *  @brief Armenian uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_armenian_(  //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
-    sz_cptr_t needle, sz_size_t needle_length,                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,              //
+    sz_cptr_t needle, sz_size_t needle_length,                  //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,   //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_,
@@ -907,7 +911,7 @@ static sz_u8_t const sz_utf8_uncased_neon_greek_ce_promotes_lut_[64] = {
  *  boundary, so the second-byte class masks are assembled per register first, then a single
  *  32-byte `next_bytes` carries the high register's lane 0 to the low register's lane 15.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
@@ -973,7 +977,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(uint8x1
  *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2, sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                             sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Pair danger anchored at the second byte (lead from `previous`); the polytonic & archaic leads
@@ -1016,7 +1021,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(uint8x16x2
  *  @brief Greek uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_greek_(     //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_greek_(  //
     sz_cptr_t haystack, sz_size_t haystack_length,            //
     sz_cptr_t needle, sz_size_t needle_length,                //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, //
@@ -1047,7 +1052,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_greek_(     //
  *  The third-byte rule needs the byte TWO lanes back, so a second `previous_bytes` pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
-SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous2_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(previous_bytes_u8x16x2);
@@ -1119,8 +1124,8 @@ SZ_INTERNAL uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_(ui
  *  alarms, the result is shifted back to the SEQUENCE-START positions, mirroring the
  *  reference bit-for-bit.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                           sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                  sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // All hazards anchored at their second byte: lead from `previous`, the E1 BA expanding third
@@ -1155,10 +1160,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x16x2_(uint8
  *  @brief Vietnamese uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,             //
-    sz_cptr_t needle, sz_size_t needle_length,                 //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,  //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                //
+    sz_cptr_t needle, sz_size_t needle_length,                    //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_,
@@ -1185,8 +1190,8 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_vietnamese_( //
  *  [A0, E5], so tail chunks stay safe-negative. The result is shifted back to the
  *  SEQUENCE-START positions, mirroring the reference bit-for-bit.
  */
-SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
-                                                                         sz_u32_t load_mask) {
+SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+                                                                                sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third (next) byte for Asomtavruli; E2 B4 =
@@ -1220,10 +1225,10 @@ SZ_INTERNAL sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x2_(uint8x1
  *  The fastest non-ASCII kernel: Mkhedruli is caseless, so the fold callback is just the
  *  ASCII fold for mixed Latin text and the alarm only watches for the historical scripts.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_georgian_(  //
-    sz_cptr_t haystack, sz_size_t haystack_length,            //
-    sz_cptr_t needle, sz_size_t needle_length,                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, //
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,              //
+    sz_cptr_t needle, sz_size_t needle_length,                  //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,   //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_,
@@ -1233,9 +1238,9 @@ SZ_INTERNAL sz_cptr_t sz_utf8_uncased_search_neon_georgian_(  //
 
 #pragma endregion // Georgian Uncased Find
 
-SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_neon(   //
-    sz_cptr_t haystack, sz_size_t haystack_length, //
-    sz_cptr_t needle, sz_size_t needle_length,     //
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_neon( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length,         //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
 
     // Handle the obvious edge cases first
@@ -1306,7 +1311,7 @@ SZ_PUBLIC sz_cptr_t sz_utf8_uncased_search_neon(   //
                                          matched_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_neon(sz_cptr_t str, sz_size_t length) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_neon(sz_cptr_t str, sz_size_t length) {
     sz_cptr_t text_cursor = str;
 
     // Single loop: advance by min(length, 29), check leads in the first `block_length` positions;
@@ -1437,7 +1442,8 @@ SZ_PUBLIC sz_cptr_t sz_utf8_find_cased_neon(sz_cptr_t str, sz_size_t length) {
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_ordering_t sz_utf8_uncased_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                         sz_size_t b_length) {
     return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
 }
 

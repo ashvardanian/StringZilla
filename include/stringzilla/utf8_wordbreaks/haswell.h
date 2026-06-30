@@ -38,7 +38,7 @@ extern "C" {
 /** @brief  Word_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
  *          register-resident `vpshufb` nibble cascade, the AVX2 twin of the Ice Lake BMP classifier. Gather-free;
  *          bit-exact with `sz_rune_word_break_property` over the whole BMP. */
-SZ_INTERNAL __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high, __m256i low) {
+SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high, __m256i low) {
     __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
     __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_stage1_, high);
     __m256i const low_high = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
@@ -65,7 +65,7 @@ SZ_INTERNAL __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high, __m256i 
  *          cascade), the AVX2 twin of `sz_utf8_word_break_classify_astral16_icelake_`. Per-lane bytes:
  *          @p plane_off = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
  *          Gather-free; bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
-SZ_INTERNAL __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off, __m256i high, __m256i low) {
+SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off, __m256i high, __m256i low) {
     __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
     __m256i const n4 = _mm256_and_si256(plane_off, low_nibble_mask);
     __m256i const n3 = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
@@ -100,7 +100,7 @@ SZ_INTERNAL __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off, 
 /** @brief  Word_Break class byte for thirty-two ASCII codepoints (cp < 0x80) via the existing 128-entry property
  *          table, read in-register by two `lut256` halves (low six bits) blended on bit 6, the AVX2 twin of the
  *          icelake ASCII permute. The window byte equals the codepoint on ASCII lanes. */
-SZ_INTERNAL __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
     __m256i const index_low6 = _mm256_and_si256(bytes, _mm256_set1_epi8(0x3F));
     __m256i const low_half = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
     __m256i const high_half = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
@@ -117,7 +117,7 @@ SZ_INTERNAL __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
  *          gather/scatter touch only set bits of @p bmp_starts. Bit-identical to two full
  *          @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start lane; every other lane is a
  *          don't-care left at its incoming value. */
-SZ_INTERNAL void sz_utf8_word_break_bmp_compact_haswell_( //
+SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
     sz_u64_t bmp_starts, __m256i high_lo, __m256i high_hi, __m256i low_lo, __m256i low_hi, __m256i *out_lo,
     __m256i *out_hi) {
     sz_u8_t high_bytes[64], low_bytes[64];
@@ -163,7 +163,7 @@ SZ_INTERNAL void sz_utf8_word_break_bmp_compact_haswell_( //
  *          @ref sz_utf8_word_break_classify_window_icelake_, bit-identical on every start lane. ASCII through the
  *          property table, BMP through the nibble cascade, 4-byte leads through the astral cascade with the codepoint
  *          high/low/plane reconstructed from the forward neighbours. */
-SZ_INTERNAL void sz_utf8_word_break_classify_window_haswell_( //
+SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_haswell_( //
     sz_utf8_rune_window_haswell_t window, __m256i *classes_lo, __m256i *classes_hi) {
     __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -235,25 +235,26 @@ SZ_INTERNAL void sz_utf8_word_break_classify_window_haswell_( //
 #pragma region Mask algebra extractor
 
 /** @brief  A 64-bit "class byte == @p value" lane mask over both class halves (two `vpcmpeqb` -> mask_combine). */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo, __m256i classes_hi, sz_u8_t value) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo, __m256i classes_hi,
+                                                                 sz_u8_t value) {
     __m256i const v = _mm256_set1_epi8((char)value);
     return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(classes_lo, v), _mm256_cmpeq_epi8(classes_hi, v));
 }
 
 /** @brief  A 64-bit "raw window byte == @p value" lane mask over both window halves. */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half, __m256i high_half, sz_u8_t value) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half, __m256i high_half, sz_u8_t value) {
     __m256i const v = _mm256_set1_epi8((char)value);
     return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half, v), _mm256_cmpeq_epi8(high_half, v));
 }
 
 /** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
-SZ_INTERNAL __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value, bound), value);
 }
 
 /** @brief  Per-half "(high,low) 16-bit value in `[lo, hi]`" membership for one range (the AVX2 unsigned 16-bit
  *          window-compare building block of @ref sz_utf8_word_break_range16_mask_haswell_). */
-SZ_INTERNAL __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high, __m256i low, sz_u16_t lo, sz_u16_t hi) {
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high, __m256i low, sz_u16_t lo, sz_u16_t hi) {
     __m256i const lo_high = _mm256_set1_epi8((char)(lo >> 8)), lo_low = _mm256_set1_epi8((char)(lo & 0xFF));
     __m256i const hi_high = _mm256_set1_epi8((char)(hi >> 8)), hi_low = _mm256_set1_epi8((char)(hi & 0xFF));
     __m256i const ones = _mm256_set1_epi8((char)0xFF);
@@ -270,7 +271,7 @@ SZ_INTERNAL __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high, __m256
 
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over both window halves, the
  *          AVX2 twin of @ref sz_utf8_word_break_range16_mask_icelake_ (WSegSpace / Extended_Pictographic). */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
+SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
     __m256i high_lo, __m256i high_hi, __m256i low_lo, __m256i low_hi, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
     __m256i hit_lo = _mm256_setzero_si256(), hit_hi = _mm256_setzero_si256();
@@ -289,7 +290,7 @@ SZ_INTERNAL sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
  *          the class halves, materializes every per-class lane mask + the raw-byte membership masks, the
  *          Extended_Pictographic mask (BMP + SMP range scan), and the per-lane class byte array.
  */
-SZ_FORCE_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswell_(
+SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswell_(
     sz_utf8_rune_window_haswell_t window, __m256i classes_lo, __m256i classes_hi, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -412,8 +413,8 @@ SZ_FORCE_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswel
 /** @brief  Resolve one window into the maximal-subpart partition - the AVX2 twin of
  *          @ref sz_utf8_word_break_partition_icelake_: compute the per-ISA `sz_u64_t` masks and delegate to the
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
-SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(sz_utf8_rune_window_haswell_t window,
-                                                                                 sz_u64_t valid, int at_end_of_text) {
+SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
+    sz_utf8_rune_window_haswell_t window, sz_u64_t valid, int at_end_of_text) {
     __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
     sz_u64_t const real_continuation = window.continuation & valid;
     __m256i const high_nibble_lo = sz_utf8_srl8_haswell_(raw_lo, 4, 0x0F);
@@ -471,9 +472,9 @@ SZ_INTERNAL sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_
  *          mirroring @ref sz_utf8_wordbreaks_icelake over the AVX2 window/classify/partition/decide/drain
  *          leaves. Bit-exact with `sz_utf8_wordbreaks_serial` and `sz_utf8_wordbreaks_icelake`.
  */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_haswell(      //
-    sz_cptr_t text, sz_size_t length,                //
-    sz_size_t *word_starts, sz_size_t *word_lengths, //
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *word_starts, sz_size_t *word_lengths,  //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {

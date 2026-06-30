@@ -146,15 +146,13 @@
 #endif
 #endif
 
-/*  Annotation for the public API symbols:
- *
- *  - `SZ_PUBLIC` is used for functions that are part of the public API.
- *  - `SZ_INTERNAL` is used for internal helper functions with unstable APIs.
- *  - `SZ_FORCE_INLINE` is for internal helpers whose expansion is structural, not advisory,
- *    e.g., shared driver loops whose function-pointer parameters must devirtualize per call site.
- *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
- *  - `SZ_EXTERNAL` is used for third-party libraries that are linked dynamically.
- */
+/*  Function annotations on two axes — role and (for internal helpers) inlining policy:
+ *  - `SZ_API_COMPTIME`    public API, ISA tier resolved at compile time (header-inline).
+ *  - `SZ_API_RUNTIME`     public API dispatched at runtime — the only role with cross-TU linkage.
+ *  - `SZ_HELPER_AUTO`     internal helper; compiler decides inlining (same expansion as `SZ_API_COMPTIME`).
+ *  - `SZ_HELPER_INLINE`   internal helper forced inline (structural: devirtualizing driver loops).
+ *  - `SZ_HELPER_NOINLINE` internal helper forced out-of-line. Omits `inline` deliberately — GCC ignores
+ *    `noinline` on an `inline` function. */
 
 #if defined(__cplusplus)
 #define SZ_C_INLINE inline
@@ -162,42 +160,40 @@
 #define SZ_C_INLINE inline static
 #endif
 
-#if defined(_MSC_VER)
-#define SZ_FORCE_INLINE __forceinline static
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_MAYBE_UNUSED __attribute__((unused))
 #else
-#define SZ_FORCE_INLINE __attribute__((always_inline)) SZ_C_INLINE
+#define SZ_MAYBE_UNUSED
 #endif
 
-#if SZ_DYNAMIC_DISPATCH
-#if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_DYNAMIC __declspec(dllexport)
-#define SZ_EXTERNAL __declspec(dllimport)
-#define SZ_PUBLIC SZ_C_INLINE
-#define SZ_INTERNAL SZ_C_INLINE
+#if defined(_MSC_VER)
+#define SZ_HELPER_INLINE __forceinline static
+#define SZ_HELPER_NOINLINE __declspec(noinline) static
 #else
-#define SZ_DYNAMIC extern __attribute__((visibility("default")))
-#define SZ_EXTERNAL extern
-#define SZ_PUBLIC __attribute__((unused)) SZ_C_INLINE
-#define SZ_INTERNAL __attribute__((always_inline)) SZ_C_INLINE
+#define SZ_HELPER_INLINE __attribute__((always_inline)) SZ_C_INLINE
+#define SZ_HELPER_NOINLINE static __attribute__((noinline))
+#endif
+
+#define SZ_API_COMPTIME SZ_MAYBE_UNUSED SZ_C_INLINE
+#define SZ_HELPER_AUTO SZ_MAYBE_UNUSED SZ_C_INLINE
+
+// Exported symbol under dynamic dispatch or `SZ_EXPORT` (emitted from one amalgamation TU, links like a
+// normal C library — the Rust binding without `dynamic-dispatch`); otherwise a header-inline tier.
+#if SZ_DYNAMIC_DISPATCH || (defined(SZ_EXPORT) && SZ_EXPORT)
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define SZ_API_RUNTIME __declspec(dllexport)
+#else
+#define SZ_API_RUNTIME extern __attribute__((visibility("default")))
 #endif // _WIN32 || __CYGWIN__
 #else
-// Compile-time dispatch resolves each public function to a single ISA tier in the headers (no table).
-// They are `inline static` for header-only inclusion; defining `SZ_EXPORT` instead emits them as external
-// symbols from one amalgamation translation unit, so the result links like a normal C library (used by the
-// Rust binding without the `dynamic-dispatch` feature). Only ever compile one such TU to avoid duplicate symbols.
-#if defined(SZ_EXPORT) && SZ_EXPORT
-#if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_DYNAMIC __declspec(dllexport)
-#else
-#define SZ_DYNAMIC extern __attribute__((visibility("default")))
-#endif // _WIN32 || __CYGWIN__
-#else
-#define SZ_DYNAMIC SZ_C_INLINE
-#endif // SZ_EXPORT
-#define SZ_EXTERNAL extern
-#define SZ_PUBLIC SZ_C_INLINE
-#define SZ_INTERNAL SZ_C_INLINE
-#endif // SZ_DYNAMIC_DISPATCH
+#define SZ_API_RUNTIME SZ_C_INLINE
+#endif // SZ_DYNAMIC_DISPATCH || SZ_EXPORT
+
+// CUDA device-side inlining policy (only meaningful under nvcc; these functions exist only on the device).
+#if defined(__CUDACC__)
+#define SZ_DEVICE_INLINE __device__ __forceinline__
+#define SZ_DEVICE_NOINLINE __device__ __noinline__
+#endif
 
 /**
  *  @brief Disables stack protection for performance-critical functions.
@@ -252,6 +248,11 @@
 #else
 #define sz_at_least_(n) static n
 #endif
+
+/**
+ *  @brief Largest value that fits into 16 bits.
+ */
+#define SZ_U16_MAX (65535u)
 
 /**
  *  @brief Largest prime number that fits into 16 bits.
@@ -651,9 +652,19 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 #endif // SZ_AVOID_LIBC
 
 /**
- *  @brief Compile-time assert macro similar to `static_assert` in C++.
+ *  @brief Compile-time assert akin to C++ `static_assert`. Uses the native assertion where available (C++11
+ *  `static_assert`, C11 `_Static_assert`); the older-C typedef fallback must sit at file scope to stay clear of
+ *  `-Wunused-local-typedef`.
  */
+#if defined(__cplusplus) && __cplusplus >= 201103L
+#define sz_static_assert(condition, name) static_assert(condition, #name)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define sz_static_assert(condition, name) _Static_assert(condition, #name)
+#elif defined(_MSC_VER)
+#define sz_static_assert(condition, name) static_assert(condition, #name)
+#else
 #define sz_static_assert(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
+#endif
 
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
@@ -794,16 +805,16 @@ typedef enum sz_capability_t {
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |
-        sz_cap_icelake_k,                                               ///< Serial code with Fork Union and Ice Lake
+                     sz_cap_icelake_k,                                  ///< Serial code with Fork Union and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
     // Aggregates for different StringZillas builds
     sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_icelake_k |
-        sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k | sz_cap_sve_k |
-        sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k | sz_cap_rvv_k | sz_cap_rvvcrypto_k |
-        sz_cap_lasx_k | sz_cap_powervsx_k,
+                     sz_cap_westmere_k | sz_cap_goldmont_k | sz_cap_neon_k | sz_cap_neonaes_k | sz_cap_neonsha_k |
+                     sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2aes_k | sz_cap_v128_k | sz_cap_v128relaxed_k |
+                     sz_cap_rvv_k | sz_cap_rvvcrypto_k | sz_cap_lasx_k | sz_cap_powervsx_k,
     sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
 
 } sz_capability_t;
@@ -841,7 +852,7 @@ typedef sz_u32_t sz_rune_t;
 /** @brief The Unicode @b replacement character U+FFFD, emitted once per maximal ill-formed UTF-8 subpart. */
 enum { sz_rune_replacement_k = 0xFFFD };
 
-SZ_PUBLIC sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
+SZ_API_COMPTIME sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
     // TODO: A perfect hashing scheme can be constructed to map a 32-bit rune into an 18-bit representation,
     // TODO: that can fit all of the unique values in the Unicode 16 standard.
     return rune;
@@ -884,22 +895,22 @@ typedef union sz_byteset_t {
 } sz_byteset_t;
 
 /** @brief Initializes a bit-set to an empty collection, meaning - all characters are banned. */
-SZ_PUBLIC void sz_byteset_init(sz_byteset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+SZ_API_COMPTIME void sz_byteset_init(sz_byteset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
 
 /** @brief Initializes a bit-set to all ASCII character. */
-SZ_PUBLIC void sz_byteset_init_ascii(sz_byteset_t *s) {
+SZ_API_COMPTIME void sz_byteset_init_ascii(sz_byteset_t *s) {
     s->_u64s[0] = s->_u64s[1] = 0xFFFFFFFFFFFFFFFFull;
     s->_u64s[2] = s->_u64s[3] = 0;
 }
 
 /** @brief Adds a character to the set and accepts @b unsigned integers. */
-SZ_PUBLIC void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+SZ_API_COMPTIME void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
 /** @brief Adds a character to the set. Consider @b sz_byteset_add_u8. */
-SZ_PUBLIC void sz_byteset_add(sz_byteset_t *s, char c) { sz_byteset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
+SZ_API_COMPTIME void sz_byteset_add(sz_byteset_t *s, char c) { sz_byteset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
 
 /** @brief Checks if the set contains a given character and accepts @b unsigned integers. */
-SZ_PUBLIC sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
+SZ_API_COMPTIME sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
     // Checking the bit can be done in different ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
     // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
@@ -909,12 +920,12 @@ SZ_PUBLIC sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
 }
 
 /** @brief Checks if the set contains a given character. Consider @b sz_byteset_contains_u8. */
-SZ_PUBLIC sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
+SZ_API_COMPTIME sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
     return sz_byteset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
 }
 
 /** @brief Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
-SZ_PUBLIC void sz_byteset_invert(sz_byteset_t *s) {
+SZ_API_COMPTIME void sz_byteset_invert(sz_byteset_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
@@ -945,7 +956,7 @@ typedef struct sz_memory_allocator_t {
  *  @note Unlike the C standard library, the `malloc(0)` is guaranteed to return a non-null pointer.
  *  @see https://en.cppreference.com/w/c/memory/malloc
  */
-SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
+SZ_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
 
 /**
  *  @brief Initializes a memory allocator to use only a static-capacity buffer @b w/out any dynamic allocations.
@@ -956,7 +967,7 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator
  *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be
  *  modified.
  */
-SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length);
+SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length);
 
 /**
  *  @brief Checks if two memory allocators are equivalent.
@@ -964,7 +975,7 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, 
  *  @param b Second memory allocator.
  *  @return True if the allocators are the same, false otherwise.
  */
-SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b);
+SZ_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b);
 
 #pragma endregion
 
@@ -1271,7 +1282,8 @@ typedef struct sz_sequence_t {
  *  @param count Number of strings in the array.
  *  @param sequence Sequence structure to initialize.
  */
-SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence);
+SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
+                                                              sz_sequence_t *sequence);
 
 #pragma endregion
 
@@ -1318,6 +1330,9 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #ifdef __GNUG__
 #define SZ_NULL __null
 #define SZ_NULL_CHAR __null
+#elif defined(__cplusplus)
+#define SZ_NULL nullptr
+#define SZ_NULL_CHAR nullptr
 #else
 #define SZ_NULL ((void *)0)
 #define SZ_NULL_CHAR ((char *)0)
@@ -1333,8 +1348,8 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
 #define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))
 
-SZ_INTERNAL sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
-SZ_INTERNAL sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
+SZ_HELPER_AUTO sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
+SZ_HELPER_AUTO sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
 
 /**
  *  @brief Similar to `assert`, the `sz_assert_` is used in the `SZ_DEBUG` mode
@@ -1343,7 +1358,7 @@ SZ_INTERNAL sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
  */
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC) && \
     !defined(__CUDA_ARCH__) // ? CPU code w/out LibC access
-SZ_PUBLIC void sz_assert_failure_(char const *condition, char const *file, int line) {
+SZ_API_COMPTIME void sz_assert_failure_(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     exit(EXIT_FAILURE);
 }
@@ -1352,7 +1367,7 @@ SZ_PUBLIC void sz_assert_failure_(char const *condition, char const *file, int l
         if (!(condition)) { sz_assert_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
 #elif SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
-__device__ __noinline__ void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
+SZ_DEVICE_NOINLINE void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
     printf("Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     __trap();
 }
@@ -1380,71 +1395,71 @@ __device__ __noinline__ void sz_assert_cuda_failure_(char const *condition, char
  *  Use the serial version on 32-bit x86 and on Arm.
  */
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
-SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
+SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-SZ_INTERNAL int sz_u64_clz(sz_u64_t x) {
+SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
 }
-SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
+SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) {
     x = x - ((x >> 1) & 0x5555555555555555ull);
     x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) {
+SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) {
+SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) {
     sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
     return n;
 }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) {
+SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) {
     x = x - ((x >> 1) & 0x55555555);
     x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
     return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 }
 #else
-SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
-SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
-SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
+SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
+SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
+SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
+SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
+SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 /*
  *  Force the byteswap functions to be intrinsics, because when `/Oi-` is given,
  *  these will turn into CRT function calls, which breaks when `SZ_AVOID_LIBC` is given.
  */
 #pragma intrinsic(_byteswap_uint64)
-SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #pragma intrinsic(_byteswap_ulong)
-SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
+SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
-SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
-SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
-SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
-SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
-SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
+SZ_HELPER_AUTO int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
+SZ_HELPER_AUTO int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
+SZ_HELPER_AUTO int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
+SZ_HELPER_AUTO int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
+SZ_HELPER_AUTO int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
+SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
+SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
+SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
 /** @brief Reverse the 64 bits of @p value (bit `i` moves to bit `63 - i`): swap adjacent bits, then bit-pairs
  *         within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only byte-compress
  *         (`vpcompressb`) pack lanes in descending order. */
-SZ_INTERNAL sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
+SZ_HELPER_AUTO sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
     value = ((value & 0x5555555555555555ull) << 1) | ((value >> 1) & 0x5555555555555555ull);
     value = ((value & 0x3333333333333333ull) << 2) | ((value >> 2) & 0x3333333333333333ull);
     value = ((value & 0x0F0F0F0F0F0F0F0Full) << 4) | ((value >> 4) & 0x0F0F0F0F0F0F0F0Full);
@@ -1453,11 +1468,11 @@ SZ_INTERNAL sz_u64_t sz_u64_bits_reverse(sz_u64_t value) {
 
 /** @brief Bit index of the n-th (0-based) set bit of @p bits; clears the @p n lowest set bits, then `ctz`.
  *         @p bits must hold more than @p n set bits. One tested home for the per-ISA SIMD "n-th lane" locate. */
-SZ_INTERNAL int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
+SZ_HELPER_AUTO int sz_u64_nth_set_bit(sz_u64_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u64_ctz(bits);
 }
-SZ_INTERNAL int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
+SZ_HELPER_AUTO int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
     while (n--) bits &= bits - 1;
     return sz_u32_ctz(bits);
 }
@@ -1465,11 +1480,11 @@ SZ_INTERNAL int sz_u32_nth_set_bit(sz_u32_t bits, sz_size_t n) {
 /** @brief Branchless `value | (bit if condition)`: OR @p bit into @p value when @p condition holds, with no
  *         branch (mask-select rather than a CMOV, so there is no flag dependency). For threading a per-window
  *         carry signal into a lane mask. */
-SZ_INTERNAL sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
+SZ_HELPER_AUTO sz_u64_t sz_u64_or_if_(sz_u64_t value, sz_u64_t bit, int condition) {
     return value | (bit & ((sz_u64_t)0 - (sz_u64_t)(condition != 0)));
 }
 
-SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
+SZ_HELPER_AUTO sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /**
  *  @brief Select bits from either @p a or @p b depending on the value of @p mask bits.
@@ -1478,7 +1493,7 @@ SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x 
  *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
  *  https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
  */
-SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
+SZ_HELPER_AUTO sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
 
 /*
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
@@ -1528,10 +1543,10 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
     } while (0)
 
 /** @brief  Branchless minimum function for two signed 32-bit integers. */
-SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
+SZ_HELPER_AUTO sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 
 /** @brief  Branchless minimum function for two signed 32-bit integers. */
-SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
+SZ_HELPER_AUTO sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
 
 /*  In AVX-512 we actively use masked operations and the "K mask registers".
  *  Producing a mask for the first N elements of a sequence can be done using the `1 << N - 1` idiom.
@@ -1545,16 +1560,16 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
 #endif
-SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
-SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
-SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n); }
-SZ_INTERNAL __mmask64 sz_u64_mask_until_(sz_size_t n) {
+SZ_HELPER_AUTO __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
+SZ_HELPER_AUTO __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
+SZ_HELPER_AUTO __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n); }
+SZ_HELPER_AUTO __mmask64 sz_u64_mask_until_(sz_size_t n) {
     return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, (unsigned char)n);
 }
-SZ_INTERNAL __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
-SZ_INTERNAL __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
-SZ_INTERNAL __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
-SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
+SZ_HELPER_AUTO __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
+SZ_HELPER_AUTO __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
+SZ_HELPER_AUTO __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
+SZ_HELPER_AUTO __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
     return n < 64 ? sz_u64_mask_until_(n) : 0xFFFFFFFFFFFFFFFFull;
 }
 #if defined(__clang__)
@@ -1568,7 +1583,7 @@ SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
  *  @brief Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
-SZ_INTERNAL sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
+SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each byte is set.
@@ -1581,7 +1596,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b)
 /**
  *  @brief Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
  */
-SZ_INTERNAL void sz_ssize_clamp_interval( //
+SZ_HELPER_AUTO void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     // TODO: Remove branches.
     // Normalize negative indices
@@ -1605,7 +1620,7 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
  *  @brief Compute the logarithm base 2 of a positive integer, rounding down.
  *  @pre Input must be a positive number, as the logarithm of zero is undefined.
  */
-SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
+SZ_HELPER_AUTO sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
     int leading_zeros = sz_u64_clz(x);
     return (sz_size_t)(63 - leading_zeros);
@@ -1615,7 +1630,7 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
  *  @brief Computes the ceiling of @p x divided by @p divisor - the number of @p divisor-sized
  *         chunks needed to cover @p x. Assumes a non-zero @p divisor and no overflow on `x + divisor`.
  */
-SZ_INTERNAL sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + divisor - 1) / divisor; }
+SZ_HELPER_AUTO sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + divisor - 1) / divisor; }
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
@@ -1623,7 +1638,7 @@ SZ_INTERNAL sz_size_t sz_size_divide_round_up(sz_size_t x, sz_size_t divisor) { 
  *        Edge cases: bit_ceil(0) = 0, bit_ceil(1) = 1.
  *  @see https://stackoverflow.com/a/10143264
  */
-SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
+SZ_HELPER_AUTO sz_size_t sz_size_bit_ceil(sz_size_t x) {
 #if defined(__LZCNT__) || defined(__BMI__)
     // Edge cases: 0 and 1 return themselves, avoids undefined clz(0).
     if (x <= 1) return x;
@@ -1656,7 +1671,7 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
  *  https://www.chessprogramming.org/Flipping_Mirroring_and_Rotating
  *  https://lukas-prokop.at/articles/2021-07-23-transpose
  */
-SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
+SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
     sz_u64_t t;
     t = x ^ (x << 36);
     x ^= 0xf0f0f0f00f0f0f0full & (t ^ (x >> 36));
@@ -1669,7 +1684,7 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
 
 /** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result;
     result.u8s[0] = ptr[0];
@@ -1689,7 +1704,7 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 
 /** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result;
     result.u8s[0] = ptr[0];
@@ -1711,7 +1726,7 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 
 /** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result;
     result.u8s[0] = ptr[0];
@@ -1736,7 +1751,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 }
 
 /** @brief Store a 16-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_INTERNAL void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
+SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t vec;
     vec.u16 = value;
@@ -1755,7 +1770,7 @@ SZ_INTERNAL void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 }
 
 /** @brief Store a 32-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_INTERNAL void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
+SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t vec;
     vec.u32 = value;
@@ -1776,7 +1791,7 @@ SZ_INTERNAL void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 }
 
 /** @brief Store a 64-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_INTERNAL void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
+SZ_HELPER_AUTO void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t vec;
     vec.u64 = value;
@@ -1801,7 +1816,7 @@ SZ_INTERNAL void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 }
 
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
-SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
+SZ_HELPER_AUTO sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
@@ -1812,7 +1827,7 @@ SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 }
 
 /** @brief Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-SZ_INTERNAL void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
+SZ_HELPER_AUTO void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused_(start && length && handle);
 }
 
@@ -1827,19 +1842,19 @@ SZ_INTERNAL void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *h
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-SZ_PUBLIC void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
+SZ_API_COMPTIME void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
     sz_unused_(handle);
     if (length == 0) return SZ_NULL;
     return malloc(length);
 }
-SZ_PUBLIC void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
+SZ_API_COMPTIME void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused_(handle && length);
     free(start);
 }
 
 #endif
 
-SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
+SZ_API_COMPTIME void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
 #if !SZ_AVOID_LIBC
     allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
     allocator->free = (sz_memory_free_t)sz_memory_free_default_;
@@ -1850,7 +1865,7 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator
     allocator->handle = SZ_NULL;
 }
 
-SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length) {
+SZ_API_COMPTIME void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer, sz_size_t length) {
     // The logic here is simple - put the buffer capacity in the first slots of the buffer.
     // The second slot is used to store the current consumed capacity.
     // The rest of the buffer is used for the actual data.
@@ -1862,26 +1877,27 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, 
     pointer[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
-SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {
+SZ_API_COMPTIME sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {
     if (!a || !b) return sz_false_k;
 
     // Two allocators are considered equal if they have the same function pointers and handle
     return (a->allocate == b->allocate) && (a->free == b->free) && (a->handle == b->handle) ? sz_true_k : sz_false_k;
 }
 
-SZ_PUBLIC sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
+SZ_API_COMPTIME sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     return start[i];
 }
 
-SZ_PUBLIC sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle, sz_size_t i) {
+SZ_API_COMPTIME sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle, sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     sz_size_t length = 0;
     for (sz_cptr_t ptr = start[i]; *ptr; ptr++) length++;
     return length;
 }
 
-SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence) {
+SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
+                                                              sz_sequence_t *sequence) {
     sequence->handle = start;
     sequence->count = count;
     sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;

@@ -134,7 +134,7 @@ typedef struct PyAPI {
  *  @return sz_true_k on success, sz_false_k on failure
  *  @note Sets Pythonic error on failure.
  */
-static inline sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
+SZ_HELPER_AUTO sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
     if (!strs_obj || !sz_py_replace_strings_allocator) return sz_false_k;
 
     // Try to swap to unified allocator - this will be a no-op if already using it
@@ -155,7 +155,7 @@ static inline sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
  *  @brief Helper function to determine if unified memory is required based on capabilities and device scope.
  *  @param[in] capabilities The capabilities bitmask of the current engine.
  */
-static inline sz_bool_t requires_unified_memory(sz_capability_t capabilities) {
+SZ_HELPER_AUTO sz_bool_t requires_unified_memory(sz_capability_t capabilities) {
     return (capabilities & sz_cap_cuda_k) != 0;
 }
 

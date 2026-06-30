@@ -34,7 +34,7 @@ extern "C" {
  *
  *  @note No zero-length words are emitted; @p length == 0 returns 0.
  */
-SZ_DYNAMIC sz_size_t sz_utf8_wordbreaks(             //
+SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(         //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed);
@@ -50,7 +50,7 @@ SZ_DYNAMIC sz_size_t sz_utf8_wordbreaks(             //
  *
  *  @see https://www.unicode.org/reports/tr29/ - Unicode Text Segmentation
  */
-SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
+SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 
 /**
  *  @brief Check if a codepoint is a "word character" (has word-forming property).
@@ -61,7 +61,7 @@ SZ_PUBLIC sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
  *  @param rune The Unicode codepoint to check.
  *  @return sz_true_k if the codepoint is a word character, sz_false_k otherwise.
  */
-SZ_PUBLIC sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
+SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
  *  @brief Suggested default batch size for callers that stream boundaries through the `sz_utf8_find_*` kernels.
@@ -89,71 +89,71 @@ enum { sz_iterators_default_steps_k = 64 };
  *  @note Position 0 and position == length are always boundaries (SOT/EOT).
  *  @note This is an internal helper used by the iterators; not part of stable ABI.
  */
-SZ_PUBLIC sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
+SZ_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
 
 #pragma endregion
 
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                              sz_size_t *word_lengths, sz_size_t words_capacity,
-                                              sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                    sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                    sz_size_t *bytes_consumed);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                               sz_size_t *word_lengths, sz_size_t words_capacity,
-                                               sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                     sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_ICELAKE
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                               sz_size_t *word_lengths, sz_size_t words_capacity,
-                                               sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                     sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                            sz_size_t *word_lengths, sz_size_t words_capacity,
-                                            sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_SVE2
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                            sz_size_t *word_lengths, sz_size_t words_capacity,
-                                            sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_V128
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                            sz_size_t *word_lengths, sz_size_t words_capacity,
-                                            sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_RVV
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                           sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                 sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                 sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_LASX
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                            sz_size_t *word_lengths, sz_size_t words_capacity,
-                                            sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                  sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_POWERVSX
 /** @copydoc sz_utf8_wordbreaks */
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                sz_size_t *bytes_consumed);
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                                      sz_size_t *word_lengths, sz_size_t words_capacity,
+                                                      sz_size_t *bytes_consumed);
 #endif
 
 #pragma endregion
@@ -173,8 +173,9 @@ SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length
 
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                        sz_size_t *word_lengths, sz_size_t words_capacity, sz_size_t *bytes_consumed) {
+SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
+                                            sz_size_t *word_lengths, sz_size_t words_capacity,
+                                            sz_size_t *bytes_consumed) {
 #if SZ_USE_ICELAKE
     return sz_utf8_wordbreaks_icelake(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL

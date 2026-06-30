@@ -17,7 +17,7 @@ extern "C" {
 #pragma region UAX 29 Grapheme Cluster Boundaries
 
 /** @brief Returns the packed Grapheme_Cluster_Break descriptor (gcb | incb << 4 | extpict << 6) for a codepoint. */
-SZ_PUBLIC sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
+SZ_API_COMPTIME sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
     if (rune >= 0xAC00u && rune <= 0xD7A3u)
         return ((rune - 0xAC00u) % 28u == 0u) ? (sz_u8_t)(sz_grapheme_break_hangul_lv_k)
                                               : (sz_u8_t)(sz_grapheme_break_hangul_lvt_k);
@@ -40,7 +40,7 @@ SZ_PUBLIC sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
  *         input identically. Stepping by the lead's declared byte length would skip past trailing
  *         non-continuation bytes of a truncated lead, diverging from the window decoder.
  */
-SZ_INTERNAL sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_size_t next = position + 1;
     while (next < length && ((sz_u8_t)text[next] & 0xC0) == 0x80) ++next;
     return next;
@@ -58,7 +58,7 @@ SZ_INTERNAL sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t le
  *         ill-formed input (UAX-29 leaves such bytes undefined). Valid UTF-8 decodes identically to the checked
  *         path; only malformed input differs, by design.
  */
-SZ_INTERNAL sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+SZ_HELPER_AUTO sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     sz_u8_t const byte1 = (start + 1 < length) ? (sz_u8_t)text[start + 1] : 0;
     sz_u8_t const byte2 = (start + 2 < length) ? (sz_u8_t)text[start + 2] : 0;
@@ -91,20 +91,20 @@ SZ_INTERNAL sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t len
 }
 
 /** @brief Extracts the Grapheme_Cluster_Break class (bits 0-3) from a packed descriptor. */
-SZ_INTERNAL sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) { return (sz_u8_t)(descriptor & 0x0Fu); }
+SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) { return (sz_u8_t)(descriptor & 0x0Fu); }
 /** @brief Extracts the Indic_Conjunct_Break value (bits 4-5) from a packed descriptor. */
-SZ_INTERNAL sz_u8_t sz_grapheme_break_descriptor_incb_(sz_u8_t descriptor) {
+SZ_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_incb_(sz_u8_t descriptor) {
     return (sz_u8_t)((descriptor >> 4) & 0x03u);
 }
 /** @brief Extracts the Extended_Pictographic flag (bit 6) from a packed descriptor. */
-SZ_INTERNAL sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descriptor) {
+SZ_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descriptor) {
     return (sz_bool_t)((descriptor >> 6) & 1u);
 }
 
 /**
  *  @brief Check if `position` is a grapheme cluster boundary per Unicode TR29 (GB1-GB999, incl. GB9c and GB11).
  */
-SZ_PUBLIC sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+SZ_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // GB1
     if (position >= length) return sz_true_k; // GB2
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
@@ -220,7 +220,7 @@ typedef struct sz_grapheme_serial_state_t {
 } sz_grapheme_serial_state_t;
 
 /** @brief Boundary decision between @p state's previous codepoint and the @p after codepoint, GB3..GB13 in O(1). */
-SZ_INTERNAL sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
+SZ_HELPER_AUTO sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
     sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     if (before_class == sz_grapheme_break_cr_k && after_class == sz_grapheme_break_lf_k) return sz_false_k; // GB3
@@ -257,7 +257,7 @@ SZ_INTERNAL sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t co
 }
 
 /** @brief Advance @p state by the @p after codepoint: toggle/close the RI, ExtPict-ZWJ and InCB runs. */
-SZ_INTERNAL void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
+SZ_HELPER_AUTO void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
                                             ? (sz_bool_t)(!state->regional_indicator_run_odd)
@@ -300,7 +300,7 @@ SZ_INTERNAL void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, 
  *         `cluster_starts` / `cluster_lengths`, carrying the GB9c/GB11/GB12-13 runs in a register state (O(n), no
  *         backward re-walks). Byte-identical to the per-position `sz_utf8_is_grapheme_boundary_serial`.
  */
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_serial(              //
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(        //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
@@ -373,7 +373,7 @@ typedef struct sz_grapheme_carry_t {
 } sz_grapheme_carry_t;
 
 /** @brief  A zero-initialized cross-window carry (stream start: no previous codepoint, no open runs). */
-SZ_INTERNAL sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
+SZ_HELPER_AUTO sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
     sz_grapheme_carry_t carry;
     carry.has_previous = 0;
     for (int class_index = 0; class_index < 14; ++class_index) carry.previous_class_bit[class_index] = 0;
@@ -398,8 +398,8 @@ typedef struct sz_grapheme_window_masks_t {
  *          following window. Bit i of the result set → a no-break suppression sits before dense codepoint i.
  *          ISA-independent: pure `sz_u64_t` bit-mask algebra over the substrate scan primitives.
  */
-SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window, int codepoint_count,
-                                                 sz_grapheme_carry_t const *previous, sz_grapheme_carry_t *next) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window, int codepoint_count,
+                                                    sz_grapheme_carry_t const *previous, sz_grapheme_carry_t *next) {
     sz_u64_t const regional = window->class_bit[sz_grapheme_break_regional_indicator_k];
     sz_u64_t const extend = window->class_bit[sz_grapheme_break_extend_k];
     sz_u64_t const zero_width_joiner = window->class_bit[sz_grapheme_break_zwj_k];
@@ -473,7 +473,8 @@ SZ_INTERNAL sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t cons
 /**
  *  @brief  Per-class shift of @p current into the (i-1) position, seeding lane 0 from the inbound carry's last class.
  */
-SZ_INTERNAL sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous, int class_index) {
+SZ_HELPER_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous,
+                                                int class_index) {
     return (current << 1) | (previous->previous_class_bit[class_index] & 1ull);
 }
 
@@ -483,8 +484,8 @@ SZ_INTERNAL sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t
  *          the carry forward. The ISA-independent twin of the icelake fused window-boundaries; a per-ISA extractor
  *          builds @p window from descriptors, then calls this. Pure `sz_u64_t` algebra, no intrinsics.
  */
-SZ_INTERNAL sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window, int codepoint_count,
-                                                    sz_u64_t valid, sz_grapheme_carry_t *carry) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window, int codepoint_count,
+                                                       sz_u64_t valid, sz_grapheme_carry_t *carry) {
     sz_grapheme_carry_t const previous = *carry;
 
     sz_u64_t const carriage_return = window->class_bit[sz_grapheme_break_cr_k];

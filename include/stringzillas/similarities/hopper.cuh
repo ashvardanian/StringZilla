@@ -49,7 +49,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
@@ -153,7 +153,7 @@ struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
@@ -275,7 +275,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
@@ -368,7 +368,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
@@ -438,7 +438,7 @@ struct tile_scorer<char const *, char const *, i16_t, error_costs_classes_in_cud
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
@@ -550,7 +550,7 @@ struct tile_scorer<char const *, char const *, i32_t, error_costs_classes_in_cud
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(            //
+    SZ_DEVICE_INLINE void operator()(                      //
         char const *first_slice, char const *second_slice, //
         unsigned const tasks_offset, unsigned const tasks_step,
         unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
@@ -649,8 +649,8 @@ template <sz_similarity_objective_t objective_, sz_similarity_locality_t localit
           typename score_type_>
 struct score_cell<objective_, locality_, capability_, score_type_,
                   std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0 && sizeof(score_type_) <= 4>> {
-    __forceinline__ __device__ score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
-                                                      score_type_ substitution, score_type_ gap) const noexcept {
+    SZ_DEVICE_INLINE score_type_ operator()(score_type_ diag, score_type_ top, score_type_ left,
+                                            score_type_ substitution, score_type_ gap) const noexcept {
         using score_t = score_type_;
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900)
@@ -684,7 +684,7 @@ template <sz_similarity_objective_t objective_, sz_similarity_locality_t localit
           typename score_type_>
 struct affine_score_cell<objective_, locality_, capability_, score_type_,
                          std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0 && sizeof(score_type_) <= 4>> {
-    __forceinline__ __device__ score_type_ operator()( //
+    SZ_DEVICE_INLINE score_type_ operator()( //
         score_type_ diag, score_type_ top_m, score_type_ top_v, score_type_ left_m, score_type_ left_h,
         score_type_ substitution, score_type_ open, score_type_ extend, score_type_ &v_out,
         score_type_ &h_out) const noexcept {
@@ -731,8 +731,8 @@ struct affine_score_cell<objective_, locality_, capability_, score_type_,
  */
 template <sz_similarity_locality_t locality_, sz_capability_t capability_>
 struct weighted_gap_fold<locality_, capability_, std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0>> {
-    __forceinline__ __device__ void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
-                                               i16_t gap_cost) const noexcept {
+    SZ_DEVICE_INLINE void operator()(i16_t &cell_low, i16_t &cell_high, i16_t left_cell,
+                                     i16_t gap_cost) const noexcept {
         static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
         // The two packed cells are a horizontal chain (`cell_high` reads the freshly folded `cell_low`), so they
         // cannot share one packed `__viaddmax_s16x2`; each fused add-max is a scalar 32-bit DPX op (the i16->int
@@ -756,7 +756,7 @@ struct weighted_gap_fold<locality_, capability_, std::enable_if_t<(capability_ &
  */
 template <sz_similarity_locality_t locality_, sz_capability_t capability_>
 struct weighted_affine_gap_fold<locality_, capability_, std::enable_if_t<(capability_ & sz_cap_hopper_k) != 0>> {
-    __forceinline__ __device__ void operator()(                         //
+    SZ_DEVICE_INLINE void operator()(                                   //
         i16_t match_or_insert_low, i16_t match_or_insert_high,          //
         i16_t left_cell, i16_t left_deletion, i16_t open, i16_t extend, //
         i16_t &deletion_low, i16_t &cell_low, i16_t &deletion_high, i16_t &cell_high) const noexcept {

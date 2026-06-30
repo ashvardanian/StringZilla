@@ -28,7 +28,7 @@ extern "C" {
  *         `vec_perm` and full-stores to an 18-wide scratch (absorbing the last sub-block's 2-lane spill, since
  *         VSX has no masked store); the low `emit_count` entries copy out in ascending lane order, byte-exact.
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_powervsx_(                               //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_powervsx_(                            //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -74,7 +74,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_powervsx_(                               /
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_powervsx(          //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx(    //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -151,7 +151,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_powervsx(          //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_powervsx(       //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

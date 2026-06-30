@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.github.ashvardanian</groupId>
+  <artifactId>stringzilla</artifactId>
+  <version>4.6.2</version>
+  <packaging>jar</packaging>
+
+  <name>StringZilla</name>
+  <description>Zero-copy Java bindings for StringZilla (SIMD search, compare, hash) via the Foreign Function and Memory API.</description>
+  <url>https://github.com/ashvardanian/StringZilla</url>
+
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+    </license>
+  </licenses>
+
+  <properties>
+    <maven.compiler.release>22</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <junit.version>6.1.1</junit.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Test-scope only: prove zero-copy adapters against the real consumer types. -->
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-core</artifactId>
+      <version>10.5.0</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <!-- Repo convention: the build manifest lives at the root; the Java sources live under java/. -->
+  <build>
+    <sourceDirectory>java/src/main/java</sourceDirectory>
+    <testSourceDirectory>java/src/test/java</testSourceDirectory>
+    <resources>
+      <resource>
+        <directory>java/src/main/resources</directory>
+      </resource>
+    </resources>
+    <plugins>
+      <!-- Palantir Java Format (4-space, 120 columns, K&R) to mirror the C/C++ clang-format style.
+           Palantir/google-java-format bind to com.sun.tools.javac internals, so `spotless:apply` must
+           run on a JDK <= 23 (e.g. a dedicated CI format step); the main build still targets JDK 22+. -->
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>2.43.0</version>
+        <configuration>
+          <java>
+            <includes>
+              <include>java/src/main/java/**/*.java</include>
+              <include>java/src/test/java/**/*.java</include>
+            </includes>
+            <palantirJavaFormat>
+              <version>2.50.0</version>
+            </palantirJavaFormat>
+            <removeUnusedImports/>
+          </java>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.15.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <!-- FFM downcalls require native-access to be enabled for the unnamed module. -->
+          <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -36,7 +36,7 @@ extern "C" {
 /** @brief  Software `_pext_u64`: gather the bits of @p value selected by @p selector, packed to the low end (bit `j`
  *          of the result = the `j`-th set bit of @p value within @p selector). NEON has no `pext`; the sparse loop
  *          trips once per set @p selector bit (codepoint-dense compaction over the start lanes). Bit-exact with BMI2. */
-SZ_INTERNAL sz_u64_t sz_grapheme_pext_neon_(sz_u64_t value, sz_u64_t selector) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_pext_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     sz_u64_t out_bit = 1;
     while (selector) {
@@ -51,7 +51,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_pext_neon_(sz_u64_t value, sz_u64_t selector) {
 /** @brief  Software `_pdep_u64`: scatter the low bits of @p value into the positions set in @p selector (the `j`-th
  *          set bit of @p selector receives bit `j` of @p value). NEON has no `pdep`; the sparse loop trips once per
  *          set @p selector bit (the dense-boundary scatter back onto codepoint-start lanes). Bit-exact with BMI2. */
-SZ_INTERNAL sz_u64_t sz_grapheme_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     while (selector) {
         sz_u64_t const low = selector & (~selector + 1); // lowest set bit of `selector`
@@ -71,7 +71,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
  *          cascade emits the descriptor directly (the serial `id_to_desc` permute is folded into the leaf tables).
  *          Gather-free; bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included). Addresses
  *          ONE quarter; the caller iterates the four quarters. */
-SZ_INTERNAL uint8x16_t sz_grapheme_bmp_descriptor_neon_(uint8x16_t high, uint8x16_t low) {
+SZ_HELPER_AUTO uint8x16_t sz_grapheme_bmp_descriptor_neon_(uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const page = sz_utf8_rune_lut256_neon_(sz_utf8_grapheme_break_haswell_stage1_, high);
     uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
@@ -98,7 +98,7 @@ SZ_INTERNAL uint8x16_t sz_grapheme_bmp_descriptor_neon_(uint8x16_t high, uint8x1
 /** @brief  Packed descriptor byte for sixteen ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
  *          NEON twin of the AVX2 astral trie. Per-lane bytes: @p plane = (offset>>16)&0xFF (low nibble meaningful),
  *          @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Gather-free; bit-exact. Addresses ONE quarter. */
-SZ_INTERNAL uint8x16_t sz_grapheme_astral_descriptor_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
+SZ_HELPER_AUTO uint8x16_t sz_grapheme_astral_descriptor_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const n4 = vandq_u8(plane, low_nibble_mask);
     uint8x16_t const n3 = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
@@ -133,15 +133,15 @@ SZ_INTERNAL uint8x16_t sz_grapheme_astral_descriptor_neon_(uint8x16_t plane, uin
 
 /** @brief  Per-quarter unsigned `value >= bound` boolean mask (0x00/0xFF lanes), the NEON `vcgeq_u8` twin of the AVX2
  *          `max_epu8(value,bound)==value` idiom. */
-SZ_INTERNAL uint8x16_t sz_grapheme_cmpge_epu8_neon_(uint8x16_t value, uint8x16_t bound) {
+SZ_HELPER_INLINE uint8x16_t sz_grapheme_cmpge_epu8_neon_(uint8x16_t value, uint8x16_t bound) {
     return vcgeq_u8(value, bound);
 }
 
 /** @brief  64-bit unsigned `low <= cp <= high` mask over reconstructed BMP codepoints carried in @p high_byte /
  *          @p low_byte quarters. cp = (high<<8)|low, so the inclusive 16-bit range test is: high in (lo_hi,hi_hi)
  *          unconditionally, or on the boundary high bytes the low byte within bound. Four quarters, branchless. */
-SZ_INTERNAL sz_u64_t sz_grapheme_cp_in_range_neon_(uint8x16_t const *high, uint8x16_t const *low, sz_u16_t lo,
-                                                   sz_u16_t hi) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_cp_in_range_neon_(uint8x16_t const *high, uint8x16_t const *low, sz_u16_t lo,
+                                                      sz_u16_t hi) {
     sz_u8_t const lo_h = (sz_u8_t)(lo >> 8), lo_l = (sz_u8_t)(lo & 0xFF);
     sz_u8_t const hi_h = (sz_u8_t)(hi >> 8), hi_l = (sz_u8_t)(hi & 0xFF);
     uint8x16_t const lo_h_v = vdupq_n_u8(lo_h), lo_l_v = vdupq_n_u8(lo_l);
@@ -163,7 +163,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_cp_in_range_neon_(uint8x16_t const *high, uint8
 /** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges (the NEON
  *          twin of `sz_grapheme_cjk_other_haswell_`): `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend /
  *          enclosed exceptions. Such lanes need no cold cascade (their descriptor is 0). */
-SZ_INTERNAL sz_u64_t sz_grapheme_cjk_other_neon_(uint8x16_t const *high, uint8x16_t const *low) {
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_cjk_other_neon_(uint8x16_t const *high, uint8x16_t const *low) {
     sz_u64_t const run_a = sz_grapheme_cp_in_range_neon_(high, low, 0x3000, 0xA66E);
     sz_u64_t const run_b = sz_grapheme_cp_in_range_neon_(high, low, 0xD7FC, 0xFB1D);
     sz_u64_t const exc_a = sz_grapheme_cp_in_range_neon_(high, low, 0x302A, 0x3030);
@@ -176,7 +176,7 @@ SZ_INTERNAL sz_u64_t sz_grapheme_cjk_other_neon_(uint8x16_t const *high, uint8x1
 
 /** @brief  Build a per-quarter byte-boolean selector (0x00/0xFF) from the 16 lane bits of @p bits at offset @p shift,
  *          the NEON twin of `sz_utf8_byte_mask_from_bits_haswell_` confined to one quarter. */
-SZ_INTERNAL uint8x16_t sz_grapheme_byte_mask_from_bits_neon_(sz_u64_t bits, int shift) {
+SZ_HELPER_INLINE uint8x16_t sz_grapheme_byte_mask_from_bits_neon_(sz_u64_t bits, int shift) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     static sz_u8_t const lane_half[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     sz_u8_t const low_byte = (sz_u8_t)((bits >> shift) & 0xFF);
@@ -200,7 +200,7 @@ typedef struct sz_grapheme_classified_neon_t {
  *          descriptor quarters with the trimmed codepoint-start geometry. Mirrors the haswell decode/classify path
  *          (value-based blind reconstruction so malformed input agrees byte-for-byte) without table gather.
  */
-SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
+SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
     sz_u8_t const *text, sz_size_t length, sz_size_t base) {
 
     sz_utf8_rune_window_neon_t const decoded = sz_utf8_rune_decode_window_neon_(text + base, length - base);
@@ -277,6 +277,15 @@ SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
         mid[quarter] = vorrq_u8(vshlq_n_u8(vandq_u8(n1, c0f), 4), sz_utf8_srl8_neon_(n2, 2, 0x0F));
         alo[quarter] = vorrq_u8(vshlq_n_u8(vandq_u8(n2, c03), 6), vandq_u8(n3, c3f));
 
+        // A 4-byte lead's blind codepoint is `(plane<<16)|(mid<<8)|alo`, NOT the 2-byte fold seated in high/low above.
+        // Override its BMP high/low to mid/alo so a plane-0 (overlong) 4-byte lead resolves on the BMP path exactly as
+        // serial/haswell do — those carry the full 21-bit value and split BMP-vs-astral on `cp < 0x10000`, so a plane-0
+        // 4-byte lane (e.g. `F0 87 ..`) is a BMP codepoint, not astral. (The astral overwrite below is then gated on a
+        // non-zero in-range plane, mirroring haswell's `is_astral`.)
+        uint8x16_t const four_sel_blend = sz_grapheme_byte_mask_from_bits_neon_(four_byte, quarter * 16);
+        high[quarter] = vbslq_u8(four_sel_blend, mid[quarter], high[quarter]);
+        low[quarter] = vbslq_u8(four_sel_blend, alo[quarter], low[quarter]);
+
         // ASCII descriptor (cp < 0x80) via a single 256-LUT over the raw byte — the cheap gated fast path so a
         // pure-ASCII window never pays the full BMP nibble cascade. Mirrors haswell's `ascii_desc` LUT.
         ascii_desc[quarter] = sz_utf8_rune_lut256_neon_(sz_utf8_grapheme_break_haswell_ascii_desc_, here);
@@ -305,16 +314,38 @@ SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
             desc[quarter] = vbslq_u8(ascii_bool[quarter], ascii_desc[quarter], bmp);
         }
     }
-    // Astral lanes overwrite with the 4-byte descriptor. The astral cascade is addressed by offset = cp - 0x10000;
-    // subtract 1 from the reconstructed plane to get the offset plane nibble. Gated behind any astral lane.
-    sz_u64_t const is_astral = four_byte & loaded_mask;
+    // A 4-byte lead splits three ways on its blind plane = bits[16..20] of cp, matching haswell/serial value dispatch
+    // (`is_bmp = cp < 0x10000`, `is_astral = 0x10000 ≤ cp < 0x110000`, else Other):
+    //   plane == 0      → BMP codepoint (cp = (mid<<8)|alo); already resolved through the BMP path above, since the
+    //                      high/low override seated `mid`/`alo` for these lanes (e.g. overlong `F0 87 ..`).
+    //   plane in [1,16] → genuine astral (cp in 0x10000..0x10FFFF); overwrite with the 4-byte trie descriptor.
+    //   plane ≥ 17      → cp ≥ 0x110000 (e.g. overlong `F4 90 80 80`); neither BMP nor astral, force Other (0).
+    // `plane[q]` carries the 5-bit plane per 4-byte-lead lane (junk on other lanes, gated out by `four_byte`).
+    uint8x16_t const plane_one = vdupq_n_u8(1), plane_sixteen = vdupq_n_u8(0x10);
+    uint8x16_t plane_nonzero_q[4], plane_le16_q[4];
+    for (int quarter = 0; quarter < 4; ++quarter) {
+        plane_nonzero_q[quarter] = vcgeq_u8(plane[quarter], plane_one);
+        plane_le16_q[quarter] = sz_grapheme_cmpge_epu8_neon_(plane_sixteen, plane[quarter]);
+    }
+    sz_u64_t const plane_nonzero = sz_utf8_mask_combine_neon_(plane_nonzero_q[0], plane_nonzero_q[1],
+                                                              plane_nonzero_q[2], plane_nonzero_q[3]);
+    sz_u64_t const plane_le_16 = sz_utf8_mask_combine_neon_(plane_le16_q[0], plane_le16_q[1], plane_le16_q[2],
+                                                            plane_le16_q[3]);
+    sz_u64_t const is_astral = four_byte & plane_nonzero & plane_le_16 & loaded_mask;
+    sz_u64_t const is_overrange = four_byte & plane_nonzero & ~plane_le_16 & loaded_mask;
     if (is_astral) {
+        // offset = cp - 0x10000; high16/low16 unchanged, plane nibble = cp_plane - 1.
         for (int quarter = 0; quarter < 4; ++quarter) {
-            uint8x16_t const four_sel = sz_grapheme_byte_mask_from_bits_neon_(four_byte, quarter * 16);
+            uint8x16_t const four_sel = sz_grapheme_byte_mask_from_bits_neon_(is_astral, quarter * 16);
             uint8x16_t const plane_off = vsubq_u8(vandq_u8(four_sel, plane[quarter]), vdupq_n_u8(1));
             uint8x16_t const astral = sz_grapheme_astral_descriptor_neon_(plane_off, mid[quarter], alo[quarter]);
             desc[quarter] = vbslq_u8(four_sel, astral, desc[quarter]);
         }
+    }
+    if (is_overrange) {
+        // cp ≥ 0x110000: clear to Other (0); the BMP-path value seated on these lanes is meaningless.
+        for (int quarter = 0; quarter < 4; ++quarter)
+            desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(is_overrange, quarter * 16));
     }
 
     // `0xF8..0xFF` begin no valid sequence and match no lead-length mask; force their start lanes to the Other
@@ -345,8 +376,8 @@ SZ_INTERNAL sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( //
  *          the codepoint-dense domain by a single software-`pext` over the start lanes (the BMI2-free analogue of the
  *          haswell `_pext_u64`). No scalar per-lane loop, no table gather, no rule control flow.
  */
-SZ_INTERNAL sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_grapheme_classified_neon_t classified,
-                                                                     sz_u64_t valid) {
+SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_grapheme_classified_neon_t classified,
+                                                                          sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;
     uint8x16_t const nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t class_q[4], desc_q[4];
@@ -396,7 +427,7 @@ SZ_INTERNAL sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_grapheme
 
 #pragma region Grapheme forward driver
 
-SZ_PUBLIC sz_size_t sz_utf8_graphemes_neon(                //
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_neon(          //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {

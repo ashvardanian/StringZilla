@@ -21,13 +21,13 @@ extern "C" {
 #endif
 
 /*  Per-class 16-bit lane mask for an all-ASCII window via `wasm_i8x16_bitmask`. */
-SZ_INTERNAL sz_u64_t sz_utf8_word_break_class_bitmask_v128_(v128_t equal_vec) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_bitmask_v128_(v128_t equal_vec) {
     return (sz_u64_t)((sz_u32_t)wasm_i8x16_bitmask(equal_vec) & 0xFFFFu);
 }
 
 /*  Boundary mask for the trusted lanes [2,14] of an all-ASCII 16-byte window: bit i set => a word boundary
  *  precedes lane i. Computed branchlessly via the shared portable join routine. */
-SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
+SZ_HELPER_AUTO sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
     v128_t lowered = wasm_v128_or(window, wasm_i8x16_splat(0x20)); // fold A-Z onto a-z
     sz_u64_t aletter_mask = sz_utf8_word_break_class_bitmask_v128_(
         wasm_v128_and(wasm_u8x16_ge(lowered, wasm_i8x16_splat(0x61)), wasm_u8x16_le(lowered, wasm_i8x16_splat(0x7A))));
@@ -53,7 +53,7 @@ SZ_INTERNAL sz_u32_t sz_utf8_word_break_boundary_mask_v128_(v128_t window) {
 
 /** @brief  Ascending `wasm_i8x16_swizzle` permutation that gathers a 4-bit sub-block's set u32 lanes to the front,
  *          preserving low-to-high lane order. The v128 analog of `sz_utf8_word_compact4_permutation_haswell_`. */
-SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_v128_(sz_u32_t submask) {
+SZ_HELPER_INLINE v128_t sz_utf8_word_compact4_permutation_v128_(sz_u32_t submask) {
     static sz_u8_t const compact_lut[16][16] = {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         {4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -69,7 +69,7 @@ SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_v128_(sz_u32_t submask) {
 
 /** @brief  Descending counterpart of `sz_utf8_word_compact4_permutation_v128_`: gathers a 4-bit sub-block's set
  *          u32 lanes to the front in HIGH-to-LOW lane order, for the reverse word scan. */
-SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_descending_v128_(sz_u32_t submask) {
+SZ_HELPER_INLINE v128_t sz_utf8_word_compact4_permutation_descending_v128_(sz_u32_t submask) {
     static sz_u8_t const compact_lut[16][16] = {
         {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
         {4, 5, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},       {4, 5, 6, 7, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -85,13 +85,13 @@ SZ_INTERNAL v128_t sz_utf8_word_compact4_permutation_descending_v128_(sz_u32_t s
 
 /** @brief  Shift four packed u32 boundary lanes right by one and seat @p carry in the freed lane 0, building
  *          `[carry, b0, b1, b2]` from `boundaries = [b0, b1, b2, b3]` with one `wasm_i8x16_shuffle`. */
-SZ_INTERNAL v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_t carry) {
+SZ_HELPER_INLINE v128_t sz_utf8_word_shift_right_carry_v128_(v128_t boundaries, v128_t carry) {
     return wasm_i8x16_shuffle(carry, boundaries, 0, 1, 2, 3, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
 }
 
 #pragma endregion // Word boundary left pack
 
-SZ_PUBLIC sz_size_t sz_utf8_wordbreaks_v128(         //
+SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(   //
     sz_cptr_t text, sz_size_t length,                //
     sz_size_t *word_starts, sz_size_t *word_lengths, //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {

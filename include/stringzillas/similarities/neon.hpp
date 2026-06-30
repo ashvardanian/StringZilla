@@ -28,6 +28,9 @@ namespace stringzillas {
 #pragma GCC target("+simd")
 #endif
 
+/** @brief Per-lane nonzero test: an all-ones lane where any bit of @p value is set, else all-zeros. */
+SZ_INLINE uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
+
 #pragma region Bit Parallel Myers
 
 /**
@@ -70,9 +73,6 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
                         scratch_space_t scratch_space) noexcept {
         return levenshtein_distance_myers<char, sz_cap_serial_k> {}(first, second, result_ref, scratch_space);
     }
-
-    /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
 
     /**
      *  @brief Two independent single-word Myers distances, one per `uint64x2_t` lane (each shorter side <= 64).
@@ -556,9 +556,6 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
 
 #pragma endregion Per Lane Hash match_masks
 
-    /** @brief Per-lane nonzero test: returns an all-ones lane where any bit of @p value is set, all-zeros otherwise. */
-    static inline uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64(value, vdupq_n_u64(0)); }
-
     /**
      *  @brief Two independent single-word rune Myers distances, one per `uint64x2_t` lane (each shorter side <= 64
      *      runes). The scan is verbatim the byte `distances_2x64_`; only the `Eq` source differs - per text position
@@ -931,9 +928,9 @@ struct substitution_lookup_neon_t {
     uint8x16x4_t byte_to_class_vecs_[4];
     uint8x16x4_t cost_windows_vecs_[16];
 
-    inline substitution_lookup_neon_t() noexcept {}
+    substitution_lookup_neon_t() noexcept {}
 
-    inline void reload_classes(u8_t const *byte_to_class) noexcept {
+    void reload_classes(u8_t const *byte_to_class) noexcept {
         byte_to_class_vecs_[0] = vld1q_u8_x4(byte_to_class + 64 * 0);
         byte_to_class_vecs_[1] = vld1q_u8_x4(byte_to_class + 64 * 1);
         byte_to_class_vecs_[2] = vld1q_u8_x4(byte_to_class + 64 * 2);
@@ -946,7 +943,7 @@ struct substitution_lookup_neon_t {
      *         still returns the original `class_substitution_costs[first][second]` even when the diagonal walker
      *         has swapped the shorter and longer strings (which flips the order of the two class operands).
      */
-    inline void reload_costs(
+    void reload_costs(
         error_cost_t const (&class_substitution_costs)[error_costs_classes_count_k][error_costs_classes_count_k],
         bool transpose) noexcept {
         alignas(16) error_cost_t windows[16 * 64];
@@ -962,7 +959,7 @@ struct substitution_lookup_neon_t {
             cost_windows_vecs_[window] = vld1q_u8_x4((u8_t const *)(windows + window * 64));
     }
 
-    inline uint8x16_t classify16(uint8x16_t text_vec) const noexcept {
+    SZ_INLINE uint8x16_t classify16(uint8x16_t text_vec) const noexcept {
 
         // Map each input byte to its class using the 256-entry `byte_to_class` table. Each `vqtbl4q_u8`
         // addresses one 64-byte window and returns zero for indices outside [0, 63], so XOR-ing the index by
@@ -974,7 +971,7 @@ struct substitution_lookup_neon_t {
         return vorrq_u8(vorrq_u8(lookup_0_to_63, lookup_64_to_127), vorrq_u8(lookup_128_to_191, lookup_192_to_255));
     }
 
-    inline int8x16_t lookup16(uint8x16_t first_class_vec, uint8x16_t second_class_vec) const noexcept {
+    SZ_INLINE int8x16_t lookup16(uint8x16_t first_class_vec, uint8x16_t second_class_vec) const noexcept {
 
         // The permute index inside every window is `((first_class & 1) << 5) | second_class`, always below 64.
         uint8x16_t index_vec = vorrq_u8( //
@@ -4723,9 +4720,7 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i16` recurrence hardcodes `vmaxq_s16`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -4902,11 +4897,12 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
                 vst1q_s16(current_row + column * candidate_lanes_k, cell_score_vec);
 
                 if constexpr (is_local_k) {
-                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int16x8_t const column_live = vcgtq_s16(lane_lengths_vec,
-                                                            vdupq_n_s16(static_cast<i16_t>(column - 1)));
-                    int16x8_t const masked_cell_vec = vandq_s16(cell_score_vec, column_live);
-                    running_max_vec = vmaxq_s16(running_max_vec, masked_cell_vec);
+                    // Fold into the running maximum only on lanes whose candidate reaches this column. `vcgtq_s16`'s
+                    // `uint16x8_t` mask feeds `vbslq_s16` natively, keeping the new max on live lanes, the rest as-is.
+                    uint16x8_t const column_live = vcgtq_s16(lane_lengths_vec,
+                                                             vdupq_n_s16(static_cast<i16_t>(column - 1)));
+                    running_max_vec = vbslq_s16(column_live, vmaxq_s16(running_max_vec, cell_score_vec),
+                                                running_max_vec);
                 }
             }
             trivial_swap(previous_row, current_row);
@@ -4965,9 +4961,7 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     // The signed `i32` recurrence hardcodes `vmaxq_s32`; minimization would need a different blend.
     static_assert(
         objective_ == sz_maximize_score_k,
-        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water"
-                                                                                                                 "man)"
-                                                                                                                 ".");
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -5152,11 +5146,12 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
                 vst1q_s32(current_row + column * candidate_lanes_k, cell_score_vec);
 
                 if constexpr (is_local_k) {
-                    // Fold this column into the running maximum only for lanes whose candidate reaches it.
-                    int32x4_t const column_live = vcgtq_s32(lane_lengths_vec,
-                                                            vdupq_n_s32(static_cast<i32_t>(column - 1)));
-                    int32x4_t const masked_cell_vec = vandq_s32(cell_score_vec, column_live);
-                    running_max_vec = vmaxq_s32(running_max_vec, masked_cell_vec);
+                    // Fold into the running maximum only on lanes whose candidate reaches this column. `vcgtq_s32`'s
+                    // `uint32x4_t` mask feeds `vbslq_s32` natively, keeping the new max on live lanes, the rest as-is.
+                    uint32x4_t const column_live = vcgtq_s32(lane_lengths_vec,
+                                                             vdupq_n_s32(static_cast<i32_t>(column - 1)));
+                    running_max_vec = vbslq_s32(column_live, vmaxq_s32(running_max_vec, cell_score_vec),
+                                                running_max_vec);
                 }
             }
             trivial_swap(previous_row, current_row);
@@ -5635,10 +5630,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
      *      word count and `distances_2xN_<words_count>` can be selected at compile time.
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -5741,9 +5735,9 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
         size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
@@ -6835,10 +6829,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
      *      @p results matrix (plus the mirror slot for symmetric self-similarity).
      */
     template <typename queries_type_, typename candidates_type_, typename results_type_>
-    [[gnu::noinline]] status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                            results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
-                                            size_t cell_end, scratch_space_t scratch,
-                                            cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_range_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                      results_type_ &&results, cross_similarities_t cross_kind, size_t cell_begin,
+                                      size_t cell_end, scratch_space_t scratch, cpu_specs_t const &specs) noexcept {
 
         using value_t = remove_cvref<decltype(results.data[0])>;
         size_t const candidates_count = candidates.size();
@@ -7048,9 +7041,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
 
     /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
-    [[gnu::noinline]] status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
-                                               results_type_ &&results, cross_similarities_t cross_kind,
-                                               executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+    SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                                         results_type_ &&results, cross_similarities_t cross_kind,
+                                         executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
         size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);

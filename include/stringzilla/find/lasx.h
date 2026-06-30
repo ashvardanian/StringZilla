@@ -28,7 +28,7 @@ extern "C" {
  *  @param sign_extended A 256-bit comparison result vector (0xFF where matched, 0x00 otherwise).
  *  @return 32-bit movemask where bit `i` is set when byte `i` matched.
  */
-SZ_INTERNAL sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended) {
     __m256i collected = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected, 0);
     unsigned int high = __lasx_xvpickve2gr_wu(collected, 4);
@@ -42,11 +42,11 @@ SZ_INTERNAL sz_u32_t sz_xvmovemask_b_find_lasx_(__m256i sign_extended) {
  *  @param sign_extended A 128-bit comparison result vector (0xFF where matched, 0x00 otherwise).
  *  @return Low 16 bits of the movemask.
  */
-SZ_INTERNAL sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended) {
+SZ_HELPER_INLINE sz_u32_t sz_vmovemask_b_find_lsx_(__m128i sign_extended) {
     return __lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u256_vec_t haystack_vec, needle_vec, matches_vec;
     // `xvldrepl_b` broadcasts the needle byte straight from memory, fusing the load and the splat that
     // `xvreplgr2vr_b(needle[0])` would otherwise spend two instructions on.
@@ -85,7 +85,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_len
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u256_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.lasx = __lasx_xvldrepl_b(needle, 0);
     // `xvfrstp` finds the FIRST match; reverse search wants the LAST, which LASX has no single op for, so we
@@ -111,8 +111,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_le
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                 sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -184,8 +184,8 @@ SZ_PUBLIC sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, 
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                  sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -260,7 +260,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length,
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // We replicate the strided even/odd bytes of the 32-byte filter into both 128-bit lanes so that the
     // same within-lane `__lasx_xvshuf_b` index works for either half, mirroring the Haswell approach.
@@ -355,7 +355,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_by
     return sz_find_byteset_serial(text, length, filter);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Mirror of `sz_find_byteset_lasx` scanning from the end: same transposed Mula nibble-bitset classifier
     // on the trailing 32-byte window, but the in-set bytes are collected into a movemask and the highest set

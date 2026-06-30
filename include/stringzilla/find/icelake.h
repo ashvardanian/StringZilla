@@ -33,7 +33,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
@@ -148,7 +148,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan 64-byte
     // windows from the end of the buffer and take the HIGHEST set bit (closest to the buffer end) so the

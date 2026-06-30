@@ -30,7 +30,7 @@ extern "C" {
  *  Each 64-byte window is classified branchlessly into a `starts` mask plus a per-lane byte-length vector,
  *  then `vpcompressb` peels the matching lanes and lengths. Starts are trusted in lanes [0,61] (step 62) so
  *  any 2-/3-byte delimiter is fully loaded; a `t[pos-1] == '\r'` carry suppresses an LF closing an edge CRLF. */
-SZ_PUBLIC sz_size_t sz_utf8_newlines_icelake(           //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_icelake(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -100,7 +100,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_icelake(           //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_icelake(        //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -187,7 +187,7 @@ SZ_PUBLIC sz_size_t sz_utf8_whitespaces_icelake(        //
 #pragma region Gather free membership
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` over all 64 lanes, returned as a mask. */
-SZ_INTERNAL __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, __m512i low) {
+SZ_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, __m512i low) {
     __m512i const bit_table = _mm512_broadcast_i32x4(_mm_setr_epi8( //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0));
     __m512i const bit_mask = _mm512_permutexvar_epi8(_mm512_and_si512(low, _mm512_set1_epi8(0x07)), bit_table);
@@ -202,8 +202,8 @@ SZ_INTERNAL __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, __m512
  *  substrate page network; the bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally — block 0
  *  encodes the ASCII delimiters. No `vpgather`.
  */
-SZ_INTERNAL __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0, __m512i chunk1, __m512i chunk2,
-                                                           __m512i chunk3) {
+SZ_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0, __m512i chunk1, __m512i chunk2,
+                                                                __m512i chunk3) {
     // Each chunk holds 16 byte-domain results in its low 16 32-bit lanes; place them in byte order [0,64).
     __m512i result = _mm512_castsi128_si512(_mm512_cvtepi32_epi8(chunk0));
     result = _mm512_mask_expand_epi8(result, _cvtu64_mask64((sz_u64_t)0xFFFFull << 16),
@@ -215,7 +215,7 @@ SZ_INTERNAL __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0, __m51
     return result;
 }
 
-SZ_INTERNAL __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __m512i high_in, __m512i low_in) {
+SZ_HELPER_AUTO __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __m512i high_in, __m512i low_in) {
     // The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
     // codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
     __mmask64 const ascii = ~_mm512_movepi8_mask(window);
@@ -258,8 +258,8 @@ SZ_INTERNAL __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __m51
  *  network: `super = offset>>16` selects an L1 group, `group*256 + ((offset>>8)&0xFF)` selects a bitmap row id, and the
  *  bit `(offset & 7)` is tested. Resolved over all 64 lanes; the caller blends the result onto the four-byte lanes.
  */
-SZ_INTERNAL __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __m512i next1, __m512i next2,
-                                                              __m512i next3) {
+SZ_HELPER_AUTO __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __m512i next1, __m512i next2,
+                                                                 __m512i next3) {
     __m512i const byte0 = _mm512_and_si512(window, _mm512_set1_epi8(0x07));
     __m512i const byte1 = _mm512_and_si512(next1, _mm512_set1_epi8(0x3F));
     __m512i const byte2 = _mm512_and_si512(next2, _mm512_set1_epi8(0x3F));
@@ -315,7 +315,7 @@ SZ_INTERNAL __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window, __
  *          overlong, a surrogate, or beyond U+10FFFF. Invalid leads are never reported (serial advances one byte and
  *          re-syncs, which never matches the cleared lane).
  */
-SZ_INTERNAL __mmask64 sz_delimiter_valid_starts_icelake_( //
+SZ_HELPER_AUTO __mmask64 sz_delimiter_valid_starts_icelake_( //
     __m512i window, __m512i next1, __m512i next2, __m512i next3, sz_utf8_rune_window_t const *decoded) {
     __mmask64 const loaded = sz_u64_clamp_mask_until_(decoded->loaded);
     __m512i const continuation_pattern = _mm512_set1_epi8((char)0x80);
@@ -360,7 +360,7 @@ SZ_INTERNAL __mmask64 sz_delimiter_valid_starts_icelake_( //
 #pragma region Forward driver
 
 /** @copydoc sz_utf8_delimiters */
-SZ_PUBLIC sz_size_t sz_utf8_delimiters_icelake(         //
+SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake(   //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {

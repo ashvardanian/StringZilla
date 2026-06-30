@@ -23,7 +23,7 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
+SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -80,8 +80,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
             text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
             sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
             text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
-            sums_reversed_vec.ymm =
-                _mm256_add_epi64(sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
+            sums_reversed_vec.ymm = _mm256_add_epi64(sums_reversed_vec.ymm,
+                                                     _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
         }
         if (body_length >= 32) {
             sz_assert_(body_length == 32);

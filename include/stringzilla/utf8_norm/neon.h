@@ -32,7 +32,7 @@ extern "C" {
 #endif
 
 /** @brief Per-16B classify: nonzero lanes mark lead bytes that are candidate-non-inert for the form. */
-SZ_INTERNAL uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v, uint8x16x4_t lut, uint8x16_t flag_vec) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v, uint8x16x4_t lut, uint8x16_t flag_vec) {
     uint8x16_t non_ascii = vcgeq_u8(v, vdupq_n_u8(0x80));
     uint8x16_t continuation = vcltq_u8(vsubq_u8(v, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
     uint8x16_t is_lead = vbicq_u8(non_ascii, continuation);
@@ -47,7 +47,7 @@ SZ_INTERNAL uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v, uint8x16x4
  *  uses a 64-byte superchunk gate plus a `vqtbl4q_u8` lead-classify; the cold per-codepoint verify
  *  carries the combining class across chunks and reports order or QC violations exactly.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *const end = ptr + length;
     sz_u8_t const flag = sz_utf8_norm_form_flag_(form);
@@ -116,11 +116,12 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t leng
     return sz_utf8_norm_verify_block_(&ptr, end, end, flag, &previous_canonical_combining_class);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                            sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_neon_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_neon_);
 }
 

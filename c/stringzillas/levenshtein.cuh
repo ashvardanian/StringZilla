@@ -124,7 +124,7 @@ extern "C" {
 
 #pragma region Levenshtein Distances
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                                             //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_init(                                         //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
     szs_levenshtein_distances_t *engine_punned, char const **error_message) {
@@ -199,7 +199,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_init(                          
                                                                             substitution_costs, affine_costs);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                                //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances(                            //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *queries, sz_sequence_t const *candidates,               //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -214,7 +214,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances(                               
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                          //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_u32tape(                      //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates, //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -229,7 +229,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u32tape(                       
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                          //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_u64tape(                      //
     szs_levenshtein_distances_t engine_punned, szs_device_scope_t device_punned,   //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates, //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -244,7 +244,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_u64tape(                       
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine_punned) {
+SZ_API_RUNTIME void szs_levenshtein_distances_free(szs_levenshtein_distances_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     delete engine;
@@ -254,7 +254,7 @@ SZ_DYNAMIC void szs_levenshtein_distances_free(szs_levenshtein_distances_t engin
 
 #pragma region Levenshtein UTF8 Distances
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                                        //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_init(                                    //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
     sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
     szs_levenshtein_distances_utf8_t *engine_punned, char const **error_message) {
@@ -300,7 +300,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_init(                     
     return propagate_error(sz::status_t::unknown_k, error_message, "No supported UTF-8 Levenshtein backends available");
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8(                                //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8(                            //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_t const *queries, sz_sequence_t const *candidates,                    //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -315,7 +315,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8(                          
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                        //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_u32tape(                    //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u32tape_t const *queries, sz_sequence_u32tape_t const *candidates,    //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -330,7 +330,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u32tape(                  
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                        //
+SZ_API_RUNTIME sz_status_t szs_levenshtein_distances_utf8_u64tape(                    //
     szs_levenshtein_distances_utf8_t engine_punned, szs_device_scope_t device_punned, //
     sz_sequence_u64tape_t const *queries, sz_sequence_u64tape_t const *candidates,    //
     sz_size_t *results, sz_size_t results_row_stride, char const **error_message) {
@@ -345,7 +345,7 @@ SZ_DYNAMIC sz_status_t szs_levenshtein_distances_utf8_u64tape(                  
         results, results_row_stride, error_message);
 }
 
-SZ_DYNAMIC void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine_punned) {
+SZ_API_RUNTIME void szs_levenshtein_distances_utf8_free(szs_levenshtein_distances_utf8_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
     auto *engine = reinterpret_cast<levenshtein_utf8_backends_t *>(engine_punned);
     delete engine;

@@ -40,7 +40,8 @@ typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t)(__m512i, __mmask64, sz_
  *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane `vpshufb` over the broadcast LUT
  *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
  */
-SZ_INTERNAL __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes, __mmask64 is_lead, sz_u8_t form_flag) {
+SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes, __mmask64 is_lead,
+                                                                         sz_u8_t form_flag) {
     __m512i index = _mm512_and_si512(bytes, _mm512_set1_epi8(0x3F));
     __m512i low_nibble = _mm512_and_si512(index, _mm512_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
@@ -65,8 +66,8 @@ SZ_INTERNAL __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes,
  *  @brief Shared AVX-512 scan skeleton: 64-byte all-ASCII gate, lead-classify via @p classify, then the
  *         shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
-                                                    sz_utf8_norm_lead_classify_avx512_t classify) {
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
+                                                       sz_utf8_norm_lead_classify_avx512_t classify) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -97,16 +98,16 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t le
 }
 
 /** @brief Scan primitive (Skylake): first byte beginning a non-inert codepoint for @p form, else NULL. */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_shuffle_skylake_);
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                         sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
+                                               sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_skylake_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_skylake_);
 }
 

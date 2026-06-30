@@ -45,7 +45,7 @@ extern "C" {
  *  @param  four_byte_starts   Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
  *  @param  codepoint_starts   Lanes that begin any codepoint (non-continuation, in range).
  */
-SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(             //
+SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(          //
     __m512i raw_window, __m512i raw_next1, __m512i raw_next2, __m512i raw_next3, //
     __m512i high, __m512i low,                                                   //
     __mmask64 four_byte_starts, __mmask64 codepoint_starts) {
@@ -189,7 +189,7 @@ SZ_INTERNAL __m512i sz_utf8_sentence_break_classify_window_icelake_(            
  *          intrinsic-free and shared verbatim with serial / haswell. Force-inlined so the 24-byte window result stays
  *          in registers instead of spilling through an `sret`.
  */
-SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
+SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
     __m512i classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t frame;
@@ -204,7 +204,7 @@ SZ_FORCE_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_bre
 
 #pragma region Sentence_Break forward driver
 
-SZ_PUBLIC sz_size_t sz_utf8_sentences_icelake(               //
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {

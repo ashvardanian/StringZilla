@@ -43,7 +43,7 @@ extern "C" {
 #define SZ_UTF8_NORM_HANGUL_N_COUNT_ 588u // V_COUNT * T_COUNT
 
 /** @brief 3-stage trie index for @p codepoint (0 for out-of-range / default). Shared by the props and scan lookups. */
-SZ_INTERNAL sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
     if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
     sz_size_t leaf = codepoint >> SZ_UTF8_NORM_LOW_BITS_;
     sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> SZ_UTF8_NORM_MID_BITS_];
@@ -52,7 +52,7 @@ SZ_INTERNAL sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
 }
 
 /** @brief Look up the per-codepoint normalization properties (canonical combining class, quick-check, decomposition, compose). */
-SZ_INTERNAL sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
     return sz_utf8_norm_props_[sz_utf8_norm_index_(codepoint)];
 }
 
@@ -64,7 +64,7 @@ SZ_INTERNAL sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
  *  (~20% slower). Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
  *  test is needed here.
  */
-SZ_INTERNAL sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
     if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
     sz_size_t leaf = codepoint >> SZ_UTF8_NORM_SCAN_LOW_BITS_;
     sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> SZ_UTF8_NORM_SCAN_MID_BITS_];
@@ -76,7 +76,7 @@ SZ_INTERNAL sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
 }
 
 /** @brief Canonical_Combining_Class of a codepoint (0 for starters and all Hangul jamo). */
-SZ_INTERNAL sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
     return sz_utf8_norm_lookup_(codepoint).canonical_combining_class;
 }
 
@@ -87,8 +87,8 @@ SZ_INTERNAL sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
  *  common (non-decomposing) path - which is every base letter and every Hangul jamo.
  *  @return Number of runes written to @p out / @p out_canonical_combining_class (>= 1).
  */
-SZ_INTERNAL sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
-                                                   sz_u8_t *out_canonical_combining_class) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
+                                                      sz_u8_t *out_canonical_combining_class) {
     // Hangul syllables decompose algorithmically - they are absent from the tables; jamo are starters.
     if (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
         codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_) {
@@ -127,7 +127,7 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_
  *  @brief Compose a starter @p a with a following codepoint @p b into a primary composite.
  *  @return The composed codepoint, or 0 if the pair does not compose.
  */
-SZ_INTERNAL sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
+SZ_HELPER_AUTO sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     // Hangul: leading + vowel jamo → LV syllable.
     if (a >= SZ_UTF8_NORM_HANGUL_L_BASE_ && a < SZ_UTF8_NORM_HANGUL_L_BASE_ + SZ_UTF8_NORM_HANGUL_L_COUNT_ && //
         b >= SZ_UTF8_NORM_HANGUL_V_BASE_ && b < SZ_UTF8_NORM_HANGUL_V_BASE_ + SZ_UTF8_NORM_HANGUL_V_COUNT_) {
@@ -160,8 +160,8 @@ SZ_INTERNAL sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
 }
 
 /** @brief Stable insertion sort of a combining segment by canonical combining class (canonical ordering). */
-SZ_INTERNAL void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
-                                               sz_size_t count) {
+SZ_HELPER_AUTO void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
+                                                  sz_size_t count) {
     for (sz_size_t i = 1; i < count; ++i) {
         sz_rune_t rune = runes[i];
         sz_u8_t canonical_combining_class = canonical_combining_classes[i];
@@ -186,7 +186,7 @@ typedef struct sz_utf8_norm_out_t {
     sz_bool_t matches;      /**< Still byte-identical to the source (compare mode). */
 } sz_utf8_norm_out_t;
 
-SZ_INTERNAL void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
+SZ_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
     sz_u8_t bytes[4];
     sz_size_t length = (sz_size_t)sz_rune_encode(rune, bytes);
     if (out->dst) {
@@ -210,7 +210,7 @@ SZ_INTERNAL void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
  *  output verbatim, never round-tripped through `sz_rune_encode`. It is an opaque barrier: it does
  *  not decompose, compose, or participate in canonical ordering.
  */
-SZ_INTERNAL void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
+SZ_HELPER_INLINE void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
     if (out->dst) { *out->dst++ = byte, ++out->written; }
     else if (out->matches) {
         if (out->cmp == out->cmp_end || *out->cmp++ != byte) out->matches = sz_false_k;
@@ -218,8 +218,8 @@ SZ_INTERNAL void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) 
 }
 
 /** @brief Order, optionally compose, and emit one buffered combining segment. */
-SZ_INTERNAL void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes, sz_size_t count,
-                                     sz_bool_t compose, sz_utf8_norm_out_t *out) {
+SZ_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes, sz_size_t count,
+                                        sz_bool_t compose, sz_utf8_norm_out_t *out) {
     if (count == 0) return;
     sz_utf8_norm_canonical_order_(runes, canonical_combining_classes, count);
 
@@ -252,8 +252,8 @@ SZ_INTERNAL void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combin
 }
 
 /** @brief Core normalization engine, shared by the write and compare entry points. */
-SZ_INTERNAL void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                   sz_utf8_norm_out_t *out) {
+SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                      sz_utf8_norm_out_t *out) {
     sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
     sz_bool_t compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
 
@@ -318,7 +318,7 @@ SZ_INTERNAL void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz
  *  vowel/trailing jamo, which composes backward) must NOT be a split point, or `가` + `ᆨ` would be
  *  separated mid-composition.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
     sz_bool_t hangul = (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
                         codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
                            ? sz_true_k
@@ -342,7 +342,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_nor
  *  lead-classify plus a 64-byte gate. Semantics match the old module's `sz_utf8_find_denormalized`,
  *  but computed from the unified props trie - no dependency on the `utf8_*` segmentation modules.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
+SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *end = ptr + length;
     while (ptr < end) {
@@ -378,7 +378,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t le
 }
 
 /** @brief Map a normalization form to its hot-path `SZ_UTF8_NORM_QUICK_CHECK_*` flag bit. */
-SZ_INTERNAL sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFC_;
     case sz_normal_form_nfkc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFKC_;
@@ -399,9 +399,9 @@ SZ_INTERNAL sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
  *  A malformed byte is an opaque 1-byte barrier: it is inert (never flagged, passed through unchanged)
  *  and resets the carried combining class, exactly like ASCII.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
-                                                 sz_u8_t const *end, sz_u8_t form_flag,
-                                                 sz_u8_t *previous_canonical_combining_class_io) {
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
+                                                    sz_u8_t const *end, sz_u8_t form_flag,
+                                                    sz_u8_t *previous_canonical_combining_class_io) {
     sz_u8_t const *position = *position_io;
     sz_u8_t previous_canonical_combining_class = *previous_canonical_combining_class_io;
     while (position < block_end) {
@@ -450,7 +450,7 @@ SZ_INTERNAL sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz
  *  span is provably already normalized. The single ISA-specific point both engines force-inline.
  *
  *  `sz_utf8_norm_classify_serial_` is the scalar reference; `sz_utf8_norm_classify_neon_` (in `neon.h`) is the
- *  vectorized override. Passing a constant function address into the `SZ_INTERNAL` (always-inline)
+ *  vectorized override. Passing a constant function address into the `SZ_HELPER_AUTO` (always-inline)
  *  engines below devirtualizes the call at -O2/-O3, so each backend pays no indirection - this is the
  *  same force-inlined function-pointer idiom the case-folding family uses.
  */
@@ -462,7 +462,8 @@ typedef sz_cptr_t (*sz_utf8_norm_scan_t)(sz_cptr_t, sz_size_t, sz_normal_form_t)
  *  A malformed byte is an opaque 1-byte barrier - it never decomposes/composes/reorders - so it is
  *  always a safe boundary. A well-formed rune defers to `sz_utf8_norm_is_safe_boundary_`.
  */
-SZ_INTERNAL sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end, sz_normal_form_t form) {
+SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end,
+                                                     sz_normal_form_t form) {
     sz_rune_t rune;
     sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
     if (rune_length == sz_rune_invalid_k) return sz_true_k; // malformed byte: opaque barrier
@@ -476,7 +477,7 @@ SZ_INTERNAL sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t
  *  well-formed lead (or that would cross @p begin) is treated as single literal bytes, so the cursor
  *  retreats exactly one byte rather than over-reading.
  */
-SZ_INTERNAL sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
+SZ_HELPER_AUTO sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
     sz_u8_t const *probe = position - 1;
     while (probe > begin && (*probe & 0xC0u) == 0x80u && (position - probe) < 4) --probe;
     sz_rune_t rune;
@@ -491,8 +492,8 @@ SZ_INTERNAL sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u
  *  @p scan primitive) and run the decompose/reorder/compose engine only on the short dirty regions,
  *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs.
  */
-SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                           sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                              sz_ptr_t destination, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
     sz_u8_t const *const end = begin + source_length;
     sz_u8_t *out = (sz_u8_t *)destination;
@@ -557,8 +558,8 @@ SZ_INTERNAL sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_le
  *  benign segments and back up to the same boundary), and it carries the clean guarantee that every
  *  byte before the returned pointer is provably in @p form.
  */
-SZ_INTERNAL sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                        sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
+SZ_HELPER_AUTO sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
+                                                           sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 
@@ -598,12 +599,13 @@ SZ_INTERNAL sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_siz
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                        sz_ptr_t destination) {
+SZ_API_COMPTIME sz_size_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                              sz_ptr_t destination) {
     return sz_utf8_norm_engine_(source, source_length, form, destination, &sz_utf8_norm_classify_serial_);
 }
 
-SZ_PUBLIC sz_cptr_t sz_utf8_find_denormalized_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form) {
+SZ_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_serial(sz_cptr_t source, sz_size_t source_length,
+                                                           sz_normal_form_t form) {
     return sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
 }
 

@@ -26,7 +26,7 @@ extern "C" {
 #pragma GCC target("sse4.2")
 #endif
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u128_vec_t haystack_vec, needle_vec;
     needle_vec.xmm = _mm_set1_epi8(needle[0]);
@@ -41,7 +41,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack
     return sz_find_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u128_vec_t haystack_vec, needle_vec;
     needle_vec.xmm = _mm_set1_epi8(needle[0]);
@@ -56,8 +56,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t haystac
     return sz_rfind_byte_serial(haystack, haystack_length, needle);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                     sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
@@ -94,8 +94,8 @@ SZ_PUBLIC sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_leng
     return sz_find_serial(haystack, haystack_length, needle, needle_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                      sz_size_t needle_length) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
     // This almost never fires, but it's better to be safe than sorry.
     // if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
     // if (needle_length == 1) return sz_rfind_byte_westmere(haystack, haystack_length, needle);

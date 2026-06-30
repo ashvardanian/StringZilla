@@ -19,11 +19,11 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-SZ_INTERNAL v128_t sz_utf8_rotate1_v128_(v128_t v) {
+SZ_HELPER_INLINE v128_t sz_utf8_rotate1_v128_(v128_t v) {
     return wasm_i8x16_shuffle(v, v, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0);
 }
 
-SZ_INTERNAL v128_t sz_utf8_rotate2_v128_(v128_t v) {
+SZ_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t v) {
     return wasm_i8x16_shuffle(v, v, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1);
 }
 
@@ -36,7 +36,7 @@ SZ_INTERNAL v128_t sz_utf8_rotate2_v128_(v128_t v) {
  *  `(position+lane, length)` pairs to the front of a 16-wide stack scratch via one swizzle from `compact_lut`,
  *  then copies the low @p emit_count entries out - ascending lane order, byte-exact, no per-match `ctz`.
  */
-SZ_INTERNAL void sz_utf8_iterate_peel_v128_(                                   //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_v128_(                                //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -84,7 +84,7 @@ SZ_INTERNAL void sz_utf8_iterate_peel_v128_(                                   /
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_newlines_v128(              //
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_v128(        //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
@@ -166,7 +166,7 @@ SZ_PUBLIC sz_size_t sz_utf8_newlines_v128(              //
     return count;
 }
 
-SZ_PUBLIC sz_size_t sz_utf8_whitespaces_v128(           //
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(     //
     sz_cptr_t text, sz_size_t length,                   //
     sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
