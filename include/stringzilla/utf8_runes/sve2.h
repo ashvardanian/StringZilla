@@ -28,10 +28,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
 
     // Count bytes that are NOT continuation bytes: (byte & 0xC0) != 0x80
     for (sz_size_t offset = 0; offset < length; offset += step) {
-        svbool_t pg = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
-        svuint8_t text_vec = svld1_u8(pg, text_u8 + offset);
-        svbool_t is_start = svcmpne_n_u8(pg, svand_n_u8_x(pg, text_vec, 0xC0), 0x80);
-        char_count += svcntp_b8(pg, is_start);
+        svbool_t pg_b8x = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
+        svuint8_t text_vec_u8x = svld1_u8(pg_b8x, text_u8 + offset);
+        svbool_t is_start_b8x = svcmpne_n_u8(pg_b8x, svand_n_u8_x(pg_b8x, text_vec_u8x, 0xC0), 0x80);
+        char_count += svcntp_b8(pg_b8x, is_start_b8x);
     }
     return char_count;
 }
@@ -44,20 +44,20 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
 SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const window_bytes = svcntw(); // one byte per 32-bit lane
-    svuint32_t const lane_iota = svindex_u32(0, 1);
+    svuint32_t const lane_iota_u32x = svindex_u32(0, 1);
     while (length) {
-        svbool_t const pg = svwhilelt_b32_u64(0, (sz_u64_t)length);
-        svuint32_t const bytes_u32 = svld1ub_u32(pg, text_u8);
+        svbool_t const pg_b32x = svwhilelt_b32_u64(0, (sz_u64_t)length);
+        svuint32_t const bytes_u32x = svld1ub_u32(pg_b32x, text_u8);
         // Leading byte iff `(byte & 0xC0) != 0x80`.
-        svbool_t const lead = svcmpne_n_u32(pg, svand_n_u32_x(pg, bytes_u32, 0xC0), 0x80);
-        sz_size_t const lead_count = svcntp_b32(pg, lead);
+        svbool_t const lead_b32x = svcmpne_n_u32(pg_b32x, svand_n_u32_x(pg_b32x, bytes_u32x, 0xC0), 0x80);
+        sz_size_t const lead_count = svcntp_b32(pg_b32x, lead_b32x);
         if (n >= lead_count) {
             n -= lead_count;
             text_u8 += window_bytes, length -= sz_min_of_two(window_bytes, length);
             continue;
         }
-        svuint32_t const packed = svcompact_u32(lead, lane_iota);
-        sz_size_t const lane = svlastb_u32(svwhilelt_b32_u64(0, (sz_u64_t)(n + 1)), packed);
+        svuint32_t const packed_u32x = svcompact_u32(lead_b32x, lane_iota_u32x);
+        sz_size_t const lane = svlastb_u32(svwhilelt_b32_u64(0, (sz_u64_t)(n + 1)), packed_u32x);
         return (sz_cptr_t)(text_u8 + lane);
     }
     return SZ_NULL_CHAR;
@@ -105,66 +105,71 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_sve2_(                              
     svbool_t emit_starts_b32, svuint8_t ill_formed_v, svuint8_t consumed_length_v, //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
-    svbool_t const all = svptrue_b32();
-    svuint32_t const iota = svindex_u32(0, 1);
+    svbool_t const all_b32x = svptrue_b32();
+    svuint32_t const iota_u32x = svindex_u32(0, 1);
 
     // ONE compaction: pack the K start byte-indices, and (in lockstep) every per-start datum we still need.
-    svuint32_t const start_offsets = svcompact_u32(emit_starts_b32, iota);
+    svuint32_t const start_offsets_u32x = svcompact_u32(emit_starts_b32, iota_u32x);
     // The lead / trailing bytes and the ill-formed flag + maximal-subpart length are byte-lane vectors; widen the
     // low `svcntw()` lanes to 32-bit (their byte index is the iota) and compact by the very same predicate, so lane
     // `j` of every compacted vector belongs to the `j`-th emitted start.
-    svuint32_t const lead_word = svunpklo_u32(svunpklo_u16(bytes));
-    svuint32_t const next1_word = svunpklo_u32(svunpklo_u16(next1));
-    svuint32_t const next2_word = svunpklo_u32(svunpklo_u16(next2));
-    svuint32_t const next3_word = svunpklo_u32(svunpklo_u16(next3));
-    svuint32_t const ill_word = svunpklo_u32(svunpklo_u16(ill_formed_v));
-    svuint32_t const len_word = svunpklo_u32(svunpklo_u16(consumed_length_v));
+    svuint32_t const lead_word_u32x = svunpklo_u32(svunpklo_u16(bytes));
+    svuint32_t const next1_word_u32x = svunpklo_u32(svunpklo_u16(next1));
+    svuint32_t const next2_word_u32x = svunpklo_u32(svunpklo_u16(next2));
+    svuint32_t const next3_word_u32x = svunpklo_u32(svunpklo_u16(next3));
+    svuint32_t const ill_word_u32x = svunpklo_u32(svunpklo_u16(ill_formed_v));
+    svuint32_t const len_word_u32x = svunpklo_u32(svunpklo_u16(consumed_length_v));
 
-    svuint32_t const b0 = svcompact_u32(emit_starts_b32, lead_word);
-    svuint32_t const b1 = svcompact_u32(emit_starts_b32, next1_word);
-    svuint32_t const b2 = svcompact_u32(emit_starts_b32, next2_word);
-    svuint32_t const b3 = svcompact_u32(emit_starts_b32, next3_word);
-    svuint32_t const ill_compacted = svcompact_u32(emit_starts_b32, ill_word);
-    svuint32_t const len_compacted = svcompact_u32(emit_starts_b32, len_word);
+    svuint32_t const b0_u32x = svcompact_u32(emit_starts_b32, lead_word_u32x);
+    svuint32_t const b1_u32x = svcompact_u32(emit_starts_b32, next1_word_u32x);
+    svuint32_t const b2_u32x = svcompact_u32(emit_starts_b32, next2_word_u32x);
+    svuint32_t const b3_u32x = svcompact_u32(emit_starts_b32, next3_word_u32x);
+    svuint32_t const ill_compacted_u32x = svcompact_u32(emit_starts_b32, ill_word_u32x);
+    svuint32_t const len_compacted_u32x = svcompact_u32(emit_starts_b32, len_word_u32x);
 
     sz_size_t const want = emit_count < capacity ? emit_count : capacity;
-    svbool_t const emit = svwhilelt_b32_u64(0, (sz_u64_t)want);
+    svbool_t const emit_b32x = svwhilelt_b32_u64(0, (sz_u64_t)want);
 
-    svuint32_t codepoints = b0; // ASCII keeps the lead.
+    svuint32_t codepoints_u32x = b0_u32x; // ASCII keeps the lead.
     // 2-byte (0xC0..0xDF): ((b0 & 0x1F) << 6) | (b1 & 0x3F).
-    svbool_t const is_two = svand_b_z(all, svcmpge_n_u32(all, b0, 0xC0), svcmplt_n_u32(all, b0, 0xE0));
-    svuint32_t const two_byte = svorr_u32_x(all, svlsl_n_u32_x(all, svand_n_u32_x(all, b0, 0x1F), 6),
-                                            svand_n_u32_x(all, b1, 0x3F));
-    codepoints = svsel_u32(is_two, two_byte, codepoints);
+    svbool_t const is_two_b32x = svand_b_z(all_b32x, svcmpge_n_u32(all_b32x, b0_u32x, 0xC0),
+                                           svcmplt_n_u32(all_b32x, b0_u32x, 0xE0));
+    svuint32_t const two_byte_u32x = svorr_u32_x(all_b32x,
+                                                 svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b0_u32x, 0x1F), 6),
+                                                 svand_n_u32_x(all_b32x, b1_u32x, 0x3F));
+    codepoints_u32x = svsel_u32(is_two_b32x, two_byte_u32x, codepoints_u32x);
     // 3-byte (0xE0..0xEF): ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F).
-    svbool_t const is_three = svand_b_z(all, svcmpge_n_u32(all, b0, 0xE0), svcmplt_n_u32(all, b0, 0xF0));
-    svuint32_t const three_byte = svorr_u32_x(all,
-                                              svorr_u32_x(all, svlsl_n_u32_x(all, svand_n_u32_x(all, b0, 0x0F), 12),
-                                                          svlsl_n_u32_x(all, svand_n_u32_x(all, b1, 0x3F), 6)),
-                                              svand_n_u32_x(all, b2, 0x3F));
-    codepoints = svsel_u32(is_three, three_byte, codepoints);
+    svbool_t const is_three_b32x = svand_b_z(all_b32x, svcmpge_n_u32(all_b32x, b0_u32x, 0xE0),
+                                             svcmplt_n_u32(all_b32x, b0_u32x, 0xF0));
+    svuint32_t const three_byte_u32x = svorr_u32_x(
+        all_b32x,
+        svorr_u32_x(all_b32x, svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b0_u32x, 0x0F), 12),
+                    svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b1_u32x, 0x3F), 6)),
+        svand_n_u32_x(all_b32x, b2_u32x, 0x3F));
+    codepoints_u32x = svsel_u32(is_three_b32x, three_byte_u32x, codepoints_u32x);
     // 4-byte (0xF0..0xF4): ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F).
-    svbool_t const is_four = svcmpge_n_u32(all, b0, 0xF0);
-    svuint32_t const four_byte = svorr_u32_x(
-        all,
-        svorr_u32_x(all, svlsl_n_u32_x(all, svand_n_u32_x(all, b0, 0x07), 18),
-                    svlsl_n_u32_x(all, svand_n_u32_x(all, b1, 0x3F), 12)),
-        svorr_u32_x(all, svlsl_n_u32_x(all, svand_n_u32_x(all, b2, 0x3F), 6), svand_n_u32_x(all, b3, 0x3F)));
-    codepoints = svsel_u32(is_four, four_byte, codepoints);
+    svbool_t const is_four_b32x = svcmpge_n_u32(all_b32x, b0_u32x, 0xF0);
+    svuint32_t const four_byte_u32x = svorr_u32_x(
+        all_b32x,
+        svorr_u32_x(all_b32x, svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b0_u32x, 0x07), 18),
+                    svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b1_u32x, 0x3F), 12)),
+        svorr_u32_x(all_b32x, svlsl_n_u32_x(all_b32x, svand_n_u32_x(all_b32x, b2_u32x, 0x3F), 6),
+                    svand_n_u32_x(all_b32x, b3_u32x, 0x3F)));
+    codepoints_u32x = svsel_u32(is_four_b32x, four_byte_u32x, codepoints_u32x);
 
     // Every ill-formed start (bad lead, broken continuation chain, overlong / surrogate / range, orphan continuation)
     // collapses to one U+FFFD over its maximal ill-formed subpart; the width-blend value for that lane is discarded.
-    svbool_t const ill_mask = svcmpne_n_u32(all, ill_compacted, 0);
-    codepoints = svsel_u32(ill_mask, svdup_n_u32((sz_u32_t)sz_rune_replacement_k), codepoints);
+    svbool_t const ill_mask_b32x = svcmpne_n_u32(all_b32x, ill_compacted_u32x, 0);
+    codepoints_u32x = svsel_u32(ill_mask_b32x, svdup_n_u32((sz_u32_t)sz_rune_replacement_k), codepoints_u32x);
 
-    svst1_u32(emit, runes, codepoints);
+    svst1_u32(emit_b32x, runes, codepoints_u32x);
 
     // Resume cursor delta = last emitted start's offset + its compacted maximal-subpart length. For a well-formed
     // lane that length is the declared rune length; for an ill-formed lane it is the 1-3 byte subpart, so the cursor
     // never skips bytes that must become their own next-window U+FFFD.
-    svbool_t const last = svwhilelt_b32_u64(0, (sz_u64_t)want);
-    sz_u32_t const last_offset = svlastb_u32(last, start_offsets);
-    sz_u32_t const last_length = svlastb_u32(last, len_compacted);
+    svbool_t const last_b32x = svwhilelt_b32_u64(0, (sz_u64_t)want);
+    sz_u32_t const last_offset = svlastb_u32(last_b32x, start_offsets_u32x);
+    sz_u32_t const last_length = svlastb_u32(last_b32x, len_compacted_u32x);
     *consumed_bytes = (sz_size_t)last_offset + (sz_size_t)last_length;
     return want;
 }
@@ -192,26 +197,26 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_sve2_( //
     // The 32-bit compaction packs at most `svcntw()` starts per window: bound the emitted span to the first
     // `svcntw()` byte lanes (an accepted per-window throughput ceiling; the driver simply takes more windows).
     sz_size_t const emit_span = svcntw() < window ? svcntw() : window;
-    svbool_t const all = svptrue_b8();
-    svbool_t const loaded = svwhilelt_b8_u64(0, (sz_u64_t)window);
-    svuint8_t const lane_iota = svindex_u8(0, 1);
-    svuint8_t const zeros = svdup_n_u8(0);
+    svbool_t const all_b8x = svptrue_b8();
+    svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)window);
+    svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
+    svuint8_t const zeros_u8x = svdup_n_u8(0);
 
     // One byte per lane (masked tail reads zero); neighbours come from in-register `svext` fixed shifts: high lanes
     // (and out-of-window lanes) read zero, so a truncated trailing sequence never fabricates continuation bytes.
-    svuint8_t const bytes = svld1_u8(loaded, text_u8);
-    svuint8_t const next1 = svext_u8(bytes, zeros, 1);
-    svuint8_t const next2 = svext_u8(bytes, zeros, 2);
-    svuint8_t const next3 = svext_u8(bytes, zeros, 3);
+    svuint8_t const bytes_u8x = svld1_u8(loaded_b8x, text_u8);
+    svuint8_t const next1_u8x = svext_u8(bytes_u8x, zeros_u8x, 1);
+    svuint8_t const next2_u8x = svext_u8(bytes_u8x, zeros_u8x, 2);
+    svuint8_t const next3_u8x = svext_u8(bytes_u8x, zeros_u8x, 3);
 
     // ASCII fast lane: a window with the sign bit clear in every loaded lane widens the low `svcntw()` bytes directly
     // (one `svunpklo` cascade, no classification). Like the general drain it emits at most `svcntw()` runes per
     // window - the same per-window ceiling, no sub-block loop.
-    svbool_t const high_bit = svcmplt_n_s8(loaded, svreinterpret_s8_u8(bytes), 0);
-    if (!svptest_any(loaded, high_bit)) {
+    svbool_t const high_bit_b8x = svcmplt_n_s8(loaded_b8x, svreinterpret_s8_u8(bytes_u8x), 0);
+    if (!svptest_any(loaded_b8x, high_bit_b8x)) {
         sz_size_t const ascii_span = emit_span < runes_capacity ? emit_span : runes_capacity;
-        svbool_t const store = svwhilelt_b32_u64(0, (sz_u64_t)ascii_span);
-        svst1_u32(store, runes, svunpklo_u32(svunpklo_u16(bytes)));
+        svbool_t const store_b32x = svwhilelt_b32_u64(0, (sz_u64_t)ascii_span);
+        svst1_u32(store_b32x, runes, svunpklo_u32(svunpklo_u16(bytes_u8x)));
         *runes_unpacked = ascii_span;
         return text + ascii_span;
     }
@@ -219,120 +224,140 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_sve2_( //
     // Single-source classification: per-lane length from the lead's high nibble via a 16-entry `svtbl_u8` LUT
     // (`{1x12,2,2,3,4}`, the SAME table the serial / NEON references use), so a lead and its length can never
     // disagree and 0xF8..0xFF map to length 4 and cannot slip the gate.
-    svbool_t const is_continuation = svcmpeq_n_u8(loaded, svand_n_u8_x(loaded, bytes, 0xC0), 0x80);
-    svbool_t const starts = svand_b_z(loaded, loaded, svnot_b_z(loaded, is_continuation));
-    svuint8_t const length_lut = svdupq_n_u8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4);
-    svuint8_t const high_nibble = svlsr_n_u8_x(all, bytes, 4);
-    svuint8_t const length_per_lane = svtbl_u8(length_lut, high_nibble);
+    svbool_t const is_continuation_b8x = svcmpeq_n_u8(loaded_b8x, svand_n_u8_x(loaded_b8x, bytes_u8x, 0xC0), 0x80);
+    svbool_t const starts_b8x = svand_b_z(loaded_b8x, loaded_b8x, svnot_b_z(loaded_b8x, is_continuation_b8x));
+    svuint8_t const length_lut_u8x = svdupq_n_u8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4);
+    svuint8_t const high_nibble_u8x = svlsr_n_u8_x(all_b8x, bytes_u8x, 4);
+    svuint8_t const length_per_lane_u8x = svtbl_u8(length_lut_u8x, high_nibble_u8x);
 
     // Defer EVERY start whose declared sequence would reach past the EMIT span (the first `emit_span` byte lanes):
     // the FIRST overrunning start bounds the decodable prefix (well-formed text has only the trailing one; a
     // malformed `E0 C0`-style lead-in-lead overruns earlier). Its bytes resume in the next window or finalize at the
     // edge -> the cursor can never exceed `text + length`.
-    svuint8_t const sequence_end = svadd_u8_x(all, lane_iota, length_per_lane);
-    svbool_t const overruns = svand_b_z(starts, starts, svcmpgt_n_u8(all, sequence_end, (sz_u8_t)emit_span));
+    svuint8_t const sequence_end_u8x = svadd_u8_x(all_b8x, lane_iota_u8x, length_per_lane_u8x);
+    svbool_t const overruns_b8x = svand_b_z(starts_b8x, starts_b8x,
+                                            svcmpgt_n_u8(all_b8x, sequence_end_u8x, (sz_u8_t)emit_span));
     sz_size_t decodable_end = emit_span;
-    if (svptest_any(starts, overruns)) {
+    if (svptest_any(starts_b8x, overruns_b8x)) {
         // Lowest overrunning lane index = min-reduction of `overrun ? lane : emit_span` (emit_span <= 64 fits a byte).
-        svuint8_t const big = svdup_n_u8((sz_u8_t)emit_span);
-        svuint8_t const overrun_lane = svsel_u8(overruns, lane_iota, big);
-        decodable_end = (sz_size_t)svminv_u8(all, overrun_lane);
+        svuint8_t const big_u8x = svdup_n_u8((sz_u8_t)emit_span);
+        svuint8_t const overrun_lane_u8x = svsel_u8(overruns_b8x, lane_iota_u8x, big_u8x);
+        decodable_end = (sz_size_t)svminv_u8(all_b8x, overrun_lane_u8x);
     }
-    svbool_t const decodable = svwhilelt_b8_u64(0, (sz_u64_t)decodable_end);
-    svbool_t const decodable_starts = svand_b_z(decodable, starts, decodable);
+    svbool_t const decodable_b8x = svwhilelt_b8_u64(0, (sz_u64_t)decodable_end);
+    svbool_t const decodable_starts_b8x = svand_b_z(decodable_b8x, starts_b8x, decodable_b8x);
 
     // Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The window is decoded
     // TOTAL: well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain,
     // overlong / surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one
     // U+FFFD over the maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference.
-    svbool_t const len_ge2 = svand_b_z(starts, starts, svcmpge_n_u8(all, length_per_lane, 2));
-    svbool_t const len_ge3 = svand_b_z(starts, starts, svcmpge_n_u8(all, length_per_lane, 3));
-    svbool_t const len_ge4 = svand_b_z(starts, starts, svcmpge_n_u8(all, length_per_lane, 4));
-    svbool_t const len_eq2 = svbic_b_z(all, len_ge2, len_ge3);
-    int const has_three = svptest_any(starts, len_ge3);
+    svbool_t const len_ge2_b8x = svand_b_z(starts_b8x, starts_b8x, svcmpge_n_u8(all_b8x, length_per_lane_u8x, 2));
+    svbool_t const len_ge3_b8x = svand_b_z(starts_b8x, starts_b8x, svcmpge_n_u8(all_b8x, length_per_lane_u8x, 3));
+    svbool_t const len_ge4_b8x = svand_b_z(starts_b8x, starts_b8x, svcmpge_n_u8(all_b8x, length_per_lane_u8x, 4));
+    svbool_t const len_eq2_b8x = svbic_b_z(all_b8x, len_ge2_b8x, len_ge3_b8x);
+    int const has_three = svptest_any(starts_b8x, len_ge3_b8x);
 
     // Continuation availability vector (1 where lane is a continuation), shifted DOWN so lane `i` of `cont_k` is 1
     // iff lane `i + k` is a continuation - the SVE2 value-domain twin of icelake `continuation_bits >> k`.
-    svuint8_t const cont_v = svdup_u8_z(is_continuation, 1);
-    svuint8_t const starts_v = svdup_u8_z(starts, 1);
-    svuint8_t const cont1_v = svand_u8_x(all, starts_v, sz_utf8_shift_value_down_sve2_(cont_v, 1, lane_iota));
-    svuint8_t const cont2_v = svand_u8_x(all, starts_v, sz_utf8_shift_value_down_sve2_(cont_v, 2, lane_iota));
-    svuint8_t const cont3_v = svand_u8_x(all, starts_v, sz_utf8_shift_value_down_sve2_(cont_v, 3, lane_iota));
-    svbool_t const cont1 = svcmpne_n_u8(all, cont1_v, 0);
-    svbool_t const cont2 = svcmpne_n_u8(all, cont2_v, 0);
-    svbool_t const cont3 = svcmpne_n_u8(all, cont3_v, 0);
+    svuint8_t const cont_u8x = svdup_u8_z(is_continuation_b8x, 1);
+    svuint8_t const starts_u8x = svdup_u8_z(starts_b8x, 1);
+    svuint8_t const cont1_u8x = svand_u8_x(all_b8x, starts_u8x,
+                                           sz_utf8_shift_value_down_sve2_(cont_u8x, 1, lane_iota_u8x));
+    svuint8_t const cont2_u8x = svand_u8_x(all_b8x, starts_u8x,
+                                           sz_utf8_shift_value_down_sve2_(cont_u8x, 2, lane_iota_u8x));
+    svuint8_t const cont3_u8x = svand_u8_x(all_b8x, starts_u8x,
+                                           sz_utf8_shift_value_down_sve2_(cont_u8x, 3, lane_iota_u8x));
+    svbool_t const cont1_b8x = svcmpne_n_u8(all_b8x, cont1_u8x, 0);
+    svbool_t const cont2_b8x = svcmpne_n_u8(all_b8x, cont2_u8x, 0);
+    svbool_t const cont3_b8x = svcmpne_n_u8(all_b8x, cont3_u8x, 0);
 
     // Bad lead: 2-byte lead < 0xC2 (C0/C1 overlong), or 4-byte lead > 0xF4 (out of range, incl. F5..FF).
-    svbool_t const len_eq4 = svand_b_z(starts, starts, svcmpeq_n_u8(all, length_per_lane, 4));
-    svbool_t const bad_lead = svorr_b_z(starts, svand_b_z(starts, len_eq2, svcmplt_n_u8(all, bytes, 0xC2)),
-                                        svand_b_z(starts, len_eq4, svcmpgt_n_u8(all, bytes, 0xF4)));
+    svbool_t const len_eq4_b8x = svand_b_z(starts_b8x, starts_b8x, svcmpeq_n_u8(all_b8x, length_per_lane_u8x, 4));
+    svbool_t const bad_lead_b8x = svorr_b_z(starts_b8x,
+                                            svand_b_z(starts_b8x, len_eq2_b8x, svcmplt_n_u8(all_b8x, bytes_u8x, 0xC2)),
+                                            svand_b_z(starts_b8x, len_eq4_b8x, svcmpgt_n_u8(all_b8x, bytes_u8x, 0xF4)));
 
     // First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF); computed only
     // when a 3-/4-byte lead is present, else empty so `b1_range_ok` keeps every lane.
-    svbool_t b1_range_bad = svpfalse_b();
+    svbool_t b1_range_bad_b8x = svpfalse_b();
     if (has_three) {
-        svbool_t const e0_low = svand_b_z(all, svcmpeq_n_u8(all, bytes, 0xE0), svcmplt_n_u8(all, next1, 0xA0));
-        svbool_t const ed_high = svand_b_z(all, svcmpeq_n_u8(all, bytes, 0xED), svcmpge_n_u8(all, next1, 0xA0));
-        svbool_t const f0_low = svand_b_z(all, svcmpeq_n_u8(all, bytes, 0xF0), svcmplt_n_u8(all, next1, 0x90));
-        svbool_t const f4_high = svand_b_z(all, svcmpeq_n_u8(all, bytes, 0xF4), svcmpge_n_u8(all, next1, 0x90));
-        b1_range_bad = svand_b_z(all, starts,
-                                 svorr_b_z(all, svorr_b_z(all, e0_low, ed_high), svorr_b_z(all, f0_low, f4_high)));
+        svbool_t const e0_low_b8x = svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xE0),
+                                              svcmplt_n_u8(all_b8x, next1_u8x, 0xA0));
+        svbool_t const ed_high_b8x = svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xED),
+                                               svcmpge_n_u8(all_b8x, next1_u8x, 0xA0));
+        svbool_t const f0_low_b8x = svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xF0),
+                                              svcmplt_n_u8(all_b8x, next1_u8x, 0x90));
+        svbool_t const f4_high_b8x = svand_b_z(all_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xF4),
+                                               svcmpge_n_u8(all_b8x, next1_u8x, 0x90));
+        b1_range_bad_b8x = svand_b_z(all_b8x, starts_b8x,
+                                     svorr_b_z(all_b8x, svorr_b_z(all_b8x, e0_low_b8x, ed_high_b8x),
+                                               svorr_b_z(all_b8x, f0_low_b8x, f4_high_b8x)));
     }
-    svbool_t const b1_range_ok = svbic_b_z(starts, starts, b1_range_bad);
+    svbool_t const b1_range_ok_b8x = svbic_b_z(starts_b8x, starts_b8x, b1_range_bad_b8x);
     // A valid first continuation: present, range-valid, and the lead is not itself bad (C0/C1, F5..FF).
-    svbool_t const first_ok = svand_b_z(starts, svand_b_z(starts, cont1, b1_range_ok), svnot_b_z(starts, bad_lead));
+    svbool_t const first_ok_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, cont1_b8x, b1_range_ok_b8x),
+                                            svnot_b_z(starts_b8x, bad_lead_b8x));
 
     // Well-formed leads (vectorized `sz_rune_decode` success), restricted to the decodable span.
-    svbool_t const wf1 = svbic_b_z(starts, starts, len_ge2);
-    svbool_t const wf2 = svand_b_z(starts, svand_b_z(starts, len_eq2, cont1), svnot_b_z(starts, bad_lead));
-    svbool_t const wf3 = svand_b_z(starts, svand_b_z(starts, len_ge3, b1_range_ok), svand_b_z(starts, cont1, cont2));
-    svbool_t const wf3_only = svbic_b_z(starts, wf3, len_ge4);
-    svbool_t const wf4 = svand_b_z(
-        starts, svand_b_z(starts, len_ge4, b1_range_ok),
-        svand_b_z(starts, svand_b_z(starts, cont1, cont2), svand_b_z(starts, cont3, svnot_b_z(starts, bad_lead))));
-    svbool_t const well_formed = svand_b_z(
-        decodable, svorr_b_z(all, svorr_b_z(all, wf1, wf2), svorr_b_z(all, wf3_only, wf4)), decodable);
+    svbool_t const wf1_b8x = svbic_b_z(starts_b8x, starts_b8x, len_ge2_b8x);
+    svbool_t const wf2_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, len_eq2_b8x, cont1_b8x),
+                                       svnot_b_z(starts_b8x, bad_lead_b8x));
+    svbool_t const wf3_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, len_ge3_b8x, b1_range_ok_b8x),
+                                       svand_b_z(starts_b8x, cont1_b8x, cont2_b8x));
+    svbool_t const wf3_only_b8x = svbic_b_z(starts_b8x, wf3_b8x, len_ge4_b8x);
+    svbool_t const wf4_b8x = svand_b_z(
+        starts_b8x, svand_b_z(starts_b8x, len_ge4_b8x, b1_range_ok_b8x),
+        svand_b_z(starts_b8x, svand_b_z(starts_b8x, cont1_b8x, cont2_b8x),
+                  svand_b_z(starts_b8x, cont3_b8x, svnot_b_z(starts_b8x, bad_lead_b8x))));
+    svbool_t const well_formed_b8x = svand_b_z(
+        decodable_b8x,
+        svorr_b_z(all_b8x, svorr_b_z(all_b8x, wf1_b8x, wf2_b8x), svorr_b_z(all_b8x, wf3_only_b8x, wf4_b8x)),
+        decodable_b8x);
 
     // Per-lane maximal-subpart steps (mirror of `sz_utf8_maximal_subpart_`): start at 1 and extend across each
     // continuation slot a well-formed sequence would still accept. For well-formed lanes this reaches the declared
     // length; for ill-formed lanes it is the 1-3 byte subpart that one U+FFFD consumes.
-    svbool_t const step2 = svand_b_z(starts, len_ge2, first_ok);
-    svbool_t const step3 = svand_b_z(starts, svand_b_z(starts, step2, len_ge3), cont2);
-    svbool_t const step4 = svand_b_z(starts, svand_b_z(starts, step3, len_ge4), cont3);
+    svbool_t const step2_b8x = svand_b_z(starts_b8x, len_ge2_b8x, first_ok_b8x);
+    svbool_t const step3_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, step2_b8x, len_ge3_b8x), cont2_b8x);
+    svbool_t const step4_b8x = svand_b_z(starts_b8x, svand_b_z(starts_b8x, step3_b8x, len_ge4_b8x), cont3_b8x);
 
     // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span becomes its own 1-byte
     // U+FFFD. The subpart spans are exactly the continuation slots `step2/3/4` reached, so coverage is those steps
     // (restricted to decodable) smeared UP by their offset - the value-domain twin of icelake `(step << k)`.
-    svuint8_t const step2_v = svdup_u8_z(svand_b_z(decodable, step2, decodable), 1);
-    svuint8_t const step3_v = svdup_u8_z(svand_b_z(decodable, step3, decodable), 1);
-    svuint8_t const step4_v = svdup_u8_z(svand_b_z(decodable, step4, decodable), 1);
-    svuint8_t const covered_v = svorr_u8_x(all,
-                                           svorr_u8_x(all, sz_utf8_shift_value_up_sve2_(step2_v, 1, lane_iota),
-                                                      sz_utf8_shift_value_up_sve2_(step3_v, 2, lane_iota)),
-                                           sz_utf8_shift_value_up_sve2_(step4_v, 3, lane_iota));
-    svbool_t const covered = svcmpne_n_u8(all, covered_v, 0);
-    svbool_t const orphan = svbic_b_z(decodable, svand_b_z(decodable, is_continuation, decodable), covered);
-    svbool_t const emit_starts = svand_b_z(decodable, svorr_b_z(decodable, decodable_starts, orphan), decodable);
-    sz_size_t const emit_count = svcntp_b8(decodable, emit_starts);
+    svuint8_t const step2_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step2_b8x, decodable_b8x), 1);
+    svuint8_t const step3_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step3_b8x, decodable_b8x), 1);
+    svuint8_t const step4_u8x = svdup_u8_z(svand_b_z(decodable_b8x, step4_b8x, decodable_b8x), 1);
+    svuint8_t const covered_u8x = svorr_u8_x(
+        all_b8x,
+        svorr_u8_x(all_b8x, sz_utf8_shift_value_up_sve2_(step2_u8x, 1, lane_iota_u8x),
+                   sz_utf8_shift_value_up_sve2_(step3_u8x, 2, lane_iota_u8x)),
+        sz_utf8_shift_value_up_sve2_(step4_u8x, 3, lane_iota_u8x));
+    svbool_t const covered_b8x = svcmpne_n_u8(all_b8x, covered_u8x, 0);
+    svbool_t const orphan_b8x = svbic_b_z(decodable_b8x, svand_b_z(decodable_b8x, is_continuation_b8x, decodable_b8x),
+                                          covered_b8x);
+    svbool_t const emit_starts_b8x = svand_b_z(
+        decodable_b8x, svorr_b_z(decodable_b8x, decodable_starts_b8x, orphan_b8x), decodable_b8x);
+    sz_size_t const emit_count = svcntp_b8(decodable_b8x, emit_starts_b8x);
     if (emit_count == 0) { return *runes_unpacked = 0, text; } // Nothing decodable -> window-edge finalize in driver.
     // Orphans are continuations, never well-formed -> ill_formed = emit_starts & ~well_formed.
-    svbool_t const ill_formed = svbic_b_z(decodable, emit_starts, well_formed);
+    svbool_t const ill_formed_b8x = svbic_b_z(decodable_b8x, emit_starts_b8x, well_formed_b8x);
 
     // Per-lane maximal-subpart length = 1 + step2 + step3 + step4 (in window order), needed for the resume cursor.
-    svuint8_t consumed_length = svdup_n_u8(1);
-    consumed_length = svadd_u8_m(step2, consumed_length, svdup_n_u8(1));
-    consumed_length = svadd_u8_m(step3, consumed_length, svdup_n_u8(1));
-    consumed_length = svadd_u8_m(step4, consumed_length, svdup_n_u8(1));
+    svuint8_t consumed_length_u8x = svdup_n_u8(1);
+    consumed_length_u8x = svadd_u8_m(step2_b8x, consumed_length_u8x, svdup_n_u8(1));
+    consumed_length_u8x = svadd_u8_m(step3_b8x, consumed_length_u8x, svdup_n_u8(1));
+    consumed_length_u8x = svadd_u8_m(step4_b8x, consumed_length_u8x, svdup_n_u8(1));
 
     // The drain needs the emit predicate, ill-formed flag, and length as inputs over the FIRST `svcntw()` byte lanes.
     // Build the 32-bit emit predicate from the byte mask: a lane is emitted iff it is a non-zero compacted flag.
-    svuint8_t const emit_flags_v = svdup_u8_z(emit_starts, 1);
-    svbool_t const emit_starts_b32 = svcmpne_n_u32(svptrue_b32(), svunpklo_u32(svunpklo_u16(emit_flags_v)), 0);
-    svuint8_t const ill_flags_v = svdup_u8_z(ill_formed, 1);
+    svuint8_t const emit_flags_u8x = svdup_u8_z(emit_starts_b8x, 1);
+    svbool_t const emit_starts_b32x = svcmpne_n_u32(svptrue_b32(), svunpklo_u32(svunpklo_u16(emit_flags_u8x)), 0);
+    svuint8_t const ill_flags_u8x = svdup_u8_z(ill_formed_b8x, 1);
 
     sz_size_t consumed = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_sve2_(bytes, next1, next2, next3, emit_starts_b32, ill_flags_v,
-                                                        consumed_length, emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_sve2_(bytes_u8x, next1_u8x, next2_u8x, next3_u8x, emit_starts_b32x,
+                                                        ill_flags_u8x, consumed_length_u8x, emit_count, runes,
+                                                        runes_capacity, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }

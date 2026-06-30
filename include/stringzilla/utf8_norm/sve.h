@@ -50,48 +50,49 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve_(sz_cptr_t text, sz_size_
 
     // Load the 64-byte LUT once into four sub-tables, each indexed by the bottom 4 bits of the index.
     // Each load is bounded to its 16-lane row so wide vectors (VL >= 256) never over-read the 64-byte table.
-    svbool_t const lut_row = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)16);
-    svuint8_t const lut_0_to_15 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 0);
-    svuint8_t const lut_16_to_31 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 16);
-    svuint8_t const lut_32_to_47 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 32);
-    svuint8_t const lut_48_to_63 = svld1_u8(lut_row, sz_utf8_norm_lead_lut_ + 48);
+    svbool_t const lut_row_b8x = svwhilelt_b8((sz_u64_t)0, (sz_u64_t)16);
+    svuint8_t const lut_0_to_15_u8x = svld1_u8(lut_row_b8x, sz_utf8_norm_lead_lut_ + 0);
+    svuint8_t const lut_16_to_31_u8x = svld1_u8(lut_row_b8x, sz_utf8_norm_lead_lut_ + 16);
+    svuint8_t const lut_32_to_47_u8x = svld1_u8(lut_row_b8x, sz_utf8_norm_lead_lut_ + 32);
+    svuint8_t const lut_48_to_63_u8x = svld1_u8(lut_row_b8x, sz_utf8_norm_lead_lut_ + 48);
 
     sz_u8_t previous_canonical_combining_class = 0;
     for (sz_size_t offset = 0; offset < length; offset += step) {
-        svbool_t const active = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
-        svuint8_t const bytes = svld1_u8(active, text_u8 + offset);
+        svbool_t const active_b8x = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
+        svuint8_t const bytes_u8x = svld1_u8(active_b8x, text_u8 + offset);
 
         // ASCII gate: a vector with no high-bit byte is wholly inert - reset the carry and continue.
-        svbool_t const non_ascii = svcmpge_n_u8(active, bytes, 0x80);
-        if (!svptest_any(active, non_ascii)) {
+        svbool_t const non_ascii_b8x = svcmpge_n_u8(active_b8x, bytes_u8x, 0x80);
+        if (!svptest_any(active_b8x, non_ascii_b8x)) {
             previous_canonical_combining_class = 0;
             continue;
         }
 
         // Lead bytes only (non-ASCII and not a 10xxxxxx continuation), classified via the 64-entry LUT.
-        svbool_t const continuation = svcmplt_n_u8(active, svsub_n_u8_x(active, bytes, 0x80), 0x40);
-        svbool_t const is_lead = svbic_b_z(active, non_ascii, continuation);
+        svbool_t const continuation_b8x = svcmplt_n_u8(active_b8x, svsub_n_u8_x(active_b8x, bytes_u8x, 0x80), 0x40);
+        svbool_t const is_lead_b8x = svbic_b_z(active_b8x, non_ascii_b8x, continuation_b8x);
 
         // 64-entry LUT via a 4-way range-blend over the bottom 6 bits of each byte. Each sub-table holds
         // 16 entries at lanes [0,16), so every quadrant is indexed by `index` minus its base - `svtbl_u8`
         // yields 0 for out-of-range lanes, which `svsel_u8` then discards via the range predicate.
-        svuint8_t const index = svand_n_u8_x(active, bytes, 0x3F);
-        svuint8_t const index_low_nibble = svand_n_u8_x(active, index, 0x0F);
-        svbool_t const range_0_to_15 = svcmplt_n_u8(active, index, 16);
-        svbool_t const range_16_to_31 = svand_b_z(active, svcmpge_n_u8(active, index, 16),
-                                                  svcmplt_n_u8(active, index, 32));
-        svbool_t const range_32_to_47 = svand_b_z(active, svcmpge_n_u8(active, index, 32),
-                                                  svcmplt_n_u8(active, index, 48));
-        svbool_t const range_48_to_63 = svcmpge_n_u8(active, index, 48);
-        svuint8_t families = svsel_u8(range_0_to_15, svtbl_u8(lut_0_to_15, index_low_nibble), svdup_n_u8(0));
-        families = svsel_u8(range_16_to_31, svtbl_u8(lut_16_to_31, index_low_nibble), families);
-        families = svsel_u8(range_32_to_47, svtbl_u8(lut_32_to_47, index_low_nibble), families);
-        families = svsel_u8(range_48_to_63, svtbl_u8(lut_48_to_63, index_low_nibble), families);
+        svuint8_t const index_u8x = svand_n_u8_x(active_b8x, bytes_u8x, 0x3F);
+        svuint8_t const index_low_nibble_u8x = svand_n_u8_x(active_b8x, index_u8x, 0x0F);
+        svbool_t const range_0_to_15_b8x = svcmplt_n_u8(active_b8x, index_u8x, 16);
+        svbool_t const range_16_to_31_b8x = svand_b_z(active_b8x, svcmpge_n_u8(active_b8x, index_u8x, 16),
+                                                      svcmplt_n_u8(active_b8x, index_u8x, 32));
+        svbool_t const range_32_to_47_b8x = svand_b_z(active_b8x, svcmpge_n_u8(active_b8x, index_u8x, 32),
+                                                      svcmplt_n_u8(active_b8x, index_u8x, 48));
+        svbool_t const range_48_to_63_b8x = svcmpge_n_u8(active_b8x, index_u8x, 48);
+        svuint8_t families_u8x = svsel_u8(range_0_to_15_b8x, svtbl_u8(lut_0_to_15_u8x, index_low_nibble_u8x),
+                                          svdup_n_u8(0));
+        families_u8x = svsel_u8(range_16_to_31_b8x, svtbl_u8(lut_16_to_31_u8x, index_low_nibble_u8x), families_u8x);
+        families_u8x = svsel_u8(range_32_to_47_b8x, svtbl_u8(lut_32_to_47_u8x, index_low_nibble_u8x), families_u8x);
+        families_u8x = svsel_u8(range_48_to_63_b8x, svtbl_u8(lut_48_to_63_u8x, index_low_nibble_u8x), families_u8x);
 
         // Flagged leads: a lead byte whose family carries the form's quick-check bit.
-        svbool_t const has_flag = svcmpne_n_u8(active, svand_n_u8_x(active, families, form_flag), 0);
-        svbool_t const flagged = svand_b_z(active, is_lead, has_flag);
-        if (!svptest_any(active, flagged)) {
+        svbool_t const has_flag_b8x = svcmpne_n_u8(active_b8x, svand_n_u8_x(active_b8x, families_u8x, form_flag), 0);
+        svbool_t const flagged_b8x = svand_b_z(active_b8x, is_lead_b8x, has_flag_b8x);
+        if (!svptest_any(active_b8x, flagged_b8x)) {
             // No flagged lead in this vector: inert for the form. Reset the carry and realign onto a
             // codepoint boundary - a vector step can land mid-sequence, and the straddling codepoint's
             // lead was already classified inert in the vector we are leaving.
