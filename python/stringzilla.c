@@ -2096,7 +2096,7 @@ static PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_
     }
 
     PyObject *text_obj = is_member ? self : args[0];
-    PyObject *other_obj = args[is_member];
+    PyObject *other_obj = args[!is_member]; // Second operand: args[0] as a method, args[1] as a function
     sz_string_view_t text, other;
 
     // Validate and convert tje texts
