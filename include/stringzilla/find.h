@@ -88,6 +88,48 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haysta
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
 #endif
 
+#if SZ_USE_SVE
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_find_byte */
+SZ_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
+#endif
+
 /**
  *  @brief Locates first matching substring.
  *         Equivalent to `memmem(haystack, haystack_length, needle, needle_length)` in LibC.
@@ -157,6 +199,57 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_l
                                         sz_size_t needle_length);
 #endif
 
+#if SZ_USE_SVE
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                      sz_size_t needle_length);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                      sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_lasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_find */
+SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length);
+#endif
+
 /**
  *  @brief Finds the first character present from the @p set, present in @p text.
  *         Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
@@ -217,6 +310,41 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_v128(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_lasx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 /*  `sz_utf8_delimiters` (UTF-8 punctuation/symbol/separator/whitespace enumeration) lives in
