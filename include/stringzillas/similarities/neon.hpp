@@ -34,11 +34,13 @@ SZ_INLINE uint64x2_t lane_nonzero_(uint64x2_t value) noexcept { return vcgtq_u64
 #pragma region Bit Parallel Myers
 
 /**
- *  @brief NEON Myers/Hyyr\xc3\xb6 unit-cost Levenshtein for AArch64, scoring two independent pairs at once with one
- *      Myers integer per `uint64x2_t` lane. Mirrors the Ice Lake eight-lane byte Myers at a quarter of the width:
- *      there is no cross-lane carry machinery anywhere - every lane is its own register-resident 64-bit Myers
- *      integer, scaled in @b words instead of in lanes:
- *      - `distances_2x64_`            - 2 single-word Myers (shorter <= 64), one 64-bit integer per lane;
+ *  @brief NEON Myers/Hyyr\xc3\xb6 unit-cost Levenshtein for AArch64, scoring two independent pairs per `uint64x2_t`
+ *      lane, and on the single-word hot path interleaving `single_word_groups_k` such vectors for
+ *      `single_word_lanes_k` pairs at once. Mirrors the Ice Lake eight-lane byte Myers at a quarter of the
+ *      vector width: there is no cross-lane carry machinery anywhere - every lane is its own register-resident
+ *      64-bit Myers integer, scaled in @b words instead of in lanes:
+ *      - `distances_8x64_`            - up to `single_word_lanes_k` single-word Myers (shorter <= 64), two per
+ *        `uint64x2_t` and `single_word_groups_k` register-groups interleaved so the dependency chains overlap;
  *      - `distances_2x_multiword_<words_count_>` - 2 multi-word Myers with a compile-time word count, covering shorter
  *        in `(64, 64 * words_count_]`; the word state lives in stack arrays so the loop unrolls and the
  *        `vertical_positive` / `vertical_negative` words register-promote;
@@ -58,7 +60,18 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     using index_t = u32_t;
     static constexpr index_t lanes_k = 2;
     static constexpr size_t match_masks_bytes_k = sizeof(u64_t) * lanes_k *
-                                                  256; // ? 4 KB single-word `match_masks` table.
+                                                  256; // ? 4 KB multi-word `match_masks` table (2 lanes).
+
+    // The single-word kernel carries no cross-lane carry, so its only ceiling is instruction-level parallelism:
+    // each Myers integer is a ~16-op dependency chain, and one `uint64x2_t` chain leaves the wide Arm FP/SIMD
+    // pipes ~80% idle. We interleave `single_word_groups_k` independent `uint64x2_t` chains (`single_word_lanes_k`
+    // pairs per launch) so the out-of-order engine fills those pipes. More chains expose more parallelism, but
+    // each adds a per-position scalar `Eq` gather and enlarges the `match_masks` table, so the optimum is well
+    // below the architectural 32-register ceiling. Measured on an M5 Pro (60-byte all-pairs, q67xc68 tile):
+    // 1 → 117.6, 2 → 165.5, 4 → 195.5, 8 → 181.2 GCUPS, so 4 groups (8 lanes, 16 KB table) is the sweet spot.
+    static constexpr index_t single_word_groups_k = 4;
+    static constexpr index_t single_word_lanes_k = single_word_groups_k * 2;
+    static constexpr size_t single_word_match_masks_bytes_k = sizeof(u64_t) * single_word_lanes_k * 256; // 16 KB.
 
     levenshtein_distance_myers() noexcept {}
 
@@ -75,19 +88,23 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     }
 
     /**
-     *  @brief Two independent single-word Myers distances, one per `uint64x2_t` lane (each shorter side <= 64).
-     *      The hot path for short words: no carry, shift, or boundary masking crosses lanes - every lane is its own
-     *      64-bit Myers integer. @p scratch_space holds the `match_masks[2][256]` table (`match_masks_bytes_k`).
+     *  @brief Up to `single_word_lanes_k` independent single-word Myers distances, two per `uint64x2_t` and
+     *      `single_word_groups_k` register-groups interleaved (each shorter side <= 64). The hot path for short
+     *      words: no carry, shift, or boundary masking crosses lanes - every lane is its own 64-bit Myers integer,
+     *      so the only ceiling is instruction-level parallelism. Interleaving the groups keeps the wide Arm pipes
+     *      busy across the ~16-op per-position dependency chain. @p scratch_space holds the `match_masks` table
+     *      (`single_word_match_masks_bytes_k`, indexed `lane * 256 + symbol`).
      */
     template <typename results_writer_>
-    status_t distances_2x64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
+    status_t distances_8x64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                              scratch_space_t scratch_space) const noexcept {
 
-        if (scratch_space.size() < match_masks_bytes_k) return status_t::bad_alloc_k;
+        if (scratch_space.size() < single_word_match_masks_bytes_k) return status_t::bad_alloc_k;
 
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data()); // ? Indexed `lane * 256 + symbol`.
-        alignas(16) u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
-        alignas(16) u64_t vertical_positive_init[lanes_k] = {0};
+        alignas(16) u64_t top_bits[single_word_lanes_k] = {0}, shorter_lengths[single_word_lanes_k] = {0},
+                          longer_lengths[single_word_lanes_k] = {0};
+        alignas(16) u64_t vertical_positive_init[single_word_lanes_k] = {0};
 
         size_t max_longer = 0;
         for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index) {
@@ -111,49 +128,67 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             max_longer = sz_max_of_two(max_longer, longer_length);
         }
 
+        // One independent Myers integer per lane; pad lanes keep `longer_length == 0` so their `active` mask is
+        // always false (frozen) and their scores are never written back. Each group is its own `uint64x2_t` chain.
         uint64x2_t const one = vdupq_n_u64(1);
-        uint64x2_t const top_mask = vld1q_u64(top_bits), longer_vec = vld1q_u64(longer_lengths);
-        uint64x2_t vertical_positive = vld1q_u64(vertical_positive_init);
-        uint64x2_t vertical_negative = vdupq_n_u64(0);
-        uint64x2_t score = vld1q_u64(shorter_lengths);
+        uint64x2_t const ones = vdupq_n_u64(~(u64_t)0);
+        uint64x2_t top_mask[single_word_groups_k], longer_vec[single_word_groups_k];
+        uint64x2_t vertical_positive[single_word_groups_k], vertical_negative[single_word_groups_k];
+        uint64x2_t score[single_word_groups_k];
+        for (index_t group = 0; group != single_word_groups_k; ++group) {
+            top_mask[group] = vld1q_u64(&top_bits[group * 2]);
+            longer_vec[group] = vld1q_u64(&longer_lengths[group * 2]);
+            vertical_positive[group] = vld1q_u64(&vertical_positive_init[group * 2]);
+            vertical_negative[group] = vdupq_n_u64(0);
+            score[group] = vld1q_u64(&shorter_lengths[group * 2]);
+        }
 
         for (size_t position = 0; position != max_longer; ++position) {
-            uint64x2_t const active = vcgtq_u64(longer_vec, vdupq_n_u64(position));
-            alignas(16) u64_t equality_lanes[lanes_k] = {0};
+            uint64x2_t const position_vec = vdupq_n_u64(position);
+            alignas(16) u64_t equality_lanes[single_word_lanes_k] = {0};
             for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
                 if (position < pairs.longers[lane_index].size())
                     equality_lanes[lane_index] =
                         match_masks[lane_index * 256 + (u8_t)pairs.longers[lane_index].data()[position]];
-            uint64x2_t const equality = vld1q_u64(equality_lanes);
 
-            uint64x2_t const carry_in = vorrq_u64(equality, vertical_negative);
-            // Xh = (((Eq & VP) + VP) ^ VP) | Eq.
-            uint64x2_t const sum = vaddq_u64(vandq_u64(equality, vertical_positive), vertical_positive);
-            uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive), equality);
-            // Ph = VN | ~(D | VP) = VN | ~D & ~VP -> `vbic(vbic(ones, D), VP)` then OR; expressed via OR-NOT.
-            uint64x2_t horizontal_positive = vorrq_u64(
-                vertical_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), diagonal), vertical_positive));
-            uint64x2_t horizontal_negative = vandq_u64(vertical_positive, diagonal);
+            // The `single_word_groups_k` chains are independent, so this unrolled loop exposes that ILP to the
+            // scheduler: each group's ~16-op recurrence overlaps with its neighbours' to saturate the FP/SIMD pipes.
+            for (index_t group = 0; group != single_word_groups_k; ++group) {
+                uint64x2_t const active = vcgtq_u64(longer_vec[group], position_vec);
+                uint64x2_t const equality = vld1q_u64(&equality_lanes[group * 2]);
+                uint64x2_t const vertical_positive_group = vertical_positive[group];
+                uint64x2_t const vertical_negative_group = vertical_negative[group];
 
-            // score += active & ((Ph & top) != 0); score -= active & ((Hn & top) != 0).
-            uint64x2_t const add_step = vandq_u64(
-                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask))), one);
-            uint64x2_t const sub_step = vandq_u64(
-                vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask))), one);
-            score = vsubq_u64(vaddq_u64(score, add_step), sub_step);
+                uint64x2_t const carry_in = vorrq_u64(equality, vertical_negative_group);
+                // Xh = (((Eq & VP) + VP) ^ VP) | Eq.
+                uint64x2_t const sum = vaddq_u64(vandq_u64(equality, vertical_positive_group), vertical_positive_group);
+                uint64x2_t const diagonal = vorrq_u64(veorq_u64(sum, vertical_positive_group), equality);
+                // Ph = VN | ~(D | VP) = VN | ~D & ~VP → `vbic(vbic(ones, D), VP)` then OR; expressed via OR-NOT.
+                uint64x2_t horizontal_positive = vorrq_u64(
+                    vertical_negative_group, vbicq_u64(vbicq_u64(ones, diagonal), vertical_positive_group));
+                uint64x2_t horizontal_negative = vandq_u64(vertical_positive_group, diagonal);
 
-            horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), one);
-            horizontal_negative = vshlq_n_u64(horizontal_negative, 1);
-            // Pv' = Mh | ~(Xv | Ph) = Hn | ~(carry_in | Hp).
-            uint64x2_t const next_positive = vorrq_u64(
-                horizontal_negative, vbicq_u64(vbicq_u64(vdupq_n_u64(~(u64_t)0), carry_in), horizontal_positive));
-            uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
-            vertical_positive = vbslq_u64(active, next_positive, vertical_positive);
-            vertical_negative = vbslq_u64(active, next_negative, vertical_negative);
+                // score += active & ((Ph & top) != 0); score -= active & ((Hn & top) != 0).
+                uint64x2_t const add_step = vandq_u64(
+                    vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_positive, top_mask[group]))), one);
+                uint64x2_t const sub_step = vandq_u64(
+                    vandq_u64(active, lane_nonzero_(vandq_u64(horizontal_negative, top_mask[group]))), one);
+                score[group] = vsubq_u64(vaddq_u64(score[group], add_step), sub_step);
+
+                horizontal_positive = vorrq_u64(vshlq_n_u64(horizontal_positive, 1), one);
+                horizontal_negative = vshlq_n_u64(horizontal_negative, 1);
+                // Pv' = Mh | ~(Xv | Ph) = Hn | ~(carry_in | Hp).
+                uint64x2_t const next_positive = vorrq_u64(horizontal_negative,
+                                                           vbicq_u64(vbicq_u64(ones, carry_in), horizontal_positive));
+                uint64x2_t const next_negative = vandq_u64(horizontal_positive, carry_in);
+                vertical_positive[group] = vbslq_u64(active, next_positive, vertical_positive_group);
+                vertical_negative[group] = vbslq_u64(active, next_negative, vertical_negative_group);
+            }
         }
 
-        alignas(16) u64_t final_scores[lanes_k];
-        vst1q_u64(final_scores, score);
+        alignas(16) u64_t final_scores[single_word_lanes_k];
+        for (index_t group = 0; group != single_word_groups_k; ++group)
+            vst1q_u64(&final_scores[group * 2], score[group]);
         for (index_t lane_index = 0; lane_index != pairs.lanes_count(); ++lane_index)
             results[pairs.positions[lane_index]] = (size_t)final_scores[lane_index];
         return status_t::success_k;
@@ -558,8 +593,9 @@ struct levenshtein_distance_myers<rune_t, capability_, std::enable_if_t<(capabil
 
     /**
      *  @brief Two independent single-word rune Myers distances, one per `uint64x2_t` lane (each shorter side <= 64
-     *      runes). The scan is verbatim the byte `distances_2x64_`; only the `Eq` source differs - per text position
-     *      each lane hash-probes its rune to a single 64-bit bitmask, and the two masks are assembled into one vector.
+     *      runes). The per-position recurrence matches one `uint64x2_t` group of the byte `distances_8x64_` (this
+     *      rune path keeps a single group, not the byte kernel's interleaved chains); only the `Eq` source differs -
+     *      per text position each lane hash-probes its rune to a single 64-bit bitmask, assembled into one vector.
      *      @p scratch_space holds the 2-lane hash `match_masks` (`scratch_bytes_for(max_shorter)`).
      */
     template <typename results_writer_>
@@ -5463,8 +5499,8 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_g
 };
 
 /**
- *  @brief Batched byte-level @b Levenshtein distances on NEON, scoring two unit-cost pairs at once with the @b NEON
- *      Myers family - `distances_2x64_` (shorter <= 64), `distances_2x_multiword_<words_count>` (compile-time word
+ *  @brief Batched byte-level @b Levenshtein distances on NEON, scoring unit-cost pairs at once with the @b NEON
+ *      Myers family - `distances_8x64_` (shorter <= 64), `distances_2x_multiword_<words_count>` (compile-time word
  *      count, shorter <= 512), and `distances_2x_multiword_large_` (runtime word count, shorter > 512) - and the
  *      anti-diagonal DP for everything else (non-unit costs, or a lone shorter side > 512). Cells are grouped by their
  *      exact `ceil(shorter / 64)` word bucket so each group loops one common word count.
@@ -5542,7 +5578,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         for (size_t index = 0; index < candidates.size(); ++index)
             if (to_view(candidates[index]).size() > longest_candidate)
                 longest_candidate = to_view(candidates[index]).size(), longest_candidate_index = index;
-        size_t const myers_scratch = myers_t::match_masks_bytes_k;
+        size_t const myers_scratch = myers_t::single_word_match_masks_bytes_k;
         size_t dp_scratch = 0, twoxN_scratch = 0;
         size_t const shortest_longest = sz_min_of_two(longest_query, longest_candidate);
         if (queries.size() && candidates.size() && shortest_longest > 64) {
@@ -5666,13 +5702,17 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 continue;
             }
 
-            // Batched Myers: gather up to `lanes_k` consecutive live cells whose shorter side shares this seed cell's
-            // exact `ceil(shorter / 64)` word bucket, so the whole group loops one common `words_count`. Per-lane
-            // `top_bits` still handle differing exact lengths inside the bucket. Seeding first guarantees progress.
+            // Batched Myers: gather consecutive live cells whose shorter side shares this seed cell's exact
+            // `ceil(shorter / 64)` word bucket, so the whole group loops one common `words_count`. The single-word
+            // bucket (shorter <= 64) carries no cross-lane state, so it interleaves `single_word_lanes_k` lanes for
+            // instruction-level parallelism; the multi-word buckets stay at `lanes_k`. Per-lane `top_bits` still
+            // handle differing exact lengths inside the bucket. Seeding first guarantees progress.
             size_t const seed_bucket = divide_round_up<size_t>(shorter, 64);
-            span<char const> group_shorters[myers_t::lanes_k], group_longers[myers_t::lanes_k];
-            size_t group_positions[myers_t::lanes_k];
-            cross_cell_destination_<value_t> group_destinations[myers_t::lanes_k];
+            index_t const group_capacity = seed_bucket == 1 ? (index_t)myers_t::single_word_lanes_k
+                                                            : (index_t)myers_t::lanes_k;
+            span<char const> group_shorters[myers_t::single_word_lanes_k], group_longers[myers_t::single_word_lanes_k];
+            size_t group_positions[myers_t::single_word_lanes_k];
+            cross_cell_destination_<value_t> group_destinations[myers_t::single_word_lanes_k];
             bool const seed_query_shorter = query.size() <= candidate.size();
             group_shorters[0] = seed_query_shorter ? query : candidate;
             group_longers[0] = seed_query_shorter ? candidate : query;
@@ -5680,7 +5720,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             group_destinations[0] = destination_for(query_index, candidate_index);
             index_t group = 1;
             ++cell_index;
-            for (; cell_index != cell_end && group != (index_t)myers_t::lanes_k; ++cell_index, ++group) {
+            for (; cell_index != cell_end && group != group_capacity; ++cell_index, ++group) {
                 size_t next_query_index = 0, next_candidate_index = 0;
                 cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
                 auto const next_query = to_view(queries[next_query_index]);
@@ -5714,7 +5754,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             status_t status = dispatch_word_bucket_<1, 8>(
                 seed_bucket,
                 [&](auto bucket) {
-                    if constexpr (bucket.value == 1) return myers.distances_2x64_(group_pairs, group_writer, scratch);
+                    if constexpr (bucket.value == 1) return myers.distances_8x64_(group_pairs, group_writer, scratch);
                     else
                         return myers.template distances_2x_multiword_<bucket.value>(group_pairs, group_writer, scratch);
                 },
