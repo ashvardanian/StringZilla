@@ -170,9 +170,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
 
     svuint8_t const one_byte_set = svdupq_n_u8(' ', '\t', '\n', '\v', '\f', '\r', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
                                                ' ', ' ', ' ');
-    // Valid third bytes for E2 80 XX: U+2000-U+200D (0x80-0x8D), plus U+2028 (0xA8), U+2029 (0xA9).
+    // Valid third bytes for E2 80 XX: U+2000-U+200A (0x80-0x8A), plus U+2028 (0xA8), U+2029 (0xA9). U+200B/200C/200D
+    // are Format chars, not White_Space; the 16-lane set test repeats 0x80 (already a member) in their freed slots.
     svuint8_t const e280_third_bytes = svdupq_n_u8(0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A,
-                                                   0x8B, 0x8C, 0x8D, 0xA8, 0xA9);
+                                                   0x80, 0x80, 0x80, 0xA8, 0xA9);
 
     while (position < length && count < matches_capacity) {
         // Predicate the load over the valid lanes so a final partial tile reads zero past the end; a truncated
@@ -195,7 +196,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(     //
         // 3-byte: E1 9A 80 (Ogham)
         svbool_t ogham_mask = svand_b_z(pg, svand_b_z(pg, svcmpeq_n_u8(pg, text0, 0xE1), svcmpeq_n_u8(pg, text1, 0x9A)),
                                         svcmpeq_n_u8(pg, text2, 0x80));
-        // 3-byte: E2 80 [80-8D] | A8 | A9 (set match); E2 80 AF (NNBSP); E2 81 9F (MMSP)
+        // 3-byte: E2 80 [80-8A] | A8 | A9 (set match); E2 80 AF (NNBSP); E2 81 9F (MMSP)
         svbool_t lead_e2_mask = svcmpeq_n_u8(pg, text0, 0xE2);
         svbool_t lead_e280_mask = svand_b_z(pg, lead_e2_mask, svcmpeq_n_u8(pg, text1, 0x80));
         svbool_t e280xx_mask = svand_b_z(pg, lead_e280_mask, svmatch_u8(pg, text2, e280_third_bytes));

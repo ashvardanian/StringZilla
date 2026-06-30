@@ -213,7 +213,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
     uint8x16_t x_9a_u8x16 = vdupq_n_u8(0x9A);
     uint8x16_t byte_80_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t x_81_u8x16 = vdupq_n_u8(0x81);
-    uint8x16_t x_8d_u8x16 = vdupq_n_u8(0x8D);
+    uint8x16_t x_8a_u8x16 = vdupq_n_u8(0x8A);
     uint8x16_t x_a8_u8x16 = vdupq_n_u8(0xA8);
     uint8x16_t x_a9_u8x16 = vdupq_n_u8(0xA9);
     uint8x16_t x_af_u8x16 = vdupq_n_u8(0xAF);
@@ -238,13 +238,13 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
         uint8x16_t two_byte_cmp = vandq_u8(lead_c2_cmp,
                                            vorrq_u8(vceqq_u8(window1, x_85_u8x16), vceqq_u8(window1, x_a0_u8x16)));
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
         uint8x16_t window1_is_80 = vceqq_u8(window1, byte_80_u8x16);
         uint8x16_t lead_e280_cmp = vandq_u8(vceqq_u8(window, lead_e2_u8x16), window1_is_80);
         uint8x16_t ogham_cmp = vandq_u8(vceqq_u8(window, x_e1_u8x16),
                                         vandq_u8(vceqq_u8(window1, x_9a_u8x16), vceqq_u8(window2, byte_80_u8x16)));
         uint8x16_t range_e280_cmp = vandq_u8(lead_e280_cmp,
-                                             vandq_u8(vcgeq_u8(window2, byte_80_u8x16), vcleq_u8(window2, x_8d_u8x16)));
+                                             vandq_u8(vcgeq_u8(window2, byte_80_u8x16), vcleq_u8(window2, x_8a_u8x16)));
         uint8x16_t nnbsp_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_af_u8x16));
         uint8x16_t mmsp_cmp = vandq_u8(vandq_u8(vceqq_u8(window, lead_e2_u8x16), vceqq_u8(window1, x_81_u8x16)),
                                        vceqq_u8(window2, x_9f_u8x16));

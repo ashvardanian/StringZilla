@@ -113,7 +113,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
             x_e1_vec = _mm512_set1_epi8('\xE1'), lead_e2_vec = _mm512_set1_epi8('\xE2'),
             x_e3_vec = _mm512_set1_epi8('\xE3'), x_9a_vec = _mm512_set1_epi8('\x9A'),
             byte_80_vec = _mm512_set1_epi8('\x80'), x_81_vec = _mm512_set1_epi8('\x81'),
-            x_8d_vec = _mm512_set1_epi8('\x8D'), x_a8_vec = _mm512_set1_epi8('\xA8'),
+            x_8a_vec = _mm512_set1_epi8('\x8A'), x_a8_vec = _mm512_set1_epi8('\xA8'),
             x_a9_vec = _mm512_set1_epi8('\xA9'), x_af_vec = _mm512_set1_epi8('\xAF'),
             x_9f_vec = _mm512_set1_epi8('\x9F');
     __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
@@ -138,7 +138,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
             lead_c2_mask, _kor_mask64(_kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_85_vec), 1),
                                       _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_a0_vec), 1)));
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
         __mmask64 byte_80_mask = _mm512_cmpeq_epi8_mask(window, byte_80_vec);
         __mmask64 lead_e2_mask = _mm512_cmpeq_epi8_mask(window, lead_e2_vec);
         __mmask64 lead_e280_mask = _kand_mask64(lead_e2_mask, _kshiftri_mask64(byte_80_mask, 1));
@@ -147,7 +147,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
                                                          _kshiftri_mask64(byte_80_mask, 2)));
         __mmask64 range_e280_mask = _kand_mask64(
             lead_e280_mask, _kand_mask64(_kshiftri_mask64(_mm512_cmpge_epu8_mask(window, byte_80_vec), 2),
-                                         _kshiftri_mask64(_mm512_cmple_epu8_mask(window, x_8d_vec), 2)));
+                                         _kshiftri_mask64(_mm512_cmple_epu8_mask(window, x_8a_vec), 2)));
         __mmask64 nnbsp_mask = _kand_mask64(lead_e280_mask,
                                             _kshiftri_mask64(_mm512_cmpeq_epi8_mask(window, x_af_vec), 2));
         __mmask64 mmsp_mask = _kand_mask64(

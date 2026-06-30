@@ -122,18 +122,18 @@ SZ_HELPER_AUTO vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u8m
                             __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x9A, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x80, vector_length), vector_length);
     length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_ogham, vector_length);
-    // U+2000-U+200D, U+2028, U+2029, U+202F (E2 80 {80-8D, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
+    // U+2000-U+200A, U+2028, U+2029, U+202F (E2 80 {80-8A, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
     vbool2_t is_e2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length);
     vbool2_t is_e2_80 = __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length),
                                             vector_length);
-    vbool2_t third_2000_200d = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(after_next_u8m4, 0x80, vector_length),
-                                                         0x0E, vector_length);
+    vbool2_t third_2000_200a = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(after_next_u8m4, 0x80, vector_length),
+                                                         0x0B, vector_length);
     vbool2_t third_a8_a9_af = __riscv_vmor_mm_b2(
         __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
                            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xAF, vector_length), vector_length);
     vbool2_t is_e2_80_ws = __riscv_vmand_mm_b2(
-        is_e2_80, __riscv_vmor_mm_b2(third_2000_200d, third_a8_a9_af, vector_length), vector_length);
+        is_e2_80, __riscv_vmor_mm_b2(third_2000_200a, third_a8_a9_af, vector_length), vector_length);
     vbool2_t is_e2_81_9f = __riscv_vmand_mm_b2(
         __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x81, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x9F, vector_length), vector_length);

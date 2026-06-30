@@ -171,7 +171,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     __vector unsigned char const x_9a_vec = vec_splats((unsigned char)0x9A);
     __vector unsigned char const byte_80_vec = vec_splats((unsigned char)0x80);
     __vector unsigned char const x_81_vec = vec_splats((unsigned char)0x81);
-    __vector unsigned char const x_8d_vec = vec_splats((unsigned char)0x8D);
+    __vector unsigned char const x_8a_vec = vec_splats((unsigned char)0x8A);
     __vector unsigned char const x_a8_vec = vec_splats((unsigned char)0xA8);
     __vector unsigned char const x_a9_vec = vec_splats((unsigned char)0xA9);
     __vector unsigned char const x_af_vec = vec_splats((unsigned char)0xAF);
@@ -192,7 +192,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
         sz_u32_t x_a0_bits = sz_utf8_iterate_movemask_powervsx_((__vector unsigned char)vec_cmpeq(window, x_a0_vec));
         sz_u32_t two_byte_starts = lead_c2_bits & ((x_85_bits >> 1) | (x_a0_bits >> 1));
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
         sz_u32_t byte_80_bits = sz_utf8_iterate_movemask_powervsx_(
             (__vector unsigned char)vec_cmpeq(window, byte_80_vec));
         sz_u32_t lead_e2_bits = sz_utf8_iterate_movemask_powervsx_(
@@ -203,8 +203,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
         sz_u32_t ogham_bits = x_e1_bits & (x_9a_bits >> 1) & (byte_80_bits >> 2);
         sz_u32_t x_80_ge_bits = sz_utf8_iterate_movemask_powervsx_(
             (__vector unsigned char)vec_cmpge(window, byte_80_vec));
-        sz_u32_t x_8d_le_bits = sz_utf8_iterate_movemask_powervsx_((__vector unsigned char)vec_cmple(window, x_8d_vec));
-        sz_u32_t range_e280_bits = lead_e280_bits & (x_80_ge_bits >> 2) & (x_8d_le_bits >> 2);
+        sz_u32_t x_8a_le_bits = sz_utf8_iterate_movemask_powervsx_((__vector unsigned char)vec_cmple(window, x_8a_vec));
+        sz_u32_t range_e280_bits = lead_e280_bits & (x_80_ge_bits >> 2) & (x_8a_le_bits >> 2);
         sz_u32_t x_af_bits = sz_utf8_iterate_movemask_powervsx_((__vector unsigned char)vec_cmpeq(window, x_af_vec));
         sz_u32_t nnbsp_bits = lead_e280_bits & (x_af_bits >> 2);
         sz_u32_t x_81_bits = sz_utf8_iterate_movemask_powervsx_((__vector unsigned char)vec_cmpeq(window, x_81_vec));

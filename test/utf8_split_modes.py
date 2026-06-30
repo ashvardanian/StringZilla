@@ -47,3 +47,14 @@ def test_wordbreaks_tiles():
     segments = list(sz.utf8_wordbreaks("Hello, world!"))
     assert "".join(str(s) for s in segments) == "Hello, world!"
     assert len(segments) == 5
+
+
+def test_zero_width_format_chars_are_not_whitespace():
+    """Regression: U+200B/200C/200D (ZWSP/ZWNJ/ZWJ) are Format chars (Unicode White_Space=No) and must NOT be
+    whitespace separators, while U+200A HAIR SPACE (the last codepoint of the U+2000 space block) must. The kernel
+    historically over-ran the E2 80 block to 0x8D, splitting on the zero-width joiners and shattering ZWJ emoji."""
+    assert list(sz.utf8_split_whitespaces("a b")) == [Str("a"), Str("b")]  # U+200A HAIR SPACE → splits
+    for cp in ("​", "‌", "‍"):  # ZWSP / ZWNJ / ZWJ → not whitespace, no split
+        assert list(sz.utf8_split_whitespaces(f"a{cp}b")) == [Str(f"a{cp}b")]
+    # A ZWJ emoji sequence (man-ZWJ-woman) stays one segment instead of being split on the joiner.
+    assert list(sz.utf8_split_whitespaces("\U0001f468‍\U0001f469")) == [Str("\U0001f468‍\U0001f469")]

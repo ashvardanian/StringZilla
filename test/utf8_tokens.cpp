@@ -152,11 +152,16 @@ void test_utf8_tokens_unit() {
     sz_size_t const newline_length = (sz_size_t)(sizeof(newline_text) - 1);
     std::vector<std::pair<sz_size_t, sz_size_t>> const newline_spans = {{1u, 1u}, {3u, 2u}};
 
-    // `sz_utf8_whitespaces`: in "a b\tc" the space is a length-1 match at byte 1, the tab at byte 3
-    // (there is no CRLF merging in the whitespace set - each codepoint is its own match).
-    char const whitespace_text[] = "a b\tc";
+    // `sz_utf8_whitespaces`: the space is a length-1 match at byte 1, the tab at byte 3, and U+200A HAIR SPACE
+    // (E2 80 8A) a length-3 match at byte 5 (there is no CRLF merging in the whitespace set - each codepoint is its
+    // own match). The U+200B/200C/200D (ZERO WIDTH SPACE/NON-JOINER/JOINER, E2 80 8B/8C/8D) that follow are Format
+    // characters with White_Space=No and must produce NO match - this pins the E2 80 [80-8A] block boundary so no
+    // backend regresses to splitting on the zero-width joiners (which would shatter ZWJ emoji and Indic/Arabic words).
+    char const whitespace_text[] = "a b\tc\xE2\x80\x8A"                       // ... U+200A HAIR SPACE (whitespace)
+                                   "d" "\xE2\x80\x8B\xE2\x80\x8C\xE2\x80\x8D" // U+200B/200C/200D (NOT whitespace)
+                                   "e";
     sz_size_t const whitespace_length = (sz_size_t)(sizeof(whitespace_text) - 1);
-    std::vector<std::pair<sz_size_t, sz_size_t>> const whitespace_spans = {{1u, 1u}, {3u, 1u}};
+    std::vector<std::pair<sz_size_t, sz_size_t>> const whitespace_spans = {{1u, 1u}, {3u, 1u}, {5u, 3u}};
 
     // `sz_utf8_count` (6 bytes, 3 codepoints) plus the newline/whitespace boundary anchors, driven through
     // the dispatched (automatic kernel), serial, and each natively-compiled backend.
@@ -335,11 +340,11 @@ void test_utf8_tokens_unit() {
         let_assert(auto w = words("\x00 a"_sv), w.size() == 2);         // NUL before space - yields 2 segments
         let_assert(auto w = words("a \x00"_sv), w.size() == 2);         // Space before NUL - yields 2 segments
 
-        // U+200B-U+200D are format characters per Unicode, but implementation treats them as whitespace
-        // Note: This may be intentional for compatibility, but differs from Unicode "White_Space" property
-        let_assert(auto w = words("a​b"), w.size() == 2); // ZERO WIDTH SPACE
-        let_assert(auto w = words("a‌b"), w.size() == 2); // ZERO WIDTH NON-JOINER
-        let_assert(auto w = words("a‍b"), w.size() == 2); // ZERO WIDTH JOINER
+        // U+200B/200C/200D (ZWSP/ZWNJ/ZWJ) are Format characters (Unicode White_Space=No): NOT whitespace, so a word
+        // containing one stays a single segment. A regression here would shatter ZWJ emoji and Arabic/Indic words.
+        let_assert(auto w = words("a​b"), w.size() == 1); // ZERO WIDTH SPACE - Format char, not whitespace
+        let_assert(auto w = words("a‌b"), w.size() == 1); // ZERO WIDTH NON-JOINER - Format char, not whitespace
+        let_assert(auto w = words("a‍b"), w.size() == 1); // ZERO WIDTH JOINER - Format char, not whitespace
 
         // Consecutive different whitespace types - N delimiters yield N+1 segments
         let_assert(auto w = words("a \t\n\r\vb"), w.size() == 6); // 5 whitespace chars between a and b

@@ -186,7 +186,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(     //
     v128_t x_9a_vec = wasm_i8x16_splat((sz_i8_t)0x9A);
     v128_t byte_80_vec = wasm_i8x16_splat((sz_i8_t)0x80);
     v128_t x_81_vec = wasm_i8x16_splat((sz_i8_t)0x81);
-    v128_t x_8d_vec = wasm_i8x16_splat((sz_i8_t)0x8D);
+    v128_t x_8a_vec = wasm_i8x16_splat((sz_i8_t)0x8A);
     v128_t x_a8_vec = wasm_i8x16_splat((sz_i8_t)0xA8);
     v128_t x_a9_vec = wasm_i8x16_splat((sz_i8_t)0xA9);
     v128_t x_af_vec = wasm_i8x16_splat((sz_i8_t)0xAF);
@@ -209,14 +209,14 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128(     //
         v128_t two_byte_cmp = wasm_v128_and(
             lead_c2_cmp, wasm_v128_or(wasm_i8x16_eq(window1, x_85_vec), wasm_i8x16_eq(window1, x_a0_vec)));
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
         v128_t window1_is_80 = wasm_i8x16_eq(window1, byte_80_vec);
         v128_t lead_e280_cmp = wasm_v128_and(wasm_i8x16_eq(window, lead_e2_vec), window1_is_80);
         v128_t ogham_cmp = wasm_v128_and(
             wasm_i8x16_eq(window, x_e1_vec),
             wasm_v128_and(wasm_i8x16_eq(window1, x_9a_vec), wasm_i8x16_eq(window2, byte_80_vec)));
         v128_t range_e280_cmp = wasm_v128_and(
-            lead_e280_cmp, wasm_v128_and(wasm_u8x16_ge(window2, byte_80_vec), wasm_u8x16_le(window2, x_8d_vec)));
+            lead_e280_cmp, wasm_v128_and(wasm_u8x16_ge(window2, byte_80_vec), wasm_u8x16_le(window2, x_8a_vec)));
         v128_t nnbsp_cmp = wasm_v128_and(lead_e280_cmp, wasm_i8x16_eq(window2, x_af_vec));
         v128_t mmsp_cmp = wasm_v128_and(
             wasm_v128_and(wasm_i8x16_eq(window, lead_e2_vec), wasm_i8x16_eq(window1, x_81_vec)),

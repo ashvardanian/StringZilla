@@ -167,7 +167,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
             x_e1_u8x32 = _mm256_set1_epi8('\xE1'), lead_e2_u8x32 = _mm256_set1_epi8('\xE2'),
             x_e3_u8x32 = _mm256_set1_epi8('\xE3'), x_9a_u8x32 = _mm256_set1_epi8('\x9A'),
             byte_80_u8x32 = _mm256_set1_epi8('\x80'), x_81_u8x32 = _mm256_set1_epi8('\x81'),
-            x_8d_u8x32 = _mm256_set1_epi8('\x8D'), x_a8_u8x32 = _mm256_set1_epi8('\xA8'),
+            x_8a_u8x32 = _mm256_set1_epi8('\x8A'), x_a8_u8x32 = _mm256_set1_epi8('\xA8'),
             x_a9_u8x32 = _mm256_set1_epi8('\xA9'), x_af_u8x32 = _mm256_set1_epi8('\xAF'),
             x_9f_u8x32 = _mm256_set1_epi8('\x9F');
 
@@ -189,7 +189,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
         sz_u32_t x_a0_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a0_u8x32));
         sz_u32_t two_byte_starts = lead_c2_mask & ((x_85_mask | x_a0_mask) >> 1);
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8D]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
         sz_u32_t x_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_e1_u8x32));
         sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, lead_e2_u8x32));
         sz_u32_t x_e3_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_e3_u8x32));
@@ -197,15 +197,15 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
         sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, byte_80_u8x32));
         sz_u32_t x_81_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_81_u8x32));
         __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_haswell_(window, byte_80_u8x32); // >= 0x80
-        __m256i x_8d_le_cmp = sz_mm256_cmpge_epu8_haswell_(x_8d_u8x32, window);    // <= 0x8D
-        sz_u32_t x_8d_range_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_and_si256(x_80_ge_cmp, x_8d_le_cmp));
+        __m256i x_8a_le_cmp = sz_mm256_cmpge_epu8_haswell_(x_8a_u8x32, window);    // <= 0x8A
+        sz_u32_t x_8a_range_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_and_si256(x_80_ge_cmp, x_8a_le_cmp));
         sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a8_u8x32));
         sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a9_u8x32));
         sz_u32_t x_af_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_af_u8x32));
         sz_u32_t x_9f_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_9f_u8x32));
 
         sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);               // E1 9A 80
-        sz_u32_t range_e280_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_8d_range_mask >> 2); // E2 80 [80-8D]
+        sz_u32_t range_e280_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_8a_range_mask >> 2); // E2 80 [80-8A]
         sz_u32_t nnbsp_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_af_mask >> 2);            // E2 80 AF
         sz_u32_t mmsp_mask = lead_e2_mask & (x_81_mask >> 1) & (x_9f_mask >> 2);                // E2 81 9F
         sz_u32_t line_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_a8_mask >> 2);             // E2 80 A8

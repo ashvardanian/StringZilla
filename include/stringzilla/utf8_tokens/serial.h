@@ -90,7 +90,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_whitespaces_serial_(   //
             if (position + 2 < length) {
                 sz_u8_t const second = text_bytes[position + 1], third = text_bytes[position + 2];
                 if (second == 0x80 &&
-                    ((third >= 0x80 && third <= 0x8D) || third == 0xA8 || third == 0xA9 || third == 0xAF))
+                    ((third >= 0x80 && third <= 0x8A) || third == 0xA8 || third == 0xA9 || third == 0xAF))
                     match_length = 3;
                 else if (second == 0x81 && third == 0x9F) match_length = 3;
             }
