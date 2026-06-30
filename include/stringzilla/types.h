@@ -274,6 +274,14 @@
  */
 #define SZ_U64_MAX_PRIME (18446744073709551557ull)
 
+/*  Opt into glibc's "misc" extensions (`_DEFAULT_SOURCE` => `__USE_MISC`) before the first libc header is
+ *  pulled in. A strict `-std=cNN` otherwise hides declarations like `syscall()`, which the RISC-V
+ *  `riscv_hwprobe` capability probe in `stringzilla.h` relies on. As the first StringZilla header every
+ *  translation unit includes, this is the one place that covers every build system (CMake/Cargo/setuptools). */
+#if defined(__linux__) && !SZ_AVOID_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+
 #if !SZ_AVOID_LIBC
 #include <stddef.h> // `size_t`
 #include <stdint.h> // `uint8_t`
