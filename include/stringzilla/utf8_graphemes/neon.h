@@ -31,38 +31,71 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-#pragma region Scalar bit shuffles
+#pragma region Branchless bit gather and scatter
 
-/** @brief  Software `_pext_u64`: gather the bits of @p value selected by @p selector, packed to the low end (bit `j`
- *          of the result = the `j`-th set bit of @p value within @p selector). NEON has no `pext`; the sparse loop
- *          trips once per set @p selector bit (codepoint-dense compaction over the start lanes). Bit-exact with BMI2. */
+/** @brief  Precomputed routing masks for the Hacker's-Delight bit-compress network — the BMI2-free `pext`/`pdep`.
+ *          NEON has no `pext`/`pdep`, and one grapheme window applies the @b same `start_lanes` selector to 18 class
+ *          masks plus the boundary scatter, so the six routing masks are built once and shared. This replaces the old
+ *          O(popcount) per-call scalar loops with a branchless, constant-time apply. Bit-exact with BMI2. */
+typedef struct sz_grapheme_bit_route_t {
+    sz_u64_t selector;
+    sz_u64_t move_masks[6];
+} sz_grapheme_bit_route_t;
+
+/** @brief  Build the per-selector routing plan once; reuse it for every gather/scatter sharing this @p selector. */
+SZ_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
+    sz_grapheme_bit_route_t route;
+    route.selector = selector;
+    sz_u64_t routing_selector = selector;
+    sz_u64_t shifted_complement = ~selector << 1;
+    for (int step = 0; step < 6; ++step) {
+        sz_u64_t parallel_prefix = shifted_complement ^ (shifted_complement << 1);
+        parallel_prefix ^= parallel_prefix << 2;
+        parallel_prefix ^= parallel_prefix << 4;
+        parallel_prefix ^= parallel_prefix << 8;
+        parallel_prefix ^= parallel_prefix << 16;
+        parallel_prefix ^= parallel_prefix << 32;
+        sz_u64_t const movable_selector = parallel_prefix & routing_selector;
+        route.move_masks[step] = movable_selector;
+        routing_selector = (routing_selector ^ movable_selector) | (movable_selector >> (1u << step));
+        shifted_complement &= ~parallel_prefix;
+    }
+    return route;
+}
+
+/** @brief  `pext` via a precomputed @p route: gather the bits of @p value at the selector positions to the low end. */
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+    value &= route->selector;
+    for (int step = 0; step < 6; ++step) {
+        sz_u64_t const movable_value = value & route->move_masks[step];
+        value = (value ^ movable_value) | (movable_value >> (1u << step));
+    }
+    return value;
+}
+
+/** @brief  `pdep` via a precomputed @p route: scatter the low bits of @p value into the selector positions. */
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+    for (int step = 5; step >= 0; --step) {
+        sz_u64_t const movable_value = value << (1u << step);
+        value = (value & ~route->move_masks[step]) | (movable_value & route->move_masks[step]);
+    }
+    return value & route->selector;
+}
+
+/** @brief  Drop-in branchless `_pext_u64` (builds a one-shot route). Prefer `sz_grapheme_bit_gather_` when one
+ *          selector serves several values, as inside `sz_grapheme_build_masks_neon_`. Bit-exact with BMI2. */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_pext_neon_(sz_u64_t value, sz_u64_t selector) {
-    sz_u64_t result = 0;
-    sz_u64_t out_bit = 1;
-    while (selector) {
-        sz_u64_t const low = selector & (~selector + 1); // lowest set bit of `selector`
-        if (value & low) result |= out_bit;
-        out_bit <<= 1;
-        selector &= selector - 1;
-    }
-    return result;
+    sz_grapheme_bit_route_t const route = sz_grapheme_bit_route_build_(selector);
+    return sz_grapheme_bit_gather_(value, &route);
 }
 
-/** @brief  Software `_pdep_u64`: scatter the low bits of @p value into the positions set in @p selector (the `j`-th
- *          set bit of @p selector receives bit `j` of @p value). NEON has no `pdep`; the sparse loop trips once per
- *          set @p selector bit (the dense-boundary scatter back onto codepoint-start lanes). Bit-exact with BMI2. */
+/** @brief  Drop-in branchless `_pdep_u64`. Bit-exact with BMI2. */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
-    sz_u64_t result = 0;
-    while (selector) {
-        sz_u64_t const low = selector & (~selector + 1); // lowest set bit of `selector`
-        if (value & 1) result |= low;
-        value >>= 1;
-        selector &= selector - 1;
-    }
-    return result;
+    sz_grapheme_bit_route_t const route = sz_grapheme_bit_route_build_(selector);
+    return sz_grapheme_bit_scatter_(value, &route);
 }
 
-#pragma endregion Scalar bit shuffles
+#pragma endregion Branchless bit gather and scatter
 
 #pragma region Gather free Grapheme_Cluster_Break classifier
 
@@ -85,14 +118,21 @@ SZ_HELPER_AUTO uint8x16_t sz_grapheme_bmp_descriptor_neon_(uint8x16_t high, uint
     uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
     uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
     uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_grapheme_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_grapheme_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
+    // Stage 3 is a gather: descriptor[lane] = stage3_groups[leaf_group[lane] * 256 + lut_index[lane]]. The old
+    // per-group scan recomputed `lut256` (4x vqtbl4q @ 1.31/cyc) for every one of `leaf_groups_k` groups and kept
+    // one. Emulate the gather with a bounded scalar L1 walk instead (Apple's L1 is fast); the `< leaf_groups_k`
+    // mask reproduces the original (out-of-range lanes stay zero), keeping it bit-exact.
+    sz_u8_t leaf_group_lanes[16], stage3_index_lanes[16], descriptor_lanes[16];
+    vst1q_u8(leaf_group_lanes, leaf_group);
+    vst1q_u8(stage3_index_lanes, lut_index);
+    for (int lane_index = 0; lane_index < 16; ++lane_index) {
+        int const group = leaf_group_lanes[lane_index];
+        int const safe_group = group < (int)sz_utf8_grapheme_break_haswell_leaf_groups_k ? group : 0;
+        descriptor_lanes[lane_index] =
+            sz_utf8_grapheme_break_haswell_stage3_groups_[safe_group * 256 + stage3_index_lanes[lane_index]];
     }
-    return result;
+    uint8x16_t const in_range = vcltq_u8(leaf_group, vdupq_n_u8((sz_u8_t)sz_utf8_grapheme_break_haswell_leaf_groups_k));
+    return vandq_u8(vld1q_u8(descriptor_lanes), in_range);
 }
 
 /** @brief  Packed descriptor byte for sixteen ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
@@ -121,14 +161,19 @@ SZ_HELPER_AUTO uint8x16_t sz_grapheme_astral_descriptor_neon_(uint8x16_t plane, 
     uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
     uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
     uint8x16_t const stage4_lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), n0);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(
-            sz_utf8_grapheme_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
+    // Same gather collapse as the BMP path: descriptor[lane] = astral_stage4_groups[leaf_group*256 + index].
+    sz_u8_t leaf_group_lanes[16], stage4_index_lanes[16], descriptor_lanes[16];
+    vst1q_u8(leaf_group_lanes, leaf_group);
+    vst1q_u8(stage4_index_lanes, stage4_lut_index);
+    for (int lane_index = 0; lane_index < 16; ++lane_index) {
+        int const group = leaf_group_lanes[lane_index];
+        int const safe_group = group < (int)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k ? group : 0;
+        descriptor_lanes[lane_index] =
+            sz_utf8_grapheme_break_haswell_astral_stage4_groups_[safe_group * 256 + stage4_index_lanes[lane_index]];
     }
-    return result;
+    uint8x16_t const in_range = vcltq_u8(leaf_group,
+                                         vdupq_n_u8((sz_u8_t)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k));
+    return vandq_u8(vld1q_u8(descriptor_lanes), in_range);
 }
 
 /** @brief  Per-quarter unsigned `value >= bound` boolean mask (0x00/0xFF lanes), the NEON `vcgeq_u8` twin of the AVX2
@@ -379,6 +424,9 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
 SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_grapheme_classified_neon_t classified,
                                                                           sz_u64_t valid) {
     sz_u64_t const starts = classified.start_lanes;
+    // Every class compaction below gathers the byte-lane mask down to the codepoint-dense domain over the SAME
+    // `starts` selector, so build the bit-route once and reuse it for all 18 gathers (the branchless PEXT).
+    sz_grapheme_bit_route_t const start_route = sz_grapheme_bit_route_build_(starts);
     uint8x16_t const nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t class_q[4], desc_q[4];
     for (int quarter = 0; quarter < 4; ++quarter) {
@@ -388,17 +436,18 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_gra
 
     sz_grapheme_window_masks_t masks;
     for (int class_index = 0; class_index < 14; ++class_index) {
-        uint8x16_t const v = vdupq_n_u8((sz_u8_t)class_index);
-        sz_u64_t const byte_mask = sz_utf8_mask_combine_neon_(vceqq_u8(class_q[0], v), vceqq_u8(class_q[1], v),
-                                                              vceqq_u8(class_q[2], v), vceqq_u8(class_q[3], v));
-        masks.class_bit[class_index] = sz_grapheme_pext_neon_(byte_mask, starts) & valid;
+        uint8x16_t const class_id_vec = vdupq_n_u8((sz_u8_t)class_index);
+        sz_u64_t const byte_mask = sz_utf8_mask_combine_neon_(
+            vceqq_u8(class_q[0], class_id_vec), vceqq_u8(class_q[1], class_id_vec), vceqq_u8(class_q[2], class_id_vec),
+            vceqq_u8(class_q[3], class_id_vec));
+        masks.class_bit[class_index] = sz_grapheme_bit_gather_(byte_mask, &start_route) & valid;
     }
     uint8x16_t const ext_bit = vdupq_n_u8(0x40);
     uint8x16_t ext_q[4];
     for (int quarter = 0; quarter < 4; ++quarter)
         ext_q[quarter] = vceqq_u8(vandq_u8(desc_q[quarter], ext_bit), ext_bit);
     sz_u64_t const ext_byte = sz_utf8_mask_combine_neon_(ext_q[0], ext_q[1], ext_q[2], ext_q[3]);
-    masks.extended_pictographic = sz_grapheme_pext_neon_(ext_byte, starts) & valid;
+    masks.extended_pictographic = sz_grapheme_bit_gather_(ext_byte, &start_route) & valid;
 
     uint8x16_t const incb_consonant = vdupq_n_u8((sz_u8_t)sz_grapheme_incb_consonant_k);
     uint8x16_t const incb_extend = vdupq_n_u8((sz_u8_t)sz_grapheme_incb_extend_k);
@@ -410,15 +459,17 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_gra
         extend_q[quarter] = vceqq_u8(incb, incb_extend);
         linker_q[quarter] = vceqq_u8(incb, incb_linker);
     }
-    masks.indic_consonant = sz_grapheme_pext_neon_(sz_utf8_mask_combine_neon_(consonant_q[0], consonant_q[1],
-                                                                              consonant_q[2], consonant_q[3]),
-                                                   starts) &
+    masks.indic_consonant = sz_grapheme_bit_gather_(sz_utf8_mask_combine_neon_(consonant_q[0], consonant_q[1],
+                                                                               consonant_q[2], consonant_q[3]),
+                                                    &start_route) &
                             valid;
-    masks.indic_extend = sz_grapheme_pext_neon_(
-                             sz_utf8_mask_combine_neon_(extend_q[0], extend_q[1], extend_q[2], extend_q[3]), starts) &
+    masks.indic_extend = sz_grapheme_bit_gather_(
+                             sz_utf8_mask_combine_neon_(extend_q[0], extend_q[1], extend_q[2], extend_q[3]),
+                             &start_route) &
                          valid;
-    masks.indic_linker = sz_grapheme_pext_neon_(
-                             sz_utf8_mask_combine_neon_(linker_q[0], linker_q[1], linker_q[2], linker_q[3]), starts) &
+    masks.indic_linker = sz_grapheme_bit_gather_(
+                             sz_utf8_mask_combine_neon_(linker_q[0], linker_q[1], linker_q[2], linker_q[3]),
+                             &start_route) &
                          valid;
     return masks;
 }
