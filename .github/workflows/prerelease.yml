@@ -497,6 +497,83 @@ jobs:
       - name: Test Swift
         run: swift test
 
+  test_ubuntu_dotnet:
+    name: C# on Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential
+
+      - name: Build shared library
+        run: |
+          cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_shared --target stringzilla_shared --config Release
+
+        # The runtime resolver probes runtimes/{rid}/native first; the shared target emits
+        # libstringzilla_shared.so, so copy it under the name the binding looks up.
+      - name: Stage native library
+        run: |
+          mkdir -p csharp/runtimes/linux-x64/native
+          cp -L build_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check formatting
+        run: |
+          dotnet format StringZilla.csproj --verify-no-changes
+          dotnet format csharp/StringZillaTests.csproj --verify-no-changes
+
+      - name: Test C#
+        run: dotnet test csharp/StringZillaTests.csproj -c Release --nologo
+
+  test_ubuntu_java:
+    name: Java on Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential
+
+      - name: Build shared library
+        run: |
+          cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_shared --target stringzilla_shared --config Release
+
+        # NativeLoader extracts /native/{os}-{arch}/libstringzilla.so from the classpath at runtime;
+        # Maven copies src/main/resources into target/classes before the tests run.
+      - name: Stage native library
+        run: |
+          mkdir -p java/src/main/resources/native/linux-x86_64
+          cp -L build_shared/libstringzilla_shared.so java/src/main/resources/native/linux-x86_64/libstringzilla.so
+
+        # JDK 23: finalized Foreign Function & Memory API (since 22) and Palantir Java Format (needs <= 23).
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "23"
+          cache: maven
+
+      - name: Check formatting
+        run: mvn -B spotless:check
+
+      - name: Test Java
+        run: mvn -B test
+
   test_cross_linux:
     name: Cross Compile (${{ matrix.arch }} → ${{ matrix.target_arch }})
     runs-on: ${{ matrix.os }}
