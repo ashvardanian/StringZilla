@@ -321,6 +321,249 @@ class StringZillaTest {
         assertTrue(pairs.contains(java.util.List.of(1L, 0L))); // "b"
         assertTrue(pairs.contains(java.util.List.of(2L, 1L))); // "c"
     }
+
+    @Test
+    void argSort_bufferSegments() {
+        byte[] text = b("banana\napple\ncherry");
+        long[] starts = {0, 7, 13};
+        long[] lengths = {6, 5, 6};
+        long[] order = new long[3];
+        int count = StringZilla.argSort(text, starts, lengths, order, false, 0, false);
+        assertEquals(3, count);
+        assertArrayEquals(new long[] {1, 0, 2}, order); // apple, banana, cherry
+    }
+    // endregion
+
+    // region Iteration
+
+    private static String str(MemorySegment segment) {
+        return new String(segment.toArray(JAVA_BYTE), StandardCharsets.UTF_8);
+    }
+
+    private static java.util.List<String> toStrings(Iterable<MemorySegment> segments) {
+        var out = new java.util.ArrayList<String>();
+        for (MemorySegment segment : segments) out.add(str(segment));
+        return out;
+    }
+
+    @Test
+    void runes_matchesCodePoints() {
+        String text = "héllo 世界 🦖";
+        assertArrayEquals(
+                text.codePoints().toArray(), StringZilla.runes(b(text)).toArray());
+    }
+
+    @Test
+    void words_tilesInput() {
+        byte[] text = b("the quick fox");
+        long covered = 0;
+        for (MemorySegment word : StringZilla.words(text)) covered += word.byteSize();
+        assertEquals(text.length, covered); // tiling covers the whole input
+        assertTrue(toStrings(StringZilla.words(text)).contains("quick"));
+    }
+
+    @Test
+    void graphemes_matchCursorAndIterable() {
+        byte[] text = b("éllo!");
+        int viaIterable = toStrings(StringZilla.graphemes(text)).size();
+        int viaCursor = 0;
+        var cursor = StringZilla.graphemes(text).cursor();
+        while (cursor.next()) viaCursor++;
+        assertEquals(viaCursor, viaIterable);
+    }
+
+    // endregion
+
+    // region Splitting
+
+    @Test
+    void split_keepsEmptySegments() {
+        assertEquals(java.util.List.of("a", "bb", "", "c"), toStrings(StringZilla.split(b("a,bb,,c"), b(","))));
+    }
+
+    @Test
+    void split_skipEmpty() {
+        assertEquals(
+                java.util.List.of("a", "b"),
+                toStrings(StringZilla.split(b("a,,b,"), b(",")).skipEmpty()));
+    }
+
+    @Test
+    void split_maxSplit() {
+        assertEquals(
+                java.util.List.of("a", "b", "c,d"),
+                toStrings(StringZilla.split(b("a,b,c,d"), b(",")).withMaxSplit(2)));
+    }
+
+    @Test
+    void split_keepSeparator() {
+        assertEquals(
+                java.util.List.of("a,", "b,", "c"),
+                toStrings(StringZilla.split(b("a,b,c"), b(",")).keepSeparator()));
+    }
+
+    @Test
+    void rsplit_reverseOrder() {
+        assertEquals(java.util.List.of("c", "b", "a"), toStrings(StringZilla.rsplit(b("a,b,c"), b(","))));
+    }
+
+    @Test
+    void rsplit_maxSplit() {
+        assertEquals(
+                java.util.List.of("d", "a,b,c"),
+                toStrings(StringZilla.rsplit(b("a,b,c,d"), b(",")).withMaxSplit(1)));
+    }
+
+    @Test
+    void splitAny_onByteset() {
+        var separators = new StringZilla.Byteset().addAll(b("-_"));
+        assertEquals(java.util.List.of("a", "b", "c"), toStrings(StringZilla.splitAny(b("a-b_c"), separators)));
+    }
+
+    @Test
+    void splitNewlines_yieldsLines() {
+        assertEquals(java.util.List.of("a", "bb", "c"), toStrings(StringZilla.splitNewlines(b("a\nbb\nc"))));
+    }
+
+    @Test
+    void splitWhitespaces_withSeparatorsRoundTrips() {
+        var rebuilt = new StringBuilder();
+        for (MemorySegment part :
+                StringZilla.splitWhitespaces(b("the quick fox")).withSeparators()) rebuilt.append(str(part));
+        assertEquals("the quick fox", rebuilt.toString());
+    }
+
+    @Test
+    void matches_findsAllOffsets() {
+        assertArrayEquals(
+                new long[] {0, 2, 4, 6},
+                StringZilla.matches(b("abababab"), b("ab")).toArray());
+    }
+
+    @Test
+    void matches_overlappingVsNot() {
+        assertEquals(2, StringZilla.matches(b("aaaa"), b("aa")).toArray().length);
+        assertEquals(3, StringZilla.matches(b("aaaa"), b("aa")).overlapping().toArray().length);
+    }
+
+    @Test
+    void uncasedMatches_caseInsensitive() {
+        var offsets = StringZilla.uncasedMatches(b("Hello hello HELLO"), b("hello")).stream()
+                .map(StringZilla.Match::offset)
+                .toList();
+        assertEquals(java.util.List.of(0L, 6L, 12L), offsets);
+    }
+
+    @Test
+    void partition_splitsAtFirst() {
+        var partition = StringZilla.partition(b("key=value=tail"), b("="));
+        assertEquals("key", str(partition.before()));
+        assertEquals("=", str(partition.separator()));
+        assertEquals("value=tail", str(partition.after()));
+    }
+
+    @Test
+    void rpartition_splitsAtLast() {
+        var partition = StringZilla.rpartition(b("a/b/c"), b("/"));
+        assertEquals("a/b", str(partition.before()));
+        assertEquals("/", str(partition.separator()));
+        assertEquals("c", str(partition.after()));
+    }
+
+    @Test
+    void rsplit_keepSeparatorKeepsLeading() {
+        assertEquals(
+                java.util.List.of(",c", ",b", "a"),
+                toStrings(StringZilla.rsplit(b("a,b,c"), b(",")).keepSeparator()));
+    }
+
+    @Test
+    void split_maxSplitZeroYieldsWhole() {
+        assertEquals(
+                java.util.List.of("a,b,c"),
+                toStrings(StringZilla.split(b("a,b,c"), b(",")).withMaxSplit(0)));
+    }
+
+    @Test
+    void splitWhitespaces_skipEmpty() {
+        assertEquals(
+                java.util.List.of("the", "quick"),
+                toStrings(StringZilla.splitWhitespaces(b("  the   quick  ")).skipEmpty()));
+    }
+
+    @Test
+    void splitDelimiters_onlySeparators() {
+        assertEquals(
+                java.util.List.of("-", "."),
+                toStrings(StringZilla.splitDelimiters(b("a-b.c")).onlySeparators()));
+    }
+
+    @Test
+    void words_refillsAcrossBatches() {
+        var builder = new StringBuilder();
+        for (int i = 0; i < 200; i++) builder.append('w').append(i).append(' ');
+        byte[] text = b(builder.toString());
+        int count = 0;
+        var cursor = StringZilla.words(text).cursor();
+        while (cursor.next()) if (cursor.length() > 0 && text[(int) cursor.startOffset()] == (byte) 'w') count++;
+        assertEquals(200, count); // forces multiple 64-entry batch refills on the JVM side
+    }
+
+    @Test
+    void split_overNativeSegmentIsZeroCopy() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment text = arena.allocate(6);
+            MemorySegment.copy(b("a,bb,c"), 0, text, JAVA_BYTE, 0, 6);
+            MemorySegment separator = arena.allocate(1);
+            separator.set(JAVA_BYTE, 0, (byte) ',');
+
+            var parts = new java.util.ArrayList<String>();
+            for (MemorySegment part : StringZilla.split(text, separator)) parts.add(str(part));
+            assertEquals(java.util.List.of("a", "bb", "c"), parts);
+
+            // The yielded slices point into the caller's own native memory — no copy was made.
+            var cursor = StringZilla.split(text, separator).cursor();
+            assertTrue(cursor.next());
+            assertEquals(text.address(), cursor.current().address());
+        }
+    }
+
+    @Test
+    void words_overNativeSegment() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment text = arena.allocate(13);
+            MemorySegment.copy(b("the quick fox"), 0, text, JAVA_BYTE, 0, 13);
+            var words = new java.util.ArrayList<String>();
+            for (MemorySegment word : StringZilla.words(text)) words.add(str(word));
+            assertTrue(words.contains("quick"));
+        }
+    }
+
+    @Test
+    void matches_overNativeSegment() {
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment haystack = arena.allocate(8);
+            MemorySegment.copy(b("abababab"), 0, haystack, JAVA_BYTE, 0, 8);
+            MemorySegment needle = arena.allocate(2);
+            MemorySegment.copy(b("ab"), 0, needle, JAVA_BYTE, 0, 2);
+            assertArrayEquals(
+                    new long[] {0, 2, 4, 6},
+                    StringZilla.matches(haystack, needle).toArray());
+        }
+    }
+
+    @Test
+    void uncasedMatches_overlappingStaysCodepointAligned() {
+        assertEquals(
+                3,
+                StringZilla.uncasedMatches(b("AAAA"), b("aa")).overlapping().stream()
+                        .count());
+        var offsets = StringZilla.uncasedMatches(b("ÄÄÄ"), b("ä")).overlapping().stream()
+                .map(StringZilla.Match::offset)
+                .toList();
+        assertEquals(java.util.List.of(0L, 2L, 4L), offsets); // each Ä is two bytes
+    }
+
     // endregion
 
 }

@@ -74,6 +74,35 @@ for (int segment = 0; segment < count; segment++)
     use(text, (int) starts[segment], (int) lengths[segment]);
 ```
 
+## Splitting and Iteration
+
+Every factory takes an on-heap `byte[]` or any `MemorySegment` (e.g. an off-heap Spark `UTF8String`, a direct `ByteBuffer`, or an mmap'd file).
+The word, grapheme, sentence, line-break, and separator-token iterators are always zero-copy and batch 64 boundaries per native call.
+The substring and byte-set splits (`split`/`rsplit`/`splitAny`) and the match iterators scan native segments in place; for on-heap inputs they copy the text off-heap once per `cursor()`, because pointer-returning finds need a stable address that the JVM does not expose for heap memory.
+The `Iterable`/`Stream` adapters are the ergonomic path; a `cursor()` (a `boolean next()` plus `startOffset()`/`length()`) is the zero-allocation escape hatch.
+
+```java
+StringZilla.runes(text).forEach(this::use);                       // IntStream of codepoints
+for (MemorySegment word : StringZilla.words(text)) use(word);     // also graphemes/sentences/lineBreaks
+
+for (MemorySegment field : StringZilla.split(line, comma)) use(field);          // cf. String.split, zero-copy
+for (MemorySegment part : StringZilla.rsplit(path, slash).withMaxSplit(1)) use(part); // from the end
+for (MemorySegment token : StringZilla.splitAny(text, separators)) use(token);  // any byte in a Byteset
+for (MemorySegment line : StringZilla.splitWhitespaces(text).skipEmpty()) use(line); // collapse runs
+
+long[] offsets = StringZilla.matches(haystack, needle).toArray(); // every offset; .overlapping() for overlaps
+StringZilla.uncasedMatches(haystack, needle).stream().forEach(this::use); // caseless; Match.offset/length
+
+StringZilla.Partition parts = StringZilla.partition(text, equals); // cf. Python str.partition
+```
+
+The zero-allocation cursor, e.g. to sort a file's lines without materializing them:
+
+```java
+StringZilla.TokenSplitter splitter = StringZilla.splitNewlines(buffer).cursor();
+while (splitter.next()) record(splitter.startOffset(), splitter.length());
+```
+
 ## Case Folding and Normalization
 
 Case folding fills a gap: the JDK ships no Unicode case folding.
@@ -90,14 +119,41 @@ byte[] composed = StringZilla.normalize(text, StringZilla.NormalForm.NFC);  // c
 long[] order = new long[items.size()];
 int sorted = StringZilla.argSort(items, order, false, 0, false); // stable permutation over List<byte[]>
 
+long[] lineOrder = new long[lineCount];
+StringZilla.argSort(buffer, starts, lengths, lineOrder, false, 0, false); // sort one buffer's segments
+
 long[] firstPositions = new long[Math.min(left.size(), right.size())];
 long[] secondPositions = new long[firstPositions.length];
 int matches = StringZilla.intersect(left, right, firstPositions, secondPositions); // matching index pairs
 ```
 
+## Zero-Copy and Memory
+
+Every operation accepts an on-heap `byte[]` or any `MemorySegment`.
+Whether the input is read in place or copied once is determined by what the native kernel returns, not by the binding.
+
+Value- and offset-returning operations are always zero-copy, on heap or off-heap.
+They are linked with the FFM *critical* option, so the JVM lets the kernel read the array in place with no thread-state transition.
+This covers `hash`, `byteSum`, `equal`, `compare`, and the `Hasher`; codepoints (`runes`, `decode`); segmentation (`words`, `graphemes`, `sentences`, `lineBreaks`) and the separator-token splits (`splitNewlines`, `splitWhitespaces`, `splitDelimiters`); `caseFold` and `normalize`; and `argSort` / `intersect`.
+
+Pointer-returning search copies an on-heap input once.
+`indexOf` / `lastIndexOf` / `indexOfAny`, the substring and byte-set splits (`split`, `rsplit`, `splitAny`), `matches`, `uncasedMatches`, and `partition` locate a match by pointer, and the JVM does not expose the address of pinned heap memory — so an on-heap `byte[]` (or a heap-backed `MemorySegment`, e.g. a Lucene `BytesRef`) is copied off-heap once before scanning.
+That is one linear copy of the haystack per call, or per `cursor()` for the iterators, never per match.
+Pass a native `MemorySegment` (an off-heap `Arena`, a direct `ByteBuffer`, an `MMapDirectory` slice, or a Spark Tungsten row) and these run fully in place with no copy.
+
+| Input | Value / offset ops (hash, compare, segmentation, token splits, sort) | Pointer search (indexOf, split, matches, partition) |
+|---|---|---|
+| on-heap `byte[]` | zero-copy | one off-heap copy per call / per `cursor()` |
+| heap-backed `MemorySegment` (e.g. Lucene `BytesRef`) | zero-copy | one off-heap copy per call / per `cursor()` |
+| native `MemorySegment` (`Arena`, direct `ByteBuffer`, mmap, Tungsten) | zero-copy | zero-copy |
+
+The copy exists only because the JVM hides the address of pinned heap memory; .NET exposes it, so the C# binding scans `byte[]` with no copy.
+For repeated pointer searches over the same large on-heap buffer, wrap it in a native `MemorySegment` once and reuse it.
+
 ## Zero-Copy with Apache Lucene
 
-Lucene terms are UTF-8 already (`BytesRef`), so StringZilla operates on the backing bytes with no copy.
+Lucene terms are UTF-8 already (`BytesRef`), so StringZilla reads the backing bytes directly.
+Value operations such as `hash` and `compare` run with no copy; pointer searches copy a heap `BytesRef` once (see [Zero-Copy and Memory](#zero-copy-and-memory)).
 This is ideal in custom codecs, comparators, or analysis components.
 
 ```java
