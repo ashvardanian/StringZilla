@@ -166,7 +166,8 @@ SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const 
     if (!a || !b) return sz_false_k;
     for (; *a && *b; a++, b++)
         if (*a != *b) return sz_false_k;
-    return *b == '\0' ? sz_true_k : sz_false_k;
+    // Both strings must terminate together; a one-sided check would let "neonaes" match the prefix "neon".
+    return (*a == '\0' && *b == '\0') ? sz_true_k : sz_false_k;
 }
 
 /**
