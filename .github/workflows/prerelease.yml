@@ -590,18 +590,21 @@ jobs:
                       target: aarch64-linux-gnu
                       target_processor: arm64
                       cflags: ""
+                      file_id: aarch64 # substring `file` prints for this ELF
                     - os: ubuntu-24.04-arm
                       arch: aarch64
                       target_arch: x86-64
                       target: x86_64-linux-gnu
                       target_processor: amd64
                       cflags: ""
+                      file_id: x86-64
                     - os: ubuntu-24.04
                       arch: x86-64
                       target_arch: riscv64
                       target: riscv64-linux-gnu
                       target_processor: riscv64
                       cflags: "-march=rv64gcv"
+                      file_id: RISC-V # `file` prints "UCB RISC-V", not "riscv64"
 
         env:
             CC: clang-20
@@ -661,7 +664,7 @@ jobs:
                   test -e build_artifacts/libstringzilla_bare.so
                   test -e build_artifacts/libstringzilla_shared.so
                   test -e build_artifacts/stringzilla_test_cpp20
-                  file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.target_arch }}"
+                  file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
                   echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
             - name: Upload ${{ matrix.target_arch }} test binaries
