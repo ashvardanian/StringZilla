@@ -662,14 +662,33 @@ static PyObject *LevenshteinDistances_vectorcall(PyObject *callable, PyObject *c
         kernel_candidates_punned = is_self_similarity ? NULL : &candidates_seq;
     }
 
-    // If no valid input types were found, raise an error
+    // No homogeneous kernel matched. This happens when one side is empty: an empty Strs is always
+    // FRAGMENTED and cannot pair with a non-empty side's tape above. If both sides are recognized Strs
+    // and either is empty, the cross product is an empty matrix -- record the counts and fall through
+    // with a NULL kernel (the call below is skipped and the empty matrix returned).
     if (!kernel_punned) {
-        PyErr_Format( //
-            PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " //
-            "Convert using: stringzilla.Strs(your_string_list)",
-            Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
-        return NULL;
+        sz_bool_t queries_recognized = queries_is_u32tape || queries_is_u64tape || queries_is_sequence;
+        sz_bool_t candidates_recognized = is_self_similarity || candidates_is_u32tape || candidates_is_u64tape ||
+                                          candidates_is_sequence;
+        sz_size_t queries_any_count = queries_is_u32tape    ? queries_u32tape.count
+                                      : queries_is_u64tape  ? queries_u64tape.count
+                                      : queries_is_sequence ? queries_seq.count
+                                                            : 0;
+        sz_size_t candidates_any_count = is_self_similarity       ? queries_any_count
+                                         : candidates_is_u32tape  ? candidates_u32tape.count
+                                         : candidates_is_u64tape  ? candidates_u64tape.count
+                                         : candidates_is_sequence ? candidates_seq.count
+                                                                  : 0;
+        if (!(queries_recognized && candidates_recognized && (queries_any_count == 0 || candidates_any_count == 0))) {
+            PyErr_Format( //
+                PyExc_TypeError,
+                "Expected stringzilla.Strs objects, got %s and %s. " //
+                "Convert using: stringzilla.Strs(your_string_list)",
+                Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
+            return NULL;
+        }
+        queries_count = queries_any_count;
+        candidates_count = candidates_any_count;
     }
 
     // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
@@ -714,10 +733,12 @@ static PyObject *LevenshteinDistances_vectorcall(PyObject *callable, PyObject *c
     }
 
     char const *error_detail = NULL;
-    sz_status_t status = kernel_punned(                  //
-        self->handle, device_handle,                     //
-        kernel_queries_punned, kernel_candidates_punned, //
-        kernel_results, kernel_results_row_stride, &error_detail);
+    sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
+    if (kernel_punned)
+        status = kernel_punned(                              //
+            self->handle, device_handle,                     //
+            kernel_queries_punned, kernel_candidates_punned, //
+            kernel_results, kernel_results_row_stride, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Levenshtein distances computation");
@@ -1030,14 +1051,33 @@ static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObjec
         kernel_candidates_punned = is_self_similarity ? NULL : &candidates_seq;
     }
 
-    // If no valid input types were found, raise an error
+    // No homogeneous kernel matched. This happens when one side is empty: an empty Strs is always
+    // FRAGMENTED and cannot pair with a non-empty side's tape above. If both sides are recognized Strs
+    // and either is empty, the cross product is an empty matrix -- record the counts and fall through
+    // with a NULL kernel (the call below is skipped and the empty matrix returned).
     if (!kernel_punned) {
-        PyErr_Format( //
-            PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " //
-            "Convert using: stringzilla.Strs(your_string_list)",
-            Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
-        return NULL;
+        sz_bool_t queries_recognized = queries_is_u32tape || queries_is_u64tape || queries_is_sequence;
+        sz_bool_t candidates_recognized = is_self_similarity || candidates_is_u32tape || candidates_is_u64tape ||
+                                          candidates_is_sequence;
+        sz_size_t queries_any_count = queries_is_u32tape    ? queries_u32tape.count
+                                      : queries_is_u64tape  ? queries_u64tape.count
+                                      : queries_is_sequence ? queries_seq.count
+                                                            : 0;
+        sz_size_t candidates_any_count = is_self_similarity       ? queries_any_count
+                                         : candidates_is_u32tape  ? candidates_u32tape.count
+                                         : candidates_is_u64tape  ? candidates_u64tape.count
+                                         : candidates_is_sequence ? candidates_seq.count
+                                                                  : 0;
+        if (!(queries_recognized && candidates_recognized && (queries_any_count == 0 || candidates_any_count == 0))) {
+            PyErr_Format( //
+                PyExc_TypeError,
+                "Expected stringzilla.Strs objects, got %s and %s. " //
+                "Convert using: stringzilla.Strs(your_string_list)",
+                Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
+            return NULL;
+        }
+        queries_count = queries_any_count;
+        candidates_count = candidates_any_count;
     }
 
     // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
@@ -1081,10 +1121,12 @@ static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObjec
     }
 
     char const *error_detail = NULL;
-    sz_status_t status = kernel_punned(                  //
-        self->handle, device_handle,                     //
-        kernel_queries_punned, kernel_candidates_punned, //
-        kernel_results, kernel_results_row_stride, &error_detail);
+    sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
+    if (kernel_punned)
+        status = kernel_punned(                              //
+            self->handle, device_handle,                     //
+            kernel_queries_punned, kernel_candidates_punned, //
+            kernel_results, kernel_results_row_stride, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Levenshtein distances computation");
@@ -1430,14 +1472,33 @@ static PyObject *NeedlemanWunsch_vectorcall(PyObject *callable, PyObject *const 
         kernel_candidates_punned = is_self_similarity ? NULL : &candidates_seq;
     }
 
-    // If no valid input types were found, raise an error
+    // No homogeneous kernel matched. This happens when one side is empty: an empty Strs is always
+    // FRAGMENTED and cannot pair with a non-empty side's tape above. If both sides are recognized Strs
+    // and either is empty, the cross product is an empty matrix -- record the counts and fall through
+    // with a NULL kernel (the call below is skipped and the empty matrix returned).
     if (!kernel_punned) {
-        PyErr_Format( //
-            PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " //
-            "Convert using: stringzilla.Strs(your_string_list)",
-            Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
-        return NULL;
+        sz_bool_t queries_recognized = queries_is_u32tape || queries_is_u64tape || queries_is_sequence;
+        sz_bool_t candidates_recognized = is_self_similarity || candidates_is_u32tape || candidates_is_u64tape ||
+                                          candidates_is_sequence;
+        sz_size_t queries_any_count = queries_is_u32tape    ? queries_u32tape.count
+                                      : queries_is_u64tape  ? queries_u64tape.count
+                                      : queries_is_sequence ? queries_seq.count
+                                                            : 0;
+        sz_size_t candidates_any_count = is_self_similarity       ? queries_any_count
+                                         : candidates_is_u32tape  ? candidates_u32tape.count
+                                         : candidates_is_u64tape  ? candidates_u64tape.count
+                                         : candidates_is_sequence ? candidates_seq.count
+                                                                  : 0;
+        if (!(queries_recognized && candidates_recognized && (queries_any_count == 0 || candidates_any_count == 0))) {
+            PyErr_Format( //
+                PyExc_TypeError,
+                "Expected stringzilla.Strs objects, got %s and %s. " //
+                "Convert using: stringzilla.Strs(your_string_list)",
+                Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
+            return NULL;
+        }
+        queries_count = queries_any_count;
+        candidates_count = candidates_any_count;
     }
 
     // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
@@ -1484,10 +1545,12 @@ static PyObject *NeedlemanWunsch_vectorcall(PyObject *callable, PyObject *const 
     }
 
     char const *error_detail = NULL;
-    sz_status_t status = kernel_punned(                  //
-        self->handle, device_handle,                     //
-        kernel_queries_punned, kernel_candidates_punned, //
-        kernel_results, kernel_results_row_stride, &error_detail);
+    sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
+    if (kernel_punned)
+        status = kernel_punned(                              //
+            self->handle, device_handle,                     //
+            kernel_queries_punned, kernel_candidates_punned, //
+            kernel_results, kernel_results_row_stride, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "NeedlemanWunsch computation");
@@ -1826,14 +1889,33 @@ static PyObject *SmithWaterman_vectorcall(PyObject *callable, PyObject *const *a
         kernel_candidates_punned = is_self_similarity ? NULL : &candidates_seq;
     }
 
-    // If no valid input types were found, raise an error
+    // No homogeneous kernel matched. This happens when one side is empty: an empty Strs is always
+    // FRAGMENTED and cannot pair with a non-empty side's tape above. If both sides are recognized Strs
+    // and either is empty, the cross product is an empty matrix -- record the counts and fall through
+    // with a NULL kernel (the call below is skipped and the empty matrix returned).
     if (!kernel_punned) {
-        PyErr_Format( //
-            PyExc_TypeError,
-            "Expected stringzilla.Strs objects, got %s and %s. " //
-            "Convert using: stringzilla.Strs(your_string_list)",
-            Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
-        return NULL;
+        sz_bool_t queries_recognized = queries_is_u32tape || queries_is_u64tape || queries_is_sequence;
+        sz_bool_t candidates_recognized = is_self_similarity || candidates_is_u32tape || candidates_is_u64tape ||
+                                          candidates_is_sequence;
+        sz_size_t queries_any_count = queries_is_u32tape    ? queries_u32tape.count
+                                      : queries_is_u64tape  ? queries_u64tape.count
+                                      : queries_is_sequence ? queries_seq.count
+                                                            : 0;
+        sz_size_t candidates_any_count = is_self_similarity       ? queries_any_count
+                                         : candidates_is_u32tape  ? candidates_u32tape.count
+                                         : candidates_is_u64tape  ? candidates_u64tape.count
+                                         : candidates_is_sequence ? candidates_seq.count
+                                                                  : 0;
+        if (!(queries_recognized && candidates_recognized && (queries_any_count == 0 || candidates_any_count == 0))) {
+            PyErr_Format( //
+                PyExc_TypeError,
+                "Expected stringzilla.Strs objects, got %s and %s. " //
+                "Convert using: stringzilla.Strs(your_string_list)",
+                Py_TYPE(queries_obj)->tp_name, candidates_obj ? Py_TYPE(candidates_obj)->tp_name : "None");
+            return NULL;
+        }
+        queries_count = queries_any_count;
+        candidates_count = candidates_any_count;
     }
 
     // Allocate a fresh 2-D matrix or validate the provided `out` array, deriving the row stride in ELEMENTS.
@@ -1880,10 +1962,12 @@ static PyObject *SmithWaterman_vectorcall(PyObject *callable, PyObject *const *a
     }
 
     char const *error_detail = NULL;
-    sz_status_t status = kernel_punned(                  //
-        self->handle, device_handle,                     //
-        kernel_queries_punned, kernel_candidates_punned, //
-        kernel_results, kernel_results_row_stride, &error_detail);
+    sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
+    if (kernel_punned)
+        status = kernel_punned(                              //
+            self->handle, device_handle,                     //
+            kernel_queries_punned, kernel_candidates_punned, //
+            kernel_results, kernel_results_row_stride, &error_detail);
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "SmithWaterman computation");
