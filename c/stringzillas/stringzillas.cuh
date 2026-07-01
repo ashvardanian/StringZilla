@@ -353,6 +353,9 @@ struct levenshtein_backends_t {
 #if SZ_USE_NEON
         szs::levenshtein_neon_t, szs::affine_levenshtein_neon_t,
 #endif
+#if SZ_USE_RVV
+        szs::levenshtein_rvv_t, szs::affine_levenshtein_rvv_t,
+#endif
 #if SZ_USE_CUDA
         szs::levenshtein_cuda_t, szs::affine_levenshtein_cuda_t,
 #endif
@@ -459,6 +462,9 @@ struct levenshtein_utf8_backends_t {
 #if SZ_USE_NEON
         szs::levenshtein_utf8_neon_t,
 #endif
+#if SZ_USE_RVV
+        szs::levenshtein_utf8_rvv_t,
+#endif
 #if SZ_USE_CUDA
         szs::levenshtein_utf8_cuda_t,
 #endif
@@ -559,6 +565,9 @@ struct needleman_wunsch_backends_t {
 #endif
 #if SZ_USE_NEON
         szs::needleman_wunsch_neon_t, szs::affine_needleman_wunsch_neon_t,
+#endif
+#if SZ_USE_RVV
+        szs::needleman_wunsch_rvv_t, szs::affine_needleman_wunsch_rvv_t,
 #endif
 #if SZ_USE_CUDA
         szs::needleman_wunsch_cuda_t, szs::affine_needleman_wunsch_cuda_t,
@@ -662,6 +671,9 @@ struct smith_waterman_backends_t {
 #endif
 #if SZ_USE_NEON
         szs::smith_waterman_neon_t, szs::affine_smith_waterman_neon_t,
+#endif
+#if SZ_USE_RVV
+        szs::smith_waterman_rvv_t, szs::affine_smith_waterman_rvv_t,
 #endif
 #if SZ_USE_CUDA
         szs::smith_waterman_cuda_t, szs::affine_smith_waterman_cuda_t,

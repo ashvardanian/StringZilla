@@ -830,6 +830,23 @@ using affine_needleman_wunsch_neon_t =
 using affine_smith_waterman_neon_t =
     smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
 
+/**
+ *  In @b RISC-V @b RVV the per-character class lookups use the `vluxei8` indexed byte-gather feeding the
+ *  anti-diagonal scorers, while the batch Myers lane-per-pair kernel keeps one 64-bit DP word per vector lane
+ *  and scales with `VLEN`. As with NEON, the aliases are unconditional; only their instantiation is
+ *  `SZ_USE_RVV`-gated.
+ */
+using levenshtein_rvv_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using levenshtein_utf8_rvv_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using needleman_wunsch_rvv_t = needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using smith_waterman_rvv_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+
+using affine_levenshtein_rvv_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using affine_needleman_wunsch_rvv_t =
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using affine_smith_waterman_rvv_t =
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
+
 #pragma endregion Common Aliases
 
 #pragma region Autovectorized Tile Scorer

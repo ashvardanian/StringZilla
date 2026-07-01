@@ -80,19 +80,25 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
     /**
      *  @brief Up to `lanes_k` independent single-word Myers distances, one per vector lane (each shorter side <= 64).
-     *      @p scratch_space holds the `match_masks[lanes_k][256]` table (`match_masks_bytes_k`). The lockstep scan is
-     *      the byte 64-bit Myers recurrence; the per-lane `Eq` row is gathered with one `vluxei64`.
+     *      @p scratch_space holds the `match_masks[lanes_k][256]` table (`match_masks_bytes_k`) followed by a
+     *      transposed-text buffer of at least `max_longer * lanes_k` bytes. The lockstep scan is the byte 64-bit
+     *      Myers recurrence; the per-lane `Eq` row is gathered with one `vluxei64`.
      */
     template <typename results_writer_>
     status_t distances_Nx64_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                              scratch_space_t scratch_space) const noexcept {
 
-        if (scratch_space.size() < match_masks_bytes_k) return status_t::bad_alloc_k;
+        index_t const lanes = (index_t)pairs.lanes_count();
+        size_t max_longer = 0;
+        for (index_t lane_index = 0; lane_index != lanes; ++lane_index)
+            max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
+        if (scratch_space.size() < match_masks_bytes_k + max_longer * lanes_k) return status_t::bad_alloc_k;
 
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data()); // ? Indexed `lane * 256 + symbol`.
-        index_t const lanes = (index_t)pairs.lanes_count();
+        u8_t *const transposed_text = reinterpret_cast<u8_t *>(scratch_space.data() + match_masks_bytes_k);
         u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
         u64_t vertical_positive_init[lanes_k] = {0}, final_scores[lanes_k] = {0};
+        for (size_t position = 0; position != max_longer * lanes_k; ++position) transposed_text[position] = 0;
 
         for (index_t lane_index = 0; lane_index != lanes; ++lane_index) {
             index_t const shorter_length = (index_t)pairs.shorters[lane_index].size();
@@ -109,6 +115,8 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
             shorter_lengths[lane_index] = shorter_length;
             longer_lengths[lane_index] = longer_length;
             vertical_positive_init[lane_index] = shorter_length == 64 ? ~(u64_t)0 : (((u64_t)1 << shorter_length) - 1);
+            for (size_t position = 0; position != longer_length; ++position)
+                transposed_text[position * lanes_k + lane_index] = (u8_t)longer[position];
         }
 
         // Consume the group in `vsetvl`-sized chunks; each chunk is an independent set of lanes scored end-to-end.
@@ -128,13 +136,10 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
             for (size_t position = 0; position != chunk_max_longer; ++position) {
                 vbool8_t const active_b8 = __riscv_vmsgtu_vx_u64m8_b8(longer_u64m8, (u64_t)position, vl);
-                // Stage the current symbol per lane (0 for finished lanes, which `active_b8` freezes anyway), then
-                // gather each lane's `Eq` bitmask row with a single indexed load over `match_masks`.
-                u8_t symbols[lanes_k] = {0};
-                for (size_t i = 0; i != vl; ++i)
-                    if (position < longer_lengths[lane_base + i])
-                        symbols[i] = (u8_t)pairs.longers[lane_base + i].data()[position];
-                vuint64m8_t const symbol_u64m8 = __riscv_vzext_vf8_u64m8(__riscv_vle8_v_u8m1(symbols, vl), vl);
+                // Load the current symbol per lane straight from the pre-transposed text (0 for finished lanes,
+                // which `active_b8` freezes anyway), then gather each lane's `Eq` bitmask row with one `vluxei64`.
+                vuint64m8_t const symbol_u64m8 = __riscv_vzext_vf8_u64m8(
+                    __riscv_vle8_v_u8m1(transposed_text + position * lanes_k + lane_base, vl), vl);
                 vuint64m8_t const byte_offset_u64m8 = __riscv_vsll_vx_u64m8(
                     __riscv_vadd_vv_u64m8(base_index_u64m8, symbol_u64m8, vl), 3, vl);
                 vuint64m8_t const equality_u64m8 = __riscv_vluxei64_v_u64m8(match_masks, byte_offset_u64m8, vl);
@@ -229,24 +234,35 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     status_t multiword_scan_(lane_pairs_view<char_t> const &pairs, results_writer_ &results,
                              scratch_space_t scratch_space, size_t words_count) const noexcept {
 
+        index_t const lanes = (index_t)pairs.lanes_count();
+        size_t max_longer = 0;
+        for (index_t lane_index = 0; lane_index != lanes; ++lane_index)
+            max_longer = sz_max_of_two(max_longer, pairs.longers[lane_index].size());
+
         size_t const match_masks_words = (size_t)256 * words_count * lanes_k;
-        if (scratch_space.size() < match_masks_words * sizeof(u64_t)) return status_t::bad_alloc_k;
+        size_t const match_masks_bytes = match_masks_words * sizeof(u64_t);
+        if (scratch_space.size() < match_masks_bytes + max_longer * lanes_k) return status_t::bad_alloc_k;
         u64_t *const match_masks = reinterpret_cast<u64_t *>(scratch_space.data());
         for (size_t element = 0; element != match_masks_words; ++element) match_masks[element] = 0;
+        u8_t *const transposed_text = reinterpret_cast<u8_t *>(scratch_space.data() + match_masks_bytes);
+        for (size_t position = 0; position != max_longer * lanes_k; ++position) transposed_text[position] = 0;
 
-        index_t const lanes = (index_t)pairs.lanes_count();
         u64_t top_bits[lanes_k] = {0}, shorter_lengths[lanes_k] = {0}, longer_lengths[lanes_k] = {0};
         u64_t final_scores[lanes_k] = {0};
         for (index_t lane_index = 0; lane_index != lanes; ++lane_index) {
             index_t const shorter_length = (index_t)pairs.shorters[lane_index].size();
+            size_t const longer_length = pairs.longers[lane_index].size();
             char_t const *const shorter = pairs.shorters[lane_index].data();
+            char_t const *const longer = pairs.longers[lane_index].data();
             u64_t *const lane_table = match_masks + (size_t)lane_index * 256 * words_count;
             for (index_t position = 0; position != shorter_length; ++position)
                 lane_table[(size_t)(u8_t)shorter[position] * words_count + (position >> 6)] |= (u64_t)1
                                                                                                << (position & 63);
             top_bits[lane_index] = (u64_t)1 << ((shorter_length - 1) & 63);
             shorter_lengths[lane_index] = shorter_length;
-            longer_lengths[lane_index] = pairs.longers[lane_index].size();
+            longer_lengths[lane_index] = longer_length;
+            for (size_t position = 0; position != longer_length; ++position)
+                transposed_text[position * lanes_k + lane_index] = (u8_t)longer[position];
         }
 
         size_t const last_word = words_count - 1;
@@ -274,11 +290,8 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
 
             for (size_t position = 0; position != chunk_max_longer; ++position) {
                 vbool64_t const active_b64 = __riscv_vmsgtu_vx_u64m1_b64(longer_u64m1, (u64_t)position, vl);
-                u8_t symbols[lanes_k] = {0};
-                for (size_t i = 0; i != vl; ++i)
-                    if (position < longer_lengths[lane_base + i])
-                        symbols[i] = (u8_t)pairs.longers[lane_base + i].data()[position];
-                vuint64m1_t const symbol_u64m1 = __riscv_vzext_vf8_u64m1(__riscv_vle8_v_u8mf8(symbols, vl), vl);
+                vuint64m1_t const symbol_u64m1 = __riscv_vzext_vf8_u64m1(
+                    __riscv_vle8_v_u8mf8(transposed_text + position * lanes_k + lane_base, vl), vl);
                 // Row base in `u64` units: (lane * 256 + symbol) * words_count.
                 vuint64m1_t const row_base_u64m1 = __riscv_vmul_vx_u64m1(
                     __riscv_vadd_vv_u64m1(lane_index_scaled_u64m1, symbol_u64m1, vl), words_count, vl);
@@ -1904,9 +1917,9 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
     // The signed `i16` recurrence hardcodes `vmax`; minimization would need a different blend.
-    static_assert(objective_ == sz_maximize_score_k,
-                  "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / "
-                                                                              "Smith-Waterman).");
+    static_assert(
+        objective_ == sz_maximize_score_k,
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2036,6 +2049,12 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
         for (size_t query_position = 1; query_position <= query_length; ++query_position) {
             // The query character is fixed for the whole row, so its class is scalar and broadcast across lanes.
             u8_t const query_class = byte_to_class[(u8_t)query[query_position - 1]];
+            // Hoisted once per row: the 32-byte class-cost row for this `query_class`, resident in a register group
+            // sized to match `candidate_classes_u8m4` so every column folds it with one in-register `vrgather_vv`
+            // instead of re-deriving the combined table index and re-gathering from memory per cell.
+            vuint8m4_t const cost_row_u8m4 = __riscv_vle8_v_u8m4(
+                reinterpret_cast<u8_t const *>(cost_matrix_1024 + (size_t)query_class * error_costs_classes_count_k),
+                error_costs_classes_count_k);
 
             [[maybe_unused]] vint16m8_t running_inserts_i16m8 = zero_i16m8;
             // Column 0 (left boundary). Local: zero. Global linear: `gap * query_position`. Global affine: the
@@ -2089,13 +2108,10 @@ struct candidate_lane_walker<char, i16_t, error_costs_32x32_t, gap_costs_type_, 
                                                               gap_i16m8, vl);
                 }
 
-                // Fold the broadcast (scalar) query class with the per-lane candidate class into the combined
-                // `query_class * 32 + candidate_class` table index, gather the `i8` cost, and sign-extend it.
-                vuint16m8_t const candidate_class_u16m8 = __riscv_vzext_vf2_u16m8(candidate_classes_u8m4, vl);
-                vuint16m8_t const combined_index_u16m8 = __riscv_vadd_vx_u16m8(
-                    candidate_class_u16m8, (u16_t)(query_class * error_costs_classes_count_k), vl);
-                vint8m4_t const cost_i8m4 = __riscv_vluxei16_v_i8m4(cost_matrix_1024, combined_index_u16m8, vl);
-                vint16m8_t const cost_i16m8 = __riscv_vsext_vf2_i16m8(cost_i8m4, vl);
+                // Look up each lane's cost with one in-register `vrgather_vv` keyed on the per-lane candidate class
+                // directly (the hoisted row is already class-indexed 0..31; no widen/add/memory-gather needed).
+                vuint8m4_t const cost_u8m4 = __riscv_vrgather_vv_u8m4(cost_row_u8m4, candidate_classes_u8m4, vl);
+                vint16m8_t const cost_i16m8 = __riscv_vsext_vf2_i16m8(__riscv_vreinterpret_v_u8m4_i8m4(cost_u8m4), vl);
 
                 vint16m8_t const cost_if_substitution_i16m8 = __riscv_vadd_vv_i16m8(diagonal_i16m8, cost_i16m8, vl);
                 vint16m8_t cell_score_i16m8 = __riscv_vmax_vv_i16m8(cost_if_substitution_i16m8, cost_if_gap_i16m8, vl);
@@ -2162,9 +2178,9 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
     static constexpr bool is_affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
     static constexpr bool is_local_k = locality_ == sz_similarity_local_k;
 
-    static_assert(objective_ == sz_maximize_score_k,
-                  "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / "
-                                                                              "Smith-Waterman).");
+    static_assert(
+        objective_ == sz_maximize_score_k,
+        "The weighted candidate-lane kernel only implements score " "maximization (Needleman-Wunsch / " "Smith-" "Water" "man)" ".");
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2275,6 +2291,12 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
 
         for (size_t query_position = 1; query_position <= query_length; ++query_position) {
             u8_t const query_class = byte_to_class[(u8_t)query[query_position - 1]];
+            // Hoisted once per row: the 32-byte class-cost row for this `query_class`, resident in a register group
+            // sized to match `candidate_classes_u8m2` so every column folds it with one in-register `vrgather_vv`
+            // instead of re-deriving the combined table index and re-gathering from memory per cell.
+            vuint8m2_t const cost_row_u8m2 = __riscv_vle8_v_u8m2(
+                reinterpret_cast<u8_t const *>(cost_matrix_1024 + (size_t)query_class * error_costs_classes_count_k),
+                error_costs_classes_count_k);
 
             [[maybe_unused]] vint32m8_t running_inserts_i32m8 = zero_i32m8;
             if constexpr (is_local_k) {
@@ -2324,11 +2346,10 @@ struct candidate_lane_walker<char, i32_t, error_costs_32x32_t, gap_costs_type_, 
                                                               gap_i32m8, vl);
                 }
 
-                vuint16m4_t const candidate_class_u16m4 = __riscv_vzext_vf2_u16m4(candidate_classes_u8m2, vl);
-                vuint16m4_t const combined_index_u16m4 = __riscv_vadd_vx_u16m4(
-                    candidate_class_u16m4, (u16_t)(query_class * error_costs_classes_count_k), vl);
-                vint8m2_t const cost_i8m2 = __riscv_vluxei16_v_i8m2(cost_matrix_1024, combined_index_u16m4, vl);
-                vint32m8_t const cost_i32m8 = __riscv_vsext_vf4_i32m8(cost_i8m2, vl);
+                // Look up each lane's cost with one in-register `vrgather_vv` keyed on the per-lane candidate class
+                // directly (the hoisted row is already class-indexed 0..31; no widen/add/memory-gather needed).
+                vuint8m2_t const cost_u8m2 = __riscv_vrgather_vv_u8m2(cost_row_u8m2, candidate_classes_u8m2, vl);
+                vint32m8_t const cost_i32m8 = __riscv_vsext_vf4_i32m8(__riscv_vreinterpret_v_u8m2_i8m2(cost_u8m2), vl);
 
                 vint32m8_t const cost_if_substitution_i32m8 = __riscv_vadd_vv_i32m8(diagonal_i32m8, cost_i32m8, vl);
                 vint32m8_t cell_score_i32m8 = __riscv_vmax_vv_i32m8(cost_if_substitution_i32m8, cost_if_gap_i32m8, vl);
@@ -2422,12 +2443,16 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         for (size_t index = 0; index < candidates.size(); ++index)
             if (to_view(candidates[index]).size() > longest_candidate)
                 longest_candidate = to_view(candidates[index]).size(), longest_candidate_index = index;
-        size_t const myers_scratch = myers_t::match_masks_bytes_k;
+        // Both the single-word and multi-word lane scans also keep a `max_longer * lanes_k` transposed-text buffer
+        // right after the `match_masks` table (the longest possible pair "longer" side bounds it across the group).
+        size_t const longest_longer = sz_max_of_two(longest_query, longest_candidate);
+        size_t const transposed_text_scratch = longest_longer * myers_t::lanes_k;
+        size_t const myers_scratch = myers_t::match_masks_bytes_k + transposed_text_scratch;
         size_t dp_scratch = 0, multiword_scratch = 0;
         size_t const shortest_longest = sz_min_of_two(longest_query, longest_candidate);
         if (queries.size() && candidates.size() && shortest_longest > 64) {
             size_t const words_bound = divide_round_up<size_t>(shortest_longest, 64);
-            multiword_scratch = myers_t::match_masks_bytes_k * words_bound;
+            multiword_scratch = myers_t::match_masks_bytes_k * words_bound + transposed_text_scratch;
         }
         if (queries.size() && candidates.size() && shortest_longest > 512) {
             scoring_t dp {substituter_, gap_costs_};

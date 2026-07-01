@@ -259,6 +259,55 @@ extern template status_t smith_waterman_score<char, error_costs_32x32_t, affine_
                       fu::basic_pool_t &, cpu_specs_t const &) const noexcept;
 #endif // SZ_USE_NEON
 
+#if SZ_USE_RVV
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sr_k>::operator()<dummy_executor_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, dummy_executor_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t levenshtein_distance<char, linear_gap_costs_t, sz_caps_sr_k>::operator()<fu::basic_pool_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, fu::basic_pool_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sr_k>::operator()<dummy_executor_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, dummy_executor_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t levenshtein_distance<char, affine_gap_costs_t, sz_caps_sr_k>::operator()<fu::basic_pool_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, fu::basic_pool_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sr_k>::operator()<dummy_executor_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, dummy_executor_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t levenshtein_distance_utf8<linear_gap_costs_t, sz_caps_sr_k>::operator()<fu::basic_pool_t>(
+    span<char const> const &, span<char const> const &, size_t &, scratch_space_t, fu::basic_pool_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sr_k>::operator()<dummy_executor_t>(
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, dummy_executor_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sr_k>::operator()<fu::basic_pool_t>(
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, fu::basic_pool_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sr_k>::operator()<dummy_executor_t>(
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, dummy_executor_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t
+needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sr_k>::operator()<fu::basic_pool_t>(
+    span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t, fu::basic_pool_t &,
+    cpu_specs_t const &) const noexcept;
+extern template status_t smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sr_k>::operator()<
+    dummy_executor_t>(span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t,
+                      dummy_executor_t &, cpu_specs_t const &) const noexcept;
+extern template status_t smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_caps_sr_k>::operator()<
+    fu::basic_pool_t>(span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t,
+                      fu::basic_pool_t &, cpu_specs_t const &) const noexcept;
+extern template status_t smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sr_k>::operator()<
+    dummy_executor_t>(span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t,
+                      dummy_executor_t &, cpu_specs_t const &) const noexcept;
+extern template status_t smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_caps_sr_k>::operator()<
+    fu::basic_pool_t>(span<char const> const &, span<char const> const &, ssize_t &, scratch_space_t,
+                      fu::basic_pool_t &, cpu_specs_t const &) const noexcept;
+#endif // SZ_USE_RVV
+
 } // namespace stringzillas
 } // namespace ashvardanian
 #endif // SZ_DYNAMIC_DISPATCH && !SZ_USE_CUDA
