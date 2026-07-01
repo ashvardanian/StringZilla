@@ -36,7 +36,7 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Intersects two @b deduplicated binary @b string sequences, using a hash table.
+ *  @brief Intersects two binary @b string sequences, using a hash table.
  *         Outputs the @p first_positions from the @p first_sequence and @p second_positions from
  *         the @p second_sequence, that contain matched strings. Missing matches are represented as `SZ_SIZE_MAX`.
  *
@@ -53,7 +53,9 @@ extern "C" {
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
  *  @pre The @p first_positions array must fit at least `min(first_sequence->count, second_sequence->count)` items.
  *  @pre The @p second_positions array must fit at least `min(first_sequence->count, second_sequence->count)` items.
- *  @warning Doesn't check for duplicates and won't return `sz_contains_duplicates_k`. Duplicates result in UB.
+ *  @note Tolerates duplicate strings within either sequence: each distinct shared value is emitted exactly
+ *        once (a distinct-set intersection), so `intersection_size` never exceeds
+ *        `min(first_sequence->count, second_sequence->count)` and can't overflow the output arrays.
  *
  *  Example usage:
  *
