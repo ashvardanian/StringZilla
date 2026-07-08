@@ -2,7 +2,7 @@
 Shared pytest configuration for the StringZilla per-family test modules.
 
 Hosts the session-wide environment banner and the QEMU capability mask so every split test file
-(test_string.py, test_find.py, test_utf8_words.py, …) inherits them without importing anything. The
+(test_string.py, test_find.py, test_utf8_wordbreaks.py, …) inherits them without importing anything. The
 seeded-RNG helpers and `SEED_VALUES` live in `test_helpers` and are imported by each module directly.
 """
 

@@ -313,12 +313,11 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
             __m512d new_term_zmm = _mm512_set1_pd(new_term);
             __m512d old_term_zmm = _mm512_set1_pd(old_term);
 
-            // A single Barrett reduction handles both the discarded head and the incoming tail symbol.
-            // `discarding_multipliers_` folds in the `multipliers_` and is non-negative, so the fused
-            // intermediate stays within `[0, 2⁵²)` without underflowing zero before the reduction.
-            last_states_vec.zmm_pd = _mm512_fmadd_pd(last_states_vec.zmm_pd, multipliers_vec.zmm_pd, new_term_zmm);
-            last_states_vec.zmm_pd = _mm512_fmadd_pd(discarding_multipliers_vec.zmm_pd, old_term_zmm,
-                                                     last_states_vec.zmm_pd);
+            // Hoist the state-independent `new + discarding * old` summand off the recurrence so only one
+            // FMA sits on the loop-carried chain. Exact-integer (`x < 2⁵²`) reassociation → bit-identical.
+            // ~10-15% here: this single serial group has no cross-group ILP to hide the chain latency.
+            __m512d addend_zmm = _mm512_fmadd_pd(discarding_multipliers_vec.zmm_pd, old_term_zmm, new_term_zmm);
+            last_states_vec.zmm_pd = _mm512_fmadd_pd(last_states_vec.zmm_pd, multipliers_vec.zmm_pd, addend_zmm);
             last_states_vec.zmm_pd = barrett_mod( //
                 last_states_vec.zmm_pd,           //
                 modulos_vec.zmm_pd,               //

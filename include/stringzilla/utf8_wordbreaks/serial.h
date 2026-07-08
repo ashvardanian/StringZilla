@@ -3,8 +3,8 @@
  *  @file include/stringzilla/utf8_wordbreaks/serial.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_WORDS_SERIAL_H_
-#define STRINGZILLA_UTF8_WORDS_SERIAL_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_SERIAL_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_SERIAL_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_wordbreaks/tables.h"
@@ -1158,4 +1158,4 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_SERIAL_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_SERIAL_H_

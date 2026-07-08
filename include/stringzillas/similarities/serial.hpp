@@ -761,6 +761,7 @@ using malloc_t = std::allocator<char>;
 
 /**
  *  In non-SIMD backends we still leverage multi-threading for parallelism.
+ *  "Affine Levenshtein" combination is rarely used in practice, so that one only has a serial fallback.
  */
 using levenshtein_serial_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using levenshtein_utf8_serial_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
@@ -789,7 +790,6 @@ using smith_waterman_icelake_t =
     smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 using affine_levenshtein_icelake_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
-using affine_levenshtein_utf8_icelake_t = levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
 
 using affine_needleman_wunsch_icelake_t =
     needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k>;
@@ -801,9 +801,13 @@ using affine_smith_waterman_icelake_t =
  *  emulating the Ice Lake `VPERMB` class lookup with high-nibble-selected `VPSHUFB` blends. The aliases are
  *  always declared (the composite capability is a plain constant); only their instantiation is `SZ_USE_HASWELL`-gated.
  */
+using levenshtein_haswell_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+using levenshtein_utf8_haswell_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using needleman_wunsch_haswell_t =
     needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using smith_waterman_haswell_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sh_k>;
+
+using affine_levenshtein_haswell_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_needleman_wunsch_haswell_t =
     needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k>;
 using affine_smith_waterman_haswell_t =
@@ -826,6 +830,23 @@ using affine_needleman_wunsch_neon_t =
     needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
 using affine_smith_waterman_neon_t =
     smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k>;
+
+/**
+ *  In @b RISC-V @b RVV the per-character class lookups use the `vluxei8` indexed byte-gather feeding the
+ *  anti-diagonal scorers, while the batch Myers lane-per-pair kernel keeps one 64-bit DP word per vector lane
+ *  and scales with `VLEN`. As with NEON, the aliases are unconditional; only their instantiation is
+ *  `SZ_USE_RVV`-gated.
+ */
+using levenshtein_rvv_t = levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using levenshtein_utf8_rvv_t = levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using needleman_wunsch_rvv_t = needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using smith_waterman_rvv_t = smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, malloc_t, sz_caps_sr_k>;
+
+using affine_levenshtein_rvv_t = levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using affine_needleman_wunsch_rvv_t =
+    needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
+using affine_smith_waterman_rvv_t =
+    smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k>;
 
 #pragma endregion Common Aliases
 
@@ -1426,7 +1447,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, linea
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -1654,7 +1675,7 @@ struct diagonal_walker<char_or_rune_type_, score_type_, substituter_type_, affin
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -1897,7 +1918,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, lin
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2045,7 +2066,7 @@ struct horizontal_walker<char_or_rune_type_, score_type_, substituter_type_, aff
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2367,7 +2388,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
         return status_t::success_k;
     }
 
-    status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
+    status_t operator()(span<char const> const &first, span<char const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space) noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char const> shorter = first_is_shorter ? first : second;
@@ -2471,7 +2492,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
         return at;
     }
 
-    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space) const noexcept {
         bool const first_is_shorter = first.size() <= second.size();
         span<char_t const> shorter = first_is_shorter ? first : second;
@@ -2680,12 +2701,19 @@ struct levenshtein_distance {
      *  @param[in] first The first string.
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     *
+     *  @note `first`/`second` are taken by @b const-reference rather than by value. Clang 23 miscompiles the
+     *      `-O0` `-march=rv64gcv` argument lowering for this 6-argument shape: passing the two 16-byte `span`s by
+     *      value pushes the trailing arguments past the eight integer argument registers, and the resulting
+     *      stack-spill clobbers the `result_ref` reference so the score is written to the wrong address. Passing
+     *      the spans by reference keeps every argument in registers and sidesteps the backend bug; it is a no-op
+     *      on every other target.
      */
     template <typename executor_type_>
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -2861,7 +2889,7 @@ struct levenshtein_distance_utf8 {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char const> first, span<char const> second, size_t &result_ref,
+    status_t operator()(span<char const> const &first, span<char const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3033,7 +3061,7 @@ struct needleman_wunsch_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3146,7 +3174,7 @@ struct smith_waterman_score {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 

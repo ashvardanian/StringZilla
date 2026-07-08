@@ -6,7 +6,7 @@
  *         file doubles as a differential correctness harness.
  *
  *  Benchmarks include:
- *  - UAX-29 word-boundary segmentation - @b utf8_words.
+ *  - UAX-29 word-boundary segmentation - @b utf8_wordbreaks.
  *  - UAX-29 grapheme-cluster segmentation - @b utf8_graphemes.
  *  - UAX-29 sentence-boundary segmentation - @b utf8_sentences.
  *  - UAX-14 line-break segmentation - @b utf8_linebreaks.
@@ -75,7 +75,7 @@ struct utf8_word_forward_from_sz {
 
 #pragma region Benchmarks
 
-void bench_utf8_words(environment_t const &env) {
+void bench_utf8_wordbreaks(environment_t const &env) {
     auto base_v = utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {env};
     bench_result_t base = bench_unary(env, "sz_utf8_wordbreaks_serial", base_v).log();
 #if SZ_USE_HASWELL
@@ -179,7 +179,7 @@ int main(int argc, char const **argv) {
 
     std::printf("Starting UTF-8 segmentation benchmarks...\n");
 
-    bench_utf8_words(env);
+    bench_utf8_wordbreaks(env);
     bench_utf8_graphemes(env);
     bench_utf8_sentences(env);
     bench_utf8_linebreaks(env);

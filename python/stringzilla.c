@@ -2828,17 +2828,19 @@ static PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize
     return PyUnicode_Decode(text.start, text.length, encoding.start, errors.start);
 }
 
-static char const doc_write_to[] =                       //
-    "Write the string to a file.\n"                      //
-    "\n"                                                 //
-    "Args:\n"                                            //
-    "  text (Str or str or bytes): The string object.\n" //
-    "  filename (str): The file path to write to.\n"     //
-    "Returns:\n"                                         //
-    "  None.\n"                                          //
-    "\n"                                                 //
-    "Example:\n"                                         //
-    "  >>> sz.Str('payload').write_to('/tmp/sz_demo.bin')";
+static char const doc_write_to[] =                                      //
+    "Write the string to a file.\n"                                     //
+    "\n"                                                                //
+    "Args:\n"                                                           //
+    "  text (Str or str or bytes): The string object.\n"                //
+    "  filename (str): The file path to write to.\n"                    //
+    "Returns:\n"                                                        //
+    "  None.\n"                                                         //
+    "\n"                                                                //
+    "Example:\n"                                                        //
+    "  >>> import os, tempfile\n"                                       //
+    "  >>> path = os.path.join(tempfile.gettempdir(), 'sz_demo.bin')\n" //
+    "  >>> sz.Str('payload').write_to(path)";
 
 static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
@@ -6757,7 +6759,7 @@ static PyObject *Utf8WordbreaksType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8Words[] =                                       //
+static char const doc_Utf8Wordbreaks[] =                                  //
     "Utf8Wordbreaks(string, ...)\n"                                       //
     "\n"                                                                  //
     "UTF-8 aware word boundary iterator per Unicode TR29 algorithm.\n"    //
@@ -6783,7 +6785,7 @@ static PyTypeObject Utf8WordbreaksType = {
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)Utf8WordbreaksType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = doc_Utf8Words,
+    .tp_doc = doc_Utf8Wordbreaks,
     .tp_iter = Utf8WordbreaksType_iter,
     .tp_iternext = (iternextfunc)Utf8WordbreaksType_next,
 };

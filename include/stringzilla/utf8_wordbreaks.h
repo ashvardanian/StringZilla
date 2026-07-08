@@ -1,10 +1,10 @@
 /**
  *  @brief Hardware-accelerated UAX-29 word boundary segmentation.
- *  @file utf8_words.h
+ *  @file utf8_wordbreaks.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_UTF8_WORDS_H_
-#define STRINGZILLA_UTF8_WORDS_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_H_
 
 #include "stringzilla/types.h"
 
@@ -205,4 +205,4 @@ SZ_API_RUNTIME sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_H_

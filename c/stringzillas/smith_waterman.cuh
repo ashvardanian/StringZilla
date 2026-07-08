@@ -173,6 +173,16 @@ SZ_API_RUNTIME sz_status_t szs_smith_waterman_scores_init(                      
                                                                                 substitution_costs, affine_costs);
 #endif // SZ_USE_NEON
 
+#if SZ_USE_RVV
+    bool const can_use_rvv = (capabilities & sz_cap_rvv_k) == sz_cap_rvv_k;
+    if (can_use_rvv && can_use_linear_costs)
+        return emplace_smith_waterman_engine<szs::smith_waterman_rvv_t>(engine_punned, error_message,
+                                                                        substitution_costs, linear_costs);
+    else if (can_use_rvv)
+        return emplace_smith_waterman_engine<szs::affine_smith_waterman_rvv_t>(engine_punned, error_message,
+                                                                               substitution_costs, affine_costs);
+#endif // SZ_USE_RVV
+
     // Hopper reports the base-CUDA bit too, so the Hopper (DPX) tier must be tested before plain CUDA.
 #if SZ_USE_HOPPER
     bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;

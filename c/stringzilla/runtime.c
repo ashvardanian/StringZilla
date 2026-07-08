@@ -8,7 +8,7 @@
  *  definition, its one-time initialization, and the version & capabilities exports. The
  *  per-domain backends and `SZ_API_RUNTIME` wrappers live in the sibling `compare.c`, `memory.c`,
  *  `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`, `utf8_tokens.c`,
- *  `utf8_words.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`,
+ *  `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`, `utf8_uncased_fold.c`,
  *  and `utf8_uncased.c`.
  */
 #include "dispatch.h"                // `sz_dispatch_table`, per-domain updaters, sets `SZ_DYNAMIC_DISPATCH 1`
@@ -42,7 +42,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_utf8_norm_update_(caps);
     sz_dispatch_utf8_runes_update_(caps);
     sz_dispatch_utf8_tokens_update_(caps);
-    sz_dispatch_utf8_words_update_(caps);
+    sz_dispatch_utf8_wordbreaks_update_(caps);
     sz_dispatch_utf8_graphemes_update_(caps);
     sz_dispatch_utf8_sentences_update_(caps);
     sz_dispatch_utf8_linebreaks_update_(caps);

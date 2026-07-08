@@ -511,7 +511,7 @@ Sz.Hash("hello"u8);                             // fast 64-bit hash
 ```
 
 Zero-copy over `ReadOnlySpan<byte>` (and Unity's `NativeArray<byte>`); `net8.0`, NativeAOT-friendly.
-Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, and sorting.
+Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalization, sorting, and allocation-free splitting and iteration.
 
 ### Java
 
@@ -526,6 +526,7 @@ StringZilla.hash("hello".getBytes());                                       // f
 
 Pure [Foreign Function & Memory API](https://openjdk.org/jeps/454) (JDK 22+), __no JNI__.
 Zero-copy over `byte[]` and `MemorySegment` — including Lucene `BytesRef` and Spark `UTF8String` backing memory.
+Lazy `Iterable`/`Stream` splitting and iteration, with zero-allocation cursors as the escape hatch.
 
 ## Algorithms & Design Decisions
 

@@ -82,6 +82,25 @@ void test_utf8_graphemes_unit() {
     std::vector<std::string> const clusters =
         sz::string_view("ab").utf8_graphemes().template to<std::vector<std::string>>();
     assert(clusters.size() == 2 && clusters[0] == "a" && clusters[1] == "b" && "C++ utf8_graphemes range");
+
+    // Grapheme-cluster counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
+    assert(utf8_prose_pride_caption().utf8_graphemes().template to<std::vector<std::string>>().size() == 206 &&
+           "pride_caption graphemes");
+    assert(utf8_prose_devanagari_tip().utf8_graphemes().template to<std::vector<std::string>>().size() == 252 &&
+           "devanagari_tip graphemes");
+    assert(utf8_prose_concert_post().utf8_graphemes().template to<std::vector<std::string>>().size() == 134 &&
+           "concert_post graphemes");
+    assert(utf8_prose_rtl_scripts().utf8_graphemes().template to<std::vector<std::string>>().size() == 256 &&
+           "rtl_scripts graphemes");
+    assert(utf8_prose_micro_prepend().utf8_graphemes().template to<std::vector<std::string>>().size() == 3 &&
+           "micro_prepend graphemes");
+
+    // Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
+    assert(utf8_prose_pride_caption().utf8_runes().template to<std::vector<sz_rune_t>>().size() == 222 &&
+           "pride_caption runes");
+    assert(utf8_prose_pride_caption().utf8_runes().template to<std::vector<sz_rune_t>>().size() >
+               utf8_prose_pride_caption().utf8_graphemes().template to<std::vector<std::string>>().size() &&
+           "pride_caption runes exceed graphemes");
 }
 
 #pragma endregion // Unit

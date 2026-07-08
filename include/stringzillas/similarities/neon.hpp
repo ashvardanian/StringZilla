@@ -82,7 +82,7 @@ struct levenshtein_distance_myers<char, capability_, std::enable_if_t<(capabilit
     }
 
     /** @brief Single-pair Myers (per-pair engine path) — delegated to the scalar serial Myers. */
-    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, size_t &result_ref,
                         scratch_space_t scratch_space) noexcept {
         return levenshtein_distance_myers<char, sz_cap_serial_k> {}(first, second, result_ref, scratch_space);
     }
@@ -3156,7 +3156,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, linear_gap_costs_
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3365,7 +3365,7 @@ struct diagonal_walker<char, score_type_, error_costs_32x32_t, affine_gap_costs_
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, score_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &&executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3569,7 +3569,7 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3648,7 +3648,7 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3726,7 +3726,7 @@ struct smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_ca
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 
@@ -3804,7 +3804,7 @@ struct smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_ca
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(span<char_t const> first, span<char_t const> second, ssize_t &result_ref,
+    status_t operator()(span<char_t const> const &first, span<char_t const> const &second, ssize_t &result_ref,
                         scratch_space_t scratch_space, executor_type_ &executor,
                         cpu_specs_t const &specs) const noexcept {
 

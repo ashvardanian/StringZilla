@@ -269,7 +269,7 @@ class StringZillaTests: XCTestCase {
 
     // MARK: - UAX-29 Word Boundary Tests
 
-    func testUtf8WordsTileInput() {
+    func testUtf8WordbreaksTileInput() {
         let text = "Hello, world! 👋"
         let words = text.utf8Words()
         // Words tile the input: concatenating every word range reconstructs the original.

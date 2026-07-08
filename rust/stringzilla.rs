@@ -4114,6 +4114,117 @@ where
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+
+    // Realistic multi-script prose fixtures (ASCII-source \u{} escapes; rendered prose in comments).
+    // Per-family segment counts are oracle-locked (ICU root / uniseg).
+    // Hotel review (German + Japanese): NFD cafe, NBSP-glued units, a sentence-ending abbreviation, a CJK run.
+    const PROSE_HOTEL_REVIEW: &str = concat!(
+        "Last spring we strolled down M\u{fc}nchner Stra\u{df}e; the cafe\u{301} cortado cost 3,50\u{a0}",
+        "\u{20ac} and was unreal. Dr. Vogel, our guide, swore it's the city's finest. Worth the detour?! ",
+        "Absolutely \u{2014} and \u{6771}\u{4eac}\u{30bf}\u{30ef}\u{30fc} the next week, all 333\u{a0}m o",
+        "f it, was breathtaking at dusk\u{2026}"
+    );
+    // Pride caption: a ZWJ family and VS16 rainbow flag, a skin-tone modifier, a keycap, an odd regional-indicator run.
+    const PROSE_PRIDE_CAPTION: &str = concat!(
+        "Best Pride yet \u{1f3f3}\u{fe0f}\u{200d}\u{1f308} \u{2014} the whole crew showed up. Even my par",
+        "ents \u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}\u{200d}\u{1f466} and grandma \u{1f44d}\u{1f3fd}",
+        " came through! We met at booth 5\u{fe0f}\u{20e3}, then waved every flag we packed \u{1f1fa}",
+        "\u{1f1f8}\u{1f1ef}\u{1f1f5}\u{1f1eb}. Texting \u{260e}\u{fe0e} over calling \u{2708}\u{fe0f} all",
+        " day; 10/10, would march again."
+    );
+    // Concert post (Korean + Japanese): conjoining L+V+T jamo, a Katakana run, an ideographic stop, a 'p.m.' no-break.
+    const PROSE_CONCERT_POST: &str = concat!(
+        "\u{c624}\u{b298} \u{cf58}\u{c11c}\u{d2b8}, \u{c9c4}\u{c9dc} \u{bbf8}\u{cce4}\u{b2e4}!! \u{1112}",
+        "\u{1161}\u{11ab}\u{ad6d} \u{d32c}\u{b4e4}\u{c774} \u{b2e4} \u{baa8}\u{c600}\u{ace0}, the staff b",
+        "owed and said \u{c548}\u{b155}\u{d788} \u{ac00}\u{c138}\u{c694}. Setlist was pure \u{30cf}",
+        "\u{30fc}\u{30c9}\u{30b3}\u{30a2}; \u{4eca}\u{65e5}\u{306f}\u{6700}\u{9ad8}\u{3060}\u{3063}",
+        "\u{305f}\u{3002} We screamed \u{c0ac}\u{b791}\u{d574} till 11 p.m. sharp."
+    );
+    // Devanagari note: a virama conjunct, ZWJ/ZWNJ half-forms, a spacing vowel sign, and an NFKC vulgar fraction.
+    const PROSE_DEVANAGARI_TIP: &str = concat!(
+        "Quick Devanagari tip: \u{915}\u{94d}\u{937} is one cluster (\u{915} + \u{94d} + \u{937}), not th",
+        "ree. Force the half-form with ZWJ \u{2014} \u{915}\u{94d}\u{200d}\u{937} \u{2014} or split it wi",
+        "th ZWNJ \u{2014} \u{915}\u{94d}\u{200c}\u{937}. The same logic hits \u{915}\u{94d}\u{937}\u{924}",
+        "\u{94d}\u{930}\u{93f}\u{92f} and spacing vowel signs like \u{915}\u{940}. Renderers disagree, so",
+        " test (\u{bd} the bugs are font bugs) before you ship!"
+    );
+    // Science abstract: NFKC ligatures/superscripts/Roman/full-width, Kelvin and Angstrom singletons, NBSP, WJ + ZWSP.
+    const PROSE_SCIENCE_ABSTRACT: &str = concat!(
+        "The \u{fb01}lm grew at 300\u{a0}\u{212a} on a 5\u{a0}\u{212b} buffer (\u{2248} 2\u{b2} monolayer",
+        "s). Section \u{216b} covers the \u{ff21}-phase; see Fig. 2 for the \u{3a3}-band dispersion. Resi",
+        "stivity scaled as T\u{b2}, vanishing at the 4.2\u{a0}\u{212a} transition. Full dataset: doi:10.1",
+        "000\u{2060}/\u{200b}xyz (mirror in Box \u{2461})."
+    );
+    // News lede: 'U.S.A.' before a lowercase word (no break), curly quotes, thousands, currency, a date range.
+    const PROSE_NEWS_LEDE: &str = concat!(
+        "The U.S.A. wasn't ready, analysts said. \u{201c}We lost 1,000 jobs,\u{201d} the mayor warned. ",
+        "\u{201c}Recovery starts now.\u{201d} Filings spiked 2024/06\u{2013}2024/09, topping $1,000 per c",
+        "laim. Will it hold?! No one knows for sure."
+    );
+    // Language lesson: a Greek final sigma, Cyrillic case pairs, a Croatian titlecase digraph, and a fold-only match.
+    #[allow(dead_code)] // used by the Python uncased prose test, not Rust
+    const PROSE_LANGUAGE_LESSON: &str = concat!(
+        "Greek lesson: \u{39f}\u{394}\u{39f}\u{3a3} becomes \u{3bf}\u{3b4}\u{3cc}\u{3c2} when lowercased,",
+        " ending in a final \u{3c2}. Russian's easy too \u{2014} \u{41c}\u{41e}\u{421}\u{41a}\u{412}",
+        "\u{410} \u{2194} \u{43c}\u{43e}\u{441}\u{43a}\u{432}\u{430}, no drama. Croatian has the digraph ",
+        "\u{1c4}: titlecase \u{1c5}, lowercase \u{1c6}. Quiz \u{2014} does \u{201c}stra\u{df}e\u{201d} ma",
+        "tch STRASSE? Yes, once you fold."
+    );
+    // RTL scripts: Hebrew gershayim, Arabic, a number-sign Prepend, an NFC niqqud reorder, a Malayalam dot-reph.
+    const PROSE_RTL_SCRIPTS: &str = concat!(
+        "Hebrew acronyms take gershayim: \u{5e6}\u{5d4}\u{5f4}\u{5dc} and \u{5d0}\u{5e8}\u{5d4}\u{5f4}",
+        "\u{5d1} aren't typos. Arabic flows right-to-left too \u{2014} \u{645}\u{631}\u{62d}\u{628}",
+        "\u{627} \u{628}\u{627}\u{644}\u{639}\u{627}\u{644}\u{645} \u{2014} and finance text can carry th",
+        "e number sign \u{600}\u{664}. Niqqud stacks marks: \u{5e9}\u{5c1}\u{5b8}\u{5dc}\u{5d5}\u{5b9}",
+        "\u{5dd} must reorder under NFC. Malayalam even has a true prepend, the dot-reph \u{d4e}\u{d15}."
+    );
+    // A U+2019 contraction tiles as a single word, like the ASCII apostrophe.
+    const PROSE_MICRO_APOSTROPHE: &str = "it\u{2019}s worth it";
+    // Two Prepend characters (Arabic number sign, Malayalam dot-reph): clusters fewer than codepoints.
+    const PROSE_MICRO_PREPEND: &str = "\u{600}\u{664} \u{d4e}\u{d15}";
+    // A CR-LF pair and a U+2028 line separator: both Sep (force sentence and line breaks); CR-LF is one grapheme.
+    const PROSE_MICRO_HARDBREAKS: &str = "A.\u{d}\u{a}B.\u{2028}C.";
+
+    // Realistic multi-script prose fixtures: per-family segment counts (oracle-locked: ICU root / uniseg).
+    #[test]
+    fn utf8_prose_sentence_counts() {
+        assert_eq!(PROSE_HOTEL_REVIEW.as_bytes().sz_utf8_sentences().count(), 5);
+        assert_eq!(PROSE_CONCERT_POST.as_bytes().sz_utf8_sentences().count(), 4);
+        assert_eq!(PROSE_NEWS_LEDE.as_bytes().sz_utf8_sentences().count(), 6);
+        assert_eq!(PROSE_MICRO_HARDBREAKS.as_bytes().sz_utf8_sentences().count(), 3);
+    }
+
+    #[test]
+    fn utf8_prose_wordbreak_counts() {
+        assert_eq!(PROSE_HOTEL_REVIEW.as_bytes().sz_utf8_wordbreaks().count(), 100);
+        assert_eq!(PROSE_NEWS_LEDE.as_bytes().sz_utf8_wordbreaks().count(), 83);
+        assert_eq!(PROSE_CONCERT_POST.as_bytes().sz_utf8_wordbreaks().count(), 69);
+        assert_eq!(PROSE_RTL_SCRIPTS.as_bytes().sz_utf8_wordbreaks().count(), 98);
+        assert_eq!(PROSE_MICRO_APOSTROPHE.as_bytes().sz_utf8_wordbreaks().count(), 5);
+    }
+
+    #[test]
+    fn utf8_prose_grapheme_counts() {
+        assert_eq!(PROSE_PRIDE_CAPTION.as_bytes().sz_utf8_graphemes().count(), 206);
+        assert_eq!(PROSE_DEVANAGARI_TIP.as_bytes().sz_utf8_graphemes().count(), 252);
+        assert_eq!(PROSE_CONCERT_POST.as_bytes().sz_utf8_graphemes().count(), 134);
+        assert_eq!(PROSE_RTL_SCRIPTS.as_bytes().sz_utf8_graphemes().count(), 256);
+        assert_eq!(PROSE_MICRO_PREPEND.as_bytes().sz_utf8_graphemes().count(), 3);
+        // Codepoints are not clusters: the emoji paragraph has more runes than grapheme clusters.
+        assert_eq!(PROSE_PRIDE_CAPTION.as_bytes().sz_utf8_runes().iter().count(), 222);
+        assert!(
+            PROSE_PRIDE_CAPTION.as_bytes().sz_utf8_runes().iter().count()
+                > PROSE_PRIDE_CAPTION.as_bytes().sz_utf8_graphemes().count()
+        );
+    }
+
+    #[test]
+    fn utf8_prose_linebreak_counts() {
+        assert_eq!(PROSE_HOTEL_REVIEW.as_bytes().sz_utf8_linebreaks().count(), 45);
+        assert_eq!(PROSE_SCIENCE_ABSTRACT.as_bytes().sz_utf8_linebreaks().count(), 43);
+        assert_eq!(PROSE_NEWS_LEDE.as_bytes().sz_utf8_linebreaks().count(), 32);
+    }
+
     use std::borrow::Cow;
     use std::collections::{HashMap, HashSet};
     use std::hash::Hasher as _;

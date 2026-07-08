@@ -45,6 +45,249 @@ using sz::scripts::global_random_seed;         // the active seed (printed in fa
 using sz::scripts::scale_iterations;           // scales fuzz counts by `SZ_TESTS_MULTIPLIER`
 using sz::literals::operator""_sv;
 
+#pragma region Prose fixtures
+
+/**
+ *  @brief Realistic multi-script paragraphs shared by the segmentation family tests.
+ *
+ *  Each accessor returns an ASCII-source string view (non-ASCII bytes spelled as \xHH so no editor or
+ *  formatter can renormalize the load-bearing codepoints); the @code block shows the rendered text, and
+ *  the per-family segment counts asserted against it are oracle-locked (ICU root / uniseg).
+ */
+
+/**
+ *  @brief German + Japanese hotel review that exercises every UTF-8 axis in one paragraph.
+ *
+ *  An NFD "cafe" (e + U+0301), no-break spaces gluing "3,50 EUR" and "333 m", an abbreviation period that
+ *  still ends a sentence under default UAX-29 ("Dr."), a space-free CJK run, and a trailing ellipsis.
+ *
+ *  @code{.txt}
+ *  Last spring we strolled down Münchner Straße; the café cortado cost 3,50 € and was unreal.
+ *  Dr. Vogel, our guide, swore it's the city's finest. Worth the detour?! Absolutely — and
+ *  東京タワー the next week, all 333 m of it, was breathtaking at dusk…
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_hotel_review() noexcept {
+    static char const result[] =                                                                   //
+        "Last spring we strolled down M\xC3\xBCnchner Stra\xC3\x9F"                                //
+        "e; the cafe\xCC\x81 cortado cost 3,50\xC2\xA0\xE2\x82\xAC and was unreal. Dr. Vogel, our" //
+        " guide, swore it's the city's finest. Worth the detour?! Absolutely \xE2\x80\x94 and "    //
+        "\xE6\x9D\xB1\xE4\xBA\xAC\xE3\x82\xBF\xE3\x83\xAF\xE3\x83\xBC the next week, all 333"      //
+        "\xC2\xA0m of it, was breathtaking at dusk\xE2\x80\xA6";
+    return result;
+}
+
+/**
+ *  @brief Pride caption built from grapheme-cluster torture cases.
+ *
+ *  A ZWJ family and a VS16 rainbow flag, a skin-tone modifier, a keycap, an odd-length regional-indicator
+ *  run (US, JP, then a lone F), and text- versus emoji-presentation selectors (VS15 versus VS16).
+ *
+ *  @code{.txt}
+ *  Best Pride yet 🏳️‍🌈 — the whole crew showed up. Even my parents 👨‍👩‍👧‍👦 and grandma 👍🏽 came
+ *  through! We met at booth 5️⃣, then waved every flag we packed 🇺🇸🇯🇵🇫. Texting ☎︎ over calling
+ *  ✈️ all day; 10/10, would march again.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_pride_caption() noexcept {
+    static char const result[] =                                                                   //
+        "Best Pride yet \xF0\x9F\x8F\xB3\xEF\xB8\x8F\xE2\x80\x8D\xF0\x9F\x8C\x88 \xE2\x80\x94 the" //
+        " whole crew showed up. Even my parents \xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9"      //
+        "\xE2\x80\x8D\xF0\x9F\x91\xA7\xE2\x80\x8D\xF0\x9F\x91\xA6 and grandma \xF0\x9F\x91\x8D"    //
+        "\xF0\x9F\x8F\xBD came through! We met at booth 5\xEF\xB8\x8F\xE2\x83\xA3, then waved eve" //
+        "ry flag we packed \xF0\x9F\x87\xBA\xF0\x9F\x87\xB8\xF0\x9F\x87\xAF\xF0\x9F\x87\xB5"       //
+        "\xF0\x9F\x87\xAB. Texting \xE2\x98\x8E\xEF\xB8\x8E over calling \xE2\x9C\x88\xEF\xB8\x8F" //
+        " all day; 10/10, would march again.";
+    return result;
+}
+
+/**
+ *  @brief K-pop fan post mixing Korean, Japanese, and English.
+ *
+ *  The first syllable is stored as conjoining L+V+T jamo, a Katakana run stays one word while Kanji and
+ *  Hiragana break per character, an ideographic full stop terminates, and "11 p.m. sharp" does not break
+ *  (the period is followed by a lowercase word).
+ *
+ *  @code{.txt}
+ *  오늘 콘서트, 진짜 미쳤다!! 한국 팬들이 다 모였고, the staff bowed and said 안녕히 가세요. Setlist was pure ハードコア;
+ *  今日は最高だった。 We screamed 사랑해 till 11 p.m. sharp.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_concert_post() noexcept {
+    static char const result[] =                                                                   //
+        "\xEC\x98\xA4\xEB\x8A\x98 \xEC\xBD\x98\xEC\x84\x9C\xED\x8A\xB8, \xEC\xA7\x84\xEC\xA7\x9C " //
+        "\xEB\xAF\xB8\xEC\xB3\xA4\xEB\x8B\xA4!! \xE1\x84\x92\xE1\x85\xA1\xE1\x86\xAB\xEA\xB5\xAD " //
+        "\xED\x8C\xAC\xEB\x93\xA4\xEC\x9D\xB4 \xEB\x8B\xA4 \xEB\xAA\xA8\xEC\x98\x80\xEA\xB3\xA0, " //
+        "the staff bowed and said \xEC\x95\x88\xEB\x85\x95\xED\x9E\x88 \xEA\xB0\x80\xEC\x84\xB8"   //
+        "\xEC\x9A\x94. Setlist was pure \xE3\x83\x8F\xE3\x83\xBC\xE3\x83\x89\xE3\x82\xB3"          //
+        "\xE3\x82\xA2; \xE4\xBB\x8A\xE6\x97\xA5\xE3\x81\xAF\xE6\x9C\x80\xE9\xAB\x98\xE3\x81\xA0"   //
+        "\xE3\x81\xA3\xE3\x81\x9F\xE3\x80\x82 We screamed \xEC\x82\xAC\xEB\x9E\x91\xED\x95\xB4 ti" //
+        "ll 11 p.m. sharp.";
+    return result;
+}
+
+/**
+ *  @brief Devanagari typography note about conjuncts and joiners.
+ *
+ *  A consonant + virama + consonant conjunct as one cluster, the ZWJ and ZWNJ half-forms, a longer
+ *  conjunct word, a spacing vowel sign, and a vulgar fraction whose NFKC form spells out "1/2".
+ *
+ *  @code{.txt}
+ *  Quick Devanagari tip: क्ष is one cluster (क + ् + ष), not three. Force the half-form with
+ *  ZWJ — क्‍ष — or split it with ZWNJ — क्‌ष. The same logic hits क्षत्रिय and spacing vowel
+ *  signs like की. Renderers disagree, so test (½ the bugs are font bugs) before you ship!
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_devanagari_tip() noexcept {
+    static char const result[] =                                                                   //
+        "Quick Devanagari tip: \xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7 is one cluster (\xE0\xA4\x95 " //
+        "+ \xE0\xA5\x8D + \xE0\xA4\xB7), not three. Force the half-form with ZWJ \xE2\x80\x94 "    //
+        "\xE0\xA4\x95\xE0\xA5\x8D\xE2\x80\x8D\xE0\xA4\xB7 \xE2\x80\x94 or split it with ZWNJ "     //
+        "\xE2\x80\x94 \xE0\xA4\x95\xE0\xA5\x8D\xE2\x80\x8C\xE0\xA4\xB7. The same logic hits "      //
+        "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7\xE0\xA4\xA4\xE0\xA5\x8D\xE0\xA4\xB0\xE0\xA4\xBF"     //
+        "\xE0\xA4\xAF and spacing vowel signs like \xE0\xA4\x95\xE0\xA5\x80. Renderers disagree, " //
+        "so test (\xC2\xBD the bugs are font bugs) before you ship!";
+    return result;
+}
+
+/**
+ *  @brief Materials-science abstract that is dense with NFKC normalization.
+ *
+ *  An "fi" ligature, superscripts, a Roman numeral, a full-width letter and a circled digit, the Kelvin and
+ *  Angstrom singleton signs, no-break spaces before units, and a word-joiner plus zero-width space in a DOI.
+ *
+ *  @code{.txt}
+ *  The ﬁlm grew at 300 K on a 5 Å buffer (≈ 2² monolayers). Section Ⅻ covers the Ａ-phase; see
+ *  Fig. 2 for the Σ-band dispersion. Resistivity scaled as T², vanishing at the 4.2 K
+ *  transition. Full dataset: doi:10.1000⁠/​xyz (mirror in Box ②).
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_science_abstract() noexcept {
+    static char const result[] =                                                                   //
+        "The \xEF\xAC\x81lm grew at 300\xC2\xA0\xE2\x84\xAA on a 5\xC2\xA0\xE2\x84\xAB buffer ("   //
+        "\xE2\x89\x88 2\xC2\xB2 monolayers). Section \xE2\x85\xAB covers the \xEF\xBC\xA1-phase; " //
+        "see Fig. 2 for the \xCE\xA3-band dispersion. Resistivity scaled as T\xC2\xB2, vanishing " //
+        "at the 4.2\xC2\xA0\xE2\x84\xAA transition. Full dataset: doi:10.1000\xE2\x81\xA0/"        //
+        "\xE2\x80\x8Bxyz (mirror in Box \xE2\x91\xA1).";
+    return result;
+}
+
+/**
+ *  @brief US news lede stressing sentence boundaries and numbers.
+ *
+ *  "U.S.A." followed by a lowercase word (no break), curly quotation marks around quoted sentences, a
+ *  thousands separator, a currency amount, and a slash-and-en-dash date range.
+ *
+ *  @code{.txt}
+ *  The U.S.A. wasn't ready, analysts said. “We lost 1,000 jobs,” the mayor warned. “Recovery
+ *  starts now.” Filings spiked 2024/06–2024/09, topping $1,000 per claim. Will it hold?! No one
+ *  knows for sure.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_news_lede() noexcept {
+    static char const result[] =                                                                   //
+        "The U.S.A. wasn't ready, analysts said. \xE2\x80\x9CWe lost 1,000 jobs,\xE2\x80\x9D the " //
+        "mayor warned. \xE2\x80\x9CRecovery starts now.\xE2\x80\x9D Filings spiked 2024/06"        //
+        "\xE2\x80\x93"                                                                             //
+        "2024/09, topping $1,000 per claim. Will it hold?! No one knows for sure.";
+    return result;
+}
+
+/**
+ *  @brief Language-learning post about letter case and folding.
+ *
+ *  A Greek word ending in a final sigma carrying a tonos, Cyrillic upper/lower pairs, the Croatian
+ *  titlecase digraph in all three cases, and a German pair that only matches once case-folded.
+ *
+ *  @code{.txt}
+ *  Greek lesson: ΟΔΟΣ becomes οδός when lowercased, ending in a final ς. Russian's easy too —
+ *  МОСКВА ↔ москва, no drama. Croatian has the digraph Ǆ: titlecase ǅ, lowercase ǆ. Quiz — does
+ *  “straße” match STRASSE? Yes, once you fold.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_language_lesson() noexcept {
+    static char const result[] =                                                                   //
+        "Greek lesson: \xCE\x9F\xCE\x94\xCE\x9F\xCE\xA3 becomes \xCE\xBF\xCE\xB4\xCF\x8C\xCF\x82 " //
+        "when lowercased, ending in a final \xCF\x82. Russian's easy too \xE2\x80\x94 \xD0\x9C"    //
+        "\xD0\x9E\xD0\xA1\xD0\x9A\xD0\x92\xD0\x90 \xE2\x86\x94 \xD0\xBC\xD0\xBE\xD1\x81\xD0\xBA"   //
+        "\xD0\xB2\xD0\xB0, no drama. Croatian has the digraph \xC7\x84: titlecase \xC7\x85, lower" //
+        "case \xC7\x86. Quiz \xE2\x80\x94 does \xE2\x80\x9Cstra\xC3\x9F"                           //
+        "e\xE2\x80\x9D match STRASSE? Yes, once you fold.";
+    return result;
+}
+
+/**
+ *  @brief Right-to-left note spanning Hebrew, Arabic, and Malayalam.
+ *
+ *  Hebrew acronyms with gershayim, Arabic text, an Arabic number sign (a Prepend), niqqud stored out of
+ *  canonical order so NFC reorders it, and a Malayalam dot-reph (another Prepend). Offsets stay in logical
+ *  order, not visual order.
+ *
+ *  @code{.txt}
+ *  Hebrew acronyms take gershayim: צה״ל and ארה״ב aren't typos. Arabic flows right-to-left too
+ *  — مرحبا بالعالم — and finance text can carry the number sign ؀٤. Niqqud stacks marks:
+ *  שָׁלוֹם must reorder under NFC. Malayalam even has a true prepend, the dot-reph ൎക.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_rtl_scripts() noexcept {
+    static char const result[] =                                                                   //
+        "Hebrew acronyms take gershayim: \xD7\xA6\xD7\x94\xD7\xB4\xD7\x9C and \xD7\x90\xD7\xA8"    //
+        "\xD7\x94\xD7\xB4\xD7\x91 aren't typos. Arabic flows right-to-left too \xE2\x80\x94 "      //
+        "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7 \xD8\xA8\xD8\xA7\xD9\x84\xD8\xB9\xD8\xA7"        //
+        "\xD9\x84\xD9\x85 \xE2\x80\x94 and finance text can carry the number sign \xD8\x80"        //
+        "\xD9\xA4. Niqqud stacks marks: \xD7\xA9\xD7\x81\xD6\xB8\xD7\x9C\xD7\x95\xD6\xB9\xD7\x9D " //
+        "must reorder under NFC. Malayalam even has a true prepend, the dot-reph \xE0\xB5\x8E"     //
+        "\xE0\xB4\x95.";
+    return result;
+}
+
+/**
+ *  @brief A U+2019 contraction tiles as a single word, exactly like the ASCII apostrophe.
+ *
+ *  @code{.txt}
+ *  it’s worth it
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_micro_apostrophe() noexcept {
+    static char const result[] = //
+        "it\xE2\x80\x99s worth it";
+    return result;
+}
+
+/**
+ *  @brief Two Prepend characters: an Arabic number sign and a Malayalam dot-reph.
+ *
+ *  Each attaches to the following base, so the grapheme-cluster count stays below the codepoint count.
+ *
+ *  @code{.txt}
+ *  ؀٤ ൎക
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_micro_prepend() noexcept {
+    static char const result[] = //
+        "\xD8\x80\xD9\xA4 \xE0\xB5\x8E\xE0\xB4\x95";
+    return result;
+}
+
+/**
+ *  @brief A CR-LF pair and a U+2028 line separator.
+ *
+ *  Both are Sep, forcing sentence and line breaks, while the CR-LF stays a single grapheme cluster.
+ *
+ *  @code{.txt}
+ *  A.\r\nB.\u2028C.
+ *  @endcode
+ */
+[[maybe_unused]] static sz::string_view utf8_prose_micro_hardbreaks() noexcept {
+    static char const result[] = //
+        "A.\x0D\x0A"             //
+        "B.\xE2\x80\xA8"         //
+        "C.";
+    return result;
+}
+
+#pragma endregion // Prose fixtures
+
 #pragma region Shared constants and types
 
 /** @brief The 64-byte window every SIMD backend processes; phase sweeps and gaps are sized from it. */

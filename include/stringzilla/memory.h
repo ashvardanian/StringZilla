@@ -167,7 +167,7 @@ SZ_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr
 SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-/** @copydoc sz_rfind_fill */
+/** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
@@ -179,7 +179,7 @@ SZ_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cpt
 SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-/** @copydoc sz_rfind_fill */
+/** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
@@ -194,11 +194,83 @@ SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cpt
 SZ_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
 SZ_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-/** @copydoc sz_rfind_fill */
+/** @copydoc sz_fill */
 SZ_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_lookup */
 SZ_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
                                     char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_SVE
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                   char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                           char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                   char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                    char const lut[sz_at_least_(256)]);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_copy */
+SZ_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
+                                        char const lut[sz_at_least_(256)]);
 #endif
 
 #pragma endregion // Core API

@@ -120,6 +120,48 @@ SZ_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t leng
 SZ_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 #endif
 
+#if SZ_USE_SVE
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
+#if SZ_USE_V128
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_equal */
+SZ_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+#endif
+
 #pragma endregion // Core API
 
 #include "stringzilla/compare/serial.h"

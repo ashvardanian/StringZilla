@@ -67,7 +67,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
     rolling_state_t multipliers_[aligned_dimensions_k];
     rolling_state_t modulos_[aligned_dimensions_k];
     rolling_state_t inverse_modulos_[aligned_dimensions_k];
-    rolling_state_t negative_discarding_multipliers_[aligned_dimensions_k];
+    rolling_state_t discarding_multipliers_[aligned_dimensions_k];
     size_t window_width_;
 
   public:
@@ -80,8 +80,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
         for (auto &multiplier : multipliers_) multiplier = 0.0;
         for (auto &modulo : modulos_) modulo = 0.0;
         for (auto &inverse_modulo : inverse_modulos_) inverse_modulo = 0.0;
-        for (auto &negative_discarding_multiplier : negative_discarding_multipliers_)
-            negative_discarding_multiplier = 0.0;
+        for (auto &discarding_multiplier : discarding_multipliers_) discarding_multiplier = 0.0;
         window_width_ = 0;
     }
 
@@ -98,7 +97,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
             multipliers_[dim] = hasher.multiplier();
             modulos_[dim] = hasher.modulo();
             inverse_modulos_[dim] = hasher.inverse_modulo();
-            negative_discarding_multipliers_[dim] = hasher.negative_discarding_multiplier();
+            discarding_multipliers_[dim] = hasher.discarding_multiplier();
         }
         window_width_ = window_width;
         return status_t::success_k;
@@ -245,9 +244,9 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
         }
 
         // Temporary variables for the rolling state
-        u256_vec_t multipliers_vec, negative_discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
+        u256_vec_t multipliers_vec, discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
         multipliers_vec.ymm_pd = _mm256_loadu_pd(&multipliers_[first_dim]);
-        negative_discarding_multipliers_vec.ymm_pd = _mm256_loadu_pd(&negative_discarding_multipliers_[first_dim]);
+        discarding_multipliers_vec.ymm_pd = _mm256_loadu_pd(&discarding_multipliers_[first_dim]);
         modulos_vec.ymm_pd = _mm256_loadu_pd(&modulos_[first_dim]);
         inverse_modulos_vec.ymm_pd = _mm256_loadu_pd(&inverse_modulos_[first_dim]);
 
@@ -280,16 +279,13 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_, void> {
             __m256d new_term_ymm = _mm256_set1_pd(new_term);
             __m256d old_term_ymm = _mm256_set1_pd(old_term);
 
-            // Discard the old term
-            last_states_vec.ymm_pd = _mm256_fmadd_pd(negative_discarding_multipliers_vec.ymm_pd, old_term_ymm,
-                                                     last_states_vec.ymm_pd);
-            last_states_vec.ymm_pd = barrett_mod( //
-                last_states_vec.ymm_pd,           //
-                modulos_vec.ymm_pd,               //
-                inverse_modulos_vec.ymm_pd);
-
-            // Add the new term
-            last_states_vec.ymm_pd = _mm256_fmadd_pd(last_states_vec.ymm_pd, multipliers_vec.ymm_pd, new_term_ymm);
+            // Single fused Barrett (the AVX-512 algorithm): the non-negative `discarding_multipliers_` keeps
+            // `state * mult + new + disc * old` within `[0, 2⁵²)`, so one reduction handles both the discarded
+            // head and the incoming tail — halving the reduction work versus the old discard-then-add form
+            // (~2x). The state-independent addend is hoisted off the loop-carried chain (exact-integer →
+            // bit-identical to serial/AVX-512).
+            __m256d addend_ymm = _mm256_fmadd_pd(discarding_multipliers_vec.ymm_pd, old_term_ymm, new_term_ymm);
+            last_states_vec.ymm_pd = _mm256_fmadd_pd(last_states_vec.ymm_pd, multipliers_vec.ymm_pd, addend_ymm);
             last_states_vec.ymm_pd = barrett_mod( //
                 last_states_vec.ymm_pd,           //
                 modulos_vec.ymm_pd,               //

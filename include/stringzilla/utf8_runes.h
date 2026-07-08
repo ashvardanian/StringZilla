@@ -156,6 +156,57 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
     sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
 #endif
 
+#if SZ_USE_V128
+/** @copydoc sz_utf8_count */
+SZ_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_seek */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_decode */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_v128( //
+    sz_cptr_t text, sz_size_t length,          //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
+#if SZ_USE_V128RELAXED
+/** @copydoc sz_utf8_count */
+SZ_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_seek */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n);
+#endif
+
+#if SZ_USE_RVV
+/** @copydoc sz_utf8_count */
+SZ_API_COMPTIME sz_size_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_seek */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_decode */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv( //
+    sz_cptr_t text, sz_size_t length,         //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
+#if SZ_USE_LASX
+/** @copydoc sz_utf8_count */
+SZ_API_COMPTIME sz_size_t sz_utf8_count_lasx(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_seek */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_lasx(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_decode */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_lasx( //
+    sz_cptr_t text, sz_size_t length,          //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
+#if SZ_USE_POWERVSX
+/** @copydoc sz_utf8_count */
+SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length);
+/** @copydoc sz_utf8_seek */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n);
+/** @copydoc sz_utf8_decode */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_powervsx( //
+    sz_cptr_t text, sz_size_t length,              //
+    sz_rune_t *runes, sz_size_t runes_capacity, sz_size_t *runes_unpacked);
+#endif
+
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */

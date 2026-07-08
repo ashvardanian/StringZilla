@@ -922,6 +922,18 @@ static void run_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
  *  broad battery of cross-script C++ wrapper cases: ordering, finding, ligatures, expansions, and
  *  SIMD-boundary regressions discovered by earlier fuzzing.
  */
+// Known-answer battery for a single `sz_utf8_uncased_order` backend: case-insensitive equality, ASCII
+// less/greater, length-prefix ordering, and 2-byte accented folds (ö = C3 B6, é = C3 A9). Each compiled
+// per-ISA kernel is run through it directly, mirroring the per-ISA `_search` coverage.
+static void check_uncased_order_(sz_utf8_uncased_order_t order) {
+    assert(order("Hello", 5, "HELLO", 5) == sz_equal_k);
+    assert(order("abc", 3, "abd", 3) == sz_less_k);
+    assert(order("abd", 3, "abc", 3) == sz_greater_k);
+    assert(order("ab", 2, "abc", 3) == sz_less_k);
+    assert(order("sch\xC3\xB6ner", 8, "SCH\xC3\x96NER", 8) == sz_equal_k); // 'ö' fold (2-byte)
+    assert(order("caf\xC3\xA9", 5, "CAF\xC3\x89", 5) == sz_equal_k);       // 'é' fold (2-byte)
+}
+
 void test_uncased_unit() {
 
     using str = sz::string_view;
@@ -1005,7 +1017,29 @@ void test_uncased_unit() {
         // `sz_utf8_uncased_order`: "Hello" and "HELLO" compare equal ignoring case.
         assert(sz_utf8_uncased_order("Hello", 5, "HELLO", 5) == sz_equal_k);        // Dispatched (automatic kernel)
         assert(sz_utf8_uncased_order_serial("Hello", 5, "HELLO", 5) == sz_equal_k); // Manual: serial kernel
-        assert(str("Hello").utf8_uncased_order("HELLO") == sz_equal_k);             // C++ wrapper
+        check_uncased_order_(sz_utf8_uncased_order_serial);                         // serial battery
+#if SZ_USE_HASWELL
+        check_uncased_order_(sz_utf8_uncased_order_haswell); // Manual: haswell kernel
+#endif
+#if SZ_USE_ICELAKE
+        check_uncased_order_(sz_utf8_uncased_order_icelake); // Manual: icelake kernel
+#endif
+#if SZ_USE_NEON
+        check_uncased_order_(sz_utf8_uncased_order_neon); // Manual: neon kernel
+#endif
+#if SZ_USE_V128
+        check_uncased_order_(sz_utf8_uncased_order_v128); // Manual: v128 kernel
+#endif
+#if SZ_USE_RVV
+        check_uncased_order_(sz_utf8_uncased_order_rvv); // Manual: rvv kernel
+#endif
+#if SZ_USE_LASX
+        check_uncased_order_(sz_utf8_uncased_order_lasx); // Manual: lasx kernel
+#endif
+#if SZ_USE_POWERVSX
+        check_uncased_order_(sz_utf8_uncased_order_powervsx); // Manual: powervsx kernel
+#endif
+        assert(str("Hello").utf8_uncased_order("HELLO") == sz_equal_k); // C++ wrapper
 
         // `sz_utf8_find_cased`: NULL for a fully-caseless string, else the FIRST cased codepoint.
         // "价格 123" is caseless (CJK + digits + space), so no rune participates in case → NULL.

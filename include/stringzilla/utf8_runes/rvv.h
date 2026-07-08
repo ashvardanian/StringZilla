@@ -256,7 +256,6 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_rvv_( //
     // to one U+FFFD over their maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C). The bit algebra is carried in the
     // lane domain: each lead-lane predicate is a 0/1 byte vector, "shift toward continuations" is `vslideup`, and the
     // lead lane reads its trailing continuation slots via `vslidedown` of the continuation flags.
-    vbool8_t const len_eq_two = __riscv_vmseq_vx_u8m1_b8(lengths, 2, vector_length);
     vbool8_t const len_ge_two = __riscv_vmsgeu_vx_u8m1_b8(lengths, 2, vector_length);
     vbool8_t const len_ge_three = __riscv_vmsgeu_vx_u8m1_b8(lengths, 3, vector_length);
     vbool8_t const len_eq_four = __riscv_vmseq_vx_u8m1_b8(lengths, 4, vector_length);

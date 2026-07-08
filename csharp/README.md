@@ -69,6 +69,38 @@ for (int segment = 0; segment < count; segment++)
 // Kinds: Graphemes (cf. StringInfo), Words, Sentences, LineBreaks (UAX-14), Newlines, Whitespaces, Delimiters
 ```
 
+Codepoints count scalar values, not bytes or UTF-16 chars.
+Segmentation *tiles* the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
+
+```csharp
+Sz.CountRunes("你好世界"u8);                     // 4 codepoints
+Sz.CountRunes("Hello🌍"u8);                      // 6 — the astral emoji is one scalar
+
+foreach (var cluster in Sz.EnumerateGraphemes("👍🏽🇺🇸"u8)) Use(cluster); // 2 clusters: 👍🏽 (emoji + skin tone), 🇺🇸 (flag)
+foreach (var word in Sz.EnumerateWords("Hello, 世界"u8)) Use(word);      // Latin run, then CJK run
+```
+
+## Splitting and Iteration
+
+The iterators are lazy and allocation-free: each is a `ref struct` enumerator yielding zero-copy `ReadOnlySpan<byte>` views, so a `foreach` never touches the heap.
+The codepoint and segmentation iterators batch 64 boundaries per native call; the substring and byte-set splits and the match iterators advance one `find` at a time.
+Policies are fluent methods on the returned value.
+
+```csharp
+foreach (Rune rune in Sz.EnumerateRunes(text)) Use(rune);   // cf. string.EnumerateRunes
+foreach (var word in Sz.EnumerateWords(text)) Use(word);    // also Graphemes/Sentences/LineBreaks
+
+foreach (var field in Sz.Split(line, ","u8)) Use(field); // cf. string.Split, but zero-copy
+foreach (var part in Sz.RSplit(path, "/"u8).WithMaxSplit(1)) Use(part); // from the end, at most one split
+foreach (var token in Sz.SplitAny(text, separators)) Use(token); // split on any byte in a Byteset
+foreach (var line in Sz.SplitWhitespaces(text).SkipEmpty()) Use(line); // collapse whitespace runs
+
+foreach (long at in Sz.EnumerateMatches(haystack, "ab"u8)) Use(at); // every offset; .Overlapping() for overlaps
+foreach (var m in Sz.EnumerateUncasedMatches(haystack, "ß"u8)) Use(m); // caseless; m.Offset, m.Length
+
+var (before, separator, after) = Sz.Partition(text, "="u8); // cf. Python str.partition
+```
+
 ## Case Folding and Normalization
 
 Case folding fills a gap: .NET has no public Unicode case-folding API.
@@ -82,6 +114,9 @@ needle.IndexIn(document, out long matchedLength);
 
 byte[] composed = Sz.Normalize(text, Sz.NormalForm.Nfc); // cf. string.Normalize
 int written = Sz.Normalize(text, Sz.NormalForm.Nfc, destination); // allocation-free variant
+
+Sz.Normalize("é"u8, Sz.NormalForm.Nfc);  // "e" + U+0301 -> precomposed "é"
+Sz.Normalize("ﬁ"u8, Sz.NormalForm.Nfkc);       // ligature "ﬁ" -> "fi"
 ```
 
 ## Sorting and Set Operations
@@ -91,6 +126,9 @@ These take a caller-provided result buffer and return the count; allocating conv
 ```csharp
 long[] order = new long[items.Count];
 int sorted = Sz.ArgSort(items, order, top: 10, uncased: true); // cf. Array.Sort + StringComparer.Ordinal
+
+Span<long> lineOrder = stackalloc long[lineCount];
+Sz.ArgSort(buffer, starts, lengths, lineOrder); // sort one buffer's segments without a byte[][]
 
 long[] firstPositions = new long[Math.Min(left.Count, right.Count)];
 long[] secondPositions = new long[firstPositions.Length];

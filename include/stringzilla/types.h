@@ -274,6 +274,14 @@
  */
 #define SZ_U64_MAX_PRIME (18446744073709551557ull)
 
+/*  Opt into glibc's "misc" extensions (`_DEFAULT_SOURCE` => `__USE_MISC`) before the first libc header is
+ *  pulled in. A strict `-std=cNN` otherwise hides declarations like `syscall()`, which the RISC-V
+ *  `riscv_hwprobe` capability probe in `stringzilla.h` relies on. As the first StringZilla header every
+ *  translation unit includes, this is the one place that covers every build system (CMake/Cargo/setuptools). */
+#if defined(__linux__) && !SZ_AVOID_LIBC && !defined(_DEFAULT_SOURCE) && !defined(_GNU_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+
 #if !SZ_AVOID_LIBC
 #include <stddef.h> // `size_t`
 #include <stdint.h> // `uint8_t`
@@ -802,6 +810,7 @@ typedef enum sz_capability_t {
     sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k, ///< Serial code with Fork Union
     sz_caps_sh_k = sz_cap_serial_k | sz_cap_haswell_k,  ///< Serial code with Haswell
     sz_caps_sn_k = sz_cap_serial_k | sz_cap_neon_k,     ///< Serial code with NEON
+    sz_caps_sr_k = sz_cap_serial_k | sz_cap_rvv_k,      ///< Serial code with RISC-V Vector
     sz_caps_sil_k = sz_cap_serial_k | sz_cap_icelake_k, ///< Serial code with Ice Lake
 
     sz_caps_spil_k = sz_cap_serial_k | sz_cap_parallel_k |

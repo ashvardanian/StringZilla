@@ -340,12 +340,12 @@ __global__ void floating_rolling_hashers_per_cuda_warp_(                      //
                     f64_t const modulo = modulos[dim_within_thread];
                     f64_t const inverse_modulo = inverse_modulos[dim_within_thread];
 
-                    // A single Barrett reduction handles both the discarded head and the incoming tail symbol.
-                    // `discarding_multiplier` folds in the `multiplier` and is non-negative, so the fused
-                    // intermediate stays within `[0, 2⁵²)` without underflowing zero before the reduction.
-                    f64_t fused = fma(rolling_state, multiplier, new_term);
-                    fused = fma(discarding_multiplier, old_term, fused);
-                    rolling_state = barrett_mod_cuda_(fused, modulo, inverse_modulo);
+                    // Hoist the state-independent `new + discarding * old` summand off the recurrence so only
+                    // one FMA sits on the loop-carried chain. Exact-integer (`x < 2⁵²`) → bit-identical, and
+                    // register-neutral here (warp-parallelism already hides the chain when the GPU is full).
+                    f64_t addend = fma(discarding_multiplier, old_term, new_term);
+                    rolling_state = fma(rolling_state, multiplier, addend);
+                    rolling_state = barrett_mod_cuda_(rolling_state, modulo, inverse_modulo);
 
                     // Update the minimums and counts
                     f64_t &rolling_minimum = rolling_minimums[dim_within_thread];
@@ -371,9 +371,10 @@ __global__ void floating_rolling_hashers_per_cuda_warp_(                      //
                 f64_t const inverse_modulo = inverse_modulos[dim_within_thread];
 
                 // A single Barrett reduction handles both the discarded head and the incoming tail symbol.
-                f64_t fused = fma(rolling_state, multiplier, new_term);
-                fused = fma(discarding_multiplier, old_term, fused);
-                rolling_state = barrett_mod_cuda_(fused, modulo, inverse_modulo);
+                // The state-independent `new + discarding * old` summand is hoisted off the recurrence.
+                f64_t addend = fma(discarding_multiplier, old_term, new_term);
+                rolling_state = fma(rolling_state, multiplier, addend);
+                rolling_state = barrett_mod_cuda_(rolling_state, modulo, inverse_modulo);
 
                 // Update the minimums and counts
                 f64_t &rolling_minimum = rolling_minimums[dim_within_thread];

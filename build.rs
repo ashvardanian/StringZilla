@@ -378,14 +378,19 @@ fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(
         // declare them). The off-platform files compile to empty objects via their internal SZ_USE_* guards.
         "c/stringzillas/levenshtein_serial.cpp",
         "c/stringzillas/levenshtein_icelake.cpp",
+        "c/stringzillas/levenshtein_haswell.cpp",
+        "c/stringzillas/levenshtein_neon.cpp",
+        "c/stringzillas/levenshtein_rvv.cpp",
         "c/stringzillas/needleman_wunsch_serial.cpp",
         "c/stringzillas/needleman_wunsch_icelake.cpp",
         "c/stringzillas/needleman_wunsch_haswell.cpp",
         "c/stringzillas/needleman_wunsch_neon.cpp",
+        "c/stringzillas/needleman_wunsch_rvv.cpp",
         "c/stringzillas/smith_waterman_serial.cpp",
         "c/stringzillas/smith_waterman_icelake.cpp",
         "c/stringzillas/smith_waterman_haswell.cpp",
         "c/stringzillas/smith_waterman_neon.cpp",
+        "c/stringzillas/smith_waterman_rvv.cpp",
     ]);
     build.try_compile("stringzillas")
 }

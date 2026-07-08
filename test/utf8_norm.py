@@ -239,3 +239,20 @@ def test_utf8_norm_canonical_ordering(seed_value: int):
 
 
 #  endregion Official conformance + canonical ordering
+
+
+def test_utf8_norm_prose():
+    """Realistic paragraphs normalize bit-identically to ICU across all four forms; NFD content is detected."""
+    from test.utf8_helpers import (
+        PROSE_HOTEL_REVIEW,
+        PROSE_SCIENCE_ABSTRACT,
+        PROSE_DEVANAGARI_TIP,
+        PROSE_RTL_SCRIPTS,
+        icu_normalizer,
+    )
+
+    # P1 carries an NFD 'cafe' (e + U+0301), so it is not already NFC.
+    assert sz.utf8_find_denormalized(PROSE_HOTEL_REVIEW, "NFC") is not None
+    for text in (PROSE_HOTEL_REVIEW, PROSE_SCIENCE_ABSTRACT, PROSE_DEVANAGARI_TIP, PROSE_RTL_SCRIPTS):
+        for form in ("NFC", "NFD", "NFKC", "NFKD"):
+            assert sz.utf8_norm(text, form) == icu_normalizer(form)(text).encode("utf-8")

@@ -11,8 +11,8 @@
  *  rule engine, so WB1-WB16 (including the cross-window bridge shadow / RI parity / left-context carry) run once in
  *  portable `sz_u64_t` bit algebra. Dense-compaction of the boundary mask uses the substrate's BMI2 index loop.
  */
-#ifndef STRINGZILLA_UTF8_WORDS_HASWELL_H_
-#define STRINGZILLA_UTF8_WORDS_HASWELL_H_
+#ifndef STRINGZILLA_UTF8_WORDBREAKS_HASWELL_H_
+#define STRINGZILLA_UTF8_WORDBREAKS_HASWELL_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_wordbreaks/tables.h"
@@ -595,4 +595,4 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_WORDS_HASWELL_H_
+#endif // STRINGZILLA_UTF8_WORDBREAKS_HASWELL_H_
