@@ -11,9 +11,10 @@
  *  resume) over the regression cases, a capacity x alignment sweep, and >=2,000,000 random valid/malformed
  *  inputs at `svcntb()==64` (so one window == one 64-bit lane-mask domain).
  *
- *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with C++ `svext`-based shift
- *  templates (`sz_utf8_word_break_lane_up_sve2_<K>` / `sz_utf8_word_break_lane_dn_sve2_<K>`), which cannot carry C language linkage; they are wrapped in an `extern "C++"`
- *  island to override the enclosing `extern "C"`. Every other leaf stays C-linkage like the sibling kernels.
+ *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with `svext`-based shift macros
+ *  (`sz_utf8_word_break_lane_up_sve2_(v, k)` / `sz_utf8_word_break_lane_dn_sve2_(v, k)`) so the shift amount
+ *  stays an integer-constant expression and the whole file compiles as both C99 and C++, matching the
+ *  sibling kernels.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_SVE2_H_
@@ -252,69 +253,58 @@ SZ_HELPER_AUTO void sz_utf8_word_classify_window_sve2_(                //
 
 /** @brief Full-width SVE2 rule engine; the portable `sz_u64_t` engine's `<<k` / `>>1` lane algebra is realized on
  *         per-lane 0/1 vectors via `svext`-based lane shifts (so it scales beyond a 64-bit movemask). */
-static SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a) { return svinsr_n_u8(a, 0); }
-static SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a) {
-    return svext_u8(a, svdup_n_u8(0), 1);
-}
-// Function templates cannot have C language linkage; `extern "C++"` overrides the enclosing `extern "C"` so the
-// `svext` lane-shift immediates (`K`) stay compile-time constants without disturbing the rest of the file.
-#ifdef __cplusplus
-extern "C++" {
-#endif
-template <int K>
-static SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up_sve2_(svuint8_t v) {
-    return svrev_u8(svext_u8(svrev_u8(v), svdup_n_u8(0), K));
-}
-template <int K>
-static SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn_sve2_(svuint8_t v) {
-    return svext_u8(v, svdup_n_u8(0), K);
-}
-#ifdef __cplusplus
-}
-#endif
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a) { return svinsr_n_u8(a, 0); }
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a) { return svext_u8(a, svdup_n_u8(0), 1); }
+// The `svext` lane-shift amount must be an integer-constant expression, so the variable-`k` helpers are
+// function-like macros rather than functions: the literal `k` at each call site reaches the intrinsic
+// unchanged. Macros also keep this header a single code path for C99 and C++ — this file is compiled into
+// the C99 library (`c/stringzilla/utf8_wordbreaks.c`), where the earlier `template <int K>` helpers with
+// their `extern "C++"` island could not parse.
+#define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
+#define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
 SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed, svuint8_t gate) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed, reach_u8x = gate;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<1>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<1>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 1), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 1));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<2>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<2>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 2), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 2));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<4>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<4>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 4), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 4));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<8>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<8>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 8), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 8));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<16>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<16>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 16), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 16));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<32>(bits_u8x), reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
 SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed, svuint8_t gate) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed, reach_u8x = gate;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<1>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_<1>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 1), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 1));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<2>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_<2>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 2), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 2));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<4>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_<4>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 4), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 4));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<8>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_<8>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 8), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 8));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<16>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_<16>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 16), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 16));
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_<32>(bits_u8x), reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
 SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits, svuint8_t reach) {
@@ -328,22 +318,22 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri, svuint8_
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = ri, reach_u8x = run_gate;
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<1>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<1>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 1), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 1));
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<2>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<2>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 2), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 2));
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<4>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<4>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 4), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 4));
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<8>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<8>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 8), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 8));
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<16>(bits_u8x), reach_u8x));
-    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_<16>(reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 16), reach_u8x));
+    reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 16));
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_<32>(bits_u8x), reach_u8x));
+                          svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     if (inbound_parity) {
         svuint8_t const lane0_u8x = svdup_u8_z(svwhilelt_b8_u64(0, 1), 1);
         bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
@@ -352,17 +342,17 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri, svuint8_
     *inclusive_out = bits_u8x;
     return svand_u8_x(pg_b8x, ri, sveor_u8_x(pg_b8x, bits_u8x, ri));
 }
-static SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m, svuint8_t v) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m, svuint8_t v) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const p_b8x = svcmpne_n_u8(pg_b8x, m, 0);
     svbool_t const first_b8x = svand_b_z(svptrue_b8(), p_b8x, svbrka_b_z(svptrue_b8(), p_b8x));
     return svlastb_u8(first_b8x, v);
 }
-static SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m, svuint8_t v) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m, svuint8_t v) {
     svbool_t const pg_b8x = svptrue_b8();
     return svlastb_u8(svcmpne_n_u8(pg_b8x, m, 0), v);
 }
-static SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v) { return svlasta_u8(svpfalse_b(), v); }
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v) { return svlasta_u8(svpfalse_b(), v); }
 
 SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                                                    //
     svuint8_t class_aletter_in, svuint8_t class_hebrew_in, svuint8_t class_numeric_in, svuint8_t class_katakana_in, //
