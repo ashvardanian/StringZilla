@@ -120,31 +120,13 @@ SZ_HELPER_AUTO void sz_utf8_sentence_break_bmp_highlow_neon_( //
  *          Gather-free; bit-exact with `sz_rune_sentence_break_property` over the whole BMP. Operates on one quarter;
  *          the caller iterates the four quarters. */
 SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high, uint8x16_t low) {
-    uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
-    uint8x16_t const high_high = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
-    uint8x16_t const high_low = vandq_u8(high, low_nibble_mask);
-    uint8x16_t const page = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage1_,
-                                                             sz_utf8_sentence_break_haswell_stage1_count_k / 16,
-                                                             high_high, high_low);
-    uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage2_lo_,
-                                                                sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage2_hi_,
-                                                                sz_utf8_sentence_break_haswell_stage2_hi_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
-    uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
-    uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
-    uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_sentence_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
-    }
-    return result;
+    // The 3-stage BMP trie is a pure function of (page, low) - `stage2`/`stage3` only ever see `page = stage1[high]`
+    // and the two `low` nibbles - so the composition is materialized as ONE flat generated table (page_count x 256,
+    // bit-exact by construction): one vectorized `lut256` for the page, one bounded L1 gather for the class,
+    // replacing three chained gathers. See the flat table's generator note in tables.h.
+    uint8x16_t const page = sz_utf8_rune_lut256_neon_(sz_utf8_sentence_break_haswell_stage1_, high);
+    return sz_utf8_rune_leaf_gather_neon_(sz_utf8_sentence_break_flat_bmp_,
+                                          (int)sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16, page, low);
 }
 
 /** @brief  Sentence_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
@@ -172,14 +154,9 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t p
     uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
     uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
     uint8x16_t const stage4_lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), n0);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_astral_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(
-            sz_utf8_sentence_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
-    }
-    return result;
+    return sz_utf8_rune_leaf_gather_neon_(sz_utf8_sentence_break_haswell_astral_stage4_groups_,
+                                          (int)sz_utf8_sentence_break_haswell_astral_leaf_groups_k, leaf_group,
+                                          stage4_lut_index);
 }
 
 /** @brief  Per-byte-lane Sentence_Break class for ONE decoded window quarter, fully in-register and zero-scalar - the
@@ -237,6 +214,11 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
         uint8x16_t const classed = vbslq_u8(is_astral, astral, bmp); // BMP for plane 0, astral for [1,16]
         return vbicq_u8(classed, is_overrange);                      // force plane >= 17 lanes to Other (0)
     }
+    // OLetter cascade-skip: Han/Kana/Hangul resolve uniformly to OLetter(9). If every codepoint-START lane in this
+    // quarter is OLetter by arithmetic, the BMP cascade would return 9 for all of them - skip it and return 9 (the
+    // class on continuation lanes is ignored by the dense compaction). The ranges are all >= 0x3041 (3-byte UTF-8), so
+    // gate on a 3-byte lead present in this quarter AND `high >= 0x30`: Latin/Cyrillic (2-byte) and ASCII quarters skip
+    // the whole test, Devanagari/Thai (3-byte but high < 0x30) skip after one `vmaxvq`. Bit-exact with the cascade.
     return sz_utf8_sentence_break_bmp_class_neon_(high, low);
 }
 

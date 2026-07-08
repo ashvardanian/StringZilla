@@ -105,34 +105,13 @@ SZ_HELPER_AUTO sz_u64_t sz_grapheme_pdep_neon_(sz_u64_t value, sz_u64_t selector
  *          Gather-free; bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included). Addresses
  *          ONE quarter; the caller iterates the four quarters. */
 SZ_HELPER_AUTO uint8x16_t sz_grapheme_bmp_descriptor_neon_(uint8x16_t high, uint8x16_t low) {
-    uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
+    // The 3-stage BMP trie is a pure function of (page, low) - `stage2`/`stage3` only ever see `page = stage1[high]`
+    // and the two `low` nibbles - so the composition is materialized as ONE flat generated table (page_count x 256,
+    // bit-exact by construction): one vectorized `lut256` for the page, one bounded L1 gather for the descriptor,
+    // replacing three chained gathers. See the flat table's generator note in tables.h.
     uint8x16_t const page = sz_utf8_rune_lut256_neon_(sz_utf8_grapheme_break_haswell_stage1_, high);
-    uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(sz_utf8_grapheme_break_haswell_stage2_lo_,
-                                                                sz_utf8_grapheme_break_haswell_stage2_lo_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(sz_utf8_grapheme_break_haswell_stage2_hi_,
-                                                                sz_utf8_grapheme_break_haswell_stage2_hi_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
-    uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
-    uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
-    uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    // Stage 3 is a gather: descriptor[lane] = stage3_groups[leaf_group[lane] * 256 + lut_index[lane]]. The old
-    // per-group scan recomputed `lut256` (4x vqtbl4q @ 1.31/cyc) for every one of `leaf_groups_k` groups and kept
-    // one. Emulate the gather with a bounded scalar L1 walk instead (Apple's L1 is fast); the `< leaf_groups_k`
-    // mask reproduces the original (out-of-range lanes stay zero), keeping it bit-exact.
-    sz_u8_t leaf_group_lanes[16], stage3_index_lanes[16], descriptor_lanes[16];
-    vst1q_u8(leaf_group_lanes, leaf_group);
-    vst1q_u8(stage3_index_lanes, lut_index);
-    for (int lane_index = 0; lane_index < 16; ++lane_index) {
-        int const group = leaf_group_lanes[lane_index];
-        int const safe_group = group < (int)sz_utf8_grapheme_break_haswell_leaf_groups_k ? group : 0;
-        descriptor_lanes[lane_index] =
-            sz_utf8_grapheme_break_haswell_stage3_groups_[safe_group * 256 + stage3_index_lanes[lane_index]];
-    }
-    uint8x16_t const in_range = vcltq_u8(leaf_group, vdupq_n_u8((sz_u8_t)sz_utf8_grapheme_break_haswell_leaf_groups_k));
-    return vandq_u8(vld1q_u8(descriptor_lanes), in_range);
+    return sz_utf8_rune_leaf_gather_neon_(sz_utf8_grapheme_break_flat_bmp_,
+                                          (int)sz_utf8_grapheme_break_haswell_stage2_lo_count_k / 16, page, low);
 }
 
 /** @brief  Packed descriptor byte for sixteen ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
@@ -161,62 +140,15 @@ SZ_HELPER_AUTO uint8x16_t sz_grapheme_astral_descriptor_neon_(uint8x16_t plane, 
     uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
     uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
     uint8x16_t const stage4_lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), n0);
-    // Same gather collapse as the BMP path: descriptor[lane] = astral_stage4_groups[leaf_group*256 + index].
-    sz_u8_t leaf_group_lanes[16], stage4_index_lanes[16], descriptor_lanes[16];
-    vst1q_u8(leaf_group_lanes, leaf_group);
-    vst1q_u8(stage4_index_lanes, stage4_lut_index);
-    for (int lane_index = 0; lane_index < 16; ++lane_index) {
-        int const group = leaf_group_lanes[lane_index];
-        int const safe_group = group < (int)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k ? group : 0;
-        descriptor_lanes[lane_index] =
-            sz_utf8_grapheme_break_haswell_astral_stage4_groups_[safe_group * 256 + stage4_index_lanes[lane_index]];
-    }
-    uint8x16_t const in_range = vcltq_u8(leaf_group,
-                                         vdupq_n_u8((sz_u8_t)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k));
-    return vandq_u8(vld1q_u8(descriptor_lanes), in_range);
+    return sz_utf8_rune_leaf_gather_neon_(sz_utf8_grapheme_break_haswell_astral_stage4_groups_,
+                                          (int)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k, leaf_group,
+                                          stage4_lut_index);
 }
 
 /** @brief  Per-quarter unsigned `value >= bound` boolean mask (0x00/0xFF lanes), the NEON `vcgeq_u8` twin of the AVX2
  *          `max_epu8(value,bound)==value` idiom. */
 SZ_HELPER_INLINE uint8x16_t sz_grapheme_cmpge_epu8_neon_(uint8x16_t value, uint8x16_t bound) {
     return vcgeq_u8(value, bound);
-}
-
-/** @brief  64-bit unsigned `low <= cp <= high` mask over reconstructed BMP codepoints carried in @p high_byte /
- *          @p low_byte quarters. cp = (high<<8)|low, so the inclusive 16-bit range test is: high in (lo_hi,hi_hi)
- *          unconditionally, or on the boundary high bytes the low byte within bound. Four quarters, branchless. */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_cp_in_range_neon_(uint8x16_t const *high, uint8x16_t const *low, sz_u16_t lo,
-                                                      sz_u16_t hi) {
-    sz_u8_t const lo_h = (sz_u8_t)(lo >> 8), lo_l = (sz_u8_t)(lo & 0xFF);
-    sz_u8_t const hi_h = (sz_u8_t)(hi >> 8), hi_l = (sz_u8_t)(hi & 0xFF);
-    uint8x16_t const lo_h_v = vdupq_n_u8(lo_h), lo_l_v = vdupq_n_u8(lo_l);
-    uint8x16_t const hi_h_v = vdupq_n_u8(hi_h), hi_l_v = vdupq_n_u8(hi_l);
-    uint8x16_t in_range[4];
-    for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const high_eq_lo = vceqq_u8(high[quarter], lo_h_v);
-        uint8x16_t const high_eq_hi = vceqq_u8(high[quarter], hi_h_v);
-        // ge_low: high>lo_h, or (high==lo_h and low>=lo_l). le_high: high<hi_h, or (high==hi_h and low<=hi_l).
-        uint8x16_t const ge_low = vorrq_u8(vbicq_u8(sz_grapheme_cmpge_epu8_neon_(high[quarter], lo_h_v), high_eq_lo),
-                                           vandq_u8(high_eq_lo, sz_grapheme_cmpge_epu8_neon_(low[quarter], lo_l_v)));
-        uint8x16_t const le_high = vorrq_u8(vbicq_u8(sz_grapheme_cmpge_epu8_neon_(hi_h_v, high[quarter]), high_eq_hi),
-                                            vandq_u8(high_eq_hi, sz_grapheme_cmpge_epu8_neon_(hi_l_v, low[quarter])));
-        in_range[quarter] = vandq_u8(ge_low, le_high);
-    }
-    return sz_utf8_mask_combine_neon_(in_range[0], in_range[1], in_range[2], in_range[3]);
-}
-
-/** @brief  Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK / Kana arithmetic ranges (the NEON
- *          twin of `sz_grapheme_cjk_other_haswell_`): `[0x3000,0xA66E] | [0xD7FC,0xFB1D]` minus the interior Extend /
- *          enclosed exceptions. Such lanes need no cold cascade (their descriptor is 0). */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_cjk_other_neon_(uint8x16_t const *high, uint8x16_t const *low) {
-    sz_u64_t const run_a = sz_grapheme_cp_in_range_neon_(high, low, 0x3000, 0xA66E);
-    sz_u64_t const run_b = sz_grapheme_cp_in_range_neon_(high, low, 0xD7FC, 0xFB1D);
-    sz_u64_t const exc_a = sz_grapheme_cp_in_range_neon_(high, low, 0x302A, 0x3030);
-    sz_u64_t const exc_b = sz_grapheme_cp_in_range_neon_(high, low, 0x3099, 0x309A);
-    sz_u64_t const exc_c = sz_grapheme_cp_in_range_neon_(high, low, 0x303D, 0x303D);
-    sz_u64_t const exc_d = sz_grapheme_cp_in_range_neon_(high, low, 0x3297, 0x3297);
-    sz_u64_t const exc_e = sz_grapheme_cp_in_range_neon_(high, low, 0x3299, 0x3299);
-    return (run_a | run_b) & ~(exc_a | exc_b | exc_c | exc_d | exc_e);
 }
 
 /** @brief  Build a per-quarter byte-boolean selector (0x00/0xFF) from the 16 lane bits of @p bits at offset @p shift,
@@ -339,26 +271,19 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
 
     sz_u64_t const ascii = sz_utf8_mask_combine_neon_(ascii_bool[0], ascii_bool[1], ascii_bool[2], ascii_bool[3]);
 
-    // Any non-ASCII lead present? gate the cold full-BMP cascade behind it. The CJK / Kana arithmetic ranges resolve
-    // to GCB=Other (descriptor 0), so a pure-CJK or pure-ASCII window skips the cascade entirely (haswell `cjk_other`).
-    sz_u64_t const non_ascii = loaded_mask & ~ascii;
-    sz_u64_t cold = non_ascii;
-    if (non_ascii) {
-        sz_u64_t const cjk_other = sz_grapheme_cjk_other_neon_(high, low) & non_ascii;
-        cold = non_ascii & ~cjk_other;
-        // Force the CJK-other lanes to descriptor 0 (their ASCII-LUT value on a non-ASCII byte is junk; clear it).
-        for (int quarter = 0; quarter < 4; ++quarter)
-            desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(cjk_other, quarter * 16));
-    }
-    if (cold) {
-        // A cold (non-ASCII, non-CJK-other) lane is present: resolve EVERY lane through the full-BMP cascade,
-        // overwriting the ASCII fast path. ASCII and CJK-other lanes resolve identically (the cascade reproduces 0
-        // for the carved CJK ranges), so the blend below is exact.
+    // The flat gather IS the classifier - no arithmetic script gates. A quarter runs it only when it holds a
+    // non-ASCII codepoint-START lane (descriptors are read on start lanes only); the flat table returns the exact
+    // descriptor for every BMP codepoint, so pure-ASCII quarters keep the cheap `ascii_desc` LUT untouched. Measured
+    // on M5: this beats every gated variant (CJK/euro/Hangul range tests cost more than the 16 L1 loads they skip).
+    sz_u64_t const non_ascii_starts = loaded_mask & ~ascii & start_lanes;
+    if (non_ascii_starts) {
         for (int quarter = 0; quarter < 4; ++quarter) {
+            if (((non_ascii_starts >> (quarter * 16)) & 0xFFFFull) == 0) continue;
             uint8x16_t const bmp = sz_grapheme_bmp_descriptor_neon_(high[quarter], low[quarter]);
             desc[quarter] = vbslq_u8(ascii_bool[quarter], ascii_desc[quarter], bmp);
         }
     }
+
     // A 4-byte lead splits three ways on its blind plane = bits[16..20] of cp, matching haswell/serial value dispatch
     // (`is_bmp = cp < 0x10000`, `is_astral = 0x10000 ≤ cp < 0x110000`, else Other):
     //   plane == 0      → BMP codepoint (cp = (mid<<8)|alo); already resolved through the BMP path above, since the
@@ -435,6 +360,34 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_neon_(sz_gra
     }
 
     sz_grapheme_window_masks_t masks;
+
+    // Trivial-window fast path (the CJK/Other analogue of the driver's ASCII gate). When every start-lane descriptor is
+    // a simple break class - Other/CR/LF/Control, i.e. `desc <= 3`: no Extend/ZWJ/Regional_Indicator/Prepend/
+    // SpacingMark/Hangul {L,V,T,LV,LVT} in the low nibble, no Extended_Pictographic (bit 0x40), no Indic (bits [5:4]) -
+    // only CR/LF/Control drive the boundary (GB3/GB4/GB5) and the other 15 class masks are provably all-zero. Build just
+    // those three, skipping ~15 of 18 software-`pext` gathers. Bit-exact. This dominates Han/Kana text and any diacritic-
+    // free 2-byte script (Cyrillic/Greek/Arabic/Hebrew base letters are all GCB=Other), where `build_masks` is the top
+    // cost once the cascade is gated away. The one extra `vcgtq`+combine per window is <1/18 of the full extraction.
+    uint8x16_t const three_vec = vdupq_n_u8(3);
+    sz_u64_t const nonsimple = sz_utf8_mask_combine_neon_(
+                                   vcgtq_u8(desc_q[0], three_vec), vcgtq_u8(desc_q[1], three_vec),
+                                   vcgtq_u8(desc_q[2], three_vec), vcgtq_u8(desc_q[3], three_vec)) &
+                               starts;
+    if (nonsimple == 0) {
+        for (int class_index = 0; class_index < 14; ++class_index) masks.class_bit[class_index] = 0;
+        masks.extended_pictographic = 0;
+        masks.indic_consonant = masks.indic_extend = masks.indic_linker = 0;
+        for (int class_index = (int)sz_grapheme_break_cr_k; class_index <= (int)sz_grapheme_break_control_k;
+             ++class_index) {
+            uint8x16_t const class_id_vec = vdupq_n_u8((sz_u8_t)class_index);
+            sz_u64_t const byte_mask = sz_utf8_mask_combine_neon_(
+                vceqq_u8(class_q[0], class_id_vec), vceqq_u8(class_q[1], class_id_vec),
+                vceqq_u8(class_q[2], class_id_vec), vceqq_u8(class_q[3], class_id_vec));
+            masks.class_bit[class_index] = sz_grapheme_bit_gather_(byte_mask, &start_route) & valid;
+        }
+        return masks;
+    }
+
     for (int class_index = 0; class_index < 14; ++class_index) {
         uint8x16_t const class_id_vec = vdupq_n_u8((sz_u8_t)class_index);
         sz_u64_t const byte_mask = sz_utf8_mask_combine_neon_(
@@ -494,6 +447,61 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_neon(          //
     sz_size_t base = 0;
 
     while (base < length) {
+        // ASCII whole-window fast path (x86-style tiering): a window with no byte >= 0x80 decodes 1:1 to codepoints,
+        // and only CR/LF/Control affect grapheme boundaries (GB3, GB4/GB5) - every other ASCII byte is `Other`
+        // (GB999 break). Build just those three class masks and run the SAME rule engine (bit-exact, carry handled),
+        // skipping the UTF-8 decode and the 18-class `build_masks` that dominate Latin text (measured ~+49% on M5).
+        sz_size_t const ascii_bytes = length - base < 64 ? length - base : 64;
+        uint8x16_t ascii_q[4];
+        if (length - base >= 64) {
+            ascii_q[0] = vld1q_u8(text_u8 + base), ascii_q[1] = vld1q_u8(text_u8 + base + 16);
+            ascii_q[2] = vld1q_u8(text_u8 + base + 32), ascii_q[3] = vld1q_u8(text_u8 + base + 48);
+        }
+        else {
+            sz_align_(16) sz_u8_t padded[64];
+            for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index)
+                padded[byte_index] = byte_index < ascii_bytes ? text_u8[base + byte_index] : 0;
+            ascii_q[0] = vld1q_u8(padded), ascii_q[1] = vld1q_u8(padded + 16);
+            ascii_q[2] = vld1q_u8(padded + 32), ascii_q[3] = vld1q_u8(padded + 48);
+        }
+        uint8x16_t const ascii_any = vorrq_u8(vorrq_u8(ascii_q[0], ascii_q[1]), vorrq_u8(ascii_q[2], ascii_q[3]));
+        if ((vmaxvq_u8(ascii_any) & 0x80u) == 0) {
+            int const codepoint_count = (int)ascii_bytes;
+            sz_u64_t const valid = codepoint_count >= 64 ? ~(sz_u64_t)0 : (((sz_u64_t)1 << codepoint_count) - 1);
+            uint8x16_t const cr_vec = vdupq_n_u8(0x0D), lf_vec = vdupq_n_u8(0x0A);
+            uint8x16_t const space_vec = vdupq_n_u8(0x20), del_vec = vdupq_n_u8(0x7F);
+            uint8x16_t cr_q[4], lf_q[4], control_q[4];
+            for (int quarter = 0; quarter < 4; ++quarter) {
+                cr_q[quarter] = vceqq_u8(ascii_q[quarter], cr_vec);
+                lf_q[quarter] = vceqq_u8(ascii_q[quarter], lf_vec);
+                uint8x16_t const c0_or_del = vorrq_u8(vcltq_u8(ascii_q[quarter], space_vec),
+                                                      vceqq_u8(ascii_q[quarter], del_vec));
+                control_q[quarter] = vbicq_u8(vbicq_u8(c0_or_del, cr_q[quarter]), lf_q[quarter]);
+            }
+            sz_grapheme_window_masks_t ascii_masks;
+            for (int class_index = 0; class_index < 14; ++class_index) ascii_masks.class_bit[class_index] = 0;
+            ascii_masks.extended_pictographic = 0;
+            ascii_masks.indic_consonant = ascii_masks.indic_extend = ascii_masks.indic_linker = 0;
+            ascii_masks.class_bit[sz_grapheme_break_cr_k] =
+                sz_utf8_mask_combine_neon_(cr_q[0], cr_q[1], cr_q[2], cr_q[3]) & valid;
+            ascii_masks.class_bit[sz_grapheme_break_lf_k] =
+                sz_utf8_mask_combine_neon_(lf_q[0], lf_q[1], lf_q[2], lf_q[3]) & valid;
+            ascii_masks.class_bit[sz_grapheme_break_control_k] =
+                sz_utf8_mask_combine_neon_(control_q[0], control_q[1], control_q[2], control_q[3]) & valid;
+            // ASCII: every byte is a codepoint-start, so the byte-domain boundary equals the dense boundary (pdep is
+            // the identity) and no software-pext scatter is needed.
+            sz_u64_t boundary = sz_grapheme_window_boundaries_(&ascii_masks, codepoint_count, valid, &carry);
+            if (base == 0) boundary &= ~(sz_u64_t)1;
+            clusters = sz_utf8_rune_drain_forward_neon_(boundary, base, cluster_starts, cluster_lengths, clusters,
+                                                        clusters_capacity, &cluster_start);
+            if (clusters == clusters_capacity) {
+                if (bytes_consumed) *bytes_consumed = cluster_start;
+                return clusters;
+            }
+            base += ascii_bytes;
+            continue;
+        }
+
         sz_grapheme_classified_neon_t const window = sz_grapheme_classify_window_neon_(text_u8, length, base);
         if (window.codepoint_count == 0) break; // defensive: cannot happen for valid input
 
