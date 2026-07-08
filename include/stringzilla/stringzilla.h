@@ -139,7 +139,12 @@
 
 /* Detect POSIX extensions availability for signal handling.
  * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
- * These are needed on Linux ARM for safely testing `mrs` instruction availability. */
+ * These are needed on Linux ARM for safely testing `mrs` instruction availability.
+ * `_POSIX_VERSION` only exists after `<unistd.h>` - without this include the check below was always
+ * false, the `mrs` path compiled out, and Linux-Arm detection silently degraded to NEON-only. */
+#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+#include <unistd.h>
+#endif
 #if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC && defined(_POSIX_VERSION)
 #include <setjmp.h>
 #include <signal.h>
