@@ -128,6 +128,15 @@
 #endif
 #endif
 
+/* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the auxiliary vector. */
+#if (defined(__loongarch__) || defined(__powerpc64__) || defined(__powerpc__)) && !SZ_AVOID_LIBC
+#if defined(SZ_IS_LINUX_)
+#include <sys/auxv.h> // `getauxval`, `AT_HWCAP`, `AT_HWCAP2`
+#elif defined(SZ_IS_FREEBSD_)
+#include <sys/auxv.h> // `elf_aux_info`, `AT_HWCAP`, `AT_HWCAP2`
+#endif
+#endif
+
 /* Detect POSIX extensions availability for signal handling.
  * POSIX extensions provide `sigaction`, `sigjmp_buf`, and `sigsetjmp` for safe signal handling.
  * These are needed on Linux ARM for safely testing `mrs` instruction availability. */
@@ -283,6 +292,15 @@ SZ_HELPER_AUTO sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability
     return buffer;
 }
 
+/*  The runtime detectors below report the FULL hardware capability set, independent of which `SZ_USE_*`
+ *  tiers this build compiled in: `sz_capabilities` ANDs their result with the compile-time mask anyway,
+ *  and the executable instructions involved are unconditionally safe - `cpuid` is baseline x86-64 with
+ *  `xgetbv` behind the OSXSAVE check, and the Arm `mrs` reads sit behind a SIGILL-guarded probe with the
+ *  `ID_AA64ZFR0_EL1` encoding enabled by the `target("+sve")` pragma that already wraps the whole
+ *  detector. Keeping detection unconditional lets build-system probes (`probes/run_capabilities.c`)
+ *  compile a serial-only translation unit and still learn what this machine runs, so the build can
+ *  intersect it with what the toolchain compiles before any kernel is built.
+ */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
     return (sz_capability_t)(                         //
         (sz_cap_neon_k * SZ_USE_NEON) |               //
@@ -395,7 +413,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     sz_unused_(id_aa64pfr0_el1);
     sz_unused_(id_aa64zfr0_el1);
 
-#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_NEONAES || SZ_USE_NEONSHA || SZ_USE_SVE2AES
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
@@ -405,7 +422,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // Now let's unpack the status flags from ID_AA64PFR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
-#endif // SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2
 
     // AdvSIMD, bits [23:20] of ID_AA64PFR0_EL1 can be used to check for `fp16` support
     //  - 0b0000: integers, single, double precision arithmetic
@@ -419,7 +435,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // SHA2, bits [15:12] of ID_AA64ISAR0_EL1
     supports_neonsha = ((id_aa64isar0_el1 >> 12) & 0xF) >= 1;
 
-#if SZ_USE_SVE || SZ_USE_SVE2 || SZ_USE_SVE2AES
     // SVE, bits [35:32] of ID_AA64PFR0_EL1
     supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
     // Now let's unpack the status flags from ID_AA64ZFR0_EL1
@@ -432,7 +447,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
     // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
     supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
     supports_sve2aes = ((id_aa64zfr0_el1 >> 4) & 0xF) >= 1;
-#endif // SZ_USE_SVE || SZ_USE_SVE2
 
     return (sz_capability_t)(                     //
         (sz_cap_neon_k * (supports_neon)) |       //
@@ -476,20 +490,23 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_arm_(void) {
 
 SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
 
-#if SZ_USE_WESTMERE || SZ_USE_GOLDMONT || SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICELAKE
-
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
         int array[4];
         struct separate_t {
             unsigned eax, ebx, ecx, edx;
         } named;
-    } info1, info7;
+    } info0, info1, info7;
 
 #if defined(_MSC_VER)
+    __cpuidex(info0.array, 0, 0);
     __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
 #else
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info0.named.eax), "=b"(info0.named.ebx), "=c"(info0.named.ecx), "=d"(info0.named.edx)
+        : "a"(0), "c"(0));
     __asm__ __volatile__( //
         "cpuid"
         : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
@@ -499,6 +516,12 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
         : "a"(7), "c"(0));
 #endif
+
+    // Querying a leaf above the highest supported one returns the highest leaf's data, not zeros, so on
+    // early x86-64 parts (max basic leaf below 7) the "leaf 7" registers would hold unrelated bits. The
+    // AVX family is already masked by the XGETBV/OSXSAVE chain below, but SHA-NI is read from leaf 7
+    // unmasked - so zero the whole leaf when it does not exist rather than trust garbage.
+    if (info0.named.eax < 7) info7.named.eax = info7.named.ebx = info7.named.ecx = info7.named.edx = 0;
 
     // Gate AVX/AVX-512 on OS-enabled extended state (XGETBV)
     unsigned has_osxsave = (info1.named.ecx & (1u << 27)) != 0; // OSXSAVE
@@ -540,9 +563,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
         (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw)) |   //
         (sz_cap_icelake_k * (supports_avx512vbmi && supports_avx512vbmi2 && supports_vaes)) | //
         (sz_cap_serial_k));
-#else
-    return sz_cap_serial_k;
-#endif
 }
 #endif // SZ_IS_64BIT_X86_
 
@@ -604,21 +624,107 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_riscv_(void) {
 
 #endif // defined(__riscv) && (__riscv_xlen == 64)
 
+#if defined(__loongarch__)
+
+/**
+ *  @brief Function to determine the SIMD capabilities of the current LoongArch machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_loongarch_(void) {
+#if defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+
+    // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
+    //   HWCAP_LOONGARCH_LSX  == (1 << 4)  // 128-bit SIMD
+    //   HWCAP_LOONGARCH_LASX == (1 << 5)  // 256-bit SIMD, implies LSX
+    unsigned long hwcap = getauxval(AT_HWCAP);
+    return (sz_capability_t)((sz_cap_lasx_k * ((hwcap & (1UL << 5)) != 0)) | sz_cap_serial_k);
+
+#else
+    // Without a portable runtime probe, mirror the compile-time capabilities.
+    return sz_capabilities_comptime_implementation_();
+#endif
+}
+
+#endif // defined(__loongarch__)
+
+#if defined(__powerpc64__) || defined(__powerpc__)
+
+/**
+ *  @brief Function to determine the SIMD capabilities of the current IBM POWER machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_power_(void) {
+#if (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
+
+    // The `powervsx` kernels target POWER9 (`-mcpu=power9 -mvsx`), so both facts are required,
+    // matching the constants in `arch/powerpc/include/uapi/asm/cputable.h`:
+    //   PPC_FEATURE_HAS_VSX     == 0x00000080 // in AT_HWCAP
+    //   PPC_FEATURE2_ARCH_3_00  == 0x00800000 // in AT_HWCAP2, the POWER9 ISA level
+    unsigned long hwcap = 0, hwcap2 = 0;
+#if defined(SZ_IS_LINUX_)
+    hwcap = getauxval(AT_HWCAP);
+    hwcap2 = getauxval(AT_HWCAP2);
+#else
+    elf_aux_info(AT_HWCAP, &hwcap, sizeof(hwcap));
+    elf_aux_info(AT_HWCAP2, &hwcap2, sizeof(hwcap2));
+#endif
+    unsigned const supports_powervsx = ((hwcap & 0x00000080UL) != 0) && ((hwcap2 & 0x00800000UL) != 0);
+    return (sz_capability_t)((sz_cap_powervsx_k * supports_powervsx) | sz_cap_serial_k);
+
+#else
+    // Without a portable runtime probe, mirror the compile-time capabilities.
+    return sz_capabilities_comptime_implementation_();
+#endif
+}
+
+#endif // defined(__powerpc64__) || defined(__powerpc__)
+
+/**
+ *  @brief Whether `sz_capabilities_runtime_implementation_` performs real hardware introspection on this
+ *         platform, or merely mirrors the compile-time mask because no portable probe exists.
+ *
+ *  This is the header-owned source of truth the build systems infer from - the run probe
+ *  (`probes/run_capabilities.c`) reports "no answer" when it is 0, and a compile probe
+ *  (`probes/runtime_detection.c`) lets cross builds ask the same question without executing anything -
+ *  so neither CMake nor `build.rs` hard-codes platform lists that could drift from the detectors here.
+ *  WebAssembly stays 0 by nature: a module carrying unsupported SIMD opcodes fails validation at
+ *  instantiation, so not even load-time masking is possible there.
+ */
+#if SZ_IS_64BIT_X86_ || SZ_IS_64BIT_ARM_
+#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
+#elif defined(__riscv) && (__riscv_xlen == 64) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && \
+    !SZ_AVOID_LIBC
+#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
+#elif defined(__loongarch__) && defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
+#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
+#elif (defined(__powerpc64__) || defined(__powerpc__)) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && \
+    !SZ_AVOID_LIBC
+#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
+#else
+#define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (0)
+#endif
+
 /**
  *  @brief Function to determine the SIMD capabilities of the current CPU at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
  */
 SZ_API_COMPTIME sz_capability_t sz_capabilities_runtime_implementation_(void) {
-#if SZ_IS_64BIT_X86_
+#if !SZ_CAPABILITIES_RUNTIME_DETECTABLE_
+    // WebAssembly and OS-less exotic targets expose their SIMD support at compile time only,
+    // so runtime capabilities mirror compile-time ones.
+    return sz_capabilities_comptime_implementation_();
+#elif SZ_IS_64BIT_X86_
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
     return sz_capabilities_implementation_arm_();
 #elif defined(__riscv) && (__riscv_xlen == 64)
     return sz_capabilities_implementation_riscv_();
+#elif defined(__loongarch__)
+    return sz_capabilities_implementation_loongarch_();
+#elif defined(__powerpc64__) || defined(__powerpc__)
+    return sz_capabilities_implementation_power_();
 #else
-    // WebAssembly, LoongArch, and Power expose their SIMD support at compile time
-    // (there is no portable runtime probe here), so runtime capabilities mirror compile-time ones.
     return sz_capabilities_comptime_implementation_();
 #endif
 }
