@@ -129,15 +129,99 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|RISCV64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64")
     set(SZ_IS_64BIT_LOONGARCH_ TRUE)
     message(STATUS "Platform: LoongArch64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|powerpc64le|PPC64LE|POWERPC64LE")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
+    # Matches both endiannesses ("ppc64le" contains "ppc64"); the kernels handle big-endian explicitly
+    # (`find/powervsx.h`) and `SZ_IS_BIG_ENDIAN_` is derived from `CMAKE_C_BYTE_ORDER` separately.
     set(SZ_IS_64BIT_POWER_ TRUE)
-    message(STATUS "Platform: PowerPC64 LE (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
+    message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "wasm")
     # WebAssembly is 32-bit; SIMD comes from the toolchain's `-msimd128` / `-mrelaxed-simd`, and the
     # `set_architecture_simd_definitions` wasm branch keys off `CMAKE_SYSTEM_NAME`, not a 64-bit flag.
     message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
+endif ()
+
+# ISA capability probes: which SIMD tiers can this toolchain COMPILE, and which can this machine RUN. The probe sources
+# under `probes/` are shared with the Cargo build (`build.rs`); the model and the helper macros are documented in
+# `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_CAN_COMPILE_<TIER>` results and the `SZ_ISA_TIERS` list.
+if (SZ_IS_64BIT_X86_)
+    include(cmake/sz_x86_isa_probes.cmake)
+elseif (SZ_IS_64BIT_ARM_)
+    include(cmake/sz_arm_isa_probes.cmake)
+elseif (SZ_IS_64BIT_RISCV_)
+    include(cmake/sz_riscv_isa_probes.cmake)
+elseif (SZ_IS_64BIT_LOONGARCH_)
+    include(cmake/sz_loongarch_isa_probes.cmake)
+elseif (SZ_IS_64BIT_POWER_)
+    include(cmake/sz_power_isa_probes.cmake)
+elseif (
+    CMAKE_SYSTEM_NAME STREQUAL "WASI"
+    OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten"
+    OR CMAKE_SYSTEM_PROCESSOR MATCHES "wasm"
+)
+    include(cmake/sz_wasm_isa_probes.cmake)
+else ()
+    set(SZ_ISA_TIERS "")
+endif ()
+
+# SIMD tier verdicts: fold the probe results, the machine answer, and any `-D SZ_USE_<TIER>=0/1` overrides into two
+# verdicts per tier:
+#   SZ_USE_<TIER>_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
+#   SZ_USE_<TIER>_TO_RUN     → comptime-dispatched tests & benchmarks (the picked tier must also run HERE)
+# When a verdict set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
+# `SZ_*_TIERS_KNOWN` flag stays 0, targets get no explicit definitions, and `types.h` auto-detection under their own
+# flags decides, as it did before the probes existed.
+sz_runtime_detectable_()
+set(SZ_COMPILE_TIERS_KNOWN ${SZ_RUNTIME_DETECTABLE})
+set(SZ_RUN_TIERS_KNOWN 0)
+if (SZ_RUNTIME_DETECTABLE)
+    sz_machine_capabilities_()
+    if (NOT "${SZ_MACHINE_CAPABILITIES}" STREQUAL "")
+        set(SZ_RUN_TIERS_KNOWN 1)
+        string(REPLACE "," ";" sz_machine_tokens_ "${SZ_MACHINE_CAPABILITIES}")
+    endif ()
+endif ()
+set(sz_tiers_to_compile_ "")
+set(sz_tiers_to_run_ "")
+foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
+    # Normalize every truthy source to a strict 1/0 - `check_c_source_compiles` caches an EMPTY string on
+    # failure, and overrides may arrive as ON/OFF, either of which would produce an invalid `SZ_USE_X=`.
+    if (SZ_CAN_COMPILE_${sz_tier_})
+        set(sz_to_compile_ 1)
+    else ()
+        set(sz_to_compile_ 0)
+    endif ()
+    set(sz_to_run_ ${sz_to_compile_})
+    string(TOLOWER "${sz_tier_}" sz_token_)
+    if (sz_to_run_ AND SZ_RUN_TIERS_KNOWN AND NOT sz_token_ IN_LIST sz_machine_tokens_)
+        set(sz_to_run_ 0)
+    endif ()
+    if (DEFINED SZ_USE_${sz_tier_}) # The user override wins both verdicts, except past a failed compile probe.
+        if (SZ_USE_${sz_tier_} AND NOT sz_to_compile_)
+            message(WARNING "SZ_USE_${sz_tier_}=1 requested, but its probe does not compile here; ignoring")
+        elseif (SZ_USE_${sz_tier_})
+            set(sz_to_compile_ 1)
+            set(sz_to_run_ 1)
+        else ()
+            set(sz_to_compile_ 0)
+            set(sz_to_run_ 0)
+        endif ()
+    endif ()
+    set(SZ_USE_${sz_tier_}_TO_COMPILE ${sz_to_compile_})
+    set(SZ_USE_${sz_tier_}_TO_RUN ${sz_to_run_})
+    if (sz_to_compile_)
+        list(APPEND sz_tiers_to_compile_ ${sz_tier_})
+    endif ()
+    if (sz_to_run_)
+        list(APPEND sz_tiers_to_run_ ${sz_tier_})
+    endif ()
+endforeach ()
+if (SZ_COMPILE_TIERS_KNOWN)
+    message(STATUS "SIMD tiers to compile: [${sz_tiers_to_compile_}]")
+endif ()
+if (SZ_RUN_TIERS_KNOWN)
+    message(STATUS "SIMD tiers to run here: [${sz_tiers_to_run_}]")
 endif ()
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
@@ -521,6 +605,12 @@ function (define_launcher exec_name source cpp_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${source})
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
+    # Launchers dispatch at compile time, so a tier must be BOTH compilable by this toolchain AND runnable on this
+    # machine — the intersection the RUN verdicts encode. When the caller pins an explicit `target_arch`, that `-march`
+    # (plus `types.h` auto-detection) is the tier request, so the machine gate must not override it.
+    if ("${target_arch}" STREQUAL "")
+        set_architecture_simd_definitions(${exec_name} RUN)
+    endif ()
     target_link_libraries(${exec_name} PRIVATE stringzilla_header)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
@@ -547,116 +637,23 @@ endfunction ()
 # Tests and benchmarks are defined after the libraries (below), so the StringZillas consumers can link the precompiled
 # static archives instead of recompiling the engines header-only.
 
-# Helper function to set architecture-specific SIMD compile definitions for dynamic dispatch. This is shared between
-# stringzilla_shared (serial) and stringzillas_shared (parallel) libraries. This function ONLY sets the SIMD-related
-# preprocessor definitions, not compiler flags.
-function (set_architecture_simd_definitions target)
+# Stamps the architecture id and the per-tier `SZ_USE_*` verdicts onto a target. `mode` is `COMPILE` for
+# runtime-dispatched libraries and `RUN` for comptime-dispatched executables; the verdicts themselves are resolved once
+# at configure time, in the "SIMD tier verdicts" block right after the probe includes.
+function (set_architecture_simd_definitions target mode)
     if (SZ_IS_64BIT_X86_)
-        target_compile_definitions(
-            ${target}
-            PRIVATE "SZ_IS_64BIT_X86_=1"
-                    "SZ_IS_64BIT_ARM_=0"
-                    "SZ_USE_WESTMERE=1"
-                    "SZ_USE_GOLDMONT=1"
-                    "SZ_USE_HASWELL=1"
-                    "SZ_USE_SKYLAKE=1"
-                    "SZ_USE_ICELAKE=1"
-                    "SZ_USE_NEON=0"
-                    "SZ_USE_NEONAES=0"
-                    "SZ_USE_NEONSHA=0"
-                    "SZ_USE_SVE=0"
-                    "SZ_USE_SVE2=0"
-                    "SZ_USE_SVE2AES=0"
-        )
+        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
     elseif (SZ_IS_64BIT_ARM_)
-        # SVE is not supported with MSVC
-        if (MSVC)
-            set(supports_sve "0")
-        else ()
-            set(supports_sve "1")
-        endif ()
-        target_compile_definitions(
-            ${target}
-            PRIVATE "SZ_IS_64BIT_ARM_=1"
-                    "SZ_IS_64BIT_X86_=0"
-                    "SZ_USE_WESTMERE=0"
-                    "SZ_USE_GOLDMONT=0"
-                    "SZ_USE_HASWELL=0"
-                    "SZ_USE_SKYLAKE=0"
-                    "SZ_USE_ICELAKE=0"
-                    "SZ_USE_NEON=1"
-                    "SZ_USE_NEONAES=1"
-                    "SZ_USE_NEONSHA=1"
-                    "SZ_USE_SVE=${supports_sve}"
-                    "SZ_USE_SVE2=${supports_sve}"
-                    "SZ_USE_SVE2AES=${supports_sve}"
-        )
-    elseif (SZ_IS_64BIT_RISCV_)
-        # RISC-V with the RVV 1.0 Vector extension (the toolchain passes `-march=rv64gcv`).
-        target_compile_definitions(
-            ${target} PRIVATE "SZ_USE_RVV=1" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=0" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
-        )
-    elseif (SZ_IS_64BIT_LOONGARCH_)
-        # LoongArch64 with the LASX 256-bit SIMD extension (the toolchain passes `-mlasx`).
-        target_compile_definitions(
-            ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=1" "SZ_USE_POWERVSX=0" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
-        )
-    elseif (SZ_IS_64BIT_POWER_)
-        # IBM POWER (little-endian) with VSX (the toolchain passes `-mcpu=power9 -mvsx`).
-        target_compile_definitions(
-            ${target} PRIVATE "SZ_USE_RVV=0" "SZ_USE_LASX=0" "SZ_USE_POWERVSX=1" "SZ_USE_V128=0" "SZ_USE_V128RELAXED=0"
-        )
-    elseif (
-        CMAKE_SYSTEM_NAME STREQUAL "WASI"
-        OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten"
-        OR CMAKE_SYSTEM_PROCESSOR MATCHES "wasm"
-    )
-        # WebAssembly: the toolchain passes `-msimd128` (+ `-mrelaxed-simd`), and `types.h` auto-enables SZ_USE_V128 /
-        # SZ_USE_V128RELAXED from the predefined `__wasm_simd128__` / `__wasm_relaxed_simd__` macros. Leave those to
-        # auto-detect; just disable every native tier. wasm has no runtime probe, so the header-only test/bench TUs use
-        # compile-time dispatch (SZ_DYNAMIC_DISPATCH defaults to 0).
-        target_compile_definitions(
-            ${target}
-            PRIVATE "SZ_IS_64BIT_X86_=0"
-                    "SZ_IS_64BIT_ARM_=0"
-                    "SZ_USE_WESTMERE=0"
-                    "SZ_USE_GOLDMONT=0"
-                    "SZ_USE_HASWELL=0"
-                    "SZ_USE_SKYLAKE=0"
-                    "SZ_USE_ICELAKE=0"
-                    "SZ_USE_NEON=0"
-                    "SZ_USE_NEONAES=0"
-                    "SZ_USE_NEONSHA=0"
-                    "SZ_USE_SVE=0"
-                    "SZ_USE_SVE2=0"
-                    "SZ_USE_SVE2AES=0"
-                    "SZ_USE_RVV=0"
-                    "SZ_USE_LASX=0"
-                    "SZ_USE_POWERVSX=0"
-        )
+        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=1")
     else ()
-        # Fallback: disable all SIMD and use serial execution only
-        message(
-            WARNING
-                "Neither SZ_IS_64BIT_X86_ nor SZ_IS_64BIT_ARM_ is set for ${target}, falling back to serial execution"
-        )
-        target_compile_definitions(
-            ${target}
-            PRIVATE "SZ_IS_64BIT_X86_=0"
-                    "SZ_IS_64BIT_ARM_=0"
-                    "SZ_USE_WESTMERE=0"
-                    "SZ_USE_GOLDMONT=0"
-                    "SZ_USE_HASWELL=0"
-                    "SZ_USE_SKYLAKE=0"
-                    "SZ_USE_ICELAKE=0"
-                    "SZ_USE_NEON=0"
-                    "SZ_USE_NEONAES=0"
-                    "SZ_USE_NEONSHA=0"
-                    "SZ_USE_SVE=0"
-                    "SZ_USE_SVE2=0"
-                    "SZ_USE_SVE2AES=0"
-        )
+        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
     endif ()
+    if (NOT SZ_${mode}_TIERS_KNOWN)
+        return () # No verdicts here — `types.h` auto-detection under the target's own flags decides.
+    endif ()
+    foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
+        target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=${SZ_USE_${sz_tier_}_TO_${mode}}")
+    endforeach ()
 endfunction ()
 
 # Apply the conservative baseline architecture (`-march`/`-mcpu`) that lets one shared/OBJECT compilation host every
@@ -724,8 +721,8 @@ function (define_stringzilla_shared target)
     # Set the baseline architecture; the dynamic-dispatch core selects each SIMD tier at runtime.
     set_baseline_architecture_flags(${target} "${CMAKE_CXX_COMPILER_ID}")
 
-    # Set architecture-specific SIMD flags using shared helper function
-    set_architecture_simd_definitions(${target})
+    # Enable every tier the toolchain can compile; the runtime dispatch table masks what the CPU lacks.
+    set_architecture_simd_definitions(${target} COMPILE)
 
 endfunction ()
 
@@ -809,7 +806,7 @@ function (define_stringzillas_shared target source_file backend_flags)
     target_compile_options(
         ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O2;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
     )
-    set_architecture_simd_definitions(${objects})
+    set_architecture_simd_definitions(${objects} COMPILE)
 
     # Usage requirements seen by consumers (tests and benchmarks linking the library). Defining `SZ_DYNAMIC_DISPATCH=1`
     # makes a consumer extern, rather than re-instantiate, the engines, and fork_union is needed by the extern block in
@@ -858,7 +855,7 @@ function (define_stringzillas_cuda_objects name sources gpu_archs)
         target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
     endif ()
     target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr")
-    set_architecture_simd_definitions(${name})
+    set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CUDA_COMPILER_ID}")
 endfunction ()
 

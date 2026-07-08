@@ -57,15 +57,23 @@ use stringzilla::szs;                      // batch engines (needs cpus/cuda/roc
 
 ### Dynamic vs Compile-Time Dispatch
 
-The `dynamic-dispatch` feature (on by default) controls how the C kernels select a SIMD backend, mirroring the C library's `SZ_DYNAMIC_DISPATCH` macro:
+The `dynamic-dispatch` feature (on by default) controls how the C kernels select a SIMD backend, mirroring the C library's `SZ_DYNAMIC_DISPATCH` macro.
+The build script decides which ISA tiers to enable from two independently probed facts, using the same checked-in `probes/` sources as the CMake build:
 
-- __On (default):__ every ISA tier is compiled and the best one is chosen _at load_ through a dispatch table — the same model as the precompiled `stringzilla_shared` C library.
+- the __compile set__ — tiers this toolchain can emit, learned by try-compiling `probes/<arch>_<tier>.c` (tiny programs reusing the real kernels' `target` pragmas and intrinsics, so broken or old toolchains are caught up front);
+- the __run set__ — tiers this machine can execute, learned by compiling and _running_ `probes/run_capabilities.c` on native builds.
+  When cross-compiling, the target description (`-C target-cpu=…` / `-C target-feature=+…`, surfaced as `CARGO_CFG_TARGET_FEATURE`) stands in for the machine.
+
+The two sets are independent — an old compiler on a new CPU misses tiers the machine could run, a new compiler on an old CPU can emit tiers the machine would trap on — and the dispatch mode picks the gate:
+
+- __On (default):__ every tier in the _compile set_ is built, and the best one is chosen _at load_ through a dispatch table — the same model as the precompiled `stringzilla_shared` C library.
   One binary runs optimally on any CPU of the target architecture, at the cost of one indirect call per operation.
-- __Off:__ each function is resolved _at compile time_ to the single newest tier the toolchain supports (for WebAssembly: `v128relaxed` when available, else `v128`).
-  There is no table and no constructor, the unused tiers are dead-code-stripped, and the call goes straight to the kernel — the analog of including the header-only `stringzilla_header` in your own translation unit.
+  Two constraints bound the optimism, both expressed in the probes rather than in build-system code: the SVE probes refuse Apple targets outright (no Apple CPU implements SVE, so the kernels could compile but never dispatch), and targets whose built library performs no runtime CPU detection — WebAssembly and OS-less exotica, inferred by compile-probing the header's own `SZ_CAPABILITIES_RUNTIME_DETECTABLE_` — stay within the target description, since no load-time masking exists there.
+- __Off:__ each function is resolved _at compile time_ to the newest tier in the _intersection_ of the compile and run sets — the analog of including the header-only `stringzilla_header` in your own translation unit with `-march` describing the deployment CPU.
+  There is no table and no constructor, the unused tiers are dead-code-stripped, and the call goes straight to the kernel.
 
 Removing the indirection trades flexibility for speed.
-The resulting binary __bakes in one ISA tier__, so it is not portable across CPUs (a build that selected AVX-512 will fault on an older host) — it is intended for WebAssembly and for "build where you run" deployments.
+A compile-time binary built natively is __tuned to the build machine__ ("build where you run"): the run probe may enable tiers beyond the declared target features, and the build prints a warning when it does, because the result is not portable to older CPUs.
 In exchange, call-bound operations get faster: a short-input `sz_find` microbenchmark on this machine ran ~15% more calls per second without the table (≈205 → ≈240 Mcalls/s for 8–64 B inputs).
 The win shrinks as inputs grow and the SIMD kernel, rather than the call overhead, dominates.
 
@@ -73,10 +81,12 @@ Disable it by opting out of default features (re-adding the ones you still want)
 
 ```toml
 [dependencies]
-# Compile-time dispatch: smaller, faster, but pinned to this machine's best ISA.
+# Compile-time dispatch: smaller, faster, but pinned to the build machine's best ISA.
 stringzilla = { version = "4", default-features = false, features = ["std"] }
 ```
 
+Every tier can be forced on or off with its `SZ_USE_*` environment variable (`SZ_USE_SVE2=0 cargo build`), overriding the run gate but never the compile gate; the CMake build honors the same names as cache options (`-D SZ_USE_SVE2=0`).
+For a portable compile-time build, cross-describe the floor instead of probing the machine: pin `-C target-feature=…` (or `-C target-cpu=…`) to the oldest deployment CPU.
 `sz::dynamic_dispatch()` reports which mode the crate was built with.
 This setting applies to the single-string `sz` library; the batch `stringzillas` engines (`cpus`/`cuda`/`rocm`) always use runtime dispatch.
 

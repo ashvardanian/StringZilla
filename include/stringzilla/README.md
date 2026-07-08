@@ -777,7 +777,12 @@ sz_cptr_t sz_capabilities_to_string(sz_capability_t caps); // e.g. "serial,haswe
 int sz_dynamic_dispatch(void);
 ```
 
-The runtime probe inspects CPUID on x86, the AArch64 ID registers on ARM with a `SIGILL`-guarded `mrs` fallback to NEON-only, and `getauxval`/`riscv_hwprobe` on RISC-V; WebAssembly, LoongArch, and Power report their compile-time capabilities.
+The runtime probe inspects CPUID on x86, the AArch64 ID registers on ARM with a `SIGILL`-guarded `mrs` fallback to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
+Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities()` intersects it with the compile-time mask.
+WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time (`SZ_CAPABILITIES_RUNTIME_DETECTABLE_` reports whether the current platform can introspect).
+
+The same machinery drives the build systems through the checked-in `probes/` programs: CMake and Cargo try-compile `probes/<arch>_<tier>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which tiers the toolchain can __compile__, and execute `probes/run_capabilities.c` to learn which tiers the build machine can __run__.
+Runtime-dispatched libraries enable everything compilable, trusting the load-time table to mask the rest; compile-time builds bake the intersection of the two sets.
 
 ```c
 #include <stdio.h>
@@ -996,8 +1001,10 @@ __`SZ_DEBUG`__:
 
 __`SZ_USE_GOLDMONT`, `SZ_USE_WESTMERE`, `SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICELAKE`, `SZ_USE_NEON`, `SZ_USE_NEONAES`, `SZ_USE_NEONSHA`, `SZ_USE_SVE`, `SZ_USE_SVE2`, `SZ_USE_SVE2AES`, `SZ_USE_V128`, `SZ_USE_V128RELAXED`, `SZ_USE_RVV`, `SZ_USE_LASX`, `SZ_USE_POWERVSX`__:
 
-> One can explicitly disable certain families of SIMD instructions for compatibility purposes.
-> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
+> One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
+> In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags.
+> The CMake and Cargo builds resolve them from the shared `probes/` sources instead — try-compiling each tier to learn what the toolchain can emit, and executing `probes/run_capabilities.c` to learn what the build machine can run — so runtime-dispatched libraries carry every compilable tier while compile-time builds bake the intersection.
+> The same names work as CMake cache options (`-D SZ_USE_SVE2=0`) and as Cargo environment variables (`SZ_USE_SVE2=0 cargo build`); an explicit `1` overrides the machine gate but never a failed compile probe.
 
 __`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
 
