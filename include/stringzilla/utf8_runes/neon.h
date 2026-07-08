@@ -279,15 +279,31 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     // the scan is really a gather; emulate it with a scalar L1 walk (Apple's L1 is fast) - measured 59.6 → 18.4
     // cyc/call (3.2x) on an M5 Pro for the 54-tile grapheme stage 2. The `< tile_count` mask reproduces the old
     // all-zero result for selectors past the table, keeping it bit-exact. `within` is a nibble by construction.
-    sz_align_(16) sz_u8_t selector_lanes[16], within_lanes[16], gathered_lanes[16];
-    vst1q_u8(selector_lanes, selector);
-    vst1q_u8(within_lanes, within);
-    for (int lane = 0; lane < 16; ++lane) {
-        int const tile = selector_lanes[lane];
-        int const safe_tile = tile < tile_count ? tile : 0;
-        gathered_lanes[lane] = table[safe_tile * 16 + (within_lanes[lane] & 0x0F)];
-    }
+    //
+    // ! This is the one stage NEON has no good vectorized answer for: the lookup is a gather of a >64-byte table by
+    // ! a per-lane u8 index, and every SIMD alternative loses - the `tile_count`-deep vbslq scan is ~56 cyc, and a
+    // ! present-page walk (build the 1<<page presence mask, resolve only the pages the window touches) only ties the
+    // ! scalar walk because the mask build costs as much as the 16 loads it saves (measured on M5). It is also NOT
+    // ! the end-to-end bottleneck - differential stubbing showed it negligible for Latin text and ~36% of the Korean
+    // ! grapheme cost. SVE2 changes this: `svld1_gather_[u32]index_u8` is a true vectorized gather, so a dedicated
+    // ! SVE2 cascade can resolve `table[selector*16 + within]` across the whole vector in one instruction (no scan,
+    // ! no scalar loop) - that is the right home for vectorizing this stage.
+    // Flat offset `selector * 16 + within` fuses to a 16-bit gather index `(selector << 4) | within` (within is a
+    // nibble). Clamp out-of-range selectors to 0 branchlessly (kept in bounds; masked to 0 by `in_range`) so the walk
+    // is one 16-bit-indexed byte load per lane - two loads/lane, no per-lane branch or multiply. Same shape as
+    // @ref sz_utf8_rune_leaf_gather_neon_; SVE2 `LD1B` gather does all 16 lanes in one instruction.
     uint8x16_t const in_range = vcltq_u8(selector, vdupq_n_u8((sz_u8_t)tile_count));
+    uint8x16_t const selector_clamped = vandq_u8(selector, in_range);
+    uint8x16_t const within_nibble = vandq_u8(within, vdupq_n_u8(0x0F));
+    uint16x8_t const offset_lo =
+        vorrq_u16(vshll_n_u8(vget_low_u8(selector_clamped), 4), vmovl_u8(vget_low_u8(within_nibble)));
+    uint16x8_t const offset_hi =
+        vorrq_u16(vshll_n_u8(vget_high_u8(selector_clamped), 4), vmovl_u8(vget_high_u8(within_nibble)));
+    sz_align_(16) sz_u16_t offsets[16];
+    sz_align_(16) sz_u8_t gathered_lanes[16];
+    vst1q_u16(offsets, offset_lo);
+    vst1q_u16(offsets + 8, offset_hi);
+    for (int lane = 0; lane < 16; ++lane) gathered_lanes[lane] = table[offsets[lane]];
     return vandq_u8(vld1q_u8(gathered_lanes), in_range);
 }
 
@@ -317,6 +333,34 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, u
  *          never over-reads past the array. @p group_base must point to at least 64 valid bytes. */
 SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index) {
     return vqtbl4q_u8(vld1q_u8_x4(group_base), index);
+}
+
+/** @brief  Stage-3 leaf-group gather - `class[lane] = group_table[leaf_group[lane] * 256 + index[lane]]`, groups
+ *          `>= group_count` resolving to 0. The 256-byte-group sibling of @ref sz_utf8_rune_cascade_stage_neon_ and the
+ *          final trie stage every UAX classifier (grapheme / word / sentence / line, BMP + astral) shares. Exactly one
+ *          group matches per lane, so it is a gather, and NEON reaches only 64 bytes per `vqtbl4q`. The two vectorized
+ *          alternatives both lose on M5: the per-group `lut256` scan is `group_count` (13-21) × 4 vqtbl4q/quarter (the
+ *          top sentence/line hotspot), and a present-group walk — resolve only the 1-3 groups a window touches, one
+ *          `lut256` each — still ties or loses because each present group costs 4 slow vqtbl4q while the bounded scalar
+ *          L1 walk here sustains 16 fast loads. `< group_count` reproduces the scan's all-zero for out-of-range leaf
+ *          groups. SVE2 `svld1_gather_[u32]index_u8` vectorizes it outright (see the cascade note). */
+SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_leaf_gather_neon_( //
+    sz_u8_t const *group_table, int group_count, uint8x16_t leaf_group, uint8x16_t index) {
+    // The flat offset is `group * 256 + index`, and `index` is a byte, so it collapses to a single 16-bit gather index
+    // `(group << 8) | index`. Fuse it in-register and clamp out-of-range groups to 0 branchlessly (kept in bounds; the
+    // result is masked to 0 by `in_range` anyway) so the scalar walk is one 16-bit-indexed byte load per lane - two
+    // loads/lane, no per-lane branch or multiply. NEON/Armv8 has no gather; SVE2 `LD1B {Zt.S}, Pg/Z, [Xn, Zm.S, UXTW]`
+    // resolves all 16 lanes in one instruction (that is the SVE2 backend's job); on base NEON this fused walk is the floor.
+    uint8x16_t const in_range = vcltq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group_count));
+    uint8x16_t const group_clamped = vandq_u8(leaf_group, in_range);
+    uint16x8_t const offset_lo = vorrq_u16(vshll_n_u8(vget_low_u8(group_clamped), 8), vmovl_u8(vget_low_u8(index)));
+    uint16x8_t const offset_hi = vorrq_u16(vshll_n_u8(vget_high_u8(group_clamped), 8), vmovl_u8(vget_high_u8(index)));
+    sz_align_(16) sz_u16_t offsets[16];
+    sz_align_(16) sz_u8_t class_lanes[16];
+    vst1q_u16(offsets, offset_lo);
+    vst1q_u16(offsets + 8, offset_hi);
+    for (int lane = 0; lane < 16; ++lane) class_lanes[lane] = group_table[offsets[lane]];
+    return vandq_u8(vld1q_u8(class_lanes), in_range);
 }
 
 #pragma endregion Shared SIMD leaf substrate
