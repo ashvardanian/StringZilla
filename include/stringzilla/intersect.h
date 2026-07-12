@@ -55,7 +55,7 @@ extern "C" {
  *  @pre The @p first_positions array must fit at least `min(first_sequence->count, second_sequence->count)` items.
  *  @pre The @p second_positions array must fit at least `min(first_sequence->count, second_sequence->count)` items.
  *  @note Tolerates duplicate strings within either sequence: each distinct shared value is emitted exactly
- *        once (a distinct-set intersection), so `intersection_size` never exceeds
+ *        once, a distinct-set intersection, so `intersection_size` never exceeds
  *        `min(first_sequence->count, second_sequence->count)` and can't overflow the output arrays.
  *
  *  Example usage:

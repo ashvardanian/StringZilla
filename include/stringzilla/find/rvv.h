@@ -131,7 +131,9 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t hay
 
 SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length) {
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the start, like `strstr`.
+    if (!needle_length) return haystack;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_rvv(haystack, haystack_length, needle);
 
     sz_size_t offset_first, offset_mid, offset_last;
@@ -170,7 +172,9 @@ SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_len
 
 SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                        sz_size_t needle_length) {
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the end.
+    if (!needle_length) return haystack + haystack_length;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_rvv(haystack, haystack_length, needle);
 
     sz_size_t offset_first, offset_mid, offset_last;

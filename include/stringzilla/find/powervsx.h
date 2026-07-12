@@ -89,8 +89,9 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t h
 SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length) {
 
-    // This almost never fires, but it's better to be safe than sorry.
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the start, like `strstr`.
+    if (!needle_length) return haystack;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_powervsx(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing (first, middle, last).
@@ -163,8 +164,9 @@ SZ_API_COMPTIME sz_cptr_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystac
 SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length) {
 
-    // This almost never fires, but it's better to be safe than sorry.
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the end.
+    if (!needle_length) return haystack + haystack_length;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_rfind_byte_powervsx(haystack, haystack_length, needle);
 
     sz_size_t offset_first, offset_mid, offset_last;

@@ -632,8 +632,9 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_over_256bytes_serial_( //
 
 SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length) {
-    // This almost never fires, but it's better to be safe than sorry.
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the start, like `strstr`.
+    if (!needle_length) return haystack;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense - now optimized for both endianness!
@@ -660,8 +661,9 @@ SZ_API_COMPTIME sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_
 SZ_API_COMPTIME sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length) {
 
-    // This almost never fires, but it's better to be safe than sorry.
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the end.
+    if (!needle_length) return haystack + haystack_length;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.

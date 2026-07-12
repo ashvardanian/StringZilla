@@ -109,7 +109,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
     // `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // Top bit of a stored position marks a slot whose (distinct) value already produced a pair, so a
-    // duplicate key on either sequence doesn't re-emit -- the result stays a set of size <= min(counts)
+    // duplicate key on either sequence doesn't re-emit, so the result stays a set of size <= min(counts)
     // and never overflows the caller's `positions` arrays. Positions are indices; the high bit is free.
     sz_size_t const consumed_flag = (sz_size_t)1 << (sizeof(sz_size_t) * 8 - 1);
 
@@ -256,7 +256,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                     sz_bool_t const same = sz_equal(str, small_str, length);
                     if (same != sz_true_k) continue;
 
-                    // This distinct value already contributed a pair (a duplicate key on either side) - don't re-emit.
+                    // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
                     if (stored & consumed_flag) break;
 
                     // Finally, there is a match: store the positions and mark the slot consumed.
@@ -337,7 +337,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                         sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
                         sz_bool_t const same = sz_equal(str, small_str, length);
                         if (same == sz_true_k) {
-                            // This distinct value already produced a pair - skip the duplicate key.
+                            // This distinct value already produced a pair, so skip the duplicate key.
                             if (stored & consumed_flag) continue;
                             // Finally, there is a match, store the positions and mark the slot consumed.
                             small_positions[intersection_count] = small_position;
@@ -368,7 +368,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                     sz_bool_t const same = sz_equal(str, small_str, length);
                     if (same != sz_true_k) continue;
 
-                    // This distinct value already contributed a pair (a duplicate key on either side) - don't re-emit.
+                    // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
                     if (stored & consumed_flag) break;
 
                     // Finally, there is a match: store the positions and mark the slot consumed.
@@ -426,7 +426,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                 sz_bool_t const same = sz_equal(str, small_str, length);
                 if (same != sz_true_k) continue;
 
-                // This distinct value already contributed a pair (a duplicate key on either side) - don't re-emit.
+                // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
                 if (stored & consumed_flag) break;
 
                 // Finally, there is a match: store the positions and mark the slot consumed.

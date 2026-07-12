@@ -62,7 +62,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
     // 32-bit, so `SZ_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe loop spins forever.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
     // The top bit of a stored position marks a slot whose (distinct) value has already produced a pair,
-    // so duplicate keys on either sequence don't emit again -- keeping the result a set whose size never
+    // so duplicate keys on either sequence don't emit again, keeping the result a set whose size never
     // exceeds `min(counts)` and can't overflow the caller's `positions` arrays. Positions are sequence
     // indices, always far below 2^(word_bits-1), so the high bit is free to borrow.
     sz_size_t const consumed_flag = (sz_size_t)1 << (sizeof(sz_size_t) * 8 - 1);
@@ -104,7 +104,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_serial(                       
             sz_bool_t const same = sz_equal(str, small_str, length);
             if (same != sz_true_k) continue;
 
-            // This distinct value already contributed a pair (a duplicate key on either side) - don't re-emit.
+            // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
             if (stored & consumed_flag) break;
 
             // Finally, there is a match: store the positions and mark the slot consumed.

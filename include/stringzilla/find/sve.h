@@ -71,7 +71,9 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haysta
 
 SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length) {
-    if (haystack_length < needle_length || !needle_length) return SZ_NULL_CHAR;
+    // Empty needle matches at the start, like `strstr`.
+    if (!needle_length) return haystack;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
     if (needle_length == 1) return sz_find_byte_sve(haystack, haystack_length, needle);
 
     // Determine the number of bytes in an SVE vector.

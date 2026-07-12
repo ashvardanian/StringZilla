@@ -1607,6 +1607,12 @@ where
 ///
 /// An `Option<usize>` representing the starting index of the first occurrence of `needle`
 /// within `haystack` if found, otherwise `None`.
+///
+/// # Empty needle
+///
+/// The C core returns the start of `haystack` for an empty needle, like `strstr`, so
+/// `find(haystack, b"")` is always `Some(0)`, matching `"abc".find("") == Some(0)`. This holds even
+/// for an empty `haystack`.
 pub fn find<H, N>(haystack: H, needle: N) -> Option<usize>
 where
     H: AsRef<[u8]>,
@@ -1640,6 +1646,12 @@ where
 ///
 /// An `Option<usize>` representing the starting index of the last occurrence of `needle`
 /// within `haystack` if found, otherwise `None`.
+///
+/// # Empty needle
+///
+/// The C core returns the end of `haystack` for an empty needle, the reverse mirror of `strstr`, so
+/// `rfind(haystack, b"")` is always `Some(haystack.len())`, matching `"abc".rfind("") == Some(3)`.
+/// This holds even for an empty `haystack`.
 #[inline(always)]
 pub fn rfind<H, N>(haystack: H, needle: N) -> Option<usize>
 where
@@ -1659,6 +1671,30 @@ where
     } else {
         Some(unsafe { result.offset_from(haystack_pointer) }.try_into().unwrap())
     }
+}
+
+/// Checks whether `needle` occurs anywhere within `haystack`.
+///
+/// # Arguments
+///
+/// * `haystack`: The byte slice to search.
+/// * `needle`: The byte slice to look for within the haystack.
+///
+/// # Returns
+///
+/// `true` if `needle` occurs within `haystack`, `false` otherwise.
+///
+/// # Empty needle
+///
+/// Mirrors `str::contains`: an empty needle is always present, so `contains(haystack, b"")` is
+/// always `true`, matching `"abc".contains("") == true` (even for an empty `haystack`).
+#[inline(always)]
+pub fn contains<H, N>(haystack: H, needle: N) -> bool
+where
+    H: AsRef<[u8]>,
+    N: AsRef<[u8]>,
+{
+    find(haystack, needle).is_some()
 }
 
 /// Finds the index of the first character in `haystack` that is also present in `needles`.
@@ -2677,6 +2713,13 @@ impl<'a> Matcher<'a> for MatcherType<'a> {
 /// An iterator over non-overlapping matches of a pattern in a string slice.
 /// This iterator yields the matched substrings in the order they are found.
 ///
+/// # Empty needle
+///
+/// An empty needle matches at every position, including past the last byte: iterating over an
+/// `n`-byte haystack yields `n + 1` empty matches, mirroring `"abc".matches("").count() == 4`.
+/// Each zero-length match still advances the search position by at least one byte, so the
+/// iterator always terminates instead of looping forever on the same spot.
+///
 /// # Examples
 ///
 /// ```
@@ -2720,7 +2763,10 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.haystack.len() {
+        // An empty needle matches even in the empty slice at `haystack.len()`, so the bound is
+        // exclusive on the *next* sentinel position, not on `haystack.len()` itself; once
+        // exhausted, `position` is parked one past `haystack.len()` so this guard is stable.
+        if self.position > self.haystack.len() {
             return None;
         }
 
@@ -2731,10 +2777,17 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
             );
             let start = self.position + index;
             let end = start + self.matcher.needle_length();
-            self.position = start + if O::OVERLAP { 1 } else { self.matcher.needle_length() };
+            // A zero-length match (empty needle) must still advance by at least one byte, or
+            // this would loop forever re-matching the same position.
+            let step = if O::OVERLAP {
+                1
+            } else {
+                self.matcher.needle_length().max(1)
+            };
+            self.position = start + step;
             Some(&self.haystack[start..end])
         } else {
-            self.position = self.haystack.len();
+            self.position = self.haystack.len() + 1;
             None
         }
     }
@@ -2747,6 +2800,13 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
 /// slices, mirroring `str::split`). Call [`Self::skip_empty`] to drop zero-length segments. The `STEPS`
 /// const-generic mirrors the UTF-8 split iterators for API uniformity; substring/byteset splits search
 /// match-by-match, so it does not affect the yielded segments.
+///
+/// # Empty needle and empty haystack
+///
+/// An empty haystack always yields exactly one (empty) segment, mirroring `"".split(",") == [""]`.
+/// An empty needle matches at every position - including past the last byte - so it still yields one
+/// empty segment per position instead of hanging: each zero-length match advances the search position
+/// by at least one byte.
 ///
 /// # Examples
 ///
@@ -2762,7 +2822,6 @@ pub struct FindSplits<'a, E: EmptySegments = KeepEmpty, const STEPS: usize = ITE
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
-    last_match: Option<usize>,
     _empties: PhantomData<E>,
 }
 
@@ -2780,7 +2839,6 @@ impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
             haystack,
             matcher,
             position: 0,
-            last_match: None,
             _empties: PhantomData,
         }
     }
@@ -2791,7 +2849,6 @@ impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
             haystack: self.haystack,
             matcher: self.matcher,
             position: self.position,
-            last_match: self.last_match,
             _empties: PhantomData,
         }
     }
@@ -2801,6 +2858,17 @@ impl<'a, E: EmptySegments, const STEPS: usize> FindSplits<'a, E, STEPS> {
     /// Yields the next raw segment without the empty-segment filter.
     #[inline(always)]
     fn next_raw(&mut self) -> Option<&'a [u8]> {
+        // Empty delimiter: no split.
+        if self.matcher.needle_length() == 0 {
+            if self.position > self.haystack.len() {
+                return None;
+            }
+            self.position = self.haystack.len() + 1;
+            return Some(self.haystack);
+        }
+        // `position` only ever exceeds `haystack.len()` once the trailing segment below has
+        // already been emitted; that sentinel, rather than tracking "did we ever match", is
+        // what makes this correctly yield one empty segment for a completely empty haystack.
         if self.position > self.haystack.len() {
             return None;
         }
@@ -2812,15 +2880,14 @@ impl<'a, E: EmptySegments, const STEPS: usize> FindSplits<'a, E, STEPS> {
             );
             let start = self.position;
             let end = self.position + index;
-            self.position = end + self.matcher.needle_length();
-            self.last_match = Some(end);
+            // A zero-length match (empty needle) must still advance by at least one byte, or
+            // this would loop forever re-matching the same position.
+            self.position = end + self.matcher.needle_length().max(1);
             Some(&self.haystack[start..end])
-        } else if self.position < self.haystack.len() || self.last_match.is_some() {
+        } else {
             let start = self.position;
             self.position = self.haystack.len() + 1;
             Some(&self.haystack[start..])
-        } else {
-            None
         }
     }
 }
@@ -2843,6 +2910,13 @@ impl<'a, E: EmptySegments, const STEPS: usize> Iterator for FindSplits<'a, E, ST
 /// An iterator over non-overlapping matches of a pattern in a string slice, searching from the end.
 /// This iterator yields the matched substrings in reverse order.
 ///
+/// # Empty needle
+///
+/// An empty needle matches at every position, including past the last byte: iterating over an
+/// `n`-byte haystack yields `n + 1` empty matches, in reverse order. Each zero-length match still
+/// shrinks the remaining search window by at least one byte, so the iterator always terminates
+/// instead of looping forever on the same spot.
+///
 /// # Examples
 ///
 /// ```
@@ -2856,6 +2930,7 @@ impl<'a, E: EmptySegments, const STEPS: usize> Iterator for FindSplits<'a, E, ST
 pub struct RFindMatches<'a, O: Overlaps = NonOverlapping> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
+    // Right-exclusive bound of the unsearched prefix; `usize::MAX` means exhausted.
     position: usize,
     _overlaps: PhantomData<O>,
 }
@@ -2886,10 +2961,11 @@ impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position == 0 {
+        if self.position == usize::MAX {
             return None;
         }
 
+        let previous_position = self.position;
         let search_area = &self.haystack[..self.position];
         if let Some(index) = self.matcher.find(search_area) {
             let start = index;
@@ -2901,7 +2977,18 @@ impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
             } else {
                 0
             };
-            self.position = start + skip;
+            let next_position = start + skip;
+            // A zero-length match (empty needle) can land exactly at the current window's
+            // right edge, leaving `next_position == previous_position`; shrink by one more so
+            // the window keeps making progress. Once there is nothing left to shrink, mark the
+            // iterator exhausted via the `usize::MAX` sentinel instead of wrapping around.
+            self.position = if next_position < previous_position {
+                next_position
+            } else if next_position == 0 {
+                usize::MAX
+            } else {
+                next_position - 1
+            };
 
             result
         } else {
@@ -2916,6 +3003,12 @@ impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
 /// By default empty segments are **kept** (mirroring `str::rsplit`). Call [`Self::skip_empty`] to drop
 /// zero-length segments. The `STEPS` const-generic mirrors the UTF-8 split iterators for API uniformity;
 /// substring/byteset splits search match-by-match, so it does not affect the yielded segments.
+///
+/// # Empty needle
+///
+/// An empty needle matches at every position, including past the last byte, so it still yields one
+/// empty segment per position instead of hanging: each zero-length match shrinks the remaining
+/// search window by at least one byte.
 ///
 /// # Examples
 ///
@@ -2968,10 +3061,23 @@ impl<'a, E: EmptySegments, const STEPS: usize> RFindSplits<'a, E, STEPS> {
     #[inline(always)]
     fn next_raw(&mut self) -> Option<&'a [u8]> {
         let position = self.position?;
+        // Empty delimiter: no split.
+        if self.matcher.needle_length() == 0 {
+            self.position = None;
+            return Some(&self.haystack[..position]);
+        }
         let search_area = &self.haystack[..position];
         if let Some(index) = self.matcher.find(search_area) {
             let start = index + self.matcher.needle_length();
-            self.position = Some(index);
+            // A non-empty needle always matches strictly inside `search_area`, so `index <
+            // position` and the window keeps shrinking. An empty needle instead matches right
+            // at the window's own edge (`index == position`); shrink by one more byte there so
+            // the next call doesn't re-match the same spot, and stop once nothing is left.
+            self.position = if index < position {
+                Some(index)
+            } else {
+                index.checked_sub(1)
+            };
             Some(&self.haystack[start..position])
         } else {
             self.position = None;
@@ -3517,6 +3623,11 @@ pub type Utf8Linebreaks<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> = Utf8
 ///
 /// The iterator caches needle metadata internally for efficient repeated searches.
 ///
+/// Unlike [`find`]/[`rfind`], the underlying UTF-8 search reports an empty needle as a real
+/// zero-length match rather than "not found". Each zero-length match still advances the
+/// search position by at least one byte, so the iterator always terminates instead of
+/// looping forever on the same spot.
+///
 /// # Examples
 ///
 /// ```
@@ -3574,7 +3685,8 @@ impl<'a, O: Overlaps> Iterator for Utf8UncasedMatches<'a, O> {
     type Item = IndexSpan;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.haystack.len() {
+        // Empty needle also matches at `haystack.len()`; park one past it once exhausted.
+        if self.position > self.haystack.len() {
             return None;
         }
 
@@ -3593,17 +3705,20 @@ impl<'a, O: Overlaps> Iterator for Utf8UncasedMatches<'a, O> {
         };
 
         if result.is_null() {
-            self.position = self.haystack.len();
+            self.position = self.haystack.len() + 1;
             None
         } else {
             let offset_in_remaining = unsafe { result.offset_from(remaining.as_ptr() as *const c_void) } as usize;
             let absolute_offset = self.position + offset_in_remaining;
 
-            // Advance position for next search
+            // Advance position for next search. A zero-length match (empty needle) must still
+            // advance by at least one byte in the non-overlapping case, or this would loop
+            // forever re-matching the same position; the overlapping case already always
+            // advances by 1 regardless of `matched_length`.
             if O::OVERLAP {
                 self.position = absolute_offset + 1;
             } else {
-                self.position = absolute_offset + matched_length;
+                self.position = absolute_offset + matched_length.max(1);
             }
 
             Some(IndexSpan::new(absolute_offset, matched_length))
@@ -4443,6 +4558,32 @@ mod tests {
     }
 
     #[test]
+    fn empty_needle_matches_std() {
+        // The C core reports an empty needle as "not found" by design, but `find`/`rfind`/
+        // `contains` synthesize the `str` answer instead.
+        assert_eq!(sz::find("abc", ""), Some(0));
+        assert_eq!("abc".find(""), Some(0));
+        assert_eq!(sz::rfind("abc", ""), Some(3));
+        assert_eq!("abc".rfind(""), Some(3));
+        assert!(sz::contains("abc", ""));
+        assert!("abc".contains(""));
+
+        // An empty haystack is a degenerate but well-defined case too.
+        assert_eq!(sz::find("", ""), Some(0));
+        assert_eq!("".find(""), Some(0));
+        assert_eq!(sz::rfind("", ""), Some(0));
+        assert_eq!("".rfind(""), Some(0));
+        assert!(sz::contains("", ""));
+        assert!("".contains(""));
+
+        // Non-empty needles are unaffected.
+        assert_eq!(sz::find("abc", "b"), Some(1));
+        assert_eq!(sz::rfind("abc", "b"), Some(1));
+        assert!(sz::contains("abc", "b"));
+        assert!(!sz::contains("abc", "z"));
+    }
+
+    #[test]
     fn fill_random() {
         let mut first_buffer: Vec<u8> = vec![0; 10]; // Ten zeros
         let mut second_buffer: Vec<u8> = vec![1; 10]; // Ten ones
@@ -4491,6 +4632,39 @@ mod tests {
         let needle = b",";
         let splits: Vec<_> = haystack.sz_splits(needle).collect();
         assert_eq!(splits, vec![b"a", &b""[..], b"b", &b""[..]]);
+    }
+
+    #[test]
+    fn iter_splits_empty_haystack_yields_one_empty_segment() {
+        // Mirrors `"".split(",") == [""]`, not zero segments.
+        let matcher = MatcherType::Find(b",");
+        let splits: Vec<_> = FindSplits::new(b"", matcher).collect();
+        assert_eq!(splits, vec![&b""[..]]);
+    }
+
+    #[test]
+    fn iter_matches_forward_empty_needle_matches_std() {
+        let matches: Vec<_> = FindMatches::new(b"abc", MatcherType::Find(b"")).collect();
+        assert_eq!(matches, vec![&b""[..]; 4]);
+        assert_eq!("abc".matches("").count(), 4);
+    }
+
+    #[test]
+    fn iter_matches_reverse_empty_needle() {
+        let matches: Vec<_> = RFindMatches::new(b"abc", MatcherType::RFind(b"")).collect();
+        assert_eq!(matches, vec![&b""[..]; 4]);
+    }
+
+    #[test]
+    fn iter_splits_forward_empty_needle() {
+        let splits: Vec<_> = FindSplits::new(b"abc", MatcherType::Find(b"")).collect();
+        assert_eq!(splits, vec![&b"abc"[..]]);
+    }
+
+    #[test]
+    fn iter_splits_reverse_empty_needle() {
+        let splits: Vec<_> = RFindSplits::new(b"abc", MatcherType::RFind(b"")).collect();
+        assert_eq!(splits, vec![&b"abc"[..]]);
     }
 
     #[test]
@@ -4892,6 +5066,19 @@ mod tests {
         let data = vec![0x41u8; 12];
 
         intersection_by(|_: usize| &data, |_: usize| &data, 1, &mut indices, &mut indices2).unwrap();
+    }
+
+    #[test]
+    fn intersection_sequences_sharing_an_empty_string() {
+        // Regression check for sequences that are each individually duplicate-free but happen
+        // to share an empty string - a corner case that must keep working correctly.
+        let set1 = ["", "p", "q"];
+        let set2 = ["", "z"];
+        let mut positions1 = [0usize; 2];
+        let mut positions2 = [0usize; 2];
+        let matched = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
+        assert_eq!(matched, 1);
+        assert_eq!(set1[positions1[0]], set2[positions2[0]]);
     }
 
     #[test]
@@ -5453,6 +5640,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn utf8_uncased_matches_empty_needle() {
+        let matches: Vec<_> = Utf8UncasedMatches::new(b"abc", b"").collect();
+        assert_eq!(matches.len(), 4);
+        assert!(matches.iter().all(|span| span.length == 0));
     }
 
     #[test]

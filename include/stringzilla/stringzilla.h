@@ -697,8 +697,7 @@ SZ_HELPER_AUTO sz_capability_t sz_capabilities_implementation_power_(void) {
  */
 #if SZ_IS_64BIT_X86_ || SZ_IS_64BIT_ARM_
 #define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
-#elif defined(__riscv) && (__riscv_xlen == 64) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && \
-    !SZ_AVOID_LIBC
+#elif defined(__riscv) && (__riscv_xlen == 64) && (defined(SZ_IS_LINUX_) || defined(SZ_IS_FREEBSD_)) && !SZ_AVOID_LIBC
 #define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)
 #elif defined(__loongarch__) && defined(SZ_IS_LINUX_) && !SZ_AVOID_LIBC
 #define SZ_CAPABILITIES_RUNTIME_DETECTABLE_ (1)

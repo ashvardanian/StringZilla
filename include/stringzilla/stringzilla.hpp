@@ -413,7 +413,10 @@ struct matcher_find {
     size_type operator()(string_type_ haystack) const noexcept { return haystack.find(needle_); }
     size_type skip_length() const noexcept {
         // TODO: Apply Galil rule to match repetitive patterns in strictly linear time.
-        return is_same_type<overlaps_type_, include_overlaps_type>::value ? 1 : needle_.length();
+        // Floor at 1 so an empty needle still advances.
+        return is_same_type<overlaps_type_, include_overlaps_type>::value //
+                   ? 1
+                   : sz_max_of_two(needle_.length(), size_type(1));
     }
 };
 
@@ -431,7 +434,10 @@ struct matcher_rfind {
     size_type operator()(string_type_ haystack) const noexcept { return haystack.rfind(needle_); }
     size_type skip_length() const noexcept {
         // TODO: Apply Galil rule to match repetitive patterns in strictly linear time.
-        return is_same_type<overlaps_type_, include_overlaps_type>::value ? 1 : needle_.length();
+        // Floor at 1 so an empty needle still advances.
+        return is_same_type<overlaps_type_, include_overlaps_type>::value //
+                   ? 1
+                   : sz_max_of_two(needle_.length(), size_type(1));
     }
 };
 
@@ -766,7 +772,9 @@ class find_splits_view {
                 ++start_, match_length_ = 0;
                 return;
             }
-            start_ += matcher_.needle_length();
+            // A zero-length delimiter (empty needle) still occupies one scan step, or `start_` would
+            // never move and the same zero-width match would repeat forever.
+            start_ += sz_max_of_two(matcher_.needle_length(), size_type(1));
             if (start_ > end_) {
                 match_length_ = 0;
                 return;
@@ -791,6 +799,12 @@ class find_splits_view {
 
         iterator(string_view_type haystack, matcher_type matcher) noexcept
             : start_(haystack.data()), end_(haystack.data() + haystack.size()), match_length_(0), matcher_(matcher) {
+            // Empty delimiter: no split.
+            if (matcher_.needle_length() == 0) {
+                match_length_ = haystack.size();
+                settle_();
+                return;
+            }
             auto position = matcher_(haystack);
             match_length_ = position != string_type::npos ? position : haystack.size();
             settle_();
@@ -891,7 +905,9 @@ class rfind_splits_view {
                 end_ = nullptr, start_ = reinterpret_cast<char const *>(1);
                 return;
             }
-            end_ -= matcher_.needle_length();
+            // A zero-length delimiter (empty needle) still occupies one scan step, or `end_` would
+            // never move and the same zero-width match would repeat forever.
+            end_ -= sz_max_of_two(matcher_.needle_length(), size_type(1));
             if (end_ < start_) {
                 match_length_ = 0;
                 return;
@@ -917,6 +933,12 @@ class rfind_splits_view {
 
         iterator(string_view_type haystack, matcher_type matcher) noexcept
             : start_(haystack.data()), end_(haystack.data() + haystack.size()), match_length_(0), matcher_(matcher) {
+            // Empty delimiter: no split.
+            if (matcher_.needle_length() == 0) {
+                match_length_ = haystack.size();
+                settle_();
+                return;
+            }
             auto position = matcher_(haystack);
             match_length_ = position != string_type::npos ? haystack.size() - position - matcher_.needle_length()
                                                           : haystack.size();
@@ -1374,8 +1396,9 @@ class utf8_segments_view {
                 sz_assert_(starts_[u] == (u == 0 ? size_type(0) : starts_[u - 1] + lengths_[u - 1]) &&
                            "tiling units are not contiguous");
             }
-            sz_assert_((count_ == 0 || starts_[count_ - 1] + lengths_[count_ - 1] == static_cast<size_type>(consumed)) &&
-                       "tiling units do not cover the consumed region");
+            sz_assert_(
+                (count_ == 0 || starts_[count_ - 1] + lengths_[count_ - 1] == static_cast<size_type>(consumed)) &&
+                "tiling units do not cover the consumed region");
             index_ = 0;
         }
 
@@ -1535,6 +1558,8 @@ using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks, string_type_
 /**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty needle, the zero-length match at every offset still advances by 1 byte per
+ *        step (never 0), so the range always terminates.
  */
 template <typename string_type_>
 find_matches_view<string_type_, matcher_find<string_type_, include_overlaps_type>> find_all(
@@ -1545,6 +1570,7 @@ find_matches_view<string_type_, matcher_find<string_type_, include_overlaps_type
 /**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring in @b reverse order.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty needle, always terminates; @sa find_all.
  */
 template <typename string_type_>
 rfind_matches_view<string_type_, matcher_rfind<string_type_, include_overlaps_type>> rfind_all(
@@ -1555,6 +1581,8 @@ rfind_matches_view<string_type_, matcher_rfind<string_type_, include_overlaps_ty
 /**
  *  @brief Find all @b non-overlapping inclusions of a needle substring.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty needle, the disjoint step is floored at 1 byte (instead of the needle's
+ *        zero length), so the range always terminates.
  */
 template <typename string_type_>
 find_matches_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> find_all(
@@ -1565,6 +1593,7 @@ find_matches_view<string_type_, matcher_find<string_type_, exclude_overlaps_type
 /**
  *  @brief Find all @b non-overlapping inclusions of a needle substring in @b reverse order.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty needle, always terminates; @sa find_all.
  */
 template <typename string_type_>
 rfind_matches_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rfind_all(
@@ -1615,6 +1644,8 @@ rfind_matches_view<string_type_, matcher_find_last_not_of<string_type_>> rfind_a
 /**
  *  @brief Splits a string around every @b non-overlapping inclusion of the second string.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty delimiter, every segment is empty and the delimiter step is floored at 1 byte,
+ *        so the range always terminates, yielding `size() + 1` segments.
  */
 template <typename string_type_>
 find_splits_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> split(
@@ -1625,6 +1656,7 @@ find_splits_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>
 /**
  *  @brief Splits a string around every @b non-overlapping inclusion of the second string in @b reverse order.
  *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @note For an @b empty delimiter, always terminates, yielding `size() + 1` segments; @sa split.
  */
 template <typename string_type_>
 rfind_splits_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rsplit(
@@ -2330,8 +2362,16 @@ class basic_string_slice {
 
 #pragma region Matching Substrings
 
+    /**
+     *  @brief Checks if the string contains the given substring.
+     *  @return `true` for an @b empty `other`, matching `std::string_view::find(v) != npos` (always true).
+     */
     bool contains(string_view other) const noexcept { return find(other) != npos; }
     bool contains(value_type character) const noexcept { return find(character) != npos; }
+    /**
+     *  @brief Checks if the string contains the given null-terminated substring.
+     *  @return `true` for an @b empty `other`, matching `std::string_view::find(v) != npos` (always true).
+     */
     bool contains(const_pointer other) const noexcept { return find(other) != npos; }
 
 #pragma region Returning offsets
@@ -2339,6 +2379,7 @@ class basic_string_slice {
     /**
      *  @brief Find the first occurrence of a substring, skipping the first `skip` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `skip`.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept {
@@ -2359,6 +2400,7 @@ class basic_string_slice {
     /**
      *  @brief Find the first occurrence of a substring, skipping the first `skip` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `pos`; delegates to the `string_view` overload.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
@@ -2368,6 +2410,7 @@ class basic_string_slice {
     /**
      *  @brief Find the last occurrence of a substring.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return `size()` for an @b empty `other`.
      */
     size_type rfind(string_view other) const noexcept {
         auto ptr = sz_rfind(start_, length_, other.data(), other.size());
@@ -2377,6 +2420,7 @@ class basic_string_slice {
     /**
      *  @brief Find the last occurrence of a substring, within first `until` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `min(until, size())`.
      */
     size_type rfind(string_view other, size_type until) const noexcept(false) {
         return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
@@ -2402,6 +2446,8 @@ class basic_string_slice {
     /**
      *  @brief Find the last occurrence of a substring, within first `until` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `min(until, size())`; delegates to and is
+     *          consistent with the `string_view` overload above.
      */
     size_type rfind(const_pointer other, size_type until, size_type count) const noexcept {
         return rfind(string_view(other, count), until);
@@ -2800,16 +2846,29 @@ class basic_string_slice {
     using find_all_chars_type = find_matches_view<string_slice, matcher_find_first_of<string_view, byteset>>;
     using rfind_all_chars_type = rfind_matches_view<string_slice, matcher_find_last_of<string_view, byteset>>;
 
-    /**  @brief Find all potentially @b overlapping occurrences of a given string. */
+    /**
+     *  @brief Find all potentially @b overlapping occurrences of a given string.
+     *  @note For an @b empty `needle`, yields `size()` empty matches - one per valid `find(needle, skip)`
+     *        offset from `0` to `size()` inclusive - and always terminates.
+     */
     find_all_type find_all(string_view needle, include_overlaps_type = {}) const noexcept { return {*this, needle}; }
 
-    /**  @brief Find all potentially @b overlapping occurrences of a given string in @b reverse order. */
+    /**
+     *  @brief Find all potentially @b overlapping occurrences of a given string in @b reverse order.
+     *  @note For an @b empty `needle`, yields `size()` empty matches and always terminates; @sa find_all.
+     */
     rfind_all_type rfind_all(string_view needle, include_overlaps_type = {}) const noexcept { return {*this, needle}; }
 
-    /**  @brief Find all @b non-overlapping occurrences of a given string. */
+    /**
+     *  @brief Find all @b non-overlapping occurrences of a given string.
+     *  @note For an @b empty `needle`, yields `size()` empty matches and always terminates; @sa find_all.
+     */
     find_disjoint_type find_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
-    /**  @brief Find all @b non-overlapping occurrences of a given string in @b reverse order. */
+    /**
+     *  @brief Find all @b non-overlapping occurrences of a given string in @b reverse order.
+     *  @note For an @b empty `needle`, yields `size()` empty matches and always terminates; @sa find_all.
+     */
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
@@ -2824,10 +2883,17 @@ class basic_string_slice {
     using split_chars_type = find_splits_view<string_slice, matcher_find_first_of<string_view, byteset>>;
     using rsplit_chars_type = rfind_splits_view<string_slice, matcher_find_last_of<string_view, byteset>>;
 
-    /**  @brief Split around occurrences of a given string. */
+    /**
+     *  @brief Split around occurrences of a given string.
+     *  @note For an @b empty `delimiter`, yields `size() + 1` empty segments (one per `find_all` match,
+     *        plus the trailing one) and always terminates.
+     */
     split_type split(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
-    /**  @brief Split around occurrences of a given string in @b reverse order. */
+    /**
+     *  @brief Split around occurrences of a given string in @b reverse order.
+     *  @note For an @b empty `delimiter`, yields `size() + 1` empty segments and always terminates; @sa split.
+     */
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
@@ -2879,6 +2945,8 @@ class basic_string_slice {
 
     template <typename pattern_>
     partition_type partition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+        // Empty separator: no split.
+        if (pattern_length == 0) return {string_slice(*this), string_slice(), string_slice()};
         size_type pos = find(pattern);
         if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
         return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
@@ -2887,6 +2955,8 @@ class basic_string_slice {
 
     template <typename pattern_>
     partition_type rpartition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+        // Empty separator: no split.
+        if (pattern_length == 0) return {string_slice(*this), string_slice(), string_slice()};
         size_type pos = rfind(pattern);
         if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
         return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
@@ -3429,8 +3499,16 @@ class basic_string {
 
 #pragma region Matching Substrings
 
+    /**
+     *  @brief Checks if the string contains the given substring.
+     *  @return `true` for an @b empty `other`, matching `std::string_view::find(v) != npos` (always true).
+     */
     bool contains(string_view other) const noexcept { return view().contains(other); }
     bool contains(value_type character) const noexcept { return view().contains(character); }
+    /**
+     *  @brief Checks if the string contains the given null-terminated substring.
+     *  @return `true` for an @b empty `other`, matching `std::string_view::find(v) != npos` (always true).
+     */
     bool contains(const_pointer other) const noexcept { return view().contains(other); }
 
 #pragma region Returning offsets
@@ -3438,7 +3516,8 @@ class basic_string {
     /**
      *  @brief Find the first occurrence of a substring, skipping the first `skip` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
-     *  @warning The behavior is @b undefined if `skip > size()`.
+     *  @return For an @b empty `other`, `min(skip, size())`, matching `std::string_view::find`.
+     *  @warning The behavior is @b undefined if `skip > size()` and `other` is non-empty.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept { return view().find(other, skip); }
 
@@ -3452,7 +3531,9 @@ class basic_string {
     /**
      *  @brief Find the first occurrence of a substring, skipping the first `skip` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
-     *  @warning The behavior is @b undefined if `skip > size()`.
+     *  @return For an @b empty `other` (i.e. `count == 0`), `min(skip, size())`; consistent with the
+     *          `string_view` overload above.
+     *  @warning The behavior is @b undefined if `skip > size()` and `other` is non-empty.
      */
     size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
         return view().find(other, pos, count);
@@ -3461,12 +3542,14 @@ class basic_string {
     /**
      *  @brief Find the last occurrence of a substring.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return `size()` for an @b empty `other`, matching `std::string_view::rfind`.
      */
     size_type rfind(string_view other) const noexcept { return view().rfind(other); }
 
     /**
      *  @brief Find the last occurrence of a substring, within first `until` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `min(until, size())`, matching `std::string_view::rfind`.
      */
     size_type rfind(string_view other, size_type until) const noexcept { return view().rfind(other, until); }
 
@@ -3485,6 +3568,8 @@ class basic_string {
     /**
      *  @brief Find the last occurrence of a substring, within first `until` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
+     *  @return For an @b empty `other`, `min(until, size())`; consistent with the
+     *          `string_view` overload above.
      */
     size_type rfind(const_pointer other, size_type until, size_type count) const noexcept {
         return view().rfind(other, until, count);
@@ -4699,6 +4784,9 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
                                                    matcher_find<string_view, exclude_overlaps_type>>::type;
     matcher_type matcher({pattern});
     string_view this_view = view();
+
+    // Empty pattern: nothing to replace.
+    if (matcher.needle_length() == 0) return true;
 
     // 1. The pattern and the replacement are of the same length.
     if (matcher.needle_length() == replacement.length()) {
