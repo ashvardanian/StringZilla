@@ -68,4 +68,20 @@ if [ -n "$libc" ]; then
   exit 1
 fi
 
+# GitHub Actions job & step names: no parentheses, and the visible name starts with an uppercase letter
+# (or a `${{ … }}` expression). Checks job-level `name:` keys (8-space indent in our 4-space YAML style)
+# and step-level `- name:` items on ADDED lines only, so `with:` parameters like artifact names are
+# untouched. Prefer `Test Rust with compile-time dispatch` over `Test Rust (compile-time dispatch)`, and
+# `QEMU Tests ${{ matrix.target_arch }}` over `QEMU Tests (${{ matrix.target_arch }})`.
+workflow_names=$(git diff --cached --no-color -U0 -- '.github/workflows/*.yml' '.github/workflows/*.yaml' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '^\+( {8}name:| *- name:)' \
+  | grep -E '[()]|name:[[:space:]]*["'"'"']?[a-z]' || true)
+if [ -n "$workflow_names" ]; then
+  echo "pre-commit: workflow job/step names must avoid parentheses and start with an uppercase letter:" >&2
+  echo "$workflow_names" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
 exit 0

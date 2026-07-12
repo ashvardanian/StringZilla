@@ -46,7 +46,7 @@ jobs:
                   dry-run: "true"
 
     test_ubuntu_gcc:
-        name: Ubuntu (GCC 12) - ${{ matrix.os }}
+        name: Ubuntu GCC 12 - ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -173,9 +173,13 @@ jobs:
             # Rust
             - name: Set up Rust
               uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
     test_ubuntu_clang:
-        name: Ubuntu (Clang 16) - ${{ matrix.os }}
+        name: Ubuntu Clang 16 - ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -285,6 +289,10 @@ jobs:
               # Rust
             - name: Set up Rust
               uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with parallel engines
+              run: cargo test --release --features cpus
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
               # Swift
               # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
@@ -298,7 +306,7 @@ jobs:
             #   run: swift test -c release
 
     test_ubuntu_cpus:
-        name: Ubuntu (StringZillas-CPUs)
+        name: Ubuntu StringZillas-CPUs
         runs-on: ubuntu-22.04
         env:
             CC: gcc-12
@@ -378,7 +386,7 @@ jobs:
               run: python -X faulthandler -m pytest test/stringzillas.py test/doctests.py -s -vv --maxfail=1 --full-trace
 
     test_ubuntu_cuda:
-        name: Ubuntu (StringZillas-CUDA)
+        name: Ubuntu StringZillas-CUDA
         runs-on: ubuntu-22.04
         env:
             CC: gcc-12
@@ -578,7 +586,7 @@ jobs:
     # actual execution under QEMU happens in `test_cross_qemu`, which fans the vector-length-agnostic RISC-V
     # binary across several VLENs WITHOUT recompiling it.
     test_cross_linux:
-        name: Cross Compile (${{ matrix.arch }} → ${{ matrix.target_arch }})
+        name: Cross Compile ${{ matrix.arch }} to ${{ matrix.target_arch }}
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -680,7 +688,7 @@ jobs:
     # binary built once above is swept across VLEN 128/256/512 here (`-cpu rv64,v=true,vlen=N`) with no rebuild —
     # a single width under-tests VLA code.
     test_cross_qemu:
-        name: QEMU Tests (${{ matrix.target_arch }}${{ matrix.variant }})
+        name: QEMU Tests ${{ matrix.target_arch }}${{ matrix.variant }}
         needs: test_cross_linux
         runs-on: ubuntu-24.04
         strategy:
@@ -693,7 +701,7 @@ jobs:
                     - target_arch: aarch64
                       qemu: qemu-aarch64-static
                       qemu_cpu: "max,sve=off"
-                      variant: " (NEON)"
+                      variant: " @ neon"
                     - target_arch: aarch64
                       qemu: qemu-aarch64-static
                       qemu_cpu: "max,sve-max-vq=1"
@@ -735,7 +743,7 @@ jobs:
                   name: cross-tests-${{ matrix.target_arch }}
                   path: tests
 
-            - name: Run tests under QEMU (${{ matrix.target_arch }}${{ matrix.variant }})
+            - name: Run tests under QEMU for ${{ matrix.target_arch }}${{ matrix.variant }}
               run: |
                   set -euo pipefail
                   chmod +x tests/*
@@ -745,7 +753,7 @@ jobs:
                   done
 
     test_wasm:
-        name: WebAssembly (wasm32-wasip1)
+        name: WebAssembly wasm32-wasip1
         runs-on: ubuntu-24.04
         steps:
             - uses: actions/checkout@v6
@@ -772,7 +780,7 @@ jobs:
             # The C kernels need the WASI SDK clang + sysroot; `build.rs` passes `-msimd128` (+ probed
             # `-mrelaxed-simd`). Tests run under Wasmtime via the `.cargo/config.toml` runner, single-threaded
             # (wasm32-wasip1 has no threads).
-            - name: Build & test (relaxed-SIMD + SIMD128)
+            - name: Test Rust with relaxed SIMD128
               env:
                   CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
                   AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
@@ -781,7 +789,7 @@ jobs:
                   cargo build --target wasm32-wasip1
                   cargo test --release --target wasm32-wasip1 -- --test-threads=1
 
-            - name: Build & test (baseline SIMD128, relaxed off)
+            - name: Test Rust with baseline SIMD128
               env:
                   CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
                   AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
@@ -864,6 +872,10 @@ jobs:
               # Rust
             - name: Set up Rust
               uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
     test_windows:
         name: Windows - ${{ matrix.os }}
@@ -939,6 +951,14 @@ jobs:
             - name: Test Python
               run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py -s -vv --maxfail=1 --full-trace
 
+              # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Build Rust with compile-time dispatch
+              run: cargo build --release --no-default-features --features std
+
     test_alpine:
         name: Alpine Linux
         runs-on: ubuntu-24.04
@@ -997,6 +1017,8 @@ jobs:
               # Rust
             - name: Set up Rust
               uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
     build_wheels:
         name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}

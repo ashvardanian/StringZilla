@@ -537,6 +537,8 @@ jobs:
           mv fork_union/Cargo.toml fork_union/Cargo.toml.bak
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Test Rust with dynamic dispatch
+        run: cargo test --release
       - uses: katyo/publish-crates@v2
         with:
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
