@@ -744,6 +744,13 @@ jobs:
                   path: tests
 
             - name: Run tests under QEMU for ${{ matrix.target_arch }}${{ matrix.variant }}
+              timeout-minutes: 150
+              env:
+                  # User-mode emulation runs the fuzz loops 20-40x slower than native hardware; the full
+                  # iteration budget needs over six hours per variant and the jobs die at the runner
+                  # timeout without ever reaching the later test families. A scaled-down budget still
+                  # sweeps every backend and vector length within the job limits.
+                  SZ_TESTS_MULTIPLIER: "0.05"
               run: |
                   set -euo pipefail
                   chmod +x tests/*
