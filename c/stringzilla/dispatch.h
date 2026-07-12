@@ -108,4 +108,24 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_fold_update_(sz_capability_t 
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_norm_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps);
 
+#if SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("+sve")
+#endif
+/**
+ *  @brief Whether the running CPU's SVE registers are wider than NEON's 128 bits - the point where the
+ *         scalable kernels start outrunning NEON in the length-sensitive families (the runtime
+ *         counterpart of the compile-time `SZ_SVE_WIDER_THAN_NEON_` in `types.h`).
+ */
+SZ_MAYBE_UNUSED SZ_C_INLINE sz_bool_t sz_sve_wider_than_neon_(void) { return svcntb() > 16 ? sz_true_k : sz_false_k; }
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif // SZ_IS_64BIT_ARM_ && (SZ_USE_SVE || SZ_USE_SVE2) && !defined(_MSC_VER)
+
 #endif // STRINGZILLA_DISPATCH_H_

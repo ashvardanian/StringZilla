@@ -59,7 +59,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps) {
 
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
-        if (SZ_ENFORCE_SVE_OVER_NEON) {
+        // Wider-than-NEON registers are where the scalable memory kernels win; at the common
+        // 128-bit vector length the NEON kernels stay faster, so keep them.
+        if (sz_sve_wider_than_neon_()) {
             impl->copy = sz_copy_sve;
             impl->move = sz_move_sve;
             impl->fill = sz_fill_sve;

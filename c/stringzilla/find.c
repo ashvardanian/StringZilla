@@ -78,7 +78,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
 
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
-        if (SZ_ENFORCE_SVE_OVER_NEON) {
+        // Wider-than-NEON registers are where the scalable substring kernels win; at the common
+        // 128-bit vector length the NEON kernels stay faster, so keep them.
+        if (sz_sve_wider_than_neon_()) {
             impl->find = sz_find_sve;
             // TODO: impl->rfind = sz_rfind_sve;
         }

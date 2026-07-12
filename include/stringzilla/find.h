@@ -513,7 +513,7 @@ SZ_API_RUNTIME sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, 
     return sz_find_haswell(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_WESTMERE
     return sz_find_westmere(haystack, haystack_length, needle, needle_length);
-#elif SZ_USE_SVE && SZ_ENFORCE_SVE_OVER_NEON
+#elif SZ_USE_SVE && SZ_SVE_WIDER_THAN_NEON_
     return sz_find_sve(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_NEON
     return sz_find_neon(haystack, haystack_length, needle, needle_length);

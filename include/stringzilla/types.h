@@ -399,9 +399,18 @@
 #endif
 #endif
 
-/**  SVE isn't a silver bullet. Oftentimes its still slower and with this flag you can disable it. */
-#if !defined(SZ_ENFORCE_SVE_OVER_NEON)
-#define SZ_ENFORCE_SVE_OVER_NEON (0)
+/**
+ *  SVE isn't a silver bullet: in the length-sensitive kernel families (compare, memory, find, UTF-8
+ *  tokens) the scalable kernels only outrun NEON when the registers are wider than NEON's 128 bits,
+ *  while the crypto-heavy families (like hashing) win on SVE2 at any width. At compile time the width
+ *  is only known when pinned via `-msve-vector-bits=N` (`__ARM_FEATURE_SVE_BITS`); unpinned builds
+ *  assume the common 128-bit case and keep NEON. Runtime dispatch measures the actual width with
+ *  `sz_sve_wider_than_neon_` instead of trusting this compile-time assumption.
+ */
+#if defined(__ARM_FEATURE_SVE_BITS) && (__ARM_FEATURE_SVE_BITS > 128)
+#define SZ_SVE_WIDER_THAN_NEON_ (1)
+#else
+#define SZ_SVE_WIDER_THAN_NEON_ (0)
 #endif
 
 /**

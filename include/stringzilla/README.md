@@ -781,6 +781,10 @@ The runtime probe inspects CPUID on x86, the AArch64 ID registers on ARM with a 
 Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities()` intersects it with the compile-time mask.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time (`SZ_CAPABILITIES_RUNTIME_DETECTABLE_` reports whether the current platform can introspect).
 
+On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: at the common 128-bit vector length the scalable kernels for length-sensitive operations — comparisons, memory transforms, substring search, UTF-8 token scanning — are often slower than their NEON twins, while crypto-heavy operations like hashing prefer SVE2 at any width.
+Dispatch therefore picks by register width: the load-time table measures it on the running CPU (`svcntb`), and compile-time dispatch consults `__ARM_FEATURE_SVE_BITS` when pinned via `-msve-vector-bits=N`, otherwise assuming the 128-bit case and keeping NEON.
+To force a specific backend regardless, use the `SZ_USE_SVE`/`SZ_USE_SVE2`/`SZ_USE_NEON` toggles.
+
 The same machinery drives the build systems through the checked-in `probes/` programs: CMake and Cargo try-compile `probes/<arch>_<tier>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which tiers the toolchain can __compile__, and execute `probes/run_capabilities.c` to learn which tiers the build machine can __run__.
 Runtime-dispatched libraries enable everything compilable, trusting the load-time table to mask the rest; compile-time builds bake the intersection of the two sets.
 
@@ -1010,13 +1014,6 @@ __`SZ_USE_CUDA`, `SZ_USE_KEPLER`, `SZ_USE_HOPPER`__:
 
 > One can explicitly disable certain families of PTX instructions for compatibility purposes.
 > Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
-
-__`SZ_ENFORCE_SVE_OVER_NEON`__:
-
-> SVE and SVE2 are expected to supersede NEON on ARM architectures.
-> Still, oftentimes the equivalent SVE kernels are slower due to equally small register files and higher complexity of the instructions.
-> By default, when both SVE and NEON are available, SVE is used selectively only for the algorithms that benefit from it.
-> If you want to enforce SVE usage everywhere, define this flag.
 
 __`SZ_DYNAMIC_DISPATCH`__:
 
