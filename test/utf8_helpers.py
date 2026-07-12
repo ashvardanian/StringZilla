@@ -3,7 +3,7 @@ Shared UTF-8 segmentation test driver for the per-family test modules.
 
 The Python analog of the C++ `scripts/test_utf8.hpp`: a single place that owns the boundary-relevant
 palettes, the SMP/astral fixtures, the malformed-UTF-8 corpus generators, the window-seam length sweep,
-the adversarial-byte battery, and the metamorphic tiling invariant — so every family TU
+the adversarial-byte battery, and the metamorphic tiling invariant, so every family TU
 (test_utf8_wordbreaks.py, test_utf8_graphemes.py, …) shares one driver instead of copying corpora.
 
 Differential oracles live here too: `icu_segmenter` / `icu_normalizer` wrap PyICU (skipped when absent),
@@ -18,7 +18,9 @@ from typing import Callable, Iterable, List, Optional, Sequence, Union
 
 import pytest
 
-#  region Palettes & fixtures
+from test.sz_helpers import scale_iterations
+
+# region Palettes & fixtures
 
 # Boundary-relevant codepoints spanning every category the segmentation kernels must get right: combining
 # marks, Format / ZWJ, Regional-Indicators, CJK / Hangul / Kana, astral pictographs, and the mandatory line
@@ -55,13 +57,13 @@ _PALETTE_CODEPOINTS = [
 ]
 
 # Shared corner-case palette for grapheme / sentence / line fuzzing (ASCII control + the codepoints above).
-# Words are NOT validated against ICU: its word BreakIterator is tailored for editor word-selection and
+# Words are not validated against ICU: its word BreakIterator is tailored for editor word-selection and
 # diverges ~17-20% from raw UAX-29 (separators / spaces / word-joiner), so the word family keeps its
 # bit-exact gate on the official WordBreakTest.txt + uniseg instead. Grapheme vs ICU is bit-exact (0/4000).
 SEGMENTATION_PALETTE: List[str] = list("abZ59 \t\n\r.,;:!?'\"_-()") + [chr(cp) for cp in _PALETTE_CODEPOINTS]
 
 # SMP / astral fixtures the pure-BMP random corpora miss (Regional-Indicator pairs, ZWJ sequences, lone
-# astral codepoints). Stored as raw UTF-8 bytes — reused by every family's safety + differential sweeps.
+# astral codepoints). Stored as raw UTF-8 bytes, reused by every family's safety and differential sweeps.
 ASTRAL_FIXTURES: List[bytes] = [
     b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8",  # RI(U) RI(S) flag pair
     b"\xf0\x9f\x87\xba\xf0\x9f\x87\xb8\xf0\x9f\x87\xab\xf0\x9f\x87\xb7",  # two flags
@@ -136,9 +138,9 @@ _SNIPPETS: List[bytes] = [
 # Max input bytes used by the safety sweep's random garbage, mirroring `utf8_unit_capacity_k`.
 _UNIT_CAPACITY = 70
 
-#  endregion Palettes & fixtures
+# endregion Palettes & fixtures
 
-#  region Boundary helpers
+# region Boundary helpers
 
 
 def byte_boundaries(segments: Iterable) -> List[int]:
@@ -181,9 +183,9 @@ def assert_segments_tile(segments: Iterable, original: Union[str, bytes]) -> Non
     )
 
 
-#  endregion Boundary helpers
+# endregion Boundary helpers
 
-#  region Synthetic corpora
+# region Synthetic corpora
 
 
 def append_malformed_class(rng) -> bytes:
@@ -260,7 +262,7 @@ def window_seam_lengths() -> List[int]:
     return [1, 3, 16, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256]
 
 
-def adversarial_utf8_inputs(rng, random_input_count: int = 4000) -> Iterable[bytes]:
+def adversarial_utf8_inputs(rng, random_input_count: Optional[int] = None) -> Iterable[bytes]:
     """Yield the adversarial-byte battery: named shapes, astral fixtures, all 256 single bytes, every
     lead-class byte-pair, and random garbage. The Python analog of `for_each_adversarial_utf8_input_`.
     """
@@ -271,14 +273,15 @@ def adversarial_utf8_inputs(rng, random_input_count: int = 4000) -> Iterable[byt
     for lead in _LEAD_BYTES:
         for trailing in range(256):
             yield bytes([lead, trailing])
-    for _ in range(random_input_count):
+    count = scale_iterations(4000) if random_input_count is None else random_input_count
+    for _ in range(count):
         length = rng.randint(1, _UNIT_CAPACITY)
         yield bytes(rng.randrange(256) for _ in range(length))
 
 
-#  endregion Synthetic corpora
+# endregion Synthetic corpora
 
-#  region ICU oracles
+# region ICU oracles
 
 
 def icu_segmenter(kind: str) -> Callable[[str], List[str]]:
@@ -339,9 +342,9 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
     return lambda text: normalizer.normalize(text)
 
 
-#  endregion ICU oracles
+# endregion ICU oracles
 
-#  region Rule-derived generators
+# region Rule-derived generators
 
 # Generators that turn the UCD break-property / combining-class / decomposition tables (extracted in
 # test_helpers.py) into hard synthetic corner cases, rather than relying on a hand-picked palette.
@@ -350,7 +353,7 @@ def icu_normalizer(form: str) -> Callable[[str], str]:
 def class_adjacency_strings(
     representatives: dict, arity: int = 2, representatives_per_class: int = 1, max_cases: Optional[int] = None
 ) -> List[str]:
-    """Build strings over the cartesian product of break classes — one representative codepoint per cell.
+    """Build strings over the cartesian product of break classes, one representative codepoint per cell.
 
     With one representative per class this enumerates every class-adjacency pair (arity 2) or triple (arity 3)
     the segmentation rules can encounter, surfacing rule interactions the random palette rarely hits. `max_cases`
@@ -396,10 +399,10 @@ def decomposition_pairs(decomposition_mappings: dict, canonical_only: bool = Tru
     return pairs
 
 
-#  endregion Rule-derived generators
+# endregion Rule-derived generators
 
 
-#  region Prose fixtures
+# region Prose fixtures
 
 # Realistic multi-script paragraphs (ASCII-source \uXXXX escapes; rendered prose in each comment).
 # Segment counts are asserted live against the ICU / uniseg oracles in the per-family modules.
@@ -505,4 +508,4 @@ PROSE_MICRO_PREPEND = "\u0600\u0664 \u0d4e\u0d15"
 #   A.\r\nB.\u2028C.
 PROSE_MICRO_HARDBREAKS = "A.\u000d\u000aB.\u2028C."
 
-#  endregion
+# endregion

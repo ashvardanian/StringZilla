@@ -11,7 +11,20 @@ import platform
 
 import pytest
 
-from test.helpers import SEED_VALUES, _random_seed_for_run, numpy_available, pyarrow_available
+from test.sz_helpers import (
+    ITERATIONS_MULTIPLIER,
+    SEED_VALUES,
+    UnicodeDataDownloadError,
+    _random_seed_for_run,
+    get_combining_classes,
+    get_grapheme_break_properties,
+    get_line_break_properties,
+    get_sentence_break_properties,
+    get_uncased_folding_rules,
+    get_word_break_properties,
+    numpy_available,
+    pyarrow_available,
+)
 
 import stringzilla as sz
 
@@ -42,6 +55,8 @@ def log_test_environment():
     print(f"Test seeds: {SEED_VALUES}")
     if _random_seed_for_run in SEED_VALUES:
         print(f"  (random seed for this run: {_random_seed_for_run})")
+    if ITERATIONS_MULTIPLIER != 1.0:
+        print(f"Iterations multiplier: {ITERATIONS_MULTIPLIER:.2f}x")
 
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
@@ -55,3 +70,53 @@ def log_test_environment():
 
     print("=" * 40)
     print()  # New line for better readability
+
+
+# Unicode property tables shared across the segmentation families. Session-scoped so each table is
+# downloaded and parsed once, and every consumer skips uniformly when the data is unreachable.
+@pytest.fixture(scope="session")
+def grapheme_break_props():
+    try:
+        return get_grapheme_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode grapheme-break data unavailable")
+
+
+@pytest.fixture(scope="session")
+def word_break_props():
+    try:
+        return get_word_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode word-break data unavailable")
+
+
+@pytest.fixture(scope="session")
+def sentence_break_props():
+    try:
+        return get_sentence_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode sentence-break data unavailable")
+
+
+@pytest.fixture(scope="session")
+def line_break_props():
+    try:
+        return get_line_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode line-break data unavailable")
+
+
+@pytest.fixture(scope="session")
+def combining_classes():
+    try:
+        return get_combining_classes()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode combining-class data unavailable")
+
+
+@pytest.fixture(scope="session")
+def unicode_folds():
+    try:
+        return get_uncased_folding_rules()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode case-folding data unavailable")

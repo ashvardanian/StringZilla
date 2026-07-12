@@ -33,7 +33,7 @@ def test_stringzilla_doctests():
 
 def test_stringzillas_doctests():
     # `stringzillas` is a separate, optional extension (parallel/GPU engines). Skip cleanly when it
-    # is not importable here — including a partial/link-failed build — so the suite still runs the
+    # is not importable here, including a partial or link-failed build, so the suite still runs the
     # core `stringzilla` doctests. CI builds it fully, where these examples execute for real.
     try:
         import stringzillas as szs

@@ -8,6 +8,7 @@ tests and exploration notebooks.
 
 import os
 import io
+import contextlib
 import tempfile
 import zipfile
 import urllib.request
@@ -704,7 +705,7 @@ def _parse_break_test_file(cache_path: str) -> List[tuple]:
     return test_cases
 
 
-#  region Grapheme
+# region Grapheme
 
 
 def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
@@ -799,7 +800,7 @@ def baseline_grapheme_boundaries(
 
     def is_extended_pictographic(codepoint: int) -> bool:
         # Real Extended_Pictographic from emoji-data.txt. Regional_Indicators have their own GCB class and are
-        # NOT Extended_Pictographic, so GB11's ZWJ bridge correctly does not fire on `RI ZWJ RI`.
+        # not Extended_Pictographic, so GB11's ZWJ bridge correctly does not fire on `RI ZWJ RI`.
         return codepoint in extended_pictographic
 
     for index in range(1, len(codepoints)):
@@ -874,9 +875,9 @@ def baseline_grapheme_boundaries(
     return sorted(set(boundaries))
 
 
-#  endregion Grapheme
+# endregion Grapheme
 
-#  region Sentence
+# region Sentence
 
 
 def get_sentence_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
@@ -1018,9 +1019,9 @@ def baseline_sentence_boundaries(text: str, properties: Dict[int, str] = None) -
     return sorted(set(boundaries))
 
 
-#  endregion Sentence
+# endregion Sentence
 
-#  region Line
+# region Line
 
 
 def get_line_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
@@ -1104,9 +1105,9 @@ def baseline_line_boundaries(text: str, properties: Dict[int, str] = None) -> Li
     return sorted(boundaries)
 
 
-#  endregion Line
+# endregion Line
 
-#  region Hardening extractors
+# region Hardening extractors
 
 # Extractors that derive hard synthetic corner cases and authoritative oracles directly from the UCD, rather
 # than from a hand-picked palette: the official NormalizationTest.txt, emoji-data Extended_Pictographic, the
@@ -1133,7 +1134,7 @@ def get_normalization_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     """Download and parse the official NormalizationTest.txt.
 
     Returns a list of (source, nfc, nfd, nfkc, nfkd) tuples, each a decoded `str`. This is the authoritative,
-    version-pinned conformance data for NFC/NFD/NFKC/NFKD — independent of ICU's or the host Python's Unicode
+    version-pinned conformance data for NFC/NFD/NFKC/NFKD, independent of ICU's or the host Python's Unicode
     version. ``@PartN`` section markers and comments are skipped.
     """
     cache_path = _download_ucd_text("NormalizationTest.txt", "ucd", version)
@@ -1254,9 +1255,9 @@ def representatives_by_class(
     return representatives
 
 
-#  endregion Hardening extractors
+# endregion Hardening extractors
 
-#  region General test scaffolding
+# region General test scaffolding
 
 # General fixtures and seeded-RNG helpers shared by every per-family test module (the Python analog of the
 # C++ `test_stringzilla.hpp` harness). Kept here so a split test file imports one place for both the Unicode
@@ -1287,6 +1288,27 @@ if _env_seed:
         pass  # Keep default SEED_VALUES if parsing fails
 
 
+# Stress-depth knob shared with the C++ suite: SZ_TESTS_MULTIPLIER scales every fuzz baseline,
+# defaulting to 1.0 so the runtime is unchanged unless a smoke or CI run overrides it.
+def _read_iterations_multiplier() -> float:
+    raw = os.environ.get("SZ_TESTS_MULTIPLIER")
+    if raw:
+        try:
+            value = float(raw)
+            if value > 0.0:
+                return value
+        except ValueError:
+            pass
+    return 1.0
+
+
+ITERATIONS_MULTIPLIER = _read_iterations_multiplier()
+
+
+def scale_iterations(baseline: int) -> int:
+    return max(1, int(baseline * ITERATIONS_MULTIPLIER))
+
+
 def seed_random_generators(seed_value: Optional[int] = None):
     """Seed Python and NumPy RNGs for reproducibility."""
     if seed_value is None:
@@ -1300,13 +1322,17 @@ def seed_random_generators(seed_value: Optional[int] = None):
             pass
 
 
-def get_random_string(length: Optional[int] = None, variability: Optional[int] = None) -> str:
-    """Build a random lowercase-ASCII string, with optional fixed `length` and alphabet `variability`."""
+def get_random_string(
+    length: Optional[int] = None, variability: Optional[int] = None, alphabet: Optional[str] = None
+) -> str:
+    """Build a random string with optional fixed `length`, `alphabet`, and alphabet `variability`."""
     if length is None:
         length = randint(3, 300)
+    if alphabet is None:
+        alphabet = ascii_lowercase
     if variability is None:
-        variability = len(ascii_lowercase)
-    return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+        variability = len(alphabet)
+    return "".join(choice(alphabet[:variability]) for _ in range(length))
 
 
 def is_equal_strings(native_strings, big_strings):
@@ -1315,4 +1341,155 @@ def is_equal_strings(native_strings, big_strings):
         assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
-#  endregion General test scaffolding
+DEGENERATE_HAYSTACKS = ["", "a", "hello world"]
+DEGENERATE_BOUNDS = [-16, -6, -5, -1, 0, 1, 2, 5, 6, 10, 11, 12, 16, 99]
+# `utf8_uncased_search` counts negative offsets from 0, not from the end, so its bounds are non-negative.
+UNCASED_DEGENERATE_BOUNDS = [0, 1, 3, 4, 5, 6, 7, 8, 11, 99]
+
+
+# endregion General test scaffolding
+
+
+# region Backend differential sweep
+#
+# StringZilla picks a SIMD backend at runtime via a dispatch table. `reset_capabilities([...])` re-points
+# that table, so running the same input under `["serial"]` and under `["serial", "neon"]` exercises
+# different kernel code through one binding, so any divergence is a kernel bug, not a binding bug. The
+# helpers below drive that comparison over inputs engineered to stress the SIMD tail/boundary logic.
+
+def capability_sweep():
+    """All capability configurations every differential test should sweep over, the same list for every
+    API, derived from the live hardware so no test hardcodes which backend its kernel uses.
+
+    Returns: the serial baseline, then each available SIMD backend on its own (atop serial), then the full
+    hardware set (``"any"``). Built from ``sz.__capabilities__``, so it adapts to the host (NEON / NEON-AES /
+    NEON-SHA on Arm; Westmere/Haswell/Skylake/Ice Lake on x86) and collapses to just ``("serial",)`` on a
+    machine with no SIMD backend. Each config is a tuple of capability names suitable for both
+    ``forced_capabilities(*config)`` (single-string `sz`) and the ``capabilities=config`` engine argument
+    (parallel `szs`). Sweeping every config across every API means an API whose kernel ignores a given
+    backend simply re-runs the serial path under that config, harmless redundancy, while the config
+    that does enable its SIMD path exercises it. Any divergence across the sweep is a kernel bug.
+    """
+    import stringzilla as sz
+
+    simd_backends = [capability for capability in sz.__capabilities__ if capability != "serial"]
+    sweep = [("serial",)] + [("serial", backend) for backend in simd_backends]
+    if len(simd_backends) > 1:
+        sweep.append(("any",))  # all SIMD backends enabled together
+    return sweep
+
+
+@contextlib.contextmanager
+def forced_capabilities(*names):
+    """Temporarily restrict StringZilla's dispatch to `names`, restoring full hardware dispatch on exit.
+
+    Yields the capability tuple active inside the block (which may be smaller than requested, since
+    `reset_capabilities` drops backends the hardware lacks). The `finally` always restores via `["any"]`
+    so a failing assertion cannot leak a reduced backend into later tests. We restore with `["any"]`
+    rather than the captured set because the `neonaes`/`neonsha` names do not round-trip through
+    `reset_capabilities` (re-applying them yields only `("serial", "neon")`), which would otherwise erode
+    capabilities test-over-test. Assumes the session baseline is full hardware (true except under the
+    conftest QEMU SVE mask, which these NEON differential tests are not concerned with).
+    """
+    import stringzilla as sz
+
+    try:
+        sz.reset_capabilities(list(names))
+        yield tuple(sz.__capabilities__)
+    finally:
+        sz.reset_capabilities(["any"])
+
+
+def run_across_backends(operation) -> Dict[tuple, object]:
+    """Run ``operation()`` under every :func:`capability_sweep` config, returning ``{config: result}``."""
+    results = {}
+    for config in capability_sweep():
+        with forced_capabilities(*config):
+            results[config] = operation()
+    return results
+
+
+def assert_backends_agree(results, *, oracle=None, format_inputs=None):
+    """Assert every backend agrees with the baseline, and the baseline matches ``oracle`` if given.
+    ``format_inputs`` is a zero-arg callable rendered only on failure."""
+    context = f" [{format_inputs()}]" if format_inputs is not None else ""
+    baseline_config = next(iter(results))
+    baseline = results[baseline_config]
+    diverged = {config: value for config, value in results.items() if value != baseline}
+    assert not diverged, f"backend divergence{context}: baseline {baseline_config}={baseline!r}; diverged={diverged!r}"
+    if oracle is not None:
+        assert baseline == oracle, f"kernels agree but disagree with the oracle{context}: {baseline!r} != {oracle!r}"
+
+
+# Lengths bracketing the 16/32/64-byte SIMD register widths (and a few larger tiers). Tail handling and
+# vector-boundary logic in the kernels is most likely to diverge from serial exactly at these sizes.
+VECTOR_WIDTH_LENGTHS = [0, 1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 63, 64, 65, 95, 96, 127, 128, 129, 255, 256, 257, 1024, 4096]
+
+
+def boundary_strings(alphabet: str = "ab") -> List[str]:
+    """One deterministic string per `VECTOR_WIDTH_LENGTHS`, tiled from a small `alphabet` so substring
+    and byteset kernels see frequent partial and full matches straddling the vector boundaries."""
+    repeated = alphabet * (max(VECTOR_WIDTH_LENGTHS) // len(alphabet) + 1)
+    return [repeated[:length] for length in VECTOR_WIDTH_LENGTHS]
+
+
+def unaligned_views(text, offsets=(0, 1, 3, 7, 15)):
+    """Yield ``(offset, sz.Str view)`` pairs that start at small byte offsets into a shared parent buffer.
+
+    Slicing a ``Str`` shares the parent's allocation at the sliced offset, so the kernel receives a
+    misaligned base pointer, the cheap way to exercise unaligned loads from Python."""
+    import stringzilla as sz
+
+    parent = sz.Str(text)
+    for offset in offsets:
+        if offset <= len(parent):
+            yield offset, parent[offset:]
+
+
+def malformed_utf8_corpus() -> List[bytes]:
+    """Byte strings that are not valid UTF-8, to feed the ``utf8_*`` kernels. Every backend must agree
+    on the result and stay in-bounds without crashing, the same malformed shapes the C++ `utf8.hpp`
+    safety sweep uses, ported to Python `bytes`."""
+    return [
+        b"\x80",  # lone continuation byte
+        b"\xc3",  # truncated 2-byte lead
+        b"\xe0\xa0",  # truncated 3-byte sequence
+        b"\xf0\x9f\x98",  # truncated 4-byte emoji (missing final byte)
+        b"\xc0\x80",  # overlong encoding of NUL
+        b"\xed\xa0\x80",  # UTF-16 surrogate U+D800 encoded as UTF-8
+        b"\xf5\x80\x80\x80",  # lead byte for a codepoint past U+10FFFF
+        b"a\x00b",  # embedded NUL
+        b"\xff\xfe",  # bytes that never appear in valid UTF-8
+        b"valid\xfftext",  # valid text with one invalid byte spliced in
+    ]
+
+
+def vector_width_bracketing_strings() -> List[str]:
+    """ASCII-padded strings with a 2, 3, and 4-byte codepoint planted around the 16/32/64-byte SIMD lanes."""
+    multibyte_codepoints = ["é", "中", "\U0001f600"]
+    lane_widths = [16, 32, 64]
+    strings = []
+    for lane_width in lane_widths:
+        for byte_offset in (-2, -1, 0, 1, 2):
+            for codepoint in multibyte_codepoints:
+                pad_length = max(0, lane_width + byte_offset - len(codepoint.encode("utf-8")))
+                strings.append("a" * pad_length + codepoint + "tail")
+    return strings
+
+
+_BOUNDARY_TILED_STRINGS = boundary_strings()
+_BOUNDARY_SAME_CHAR_STRINGS = boundary_strings(alphabet="a")
+_BOUNDARY_STRINGS_BY_LENGTH = {
+    length: (tiled, same_char)
+    for length, tiled, same_char in zip(VECTOR_WIDTH_LENGTHS, _BOUNDARY_TILED_STRINGS, _BOUNDARY_SAME_CHAR_STRINGS)
+}
+
+
+def differential_bodies(length, seed_value):
+    """Random, tiled, and all-same-character bodies of `length`; the random one seeded by `seed_value`."""
+    seed_random_generators(seed_value)
+    tiled_body, same_char_body = _BOUNDARY_STRINGS_BY_LENGTH[length]
+    return get_random_string(length=length), tiled_body, same_char_body
+
+
+# endregion Backend differential sweep
