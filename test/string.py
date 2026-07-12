@@ -634,15 +634,21 @@ def test_unit_strs_reinit_rebinds():
 
 def test_unit_file_reinit_rebinds():
     """Calling `File.__init__` again (even on the same path) must not corrupt the mapping or raise."""
+    import gc
+
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
         tmpfile.write(b"hello reinit")
         temp_filename = tmpfile.name
+    file = None
     try:
         file = sz.File(temp_filename)
         file.__init__(temp_filename)
         file.__init__(temp_filename)
         assert bytes(sz.Str(file)) == b"hello reinit"
     finally:
+        # Windows refuses to delete a file with a live mapping, so drop it before `os.remove`.
+        file = None
+        gc.collect()
         os.remove(temp_filename)
 
 
