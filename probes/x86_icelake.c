@@ -1,15 +1,22 @@
 /* StringZilla ISA probe: Ice Lake (x86-64 AVX-512 VBMI/VNNI + VAES), mirroring `include/stringzilla/hash/icelake.h` */
 #include <immintrin.h>
 
-#if defined(__clang__)
-#pragma clang attribute push( \
-    __attribute__((           \
+#if defined(__clang__) && (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
+// LLVM 18+ (Apple Clang 17+, which is LLVM 19-based) splits `evex512` out of AVX-512:
+// ZMM codegen in `target` attributes needs it named explicitly.
+#pragma clang attribute push(                                                                                        \
+    __attribute__((target(                                                                                           \
+        "avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,avx512vnni,bmi,bmi2,aes,vaes,sha,evex512"))), \
+    apply_to = function)
+#elif defined(__clang__)
+#pragma clang attribute push(                                                                                       \
+    __attribute__((                                                                                                 \
         target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,avx512vnni,bmi,bmi2,aes,vaes,sha"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", \
-                   "avx512vnni", "bmi", "bmi2", "aes", "vaes", "sha")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "avx512vnni", \
+                   "bmi", "bmi2", "aes", "vaes", "sha")
 #endif
 
 /* The Ice Lake kernels split across two orthogonal AVX-512 sub-extensions - the hash/intersect cores use

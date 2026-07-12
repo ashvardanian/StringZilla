@@ -26,11 +26,15 @@ extern "C" {
  *  We are going to use VBMI2 for `_mm256_maskz_compress_epi8`.
  */
 #if SZ_USE_SKYLAKE
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512,popcnt"))), \
+                             apply_to = function)
+#elif defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,popcnt"))), \
+                             apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "popcnt")
 #endif
 
 /**

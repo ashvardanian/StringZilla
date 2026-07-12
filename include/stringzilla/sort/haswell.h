@@ -30,10 +30,10 @@ extern "C" {
 
 #if SZ_USE_HASWELL
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2")
+#pragma GCC target("avx2", "popcnt")
 #endif
 
 /**

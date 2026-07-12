@@ -16,13 +16,18 @@ extern "C" {
 #endif
 
 #if SZ_USE_ICELAKE
-#if defined(__clang__)
-#pragma clang attribute push(                                                                          \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#pragma clang attribute push(                                                                                         \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512,popcnt"))), \
+    apply_to = function)
+#elif defined(__clang__)
+#pragma clang attribute push(                                                                                 \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+                   "popcnt")
 #endif
 
 #pragma region UAX 14 Line Boundaries forward kernel

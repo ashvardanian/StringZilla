@@ -19,7 +19,10 @@ namespace stringzillas {
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
-#if defined(__clang__)
+#if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512dq,avx512bw,bmi,bmi2,evex512"))), \
+                             apply_to = function)
+#elif defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512dq,avx512bw,bmi,bmi2"))), \
                              apply_to = function)
 #elif defined(__GNUC__)

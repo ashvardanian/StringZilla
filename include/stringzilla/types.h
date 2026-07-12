@@ -404,6 +404,22 @@
 #define SZ_ENFORCE_SVE_OVER_NEON (0)
 #endif
 
+/**
+ *  LLVM 18 split the `evex512` target feature out of the AVX-512 family (the AVX10 transition): in
+ *  per-function `target` attributes, `avx512f` alone now grants only 256-bit EVEX forms, and ZMM codegen
+ *  requires naming `evex512` explicitly. Older Clang treats the token as unknown and DROPS the whole
+ *  attribute (`-Wignored-attributes`, a hard error under `-Werror`), so the AVX-512 kernels fork their
+ *  pragmas on this one condition. Apple Clang versions its own way: Apple Clang 17 is LLVM-19-based and
+ *  already needs the token. Every shipped AVX-512 CPU is 512-bit capable, so the feature is semantically
+ *  implied by the Skylake and Ice Lake tiers - this is purely an encoding-model fork, never a codegen
+ *  difference on real hardware.
+ */
+#if defined(__clang__) && (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
+#define SZ_CLANG_HAS_EVEX512_ (1)
+#else
+#define SZ_CLANG_HAS_EVEX512_ (0)
+#endif
+
 #if !defined(SZ_USE_CUDA)
 #if defined(__NVCC__)
 #define SZ_USE_CUDA (1)
