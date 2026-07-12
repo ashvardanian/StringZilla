@@ -6,8 +6,6 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probes_begin_()
-sz_isa_probe_(SZ_CAN_COMPILE_POWERVSX "" "" "probes/power_vsx.c")
-sz_isa_probes_end_()
+sz_isa_probe_(SZ_CAN_COMPILE_POWERVSX SOURCE probes/power_vsx.c)
 
 set(SZ_ISA_TIERS "POWERVSX")

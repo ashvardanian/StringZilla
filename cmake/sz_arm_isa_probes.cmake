@@ -6,13 +6,11 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probes_begin_()
-sz_isa_probe_(SZ_CAN_COMPILE_SVE2AES "" "" "probes/arm_sve2aes.c")
-sz_isa_probe_(SZ_CAN_COMPILE_SVE2 "" "" "probes/arm_sve2.c")
-sz_isa_probe_(SZ_CAN_COMPILE_SVE "" "" "probes/arm_sve.c")
-sz_isa_probe_(SZ_CAN_COMPILE_NEONSHA "" "" "probes/arm_neonsha.c")
-sz_isa_probe_(SZ_CAN_COMPILE_NEONAES "" "" "probes/arm_neonaes.c")
-sz_isa_probe_(SZ_CAN_COMPILE_NEON "" "" "probes/arm_neon.c")
-sz_isa_probes_end_()
+sz_isa_probe_(SZ_CAN_COMPILE_SVE2AES SOURCE probes/arm_sve2aes.c)
+sz_isa_probe_(SZ_CAN_COMPILE_SVE2 SOURCE probes/arm_sve2.c)
+sz_isa_probe_(SZ_CAN_COMPILE_SVE SOURCE probes/arm_sve.c)
+sz_isa_probe_(SZ_CAN_COMPILE_NEONSHA SOURCE probes/arm_neonsha.c)
+sz_isa_probe_(SZ_CAN_COMPILE_NEONAES SOURCE probes/arm_neonaes.c)
+sz_isa_probe_(SZ_CAN_COMPILE_NEON SOURCE probes/arm_neon.c)
 
 set(SZ_ISA_TIERS "SVE2AES;SVE2;SVE;NEONSHA;NEONAES;NEON")

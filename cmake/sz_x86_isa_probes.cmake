@@ -6,12 +6,10 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probes_begin_()
-sz_isa_probe_(SZ_CAN_COMPILE_ICELAKE "" "" "probes/x86_icelake.c")
-sz_isa_probe_(SZ_CAN_COMPILE_SKYLAKE "" "" "probes/x86_skylake.c")
-sz_isa_probe_(SZ_CAN_COMPILE_HASWELL "" "" "probes/x86_haswell.c")
-sz_isa_probe_(SZ_CAN_COMPILE_GOLDMONT "" "" "probes/x86_goldmont.c")
-sz_isa_probe_(SZ_CAN_COMPILE_WESTMERE "" "" "probes/x86_westmere.c")
-sz_isa_probes_end_()
+sz_isa_probe_(SZ_CAN_COMPILE_ICELAKE SOURCE probes/x86_icelake.c)
+sz_isa_probe_(SZ_CAN_COMPILE_SKYLAKE SOURCE probes/x86_skylake.c)
+sz_isa_probe_(SZ_CAN_COMPILE_HASWELL SOURCE probes/x86_haswell.c)
+sz_isa_probe_(SZ_CAN_COMPILE_GOLDMONT SOURCE probes/x86_goldmont.c)
+sz_isa_probe_(SZ_CAN_COMPILE_WESTMERE SOURCE probes/x86_westmere.c)
 
 set(SZ_ISA_TIERS "ICELAKE;SKYLAKE;HASWELL;GOLDMONT;WESTMERE")

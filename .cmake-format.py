@@ -1,6 +1,4 @@
-# -----------------------------
 # Options effecting formatting.
-# -----------------------------
 with section("format"):
     # How wide to allow formatted cmake files
     line_width = 120
@@ -17,3 +15,10 @@ with section("format"):
     # If a statement is wrapped to more than one line, than dangle the closing
     # parenthesis on its own line.
     dangle_parens = True
+
+
+# Options affecting comment reflow and formatting.
+with section("markup"):
+    # Keep comments verbatim: the reflow engine only recognizes `*` bullets, so it merges
+    # dash-bulleted lines into run-on prose.
+    enable_markup = False

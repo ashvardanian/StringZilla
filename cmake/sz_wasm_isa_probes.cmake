@@ -6,9 +6,7 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probes_begin_()
-sz_isa_probe_(SZ_CAN_COMPILE_V128RELAXED "" "-msimd128 -mrelaxed-simd" "probes/wasm_v128relaxed.c")
-sz_isa_probe_(SZ_CAN_COMPILE_V128 "" "-msimd128" "probes/wasm_v128.c")
-sz_isa_probes_end_()
+sz_isa_probe_(SZ_CAN_COMPILE_V128RELAXED SOURCE probes/wasm_v128relaxed.c GNU_FLAGS -msimd128 -mrelaxed-simd)
+sz_isa_probe_(SZ_CAN_COMPILE_V128 SOURCE probes/wasm_v128.c GNU_FLAGS -msimd128)
 
 set(SZ_ISA_TIERS "V128RELAXED;V128")
