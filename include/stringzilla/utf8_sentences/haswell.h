@@ -28,47 +28,28 @@ extern "C" {
 #pragma region In register vectorized classifier
 
 /*  The AVX2 twin of the Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves to per-codepoint
- *  Sentence_Break class bytes with ZERO per-lane scalar loop, ZERO `vpgather`, and NO serial deferral. Each 64-byte
- *  window lives as two `__m256i` halves; the per-lane codepoint (high, low) byte pair from the decoded window feeds a
- *  register-resident 3-stage `vpshufb` nibble cascade over the whole BMP (the AVX2 twin of the icelake page-LUT + trie
- *  + OLetter-range mix), and a 4-stage astral cascade for 4-byte leads. Both emit the Sentence_Break class byte
- *  directly, bit-identical with `sz_rune_sentence_break_property` over the entire code space. */
+ *  Sentence_Break class bytes with ZERO per-lane scalar loop and NO serial deferral. Each 64-byte window lives as two
+ *  `__m256i` halves. The BMP is ONE indexed lookup per codepoint into a page-compressed flat table - `bmp_page_lut_[cp >> 8]`
+ *  picks one of 57 distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with
+ *  `vpgatherdd`; 4-byte leads still ride a 4-stage astral `vpshufb` cascade. Both emit the Sentence_Break class byte
+ *  directly, bit-identical with `sz_rune_sentence_break_property` over the entire code space.
+ *
+ *  The flat table is chosen for port pressure, not instruction count: `vpshufb` cross-lane shuffles are port-5-only,
+ *  so any dependent shuffle cascade saturates that single port, while `vpgatherdd` issues on the load ports and
+ *  leaves the shuffle port to the decode. Gathers pay off on multi-KB tables in general - see less_slow.cpp v0.3.0
+ *  "Gather and Scatter": https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0 */
 
-/** @brief  Sentence_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
- *          register-resident 3-stage `vpshufb` nibble cascade. Gather-free; bit-exact with
- *          `sz_rune_sentence_break_property` over the whole BMP. */
-SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high, __m256i low) {
-    __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
-    __m256i const high_high = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
-    __m256i const high_low = _mm256_and_si256(high, low_nibble_mask);
-    __m256i const page = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage1_,
-                                                             sz_utf8_sentence_break_haswell_stage1_count_k / 16,
-                                                             high_high, high_low);
-    __m256i const low_high = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage2_lo_,
-                                                                sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16,
-                                                                page, low_high);
-    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_sentence_break_haswell_stage2_hi_,
-                                                                sz_utf8_sentence_break_haswell_stage2_hi_count_k / 16,
-                                                                page, low_high);
-    __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
-                                               _mm256_slli_epi16(leaf_hi, 4));
-    __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
-    __m256i const low_low = _mm256_and_si256(low, low_nibble_mask);
-    __m256i const lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), low_low);
-    __m256i result = _mm256_setzero_si256();
-    for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_rune_lut256_haswell_(sz_utf8_sentence_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
-        result = _mm256_blendv_epi8(result, value, here);
-    }
-    return result;
+/** @brief  Sentence_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
+ *          `bmp_page_lut_` page LUT selects one of the 57 distinct 256-byte pages, then `flat_bmp_` is fetched by
+ *          `vpgatherdd`. Bit-exact with `sz_rune_sentence_break_property` over the whole BMP. */
+SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+    return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
+                                             high_bytes_u8x32, low_bytes_u8x32);
 }
 
 /** @brief  Sentence_Break class byte for thirty-two ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade). Per-lane bytes: @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF,
- *          @p low = offset&0xFF. Gather-free; bit-exact with `sz_rune_sentence_break_property` over all astral. */
+ *          @p low = offset&0xFF. Bit-exact with `sz_rune_sentence_break_property` over all astral. */
 SZ_HELPER_AUTO __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane, __m256i high, __m256i low) {
     __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
     __m256i const n4 = _mm256_and_si256(plane, low_nibble_mask);
@@ -347,8 +328,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
         sz_size_t const complete_limit = sz_utf8_sentence_break_complete_limit_haswell_(
             window, text_u8 + position + loaded, more_text);
 
-        //  Dense compaction: store the per-byte-lane class bytes once, then gather the start-lane classes into a dense
-        //  `0..count-1` array via BMI2 lane-index unpacking (no `vpgather`, no `vpcompressb`).
+        //  Dense compaction: store the per-byte-lane class bytes once, then pack the start-lane classes into a dense
+        //  `0..count-1` array via BMI2 lane-index unpacking (AVX2 has no `vpcompressb`).
         sz_u8_t class_bytes[64];
         _mm256_storeu_si256((__m256i *)(class_bytes + 0), classes_lo);
         _mm256_storeu_si256((__m256i *)(class_bytes + 32), classes_hi);

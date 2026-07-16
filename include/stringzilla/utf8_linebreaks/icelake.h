@@ -35,18 +35,26 @@ extern "C" {
 #pragma region In register vectorized classifier
 
 /*  The classifier resolves a contiguous run of codepoints to per-codepoint (class, side, dotted) with ZERO
- *  per-lane scalar loop, ZERO `vpgather`, and NO serial `sz_rune_line_break_property` deferral. It processes
- *  sixteen 32-bit codepoint lanes per pass: each codepoint is mapped to a PALETTE INDEX in-register (page-LUT
- *  for cp<0x800, the shared substrate-style two-stage trie for 0x800..0xFFFF, arithmetic range compares for
- *  the 50 big homogeneous blocks and the 618 astral ranges), then the 62-entry palette descriptor is unpacked
- *  to the LB1-resolved class byte and the engine side byte by in-register compares and masked moves. The
- *  resolution precedence mirrors `sz_rune_line_break_property`: a big-range hit (first match in array order)
- *  overrides everything; else the page-LUT; else the trie; else an astral range; else palette[0]. */
+ *  per-lane scalar loop and NO serial `sz_rune_line_break_property` deferral. It processes sixteen 32-bit codepoint
+ *  lanes per pass: the whole BMP is mapped to a flat-palette index by ONE indexed lookup - `bmp_page_lut_[cp >> 8]`
+ *  selects one of 67 distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]`, fetched by `vpgatherdd` -
+ *  while the astral planes still resolve through the 8/4/4/4 trie in the 62-entry cascade palette's index space. The
+ *  descriptor is then unpacked to the LB1-resolved class byte and the engine side byte by in-register compares and
+ *  masked moves.
+ *
+ *  Design note: the flat table is chosen for port pressure rather than instruction count. `vpermb`/`vpermi2b`
+ *  cross-lane shuffles are port-5-only, so any dependent shuffle cascade saturates that single port, while
+ *  `vpgatherdd` issues on the load ports and leaves the shuffle port to the decode. Gathers pay off on multi-KB
+ *  tables in general - see less_slow.cpp v0.3.0 "Gather and Scatter":
+ *  https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
+ *
+ *  ! The line leaf holds a `flat_palette_` index, NOT the 62-entry cascade palette index, because the Line_Break
+ *  ! descriptor is 16-bit and the leaf must stay one byte per codepoint. The two index spaces do not mix. */
 
 /** @brief Palette index for sixteen astral (>=0x10000) codepoints via a register-resident 8/4/4/4 trie over
  *         offset = codepoint - 0x10000 (s0 -> s1 -> s2 -> leaf). Re-init-free: every tile is read straight from
- *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with the legacy
- *         618-range linear astral fold; replaces that per-window scan. */
+ *         aligned .rodata through the substrate permute256_/lut_cascade_ helpers. Bit-exact with
+ *         `sz_rune_line_break_property` over the astral planes. */
 SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints) {
     __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
     __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
@@ -65,105 +73,41 @@ SZ_HELPER_AUTO __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoin
                                              (int)sz_utf8_line_break_astral_leaf_tiles_k, class_index);
 }
 
-/** @brief All-64-lane complete-BMP palette index for `cp < 0x10000` over the full-BMP trie (offset = the codepoint
- *         itself, no `-0x800` subtract), so a SINGLE pass resolves the whole BMP -- the page LUT and the 0x800 split
- *         are gone. This mirrors `sz_utf8_rune_trie_walk_icelake_` exactly with `block = superblock = 8` and
- *         `offset = (high << 8) | low`; the substrate function bakes in a hard `-0x800`, so the zero-base form lives
- *         here. Lanes whose codepoint is >= 0x10000 are undefined (the caller blends in the astral path). */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_full_index_icelake_(__m512i high, __m512i low) {
-    __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_block_k));
-    __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_subblock_k));
-    __m512i const within_mask = _mm512_set1_epi16((short)(sz_utf8_line_break_trie_block_k - 1));
-    __m512i const super_off_mask = _mm512_set1_epi16((short)(sz_utf8_line_break_trie_subblock_k - 1));
-    __m512i const super_v16 = _mm512_set1_epi16((short)sz_utf8_line_break_trie_subblock_k);
-    __m512i const block_v16 = _mm512_set1_epi16((short)sz_utf8_line_break_trie_block_k);
-
-    __m512i const zero = _mm512_setzero_si512();
-    __m512i const offset_lo = _mm512_or_si512(_mm512_slli_epi16(_mm512_unpacklo_epi8(high, zero), 8),
-                                              _mm512_unpacklo_epi8(low, zero));
-    __m512i const offset_hi = _mm512_or_si512(_mm512_slli_epi16(_mm512_unpackhi_epi8(high, zero), 8),
-                                              _mm512_unpackhi_epi8(low, zero));
-
-    __m512i const within_lo = _mm512_and_si512(offset_lo, within_mask);
-    __m512i const within_hi = _mm512_and_si512(offset_hi, within_mask);
-    __m512i const block_idx_lo = _mm512_srl_epi16(offset_lo, block_log2);
-    __m512i const block_idx_hi = _mm512_srl_epi16(offset_hi, block_log2);
-    __m512i const super_off_lo = _mm512_and_si512(block_idx_lo, super_off_mask);
-    __m512i const super_off_hi = _mm512_and_si512(block_idx_hi, super_off_mask);
-    __m512i const super_lo = _mm512_srl_epi16(block_idx_lo, super_log2);
-    __m512i const super_hi = _mm512_srl_epi16(block_idx_hi, super_log2);
-
-    __m512i const level1_lo = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
-                                                        (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_lo);
-    __m512i const level1_hi = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
-                                                        (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super_hi);
-
-    __m512i const l2_index_lo = _mm512_add_epi16(_mm512_mullo_epi16(level1_lo, super_v16), super_off_lo);
-    __m512i const l2_index_hi = _mm512_add_epi16(_mm512_mullo_epi16(level1_hi, super_v16), super_off_hi);
-    __m512i const leaf_idx_lo = sz_utf8_rune_gather_word_(
-        sz_utf8_line_break_bmp_full_trie_l2_, (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index_lo);
-    __m512i const leaf_idx_hi = sz_utf8_rune_gather_word_(
-        sz_utf8_line_break_bmp_full_trie_l2_, (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index_hi);
-
-    __m512i const leaf_byte_lo = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_lo, block_v16), within_lo);
-    __m512i const leaf_byte_hi = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_hi, block_v16), within_hi);
-    __m512i const class_lo = sz_utf8_rune_gather_byte_(
-        sz_utf8_line_break_bmp_full_trie_leaf_, (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte_lo);
-    __m512i const class_hi = sz_utf8_rune_gather_byte_(
-        sz_utf8_line_break_bmp_full_trie_leaf_, (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte_hi);
-
-    return _mm512_packus_epi16(class_lo, class_hi);
+/** @brief Flat-palette index for sixteen BMP byte-lanes, read straight from the page-compressed flat leaf: one
+ *         `vpermb` over `bmp_page_lut_` picks the 256-byte page, one `vpgatherdd` fetches
+ *         `flat_bmp_[page * 256 + (cp & 0xFF)]`. The leaf byte is an index into
+ *         `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette. Only the low byte of each u32 lane
+ *         is the index; the caller truncates with `vpmovdb`. */
+SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
+    return sz_utf8_rune_flat_lookup_icelake_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
+                                             codepoints_u32x16);
 }
 
-/** @brief Start-compacting complete-BMP palette index: the rule engine reads classes only at codepoint-START lanes,
- *         and the dense 3-byte scripts that dominate the trie cost carry at most 32 starts per 64-byte window, so the
- *         start lanes' high/low bytes are `vpcompressb`-compacted into the low <=32 lanes, widened to ONE 32x16-bit
- *         register, walked through the full-BMP trie a SINGLE time (the L1/L2/leaf gathers run once, not the lo+hi
- *         twice of @ref sz_line_break_bmp_full_index_icelake_), then the per-start class bytes are
- *         `vpexpandb`-scattered back to their original byte-lane positions. Windows with more than 32 starts (dense
- *         2-byte scripts, ASCII-interleaved runs) cannot fit one 16-bit register and fall back to the unconditional
- *         two-pass walk, which costs no more than today. Continuation lanes hold an undefined index (never consumed:
- *         `base` is a subset of `starts`). Bit-identical to the two-pass walk on every start lane. */
-SZ_HELPER_AUTO __m512i sz_line_break_bmp_full_index_compact_icelake_(__m512i high, __m512i low, sz_u64_t starts) {
-    if (_mm_popcnt_u64(starts) > 32) return sz_line_break_bmp_full_index_icelake_(high, low);
-    __mmask64 const start_mask = _cvtu64_mask64(starts);
-    __m512i const high_packed = _mm512_maskz_compress_epi8(start_mask, high);
-    __m512i const low_packed = _mm512_maskz_compress_epi8(start_mask, low);
-
-    __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_block_k));
-    __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)sz_utf8_line_break_trie_subblock_k));
-    __m512i const within_mask = _mm512_set1_epi16((short)(sz_utf8_line_break_trie_block_k - 1));
-    __m512i const super_off_mask = _mm512_set1_epi16((short)(sz_utf8_line_break_trie_subblock_k - 1));
-    __m512i const super_v16 = _mm512_set1_epi16((short)sz_utf8_line_break_trie_subblock_k);
-    __m512i const block_v16 = _mm512_set1_epi16((short)sz_utf8_line_break_trie_block_k);
-
-    //  The <=32 compacted starts sit in the low 32 bytes; widen them to a single 32x16-bit codepoint register.
-    __m512i const offset = _mm512_or_si512(
-        _mm512_slli_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(high_packed)), 8),
-        _mm512_cvtepu8_epi16(_mm512_castsi512_si256(low_packed)));
-
-    __m512i const within = _mm512_and_si512(offset, within_mask);
-    __m512i const block_idx = _mm512_srl_epi16(offset, block_log2);
-    __m512i const super_off = _mm512_and_si512(block_idx, super_off_mask);
-    __m512i const super = _mm512_srl_epi16(block_idx, super_log2);
-
-    __m512i const level1 = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_l1_,
-                                                     (int)sz_utf8_line_break_bmp_full_trie_l1_count_k, super);
-    __m512i const l2_index = _mm512_add_epi16(_mm512_mullo_epi16(level1, super_v16), super_off);
-    __m512i const leaf_idx = sz_utf8_rune_gather_word_(sz_utf8_line_break_bmp_full_trie_l2_,
-                                                       (int)sz_utf8_line_break_bmp_full_trie_l2_count_k, l2_index);
-    __m512i const leaf_byte = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx, block_v16), within);
-    __m512i const class_word = sz_utf8_rune_gather_byte_(sz_utf8_line_break_bmp_full_trie_leaf_,
-                                                         (int)sz_utf8_line_break_bmp_full_trie_leaf_count_k, leaf_byte);
-
-    //  Narrow the 32 class words back to 32 contiguous bytes (low half), then scatter to the original start lanes.
-    __m512i const class_packed = _mm512_castsi256_si512(_mm512_cvtepi16_epi8(class_word));
-    return _mm512_maskz_expand_epi8(start_mask, class_packed);
+/** @brief All-64-lane flat-palette index for `cp < 0x10000` (`cp = (high << 8) | low`): four sixteen-lane
+ *         `vpgatherdd` leaves resolve the whole window on the load ports, leaving the cross-lane shuffle port to
+ *         the decode. Lanes whose codepoint is >= 0x10000 are
+ *         undefined (the caller blends the astral path over them). The sixteen-lane groups are unrolled because
+ *         `vextracti32x4` / `vinserti32x4` take an immediate lane selector. */
+SZ_HELPER_AUTO __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
+    __m512i palette_indices_u8x64 = _mm512_setzero_si512();
+    __m512i high_u32x16, low_u32x16, codepoints_u32x16, group_indices_u32x16;
+#define SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(group)                                            \
+    high_u32x16 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high_bytes_u8x64, group)); \
+    low_u32x16 = _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(low_bytes_u8x64, group));   \
+    codepoints_u32x16 = _mm512_or_si512(_mm512_slli_epi32(high_u32x16, 8), low_u32x16);     \
+    group_indices_u32x16 = sz_line_break_bmp_flat_index16_icelake_(codepoints_u32x16);      \
+    palette_indices_u8x64 = _mm512_inserti32x4(palette_indices_u8x64, _mm512_cvtepi32_epi8(group_indices_u32x16), group)
+    SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(0);
+    SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(1);
+    SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(2);
+    SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_(3);
+#undef SZ_LINE_BREAK_FLAT_GROUP_ICELAKE_
+    return palette_indices_u8x64;
 }
 
 /** @brief Unpack thirty-two 16-bit palette descriptors (one half of the 64-byte block) to the LB1-resolved class and
  *         the engine side byte, both as 16-bit lanes, plus the per-lane DottedCircle predicate. Applies the serial
- *         resolution aliasing (SA->AL/CM, AI/SG/XX->AL, CJ->NS); Pi/Pf/EAW/Cn|Ext side bits come from descriptor
+ *         resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); Pi/Pf/EAW/Cn|Ext side bits come from descriptor
  *         bits 6/7/8/9; RI/ZWJ side from the raw class; CM|ZWJ -> mark side bit; DottedCircle from bit 13. */
 SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors, __m512i *classes_out,
                                                                     __m512i *side_out, __mmask32 *dotted_out) {
@@ -203,6 +147,38 @@ SZ_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i desc
     *classes_out = classes;
     *side_out = side;
     *dotted_out = _mm512_test_epi16_mask(descriptors, _mm512_set1_epi16(1 << 13));
+}
+
+/** @brief Expand sixty-four flat-palette indices to the LB1-resolved class byte, the engine side byte and the
+ *         DottedCircle lane mask. The 56-entry `flat_palette_` of 16-bit descriptors is padded to 64 words = two
+ *         aligned ZMM tiles, so ONE `vpermi2w` per 32-lane half resolves every index (the permute consumes the low
+ *         six index bits, exactly the padded palette's span); the descriptor halves then feed the shared
+ *         @ref sz_line_break_descriptor_unpack_half_icelake_ and narrow back to bytes with `vpmovwb`. Bit-identical
+ *         to the cascade's `palette_class_` / `_side_` / `_dotted_` byte-table permutes, which carry the same
+ *         resolution baked in. */
+SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
+                                                               __m512i *classes_u8x64_out, __m512i *side_u8x64_out,
+                                                               sz_u64_t *dotted_out) {
+    __m512i const palette_low_tile_u16x32 = _mm512_load_si512((void const *)sz_utf8_line_break_flat_palette_);
+    __m512i const palette_high_tile_u16x32 = _mm512_load_si512((void const *)(sz_utf8_line_break_flat_palette_ + 32));
+    __m512i const indices_low_u16x32 = _mm512_cvtepu8_epi16(_mm512_castsi512_si256(palette_indices_u8x64));
+    __m512i const indices_high_u16x32 = _mm512_cvtepu8_epi16(_mm512_extracti64x4_epi64(palette_indices_u8x64, 1));
+    __m512i const descriptors_low_u16x32 = _mm512_permutex2var_epi16(palette_low_tile_u16x32, indices_low_u16x32,
+                                                                     palette_high_tile_u16x32);
+    __m512i const descriptors_high_u16x32 = _mm512_permutex2var_epi16(palette_low_tile_u16x32, indices_high_u16x32,
+                                                                      palette_high_tile_u16x32);
+
+    __m512i classes_low_u16x32, classes_high_u16x32, side_low_u16x32, side_high_u16x32;
+    __mmask32 dotted_low_mask32, dotted_high_mask32;
+    sz_line_break_descriptor_unpack_half_icelake_(descriptors_low_u16x32, &classes_low_u16x32, &side_low_u16x32,
+                                                  &dotted_low_mask32);
+    sz_line_break_descriptor_unpack_half_icelake_(descriptors_high_u16x32, &classes_high_u16x32, &side_high_u16x32,
+                                                  &dotted_high_mask32);
+    *classes_u8x64_out = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(classes_low_u16x32)),
+                                            _mm512_cvtepi16_epi8(classes_high_u16x32), 1);
+    *side_u8x64_out = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_cvtepi16_epi8(side_low_u16x32)),
+                                         _mm512_cvtepi16_epi8(side_high_u16x32), 1);
+    *dotted_out = (sz_u64_t)_cvtmask32_u32(dotted_low_mask32) | ((sz_u64_t)_cvtmask32_u32(dotted_high_mask32) << 32);
 }
 
 /** @brief Per-window byte-lane classification: class/side per lane, plus the effective-start and U+FFFD masks. */
@@ -318,37 +294,27 @@ SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_
         sz_utf8_srl8_icelake_(next1, 4, 0x03));
     __m512i const previous_cluster_lane = _mm512_maskz_mov_epi8(_cvtu64_mask64(four_byte), plane_all);
 
-    //  Build the 64-lane palette-index byte vector in ONE pass. The whole BMP (cp < 0x10000) resolves through ONE
-    //  full-BMP trie walk: the sub-0x800 page LUT and its 0x800 split are folded into the trie leaf, so there is no
-    //  page-LUT gather on this path. Astral lanes (cp >= 0x10000) are blended from the astral trie below; replacement
-    //  lanes are forced to U+FFFD's palette index so malformed input matches the serial U+FFFD policy.
-    sz_u64_t const is_astral = four_byte & loaded_mask;
-    __m512i index;
-    //  All-ASCII fast path (the dominant Latin case): every loaded lane is a 1-byte unit below 0x80, so the page LUT
-    //  resolves the whole block with one `vpermi2b` over span 0 -- no lo/hi unpack, no BMP trie, no astral scan.
-    if ((true_ascii & loaded_mask) == loaded_mask) {
-        __m512i const low = _mm512_loadu_si512((void const *)sz_utf8_line_break_page_lut_);
-        __m512i const high = _mm512_loadu_si512((void const *)(sz_utf8_line_break_page_lut_ + 64));
-        index = _mm512_permutex2var_epi8(low, raw, high);
+    //  Build the 64-lane flat-palette-index byte vector in ONE pass: the whole BMP (cp < 0x10000) resolves through
+    //  the page-compressed flat leaf, four `vpgatherdd` on the load ports replacing the three-level trie walk and its
+    //  page-LUT fast paths. Replacement lanes are forced to U+FFFD's index (U+FFFD is itself BMP, so it shares this
+    //  index space) to match the serial U+FFFD policy. Astral lanes cannot join here: the astral trie still speaks the
+    //  62-entry cascade palette, a DIFFERENT index space, so they are blended after the expansion, on class/side bytes.
+    //  Only VALID 4-byte starts join that late blend: an invalid 4-byte lead is a replacement lane whose U+FFFD
+    //  resolution must survive it, so `valid4`, not `four_byte`, gates the blend.
+    sz_u64_t const is_astral = valid4 & loaded_mask;
+    __m512i palette_indices_u8x64 = sz_line_break_bmp_flat_index_icelake_(high_fixed, low_fixed);
+    if (replacement) {
+        __m512i const replacement_indices_u8x64 = sz_line_break_bmp_flat_index_icelake_(_mm512_set1_epi8((char)0xFF),
+                                                                                        _mm512_set1_epi8((char)0xFD));
+        palette_indices_u8x64 = _mm512_mask_mov_epi8(palette_indices_u8x64, _cvtu64_mask64(replacement),
+                                                     replacement_indices_u8x64);
     }
-    else if (!three_byte && !four_byte && !replacement) {
-        //  Sub-0x800 fast path (window is ASCII + valid 2-byte only): address the 2048-byte page LUT directly by
-        //  codepoint = (high << 8) | low, so two `gather_byte` cascades replace the three-level BMP trie. Bit-identical
-        //  (the trie leaf folds in this same page LUT below 0x800).
-        __m512i const zero_bytes = _mm512_setzero_si512();
-        __m512i const codepoint_low_half = _mm512_or_si512(
-            _mm512_slli_epi16(_mm512_unpacklo_epi8(high_fixed, zero_bytes), 8),
-            _mm512_unpacklo_epi8(low_fixed, zero_bytes));
-        __m512i const codepoint_high_half = _mm512_or_si512(
-            _mm512_slli_epi16(_mm512_unpackhi_epi8(high_fixed, zero_bytes), 8),
-            _mm512_unpackhi_epi8(low_fixed, zero_bytes));
-        __m512i const class_low_half = sz_utf8_rune_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
-                                                                 codepoint_low_half);
-        __m512i const class_high_half = sz_utf8_rune_gather_byte_(sz_utf8_line_break_page_lut_, 0x800,
-                                                                  codepoint_high_half);
-        index = _mm512_packus_epi16(class_low_half, class_high_half);
-    }
-    else { index = sz_line_break_bmp_full_index_compact_icelake_(high_fixed, low_fixed, starts); }
+
+    //  Expand the flat-palette indices to the LB1-resolved class byte, the engine side byte and the DottedCircle mask.
+    __m512i classes_u8x64, side_u8x64;
+    sz_u64_t dotted;
+    sz_line_break_flat_palette_unpack_icelake_(palette_indices_u8x64, &classes_u8x64, &side_u8x64, &dotted);
+
     if (is_astral) {
         //  Astral is rare: reconstruct the full 32-bit codepoint per sixteen-lane group and resolve through the
         //  shared astral trie, then blend the resulting indices back into the byte vector. No big-range scan. The
@@ -383,26 +349,27 @@ SZ_HELPER_AUTO sz_line_break_classified_t sz_line_break_classify_window_icelake_
                                      low32);
         group_index = sz_line_break_classify_astral16_icelake_(codepoints);
         astral_index = _mm512_inserti32x4(astral_index, _mm512_cvtepi32_epi8(group_index), 3);
-        index = _mm512_mask_mov_epi8(index, _cvtu64_mask64(is_astral), astral_index);
-    }
-    if (replacement) {
-        //  Force U+FFFD's palette index on the malformed lanes, derived by walking the BMP trie for cp = 0xFFFD so
-        //  the malformed policy stays table-derived rather than hard-coded.
-        __m512i const fffd_index = sz_line_break_bmp_full_index_icelake_(_mm512_set1_epi8((char)0xFF),
-                                                                         _mm512_set1_epi8((char)0xFD));
-        index = _mm512_mask_mov_epi8(index, _cvtu64_mask64(replacement), fffd_index);
+
+        //  The astral index addresses the 62-entry cascade palette, whose `palette_class_` / `_side_` / `_dotted_`
+        //  byte tables carry the very same LB1 resolution the flat descriptor unpack applies (verified entry by
+        //  entry), so blending the RESOLVED bytes over the astral lanes matches blending indices in a single
+        //  shared space, which the two palettes do not form.
+        __mmask64 const astral_mask = _cvtu64_mask64(is_astral);
+        classes_u8x64 = _mm512_mask_permutexvar_epi8(
+            classes_u8x64, astral_mask, astral_index,
+            _mm512_load_si512((void const *)sz_utf8_line_break_palette_class_));
+        side_u8x64 = _mm512_mask_permutexvar_epi8(side_u8x64, astral_mask, astral_index,
+                                                  _mm512_load_si512((void const *)sz_utf8_line_break_palette_side_));
+        __m512i const astral_dotted_bytes_u8x64 = _mm512_permutexvar_epi8(
+            astral_index, _mm512_load_si512((void const *)sz_utf8_line_break_palette_dotted_));
+        sz_u64_t const astral_dotted = _cvtmask64_u64(
+            _mm512_test_epi8_mask(astral_dotted_bytes_u8x64, astral_dotted_bytes_u8x64));
+        dotted = (dotted & ~is_astral) | (astral_dotted & is_astral);
     }
 
-    //  Resolve class / side / DottedCircle by permuting the precomputed palette tables with the per-lane palette index:
-    //  three `vpermb` over 64-entry .rodata tables replace the u16 descriptor permute + bitfield unpack. The LB1
-    //  resolution (SA->AL/CM, CJ->NS, AI/SG/XX->AL) and every side/dotted bit are baked into the tables, so this is
-    //  bit-identical to the descriptor unpack. (Garbage indices on non-start lanes fold to &63 and are ignored.)
     sz_line_break_classified_t result;
-    result.classes = _mm512_permutexvar_epi8(index, _mm512_load_si512((void const *)sz_utf8_line_break_palette_class_));
-    result.side = _mm512_permutexvar_epi8(index, _mm512_load_si512((void const *)sz_utf8_line_break_palette_side_));
-    __m512i const dotted_bytes = _mm512_permutexvar_epi8(
-        index, _mm512_load_si512((void const *)sz_utf8_line_break_palette_dotted_));
-    sz_u64_t const dotted = _cvtmask64_u64(_mm512_test_epi8_mask(dotted_bytes, dotted_bytes));
+    result.classes = classes_u8x64;
+    result.side = side_u8x64;
     result.dotted = dotted & starts;
     result.starts = starts;
     result.replacement = replacement;
@@ -632,8 +599,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
  *  @brief  Forward UAX-14 line-break-opportunity kernel (Ice Lake AVX-512).
  *
  *  Bit-exact with `sz_utf8_linebreaks_serial`. Emits every UAX-14 break opportunity (no per-segment
- *  mandatory flag). The classifier and rule engine are fully vectorized (no per-lane scalar loop, no `vpgather`,
- *  no serial-oracle deferral); the 64-codepoint block engine threads cross-block state through a register carry
+ *  mandatory flag). The classifier and rule engine are fully vectorized (no per-lane scalar loop, no
+ *  serial-oracle deferral); the 64-codepoint block engine threads cross-block state through a register carry
  *  (no halo back-scan), so throughput is flat in run length. Emits at most @p capacity segments; sets
  *  *@p bytes_consumed to the resume.
  */

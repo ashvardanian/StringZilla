@@ -30,18 +30,49 @@ extern "C" {
                    "popcnt")
 #endif
 
-#pragma region Sentence_Break gather free classifier
+#pragma region Sentence_Break classifier
+
+/** @brief  Start-compacting flat-lookup classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali, Thai,
+ *          Tamil, ...). Every cold lane is a 3-byte codepoint START, so a 64-byte window holds at most 21 of them:
+ *          their `high`/`low` bytes are `vpcompressb`-compacted into the low lanes, widened to full 32-bit codepoints
+ *          in up to two 16-lane registers, resolved by the shared @ref sz_utf8_rune_flat_lookup_icelake_ (page LUT
+ *          `vpermb` + one `vpgatherdd` each), then `vpexpandb`-scattered back onto @p classes_u8x64 at their original
+ *          byte-lane positions. The second half only runs when more than sixteen cold starts are present. Every other
+ *          lane keeps its prior value. */
+SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
+    __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
+    __mmask64 const cold_start_mask = _cvtu64_mask64(cold_starts);
+    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, high_bytes_u8x64);
+    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, low_bytes_u8x64);
+
+    //  Unused (zeroed) compacted lanes decode to codepoint 0, a safe in-bounds flat index whose class is discarded.
+    __m512i const codepoints_first_u32x16 = _mm512_or_si512(
+        _mm512_slli_epi32(_mm512_cvtepu8_epi32(_mm512_castsi512_si128(high_packed_u8x64)), 8),
+        _mm512_cvtepu8_epi32(_mm512_castsi512_si128(low_packed_u8x64)));
+    __m128i const classes_first_u8x16 = _mm512_cvtepi32_epi8(sz_utf8_rune_flat_lookup_icelake_(
+        sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_, codepoints_first_u32x16));
+    __m512i classes_packed_u8x64 = _mm512_castsi128_si512(classes_first_u8x16);
+
+    if (_mm_popcnt_u64(cold_starts) > 16) {
+        __m512i const codepoints_second_u32x16 = _mm512_or_si512(
+            _mm512_slli_epi32(_mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high_packed_u8x64, 1)), 8),
+            _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(low_packed_u8x64, 1)));
+        __m128i const classes_second_u8x16 = _mm512_cvtepi32_epi8(sz_utf8_rune_flat_lookup_icelake_(
+            sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_, codepoints_second_u32x16));
+        classes_packed_u8x64 = _mm512_inserti32x4(classes_packed_u8x64, classes_second_u8x16, 1);
+    }
+    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask, classes_packed_u8x64);
+}
 
 /**
  *  @brief  Classify up to 64 codepoints (held one-per-lane in the decoded @p high / @p low byte halves) into
- *          per-lane Sentence_Break properties, fully in-register and gather-free. The dominant `cp < 0x800`
- *          region (Latin/Greek/Cyrillic/Arabic/Hebrew) is resolved by an in-register `vpermi2b` page network
- *          over `sz_utf8_sentence_break_flat_lut_0800_`; the big homogeneous OLetter blocks (CJK/Hangul/...) by
- *          arithmetic range compares (zero data); the 3-byte-BMP residue by the shared two-stage trie substrate
- *          (`sz_utf8_rune_trie_walk_icelake_`) over all 64 lanes at once. No scalar per-lane loop, no
- *          stack round-trip, no `vpgather`. Astral (4-byte) lanes are reconstructed to full 21-bit codepoints in
- *          register (four 16-lane chunks) and resolved through the canonical sorted astral range list with
- *          arithmetic compares - still gather-free, still all 64 lanes uniformly.
+ *          per-lane Sentence_Break properties. The dominant `cp < 0x800` region (Latin/Greek/Cyrillic/Arabic/Hebrew)
+ *          is resolved by an in-register `vpermi2b` page network over `sz_utf8_sentence_break_flat_lut_0800_`; the big
+ *          homogeneous OLetter blocks (CJK/Hangul/...) by arithmetic range compares (zero data); the cold 3-byte-BMP
+ *          residue by a page-compressed flat table read with one `vpgatherdd` per sixteen lanes (see
+ *          @ref sz_utf8_sentence_break_cold_compact_icelake_). No scalar per-lane loop, no stack round-trip. Astral
+ *          (4-byte) lanes are reconstructed to full 21-bit codepoints in register (four 16-lane chunks) and resolved
+ *          through the canonical sorted astral range list with arithmetic compares, all 64 lanes uniformly.
  *
  *  @param  raw_window         The raw 64 input bytes (codepoint lead/continuation bytes, one lane each here).
  *  @param  raw_next1          Byte at lane+1 (first continuation), @p raw_next2 lane+2, @p raw_next3 lane+3.
@@ -55,21 +86,22 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
     __m512i high, __m512i low,                                                   //
     __mmask64 four_byte_starts, __mmask64 codepoint_starts) {
 
-    // Partition the lanes FIRST so the expensive page LUT and two-stage trie only run for lanes that need them.
+    // Partition the lanes FIRST so the expensive classify paths only run for lanes that need them.
     // Dispatch by codepoint VALUE, not byte-length, so overlong / malformed sequences classify exactly like the
     // serial reference: an n-byte lead whose blind value lands in a shorter range is resolved by that range's table.
     // `is_astral` selects 4-byte leads whose value is truly >= 0x10000 (cp bit 16+ set, from `(b0 & 7) | (b1 & 0x30)`);
-    // every other lead is a BMP lane routed to the page LUT (high < 0x08) or the trie (high >= 0x08). For well-formed
-    // UTF-8 the value split is identical to the byte-length split, so this leaves conformance untouched.
+    // every other lead is a BMP lane routed to the page LUT (high < 0x08) or the flat table gather (high >= 0x08).
+    // For well-formed UTF-8 the value split is identical to the byte-length split, so this leaves conformance
+    // untouched.
     __mmask64 const is_astral = four_byte_starts & (_mm512_test_epi8_mask(raw_window, _mm512_set1_epi8(0x07)) |
                                                     _mm512_test_epi8_mask(raw_next1, _mm512_set1_epi8(0x30)));
     __mmask64 const bmp_starts = codepoint_starts & ~is_astral;
     __mmask64 const small_lanes = bmp_starts & _mm512_cmplt_epu8_mask(high, _mm512_set1_epi8(0x08));
-    __mmask64 const trie_lanes = bmp_starts & _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
+    __mmask64 const cold_lanes = bmp_starts & _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
 
     // Big homogeneous OLetter ranges (CJK, Kana, ...) as arithmetic compares (zero data) over the per-lane
-    // (high<<8|low). These resolve the vast majority of CJK / Kana without the trie, so a pure-CJK window skips the
-    // trie walk entirely below.
+    // (high<<8|low). These resolve the vast majority of CJK / Kana with zero table reads, so a pure-CJK window
+    // skips the flat-table gather entirely below.
     __mmask64 oletter = 0;
     for (int range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range) {
         sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
@@ -107,22 +139,17 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
         classes = _mm512_mask_mov_epi8(classes, small_lanes, small_class);
     }
 
-    // Two-stage trie for the 0x800..0xFFFF residue, gated on a 3-byte lane the OLetter ranges did NOT already resolve,
-    // so CJK / Kana windows skip the ~36-`vpermi2b` trie walk (the port-5 hot spot). When every 3-byte lane is OLetter
-    // the trie output would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
-    __mmask64 const trie_residual = trie_lanes & ~oletter;
-    if (trie_residual) {
-        __m512i const trie_class = sz_utf8_rune_trie_walk_icelake_(
-            high, low, sz_utf8_sentence_break_trie_l1_, sz_utf8_sentence_break_trie_l2_,
-            sz_utf8_sentence_break_trie_leaf_, sz_utf8_sentence_break_trie_block_k,
-            sz_utf8_sentence_break_trie_subblock_k, 496, 1376, 2248);
-        classes = _mm512_mask_mov_epi8(classes, trie_lanes, trie_class);
-    }
+    // Flat page-LUT + gather lookup for the 0x800..0xFFFF residue, gated on a 3-byte lane the OLetter ranges did NOT
+    // already resolve, so CJK / Kana windows skip it entirely. When every 3-byte lane is OLetter the lookup's output
+    // would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
+    __mmask64 const cold_residual = cold_lanes & ~oletter;
+    if (cold_residual)
+        classes = sz_utf8_sentence_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold_residual));
 
     classes = _mm512_mask_mov_epi8(classes, oletter, _mm512_set1_epi8((char)sz_sentence_break_oletter_k));
 
     // Astral (4-byte) lanes: reconstruct the full 21-bit codepoint per lane and resolve through the sorted astral
-    // range list with arithmetic compares (no gather). cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F).
+    // range list with arithmetic compares (no table lookup at all). cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F).
     // The 21-bit value exceeds a byte lane, so we widen to 32-bit lanes in four 16-lane chunks and compare each
     // chunk against every astral range, blending the matching class back. The whole block only fires when a
     // 4-byte lead is present (corpus astral residue < 0.1%), keeping the common path branch-free.
@@ -151,7 +178,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
             for (int range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range) {
                 sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_big_oletter_hi_[range];
-                if (lo < 0x10000u) continue; // BMP OLetter blocks are resolved by the page LUT / trie path
+                if (lo < 0x10000u) continue; // BMP OLetter blocks are resolved by the page LUT / flat gather path
                 __mmask16 const in_range = _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
                                            _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four &
                                            ~matched;
@@ -162,7 +189,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
             for (int range = 0; range < sz_utf8_sentence_break_astral_count_k; ++range) {
                 sz_u32_t const lo = sz_utf8_sentence_break_astral_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_astral_hi_[range];
-                if (hi < 0x10000u) continue; // BMP ranges are already resolved by the page LUT / trie / OLetter
+                if (hi < 0x10000u) continue; // BMP ranges are already resolved by the page LUT / flat gather / OLetter
                 __mmask16 const in_range = _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
                                            _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four &
                                            ~matched;
@@ -182,7 +209,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
     return classes;
 }
 
-#pragma endregion Sentence_Break gather free classifier
+#pragma endregion Sentence_Break classifier
 
 #pragma region Sentence_Break boundary algebra
 

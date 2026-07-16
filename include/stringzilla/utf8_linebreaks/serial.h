@@ -697,8 +697,7 @@ SZ_HELPER_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u
  *          window. Every LB1-LB31 rule is expressed over byte-start lanes as `sz_u64_t` bit-mask algebra, reading
  *          effective neighbours across `gate` via `sz_line_break_prev_`/`_next_` (no scalar collapse, no intrinsics).
  *          All per-lane class/side membership is supplied precomputed in @p frame by a per-ISA extractor. The returned
- *          mask has bits only at base lanes (a break opportunity precedes that cluster). Bit-exact with the legacy
- *          fused `sz_line_break_decide_window_icelake_`.
+ *          mask has bits only at base lanes (a break opportunity precedes that cluster).
  */
 SZ_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     sz_line_break_frame_t const *frame, sz_u8_t const *effective_class_byte, sz_u8_t const *side_byte,

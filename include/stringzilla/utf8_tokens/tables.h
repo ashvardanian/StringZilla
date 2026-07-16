@@ -8,8 +8,14 @@
  *  symbol and separator super-categories), unioned with the White_Space property.
  *  This mirrors the set used by "Unicode UAX #29" word segmentation and the ICU.
  *
- *  Gather-free, KB-sized membership in a layout the SIMD substrate leaves (`lut256`,
- *  `cascade_stage`) address in-register over a decoded 64-byte window, with NO `vpgather`:
+ *  KB-sized membership in a layout the SIMD substrate leaves (`lut256`, `cascade_stage`)
+ *  address in-register over a decoded 64-byte window:
+ *
+ *  ? The segmentation classifiers measured far faster after moving from an in-register nibble
+ *  ? cascade to a page-compressed FLAT table read by `vpgatherdd` - cross-lane shuffles are
+ *  ? port-5-only, while gathers issue on the load ports. This bitmap layout predates that result
+ *  ? and has not been re-measured against a flat-table shape.
+ *
  *
  *  - BMP (cp < 0x10000): the high byte `cp >> 8` (0..255) selects a 32-byte bitmap row id
  *    via `sz_utf8_delimiter_bmp_block_[256]`; the bitmap byte `bitmap[id*32 + ((cp & 0xFF) >> 3)]`

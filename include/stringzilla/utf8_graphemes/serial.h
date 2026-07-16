@@ -48,7 +48,7 @@ SZ_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t
 
 /**
  *  @brief Grapheme_Cluster_Break descriptor of the codepoint starting at @p start, decoded BLINDLY to mirror the
- *         Ice Lake `sz_grapheme_classify_window_` value reconstruction byte-for-byte (§6.1 value-based dispatch).
+ *         Ice Lake `sz_grapheme_classify_window_` value reconstruction byte-for-byte, dispatching on the value.
  *
  *         The lead's strict length class selects the fold width — ASCII `< 0x80` stays the raw byte, 3-byte
  *         `1110xxxx` and 4-byte `11110xxx` use their reconstruction, and EVERY other non-ASCII lead (2-byte
@@ -67,7 +67,7 @@ SZ_HELPER_AUTO sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t 
     if (lead < 0x80u) { rune = lead; }
     else if (lead >= 0xF8u) {
         // `0xF8..0xFF` begin no valid UTF-8 sequence of any length and are not 2-/3-/4-byte lead patterns, so the
-        // SIMD window leaves them out of every lead-length mask. Classify as U+FFFD / Other (§6.2) with no neighbour
+        // SIMD window leaves them out of every lead-length mask. Classify as U+FFFD / Other with no neighbour
         // fold, matching the Ice Lake backend exactly even when such a byte sits on a 64-byte window edge.
         rune = 0xFFFDu;
     }
@@ -354,7 +354,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(        //
     return clusters;
 }
 
-#pragma endregion // UAX 29 Grapheme Cluster Boundaries
+#pragma endregion UAX 29 Grapheme Cluster Boundaries
 
 #pragma region Portable grapheme boundary algebra
 

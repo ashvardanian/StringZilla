@@ -61,13 +61,14 @@ SZ_HELPER_AUTO sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t se
 #pragma region In register vectorized classifier
 
 /*  The NEON twin of the Haswell / Ice Lake Sentence_Break classifier: a contiguous run of codepoints resolves to
- *  per-codepoint Sentence_Break class bytes with ZERO per-lane scalar loop, ZERO table gather, and NO serial deferral.
+ *  per-codepoint Sentence_Break class bytes with ZERO per-lane scalar loop and NO serial deferral.
+ *
  *  Each 64-byte window lives as four `uint8x16_t` quarters (`window[0]` = lanes [0,16), ... `window[3]` = lanes
  *  [48,64)) instead of haswell's two halves; every per-lane class compare is `vceqq_u8` per quarter, the four boolean
- *  quarters OR-collapsed to a `sz_u64_t` via `mask_combine_neon_`. The per-lane (high, low) codepoint byte pair feeds a
- *  register-resident 3-stage `vqtbl` nibble cascade over the whole BMP (the NEON twin of the AVX2 `vpshufb` nibble
- *  cascade), and a 5-nibble astral cascade for 4-byte leads. Both emit the Sentence_Break class byte directly,
- *  bit-identical with `sz_rune_sentence_break_property` over the entire code space. */
+ *  quarters OR-collapsed to a `sz_u64_t` via `mask_combine_neon_`. The per-lane (high, low) codepoint byte pair reads
+ *  the shared page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ over the whole BMP, and a 5-nibble
+ *  `vqtbl` astral cascade for 4-byte leads. Both emit the Sentence_Break class byte directly, bit-identical with
+ *  `sz_rune_sentence_break_property` over the entire code space. */
 
 /** @brief  Expand a 16-bit lane mask into a `uint8x16_t` select vector (byte `i` = 0xFF when bit `i` is set), the NEON
  *          twin of @ref sz_utf8_byte_mask_from_bits_haswell_ confined to one quarter. */
@@ -115,42 +116,20 @@ SZ_HELPER_AUTO void sz_utf8_sentence_break_bmp_highlow_neon_( //
     *out_high = high, *out_low = low;
 }
 
-/** @brief  Sentence_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
- *          register-resident 3-stage `vqtbl` nibble cascade, the NEON twin of @ref sz_utf8_sentence_break_bmp_class_haswell_.
- *          Gather-free; bit-exact with `sz_rune_sentence_break_property` over the whole BMP. Operates on one quarter;
- *          the caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high, uint8x16_t low) {
-    uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
-    uint8x16_t const high_high = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
-    uint8x16_t const high_low = vandq_u8(high, low_nibble_mask);
-    uint8x16_t const page = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage1_,
-                                                             sz_utf8_sentence_break_haswell_stage1_count_k / 16,
-                                                             high_high, high_low);
-    uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage2_lo_,
-                                                                sz_utf8_sentence_break_haswell_stage2_lo_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(sz_utf8_sentence_break_haswell_stage2_hi_,
-                                                                sz_utf8_sentence_break_haswell_stage2_hi_count_k / 16,
-                                                                page, low_high);
-    uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
-    uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
-    uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
-    uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_sentence_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
-    }
-    return result;
+/** @brief  Sentence_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the flat
+ *          page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
+ *          @ref sz_utf8_sentence_break_bmp_class_haswell_. Bit-exact with `sz_rune_sentence_break_property` over the
+ *          whole BMP. Operates on one quarter; the caller iterates the four quarters. */
+SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
+                                                                 uint8x16_t low_bytes_u8x16) {
+    return sz_utf8_rune_flat_lookup_neon_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
+                                          (int)sz_utf8_sentence_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
 /** @brief  Sentence_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade), the NEON twin of @ref sz_utf8_sentence_break_astral_class_haswell_. Per-lane bytes:
  *          @p plane = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
- *          Gather-free; bit-exact with `sz_rune_sentence_break_property` over all astral. Operates on one quarter. */
+ *          Bit-exact with `sz_rune_sentence_break_property` over all astral. Operates on one quarter. */
 SZ_HELPER_AUTO uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const n4 = vandq_u8(plane, low_nibble_mask);
@@ -378,8 +357,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
         sz_size_t const complete_limit = sz_utf8_sentence_break_complete_limit_neon_(
             window, text_u8 + position + loaded, more_text);
 
-        //  Dense compaction: gather the start-lane classes into a dense `0..count-1` array via software-`pext` lane
-        //  shuffles (no table gather, no `vpcompressb`).
+        //  Dense compaction: pack the start-lane classes into a dense `0..count-1` array via software-`pext` lane
+        //  shuffles (NEON has no `vpcompressb`).
         sz_u64_t const complete_mask = sz_u64_mask_until_serial_(complete_limit);
         sz_u64_t const dense_start_lanes = start_bytes & complete_mask;
         sz_size_t const dense_count = (sz_size_t)sz_u64_popcount(dense_start_lanes);

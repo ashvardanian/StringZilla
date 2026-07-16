@@ -4,24 +4,27 @@
  *  @brief  Ice Lake (AVX-512) backend for UAX-29 extended grapheme cluster boundaries, fully vectorized end-to-end.
  *
  *  Every 64-byte window is decoded for all 64 lanes through the shared codepoint substrate
- *  (`sz_utf8_rune_decode_window_`), classified gather-free into one packed Grapheme_Cluster_Break descriptor
- *  per lane, compacted to a codepoint-dense descriptor vector with a single `vpcompressb`, and resolved by the
- *  branchless rule algebra. The classifier routes each codepoint through one rare-class-gated path - an ASCII
- *  `vpermb`, a 2-byte page LUT, the cold three-stage BMP trie, or a 4-stage astral trie - so a pure-ASCII or 2-byte
- *  window never pays the cold cascade and emoji resolve without a linear range scan.
+ *  (`sz_utf8_rune_decode_window_`), classified into one packed Grapheme_Cluster_Break descriptor per lane, compacted
+ *  to a codepoint-dense descriptor vector with a single `vpcompressb`, and resolved by the branchless rule algebra.
+ *  The classifier routes each codepoint through one rare-class-gated path - an ASCII `vpermb`, a 2-byte page LUT, the
+ *  flat BMP table, or a 4-stage astral trie - so a pure-ASCII or 2-byte window never pays the BMP lookup and emoji
+ *  resolve without a linear range scan.
  *
- *  Design note: the per-family classifier tables + 4-stage astral trie are the deliberate, measurement-justified
- *  shape (CONTRIBUTING-KERNELS.md §6.9). The astral trie measured ~24x over the sorted-range scan and the gated fast
- *  paths ~2-9x over a single substrate cascade. The tables are stored `sz_align_(64)` + zero-padded to a multiple of
- *  64 in `tables.h` and every tile is read straight from `.rodata` via the substrate `permute256_`/`lut_cascade_`
- *  helpers — re-init-free (§6.13): there is no per-call `luts` struct or `_init_` load, so calling the kernel on a
- *  short input is cheap. The astral is a constant-latency walk (no per-range `for`), dispatch is value-based (§6.1)
- *  and ill-formed input is forced to U+FFFD in-register (§6.2). Satisfies the intent of defects #1/#2.
+ *  Design note: the BMP classifier is a page-compressed flat table read with `vpgatherdd` - `bmp_page_lut_[cp >> 8]`
+ *  picks one of 54 distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` yields the descriptor in one
+ *  indexed load. The shape is chosen for port pressure rather than instruction count: cross-lane shuffles are
+ *  port-5-only, so any dependent shuffle cascade saturates that single port, while the gather issues on the load
+ *  ports and leaves the shuffle port to the decode. Gathers pay off on multi-KB tables in general - see less_slow.cpp
+ *  v0.3.0 "Gather and Scatter": https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
+ *
+ *  Tables are `sz_align_(64)` and zero-padded in `tables.h`, read straight from `.rodata`: there is no per-call `luts`
+ *  struct or `_init_` load, so calling the kernel on a short input stays cheap. The astral path is a constant-latency
+ *  walk (no per-range `for`), dispatch is value-based, and ill-formed input is forced to U+FFFD in-register.
  *
  *  The three unbounded runs (GB12/13 Regional_Indicator parity, GB11 Extended_Pictographic-ZWJ chain, GB9c Indic
  *  conjunct) are threaded across windows by a small register carry, so no rule is re-walked scalar-wise and no
- *  boundary is deferred to the serial oracle. There is no per-lane scalar loop, no spill-to-stack-then-reload of the
- *  classifier, and no `vpgather` on any path.
+ *  boundary is deferred to the serial oracle. There is no per-lane scalar loop and no spill-to-stack-then-reload of
+ *  the classifier.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_ICELAKE_H_
 #define STRINGZILLA_UTF8_GRAPHEMES_ICELAKE_H_
@@ -50,12 +53,9 @@ extern "C" {
                    "popcnt")
 #endif
 
-#pragma region Gather free Grapheme_Cluster_Break classifier
+#pragma region Grapheme_Cluster_Break classifier
 
 enum {
-    sz_grapheme_break_mid_tiles_k = sizeof(sz_utf8_grapheme_break_stage_mid_) / 64, /**< ZMM tiles of `stage_mid`. */
-    sz_grapheme_break_sub_packed_tiles_k = sizeof(sz_utf8_grapheme_break_stage_sub_packed_) /
-                                           64, /**< ZMM tiles of 4-bit-packed `stage_sub`. */
     sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
@@ -78,24 +78,13 @@ SZ_HELPER_INLINE __m512i sz_grapheme_small_page_icelake_(__m512i codepoints) {
                                              _mm512_and_si512(codepoints, _mm512_set1_epi32(0x7FF)));
 }
 
-/** @brief  Descriptor of a cold BMP codepoint (0x800..0xFFFF) by the three-stage trie: `stage_hi` `vpermb`, then the
- *          `stage_mid` `vpermi2b` cascade and the 4-bit-packed `stage_sub` nibble cascade (half the tiles), then the
- *          18-byte `id_to_desc` `vpermb`. All tables read straight from aligned `.rodata` — no per-call load. */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_cascade_icelake_(__m512i codepoints) {
-    __m512i const high_byte = _mm512_and_si512(_mm512_srli_epi32(codepoints, 8), _mm512_set1_epi32(0xFF));
-    __m512i const mid = sz_utf8_rune_permute256_icelake_(sz_utf8_grapheme_break_stage_hi_, high_byte);
-    __m512i const mid_index = _mm512_add_epi32(
-        _mm512_slli_epi32(mid, 4), _mm512_and_si512(_mm512_srli_epi32(codepoints, 4), _mm512_set1_epi32(0xF)));
-    __m512i const sub = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_stage_mid_,
-                                                          sz_grapheme_break_mid_tiles_k, mid_index);
-    __m512i const sub_index = _mm512_add_epi32(_mm512_slli_epi32(sub, 4),
-                                               _mm512_and_si512(codepoints, _mm512_set1_epi32(0xF)));
-    // `stage_sub` outputs a 4-bit descriptor index, so it is stored two cells per byte: the nibble cascade walks half
-    // the tiles (25 vs 50), halving this stage's `vpermi2b` port-5 cost — the residual-cascade hot spot for Indic/CJK.
-    __m512i const descriptor_index = sz_utf8_rune_lut_cascade_nibble_icelake_(
-        sz_utf8_grapheme_break_stage_sub_packed_, sz_grapheme_break_sub_packed_tiles_k, sub_index);
-    __m512i const id_to_desc = _mm512_load_si512((void const *)sz_utf8_grapheme_break_id_to_desc_);
-    return _mm512_and_si512(_mm512_permutexvar_epi8(descriptor_index, id_to_desc), _mm512_set1_epi32(0xFF));
+/** @brief  Descriptor of a BMP codepoint: the `bmp_page_lut_` page LUT (one `vpermb`) selects one of the 54 distinct
+ *          256-byte pages, then `flat_bmp_` is fetched by one `vpgatherdd` for all sixteen lanes. The leaf carries
+ *          the packed descriptor directly, so no `id_to_desc` permute follows. */
+SZ_HELPER_AUTO __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_u32x16) {
+    return _mm512_and_si512(sz_utf8_rune_flat_lookup_icelake_(sz_utf8_grapheme_break_bmp_page_lut_,
+                                                              sz_utf8_grapheme_break_flat_bmp_, codepoints_u32x16),
+                            _mm512_set1_epi32(0xFF));
 }
 
 /** @brief  Descriptor of an astral codepoint (>= 0x10000) via the 4-stage trie over offset = codepoint - 0x10000
@@ -146,9 +135,10 @@ SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints) {
  *  @brief  Classify 16 codepoints (one u32 ZMM) into 16 packed Grapheme_Cluster_Break descriptors (one per low byte).
  *
  *  Each lane takes exactly one rare-class-gated path so a pure-ASCII / 2-byte / astral chunk never pays the cold
- *  cascade: Hangul U+AC00..U+D7A3 by the LV/LVT residue formula (no table); codepoint < 0x80 by the `ascii_desc`
- *  `vpermb`; codepoint < 0x800 by the `page_0800` LUT; the cold 0x800..0xFFFF residue by the three-stage BMP trie;
- *  and codepoint >= 0x10000 by the 4-stage astral trie. No `vpgatherdd`, no linear range scan, no scalar loop.
+ *  classify: Hangul U+AC00..U+D7A3 by the LV/LVT residue formula (no table); codepoint < 0x80 by the `ascii_desc`
+ *  `vpermb`; codepoint < 0x800 by the `page_0800` LUT; the cold 0x800..0xFFFF residue by the flat page-compressed
+ *  table (one `vpgatherdd`); and codepoint >= 0x10000 by the 4-stage astral trie. No linear range scan and no
+ *  scalar loop.
  */
 SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     __m512i const hangul_base = _mm512_set1_epi32(0xAC00);
@@ -169,8 +159,8 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                         // 0x80..0x7FF
     __mmask16 const cold_raw = _kandn_mask16(is_hangul, _kandn_mask16(below_0800, is_bmp)); // 0x800..0xFFFF, non-Hangul
     // CJK / Kana arithmetic fast-path, gated behind any-cold-lane so ASCII / Hangul windows pay nothing: the carved
-    // lanes resolve to GCB=Other (descriptor 0, the zero-init value), so a pure-CJK window skips the 50-tile cascade.
-    // Byte-identical -- the cascade would produce the same Other for these lanes whether or not residual cold remains.
+    // lanes resolve to GCB=Other (descriptor 0, the zero-init value), so a pure-CJK window skips the flat-table
+    // gather. Byte-identical: the flat table holds the same Other for these lanes whether or not cold residue remains.
     __mmask16 is_cold = cold_raw;
     if (cold_raw) is_cold = _kandn_mask16(sz_grapheme_cjk_other_icelake_(codepoints), cold_raw);
     // `cp >= 0x110000` (e.g. the overlong `F4 90 80 80`) stays Other, matching serial.
@@ -180,10 +170,9 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
     __mmask16 const bmp_non_hangul = _kandn_mask16(is_hangul, is_bmp);
     __m512i descriptor = _mm512_setzero_si512();
     if (is_cold) {
-        // A cold 3-byte lane is present: the cascade resolves EVERY BMP lane (ASCII and 2-byte included), so a mixed
-        // CJK/ASCII window pays one cascade instead of the cascade plus the ASCII and page fast paths.
-        descriptor = _mm512_mask_mov_epi32(descriptor, bmp_non_hangul,
-                                           sz_grapheme_classify_cascade_icelake_(codepoints));
+        // A cold 3-byte lane is present: the flat gather resolves EVERY BMP lane (ASCII and 2-byte included), so a
+        // mixed CJK/ASCII window pays one gather instead of the gather plus the ASCII and page fast paths.
+        descriptor = _mm512_mask_mov_epi32(descriptor, bmp_non_hangul, sz_grapheme_classify_bmp_icelake_(codepoints));
     }
     else {
         if (is_ascii)
@@ -220,7 +209,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_quarter_icelake_( //
  *  The substrate decode already holds `high = codepoint >> 8` / `low = codepoint & 0xFF` for the BMP path and the raw bytes for
  *  astral reconstruction. Each 16-lane quarter is widened in-register to a full 21-bit codepoint (the astral lanes
  *  reassemble plane/mid/low from the four UTF-8 bytes) and classified; the four descriptor quarters are written back
- *  as one byte per lane. No scalar per-lane loop, no `vpgather`, no spill round-trip.
+ *  as one byte per lane. No scalar per-lane loop and no spill round-trip.
  */
 SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
     sz_utf8_rune_window_t const *decoded, __m512i next1, __m512i next2, __m512i next3) {
@@ -230,7 +219,7 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
     // The BMP `high`/`low` are reconstructed HERE from the raw lead and the (already edge-zeroed) neighbour bytes
     // `next1`/`next2`, not read from `decoded->high`/`decoded->low`. The substrate's neighbour fetch is an in-register
     // rotate that wraps the window head into a truncated trailing lead's missing continuation byte; recomputing from
-    // the zeroed neighbours pads out-of-window bytes with 0, matching the serial blind decode byte-for-byte (§6.1) so a
+    // the zeroed neighbours pads out-of-window bytes with 0, matching the serial blind decode byte-for-byte so a
     // 2-/3-byte lead at the loaded edge classifies neighbour-independently. ASCII (1-byte) lanes take the identity
     // codepoint `(0, raw byte)`; the 2-/3-byte formulas mirror `sz_grapheme_break_property_at_`.
     __mmask64 const ascii = _mm512_cmplt_epu8_mask(window, _mm512_set1_epi8((char)0x80));
@@ -284,13 +273,13 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
     __m512i const descriptors = _mm512_permutexvar_epi32(restore, packed);
     // `0xF8..0xFF` begin no valid UTF-8 sequence and match no lead-length mask, so the 2-byte fold above read a
     // wrapped neighbour and classified them by a junk value (neighbour-dependent at the 64-byte window edge). Force
-    // those start lanes to the Other descriptor (§6.2 U+FFFD substitution) so they classify neighbour-independently,
+    // those start lanes to the Other descriptor (U+FFFD substitution) so they classify neighbour-independently,
     // identically to the serial backend. One masked compare, no scalar walk.
     __mmask64 const invalid_lead = _mm512_cmpge_epu8_mask(window, _mm512_set1_epi8((char)0xF8));
     return _mm512_maskz_mov_epi8(_knot_mask64(invalid_lead), descriptors);
 }
 
-#pragma endregion Gather free Grapheme_Cluster_Break classifier
+#pragma endregion Grapheme_Cluster_Break classifier
 
 #pragma region Grapheme boundary algebra
 
@@ -350,7 +339,7 @@ typedef struct sz_grapheme_window_t {
 } sz_grapheme_window_t;
 
 /**
- *  @brief  Decode a 64-byte byte-window for all 64 lanes, classify them gather-free into packed descriptors,
+ *  @brief  Decode a 64-byte byte-window for all 64 lanes, classify them into packed descriptors,
  *          compact the descriptors at codepoint starts to a dense vector, and run the boundary algebra. The
  *          trailing partial codepoint (whose continuation bytes fall outside the window) is left for the next
  *          window so cross-window runs stay exact. Pure register dataflow: one decode, one classify, one compress.
@@ -385,7 +374,7 @@ SZ_HELPER_AUTO sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( /
     // (`loaded < 64`) those continuation bytes are genuinely absent (the input ended mid-sequence), so a truncated
     // trailing lead would otherwise decode against the wrapped window head and classify neighbour-dependently. Zero
     // every `next k` lane whose source byte index `i + k` reaches `loaded`, matching the serial blind decode that pads
-    // out-of-bounds continuation bytes with 0 (§6.1). For a FULL window (`loaded == 64`) the only lanes this touches
+    // out-of-bounds continuation bytes with 0. For a FULL window (`loaded == 64`) the only lanes this touches
     // are the top one or two truncated leads, which the effective-window trim already deferred to the next window where
     // their real continuation bytes live; zeroing them here is inert. No scalar walk, one masked move per neighbour.
     sz_u64_t const in_window = _cvtmask64_u64(sz_u64_mask_until_(loaded));

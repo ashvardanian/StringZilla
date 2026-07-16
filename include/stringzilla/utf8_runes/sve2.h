@@ -86,6 +86,87 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_sve2_(svuint8_t value, sz_u8_t
 }
 
 /**
+ *  @brief  One widened quarter of @ref sz_utf8_rune_flat_lookup_sve2_: two chained `svld1ub_gather_u32offset_u32`
+ *          resolve `flat[page_lut[high] * 256 + low]` for `svcntw()` lanes on the load pipes. Every offset is
+ *          in-bounds by construction (the page offset is a byte, and `page * 256 + low` stays under `pages * 256`),
+ *          so `svptrue_b32()` governs even the tail lanes.
+ */
+SZ_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, svuint32_t high_bytes_u32x, svuint32_t low_bytes_u32x) {
+    svbool_t const all_words_b32x = svptrue_b32();
+    svuint32_t const page_indices_u32x = svld1ub_gather_u32offset_u32(all_words_b32x, page_lut, high_bytes_u32x);
+    svuint32_t const flat_offsets_u32x = svadd_u32_x(
+        all_words_b32x, svlsl_n_u32_x(all_words_b32x, page_indices_u32x, 8), low_bytes_u32x);
+    return svld1ub_gather_u32offset_u32(all_words_b32x, flat, flat_offsets_u32x);
+}
+
+/**
+ *  @brief  Class byte per lane from a page-compressed flat table: `page_lut[cp >> 8]` selects a 256-byte page, then
+ *          `flat[page * 256 + (cp & 0xFF)]` yields the descriptor, both stages gathered by real `LD1B` byte gathers.
+ *          The SVE2 twin of @ref sz_utf8_rune_flat_lookup_haswell_ and @ref sz_utf8_rune_flat_lookup_icelake_. An
+ *          `svtbl_u8` scan of the 256-entry page LUT would cost sixteen shuffle-pipe lookups at the architectural
+ *          minimum vector length, while gathering both stages stays length-agnostic with no VL-dependent branch.
+ */
+SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t high_bytes_u8x, svuint8_t low_bytes_u8x) {
+
+    // Widen both byte-lane vectors into four 32-bit-lane quarters each, preserving lane order. SVE vector types
+    // are sizeless and cannot be arrayed, so the quarters stay individually named and the walk is unrolled.
+    svuint16_t const high_bytes_low_half_u16x = svunpklo_u16(high_bytes_u8x);
+    svuint16_t const high_bytes_high_half_u16x = svunpkhi_u16(high_bytes_u8x);
+    svuint16_t const low_bytes_low_half_u16x = svunpklo_u16(low_bytes_u8x);
+    svuint16_t const low_bytes_high_half_u16x = svunpkhi_u16(low_bytes_u8x);
+
+    svuint32_t const first_quarter_u32x = sz_utf8_rune_flat_lookup_quarter_sve2_(
+        page_lut, flat, svunpklo_u32(high_bytes_low_half_u16x), svunpklo_u32(low_bytes_low_half_u16x));
+    svuint32_t const second_quarter_u32x = sz_utf8_rune_flat_lookup_quarter_sve2_(
+        page_lut, flat, svunpkhi_u32(high_bytes_low_half_u16x), svunpkhi_u32(low_bytes_low_half_u16x));
+    svuint32_t const third_quarter_u32x = sz_utf8_rune_flat_lookup_quarter_sve2_(
+        page_lut, flat, svunpklo_u32(high_bytes_high_half_u16x), svunpklo_u32(low_bytes_high_half_u16x));
+    svuint32_t const fourth_quarter_u32x = sz_utf8_rune_flat_lookup_quarter_sve2_(
+        page_lut, flat, svunpkhi_u32(high_bytes_high_half_u16x), svunpkhi_u32(low_bytes_high_half_u16x));
+
+    // Narrow the four 32-bit-lane quarters back into one byte-lane vector: `uzp1` on the 16-bit view keeps each
+    // word's low half, then `uzp1` on the 8-bit view keeps each half-word's low byte. Values are `< 256`, so
+    // both truncations are lossless and the original lane order is restored.
+    svuint16_t const packed_low_half_u16x = svuzp1_u16(svreinterpret_u16_u32(first_quarter_u32x),
+                                                       svreinterpret_u16_u32(second_quarter_u32x));
+    svuint16_t const packed_high_half_u16x = svuzp1_u16(svreinterpret_u16_u32(third_quarter_u32x),
+                                                        svreinterpret_u16_u32(fourth_quarter_u32x));
+    return svuzp1_u8(svreinterpret_u8_u16(packed_low_half_u16x), svreinterpret_u8_u16(packed_high_half_u16x));
+}
+
+/** @brief  Read up to 256 LUT entries by per-lane u8 index via overlapping `svtbl_u8` chunks (gather-free); lanes
+ *          outside a chunk's span select zero and OR away. Serves the astral cascade stage-1 tables. */
+SZ_HELPER_AUTO svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
+    svbool_t const all_bytes_b8x = svptrue_b8();
+    int const vector_length = (int)svcntb();
+    svuint8_t result_u8x = svdup_n_u8(0);
+    for (int base = 0; base < count; base += vector_length) {
+        int const chunk_length = (count - base) < vector_length ? (count - base) : vector_length;
+        svbool_t const load_b8x = svwhilelt_b8_u64(0, (sz_u64_t)chunk_length);
+        svuint8_t const chunk_u8x = svld1_u8(load_b8x, table + base);
+        svuint8_t const within_chunk_u8x = svsub_n_u8_x(all_bytes_b8x, index_u8x, (sz_u8_t)base);
+        result_u8x = svorr_u8_x(all_bytes_b8x, result_u8x, svtbl_u8(chunk_u8x, within_chunk_u8x));
+    }
+    return result_u8x;
+}
+
+/** @brief  Select one of `tile_count` 16-entry rows by `selector` and index it by `within` (nibble cascade tile),
+ *          serving the astral cascade stages on every property. */
+SZ_HELPER_AUTO svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
+                                                    svuint8_t within_u8x) {
+    svbool_t const all_bytes_b8x = svptrue_b8();
+    svbool_t const row_b8x = svwhilelt_b8_u64(0, 16);
+    svuint8_t result_u8x = svdup_n_u8(0);
+    for (int tile = 0; tile < tile_count; ++tile) {
+        svuint8_t const picked_u8x = svtbl_u8(svld1_u8(row_b8x, table + tile * 16), within_u8x);
+        result_u8x = svsel_u8(svcmpeq_n_u8(all_bytes_b8x, selector_u8x, (sz_u8_t)tile), picked_u8x, result_u8x);
+    }
+    return result_u8x;
+}
+
+/**
  *  @brief  Decode the dense set of emitted-start lanes @p emit_starts (a 32-bit predicate over the first `svcntw()`
  *          byte lanes of @p bytes) into sequential UTF-32 runes via ONE `svcompact_u32` - the rune-valued SVE2 twin
  *          of @ref sz_utf8_rune_drain_icelake_. The start byte-indices ride a `svindex_u32(0,1)` iota,

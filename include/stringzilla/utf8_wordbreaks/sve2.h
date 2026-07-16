@@ -6,10 +6,18 @@
  *  Full-width SVE2 UAX-29 word-break kernel `sz_utf8_wordbreaks_sve2`, assembled from three validated leaves
  *  (in-register classifier + decode/classify + rule engine) plus the `build_frame` lowering leaf, the
  *  single-`svcompact_u32` drain, and the advancing driver. The SVE2 twin of the AVX2 (Haswell) / Ice Lake /
- *  NEON kernels: no path scalar-walks codepoints, spills a vector to call the serial oracle, or issues a gather.
- *  Validated bit-exact vs `sz_utf8_wordbreaks_serial` (streaming-cursor: clamped capacity + `bytes_consumed`
- *  resume) over the regression cases, a capacity x alignment sweep, and >=2,000,000 random valid/malformed
- *  inputs at `svcntb()==64` (so one window == one 64-bit lane-mask domain).
+ *  NEON kernels: no path scalar-walks codepoints or spills a vector to call the serial oracle. The BMP
+ *  classifier deliberately DOES issue a gather: it reads the page-compressed flat leaf via
+ *  `svld1ub_gather_u32offset_u32` (see @ref sz_utf8_rune_flat_lookup_sve2_) rather than walking a nibble
+ *  cascade of `svtbl_u8` chunks: cross-lane shuffles contend for the single shuffle pipe while gathers issue
+ *  on the load pipes, and SVE2, unlike NEON, has a real hardware gather, so it takes the flat path directly.
+ *
+ *  The engine and decode leaves were validated bit-exact vs `sz_utf8_wordbreaks_serial` (streaming-cursor:
+ *  clamped capacity + `bytes_consumed` resume) over the regression cases, a capacity x alignment sweep, and
+ *  >=2,000,000 random valid/malformed inputs at `svcntb()==64` (so one window == one 64-bit lane-mask domain) -
+ *  but that campaign predates the flat BMP leaf and must be re-run on Arm hardware to cover it. The flat table
+ *  is bit-exact with the cascade by construction (see `sz_utf8_word_break_flat_bmp_`), and the flat leaf's
+ *  throughput on Arm is likewise unmeasured to date.
  *
  *  Implementation note: the engine's `<<k` / `>>1` lane algebra is realized with `svext`-based shift macros
  *  (`sz_utf8_word_break_lane_up_sve2_(v, k)` / `sz_utf8_word_break_lane_dn_sve2_(v, k)`) so the shift amount
@@ -36,59 +44,13 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-/** @brief In-register SVE2 Word_Break classifier core (nibble-cascade trie + predicate/lane-mask bridge). */
-
-/** @brief  Read up to 256 LUT entries by per-lane u8 index via overlapping `svtbl_u8` chunks (gather-free). */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
-    svbool_t const pg_b8x = svptrue_b8();
-    int const vl = (int)svcntb();
-    svuint8_t result_u8x = svdup_n_u8(0);
-    for (int base = 0; base < count; base += vl) {
-        int const here = (count - base) < vl ? (count - base) : vl;
-        svbool_t const load_b8x = svwhilelt_b8_u64(0, (sz_u64_t)here);
-        svuint8_t const chunk_u8x = svld1_u8(load_b8x, table + base);
-        svuint8_t const idx_u8x = svsub_n_u8_x(pg_b8x, index_u8x, (sz_u8_t)base);
-        result_u8x = svorr_u8_x(pg_b8x, result_u8x, svtbl_u8(chunk_u8x, idx_u8x));
-    }
-    return result_u8x;
-}
-
-/** @brief  Select one of `tile_count` 16-entry rows by `selector` and index it by `within` (nibble cascade tile). */
-SZ_HELPER_AUTO svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
-                                                    svuint8_t within_u8x) {
-    svbool_t const pg_b8x = svptrue_b8();
-    svbool_t const row_b8x = svwhilelt_b8_u64(0, 16);
-    svuint8_t result_u8x = svdup_n_u8(0);
-    for (int tile = 0; tile < tile_count; ++tile) {
-        svuint8_t const picked_u8x = svtbl_u8(svld1_u8(row_b8x, table + tile * 16), within_u8x);
-        result_u8x = svsel_u8(svcmpeq_n_u8(pg_b8x, selector_u8x, (sz_u8_t)tile), picked_u8x, result_u8x);
-    }
-    return result_u8x;
-}
+/*  In-register SVE2 Word_Break classifier core: flat-table BMP classify + astral nibble cascade + the
+ *  predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
 
 /** @brief  Word_Break class byte for sixteen-bit-wide BMP codepoints (per-lane high = cp>>8, low = cp&0xFF). */
 SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
-    svbool_t const pg_b8x = svptrue_b8();
-    svuint8_t const page_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_word_break_haswell_stage1_, 256, high_u8x);
-    svuint8_t const low_high_u8x = svand_n_u8_x(pg_b8x, svlsr_n_u8_x(pg_b8x, low_u8x, 4), 0x0F);
-    svuint8_t const leaf_lo_u8x = sz_utf8_rune_cascade_sve2_(sz_utf8_word_break_haswell_stage2_lo_,
-                                                             sz_utf8_word_break_haswell_stage2_lo_count_k / 16,
-                                                             page_u8x, low_high_u8x);
-    svuint8_t const leaf_hi_u8x = sz_utf8_rune_cascade_sve2_(sz_utf8_word_break_haswell_stage2_hi_,
-                                                             sz_utf8_word_break_haswell_stage2_hi_count_k / 16,
-                                                             page_u8x, low_high_u8x);
-    svuint8_t const leaf_group_u8x = svorr_u8_x(
-        pg_b8x, svand_n_u8_x(pg_b8x, svlsr_n_u8_x(pg_b8x, leaf_lo_u8x, 4), 0x0F), svlsl_n_u8_x(pg_b8x, leaf_hi_u8x, 4));
-    svuint8_t const leaf_low_nibble_u8x = svand_n_u8_x(pg_b8x, leaf_lo_u8x, 0x0F);
-    svuint8_t const low_low_u8x = svand_n_u8_x(pg_b8x, low_u8x, 0x0F);
-    svuint8_t const lut_index_u8x = svorr_u8_x(pg_b8x, svlsl_n_u8_x(pg_b8x, leaf_low_nibble_u8x, 4), low_low_u8x);
-    svuint8_t result_u8x = svdup_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_leaf_groups_k; ++group) {
-        svuint8_t const value_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_word_break_haswell_stage3_groups_ + group * 256, 256,
-                                                           lut_index_u8x);
-        result_u8x = svsel_u8(svcmpeq_n_u8(pg_b8x, leaf_group_u8x, (sz_u8_t)group), value_u8x, result_u8x);
-    }
-    return result_u8x;
+    return sz_utf8_rune_flat_lookup_sve2_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, high_u8x,
+                                          low_u8x);
 }
 
 /** @brief  Word_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000. */
@@ -722,9 +684,8 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high, svuint
 
 /** @brief  Lower one window to the engine's lane masks (held as `svuint8_t` locals, no spill) and run the rule
  *          engine. Builds the 15 Word_Break class masks + WSegSpace / Extended_Pictographic / quote bytes +
- *          partition masks (the old `build_frame`), then decides for @p complete_limit and re-resolves the carry
- *          to @p adv when an open bridge is still undecided at the edge -- the two-edge carry logic that mirrors
- *          the NEON driver. Replaces the deleted spill-array frame round-trip with in-register masks. */
+ *          partition masks, then decides for @p complete_limit and re-resolves the carry to @p adv when an open
+ *          bridge is still undecided at the edge -- the two-edge carry logic that mirrors the NEON driver. */
 SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                                  //
     sz_u8_t const *raw, sz_u8_t const *high_a, sz_u8_t const *low_a, sz_u8_t const *plane_a, sz_u8_t const *cls_a, //
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,                    //
@@ -751,7 +712,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(               
         classes_u8x = svsel_u8(sz_utf8_u64_to_pred_sve2_(truncated_raw, loaded),
                                svdup_n_u8((sz_u8_t)sz_utf8_word_break_other_k), classes_u8x);
 
-    // 15 Word_Break class masks as in-register 0/1 byte vectors (the old per-class store macro, inlined per class).
+    // 15 Word_Break class masks as in-register 0/1 byte vectors.
     svuint8_t const class_aletter_u8x = svdup_u8_z(
         svcmpeq_n_u8(loaded_b8x, classes_u8x, (sz_u8_t)sz_utf8_word_break_aletter_k), 1);
     svuint8_t const class_hebrew_u8x = svdup_u8_z(

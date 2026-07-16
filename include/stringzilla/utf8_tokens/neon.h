@@ -23,6 +23,8 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
+#pragma region Multistep newline and whitespace iteration
+
 /**
  *  @brief Left-packs the @p submask -selected lanes of one 4-lane sub-block to the @p out_offsets / @p out_lengths
  *         cursors in lane order via a `vqtbl2q_u8` table; returns how many lanes were written.
@@ -285,9 +287,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
     return count;
 }
 
-#pragma endregion // Multistep newline and whitespace iteration
+#pragma endregion Multistep newline and whitespace iteration
 
-#pragma region Gather free membership
+#pragma region Membership
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one quarter, returned as 0x00/0xFF lanes. */
 SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, uint8x16_t low) {
@@ -303,7 +305,7 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, 
  *  NEON has no `vpermi2b` page network, so the 32-byte bitmaps are stored column-major in @p columns (column `c`, 64
  *  ids of `bitmaps[id*32 + c]`, at `columns + c*64`). For each of the 32 columns the 64-entry column is read at
  *  @p block_id via a 4-row `vqtbl1q_u8` cascade, then the lane keeps the candidate whose column index matches its
- *  `(low >> 3)`. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`. @p block_id / @p low address one quarter.
+ *  `(low >> 3)`. In-register — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`. @p block_id / @p low address one quarter.
  */
 SZ_HELPER_AUTO uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns, uint8x16_t block_id, uint8x16_t low) {
     uint8x16_t const within = vandq_u8(block_id, vdupq_n_u8(0x0F));
@@ -319,7 +321,7 @@ SZ_HELPER_AUTO uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *columns,
 }
 
 /**
- *  @brief  BMP (codepoint < 0x10000) delimiter membership for one quarter, gather-free; returns 0x00/0xFF lanes.
+ *  @brief  BMP (codepoint < 0x10000) delimiter membership for one quarter, in-register; returns 0x00/0xFF lanes.
  *
  *  The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
  *  codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
@@ -337,7 +339,7 @@ SZ_HELPER_AUTO uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, u
 }
 
 /**
- *  @brief  Astral (codepoint >= 0x10000) delimiter membership for one quarter, gather-free; returns 0x00/0xFF lanes.
+ *  @brief  Astral (codepoint >= 0x10000) delimiter membership for one quarter, in-register; returns 0x00/0xFF lanes.
  *
  *  Reconstructs the byte-domain components of `offset = cp - 0x10000` directly per lane (no 32-bit-lane widening):
  *  with `cp = b0<<18 | b1<<12 | b2<<6 | b3` (b0 = lead & 7, b1..b3 = continuation & 0x3F) and `offset = cp - 0x10000`,
@@ -438,7 +440,7 @@ SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_neon_(sz_utf8_rune_window_neon
     return (ascii & loaded) | two_ok | three_ok | four_ok;
 }
 
-#pragma endregion Gather free membership
+#pragma endregion Membership
 
 #pragma region Forward driver
 

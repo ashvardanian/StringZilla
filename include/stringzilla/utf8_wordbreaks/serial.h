@@ -19,9 +19,9 @@ extern "C" {
 /**
  *  @brief Returns the UAX-29 Word_Break property (0-15) for a codepoint.
  *
- *  Mirrors the gather-free Word_Break classifier: arithmetic big ranges first, then a flat low-plane LUT
- *  for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral range list,
- *  defaulting to Other for everything else.
+ *  The oracle every SIMD Word_Break classifier is bit-exact against: arithmetic big ranges first, then a flat
+ *  low-plane LUT for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the BMP, then a sorted astral
+ *  range list, defaulting to Other for everything else.
  */
 SZ_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_word_break_big_count_k; ++range)
@@ -710,8 +710,7 @@ typedef struct sz_utf8_word_break_partition_t {
  *          supplies @p real_continuation, the high-nibble declared-length masks, and @p bad_second_byte). A well-formed
  *          window collapses to the O(1) continuation-bit partition; only a stray continuation, a short lead, or an
  *          overlong/surrogate/range lead takes the data-dependent reachability fixpoint. @p at_end_of_text
- *          distinguishes a benign interior straddle from a true end-of-text truncation. Bit-exact with the legacy
- *          `partition_icelake_`.
+ *          distinguishes a benign interior straddle from a true end-of-text truncation.
  */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
     sz_u64_t real_continuation, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
@@ -869,7 +868,7 @@ typedef struct sz_utf8_word_break_frame_t {
  *          @p frame, the open bridge shadow / RI parity / left context arriving in @p carry) into per-lane word-break
  *          bits, mirroring the serial WB1-WB16 over the WB4 element model. Every WB3-WB16 rule is pure `sz_u64_t` bit
  *          algebra over the precomputed lane masks; the cross-window left context arrives as register-carry seeds at
- *          lane 0, so nothing is scalar re-walked. Bit-exact with the legacy fused `block_breaks_icelake_`.
+ *          lane 0, so nothing is scalar re-walked.
  *
  *  The bridge's right context is unbounded; the in-window `bridge` is exact unless an open shadow reaches the block
  *  edge undecided, in which case `resolved` is clamped before that lane so the next, fully-contextual window

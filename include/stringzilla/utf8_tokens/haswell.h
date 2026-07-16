@@ -236,9 +236,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
     return count;
 }
 
-#pragma endregion // Multistep newline / whitespace iteration
+#pragma endregion Multistep newline / whitespace iteration
 
-#pragma region Gather free membership
+#pragma region Membership
 
 /** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
 SZ_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
@@ -266,7 +266,7 @@ SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte, __m
     return _mm256_cmpeq_epi8(isolated, bit_mask);
 }
 
-/** @brief  Read the bitmap byte `columns[(low>>3)*64 + block_id]` for one 32-lane half, gather-free: 32 candidate
+/** @brief  Read the bitmap byte `columns[(low>>3)*64 + block_id]` for one 32-lane half in-register: 32 candidate
  *          column reads (each a 64-entry `cascade_stage` over `block_id`) blended by which column `(low >> 3)` selects.
  *          The transposed `..._columns_` layout (column c holds `bitmaps[id*32+c]`) makes each column lut256-addressable
  *          for `block_id < 64` without a page network. */
@@ -409,7 +409,7 @@ SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_haswell_( //
     return (ascii | two_ok | three_ok | four_ok) & loaded_mask;
 }
 
-#pragma endregion Gather free membership
+#pragma endregion Membership
 
 #pragma region Enumerate delimiters
 

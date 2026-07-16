@@ -34,8 +34,11 @@ extern "C" {
  *  sentence / line / delimiters). Each family `#include`s this header and calls these substrate helpers
  *  primitives instead of carrying its own copy. The substrate bakes in zero property semantics: classifier
  *  tables flow in as bare pointers, boundary algebra flows in as bare masks, so the same code resolves any
- *  break property. Every routine treats all 64 lanes uniformly with no scalar per-lane loop, no gather, and
- *  no spill-to-stack-then-reload round-trip. */
+ *  break property. Every routine treats all 64 lanes uniformly with no scalar per-lane loop and no
+ *  spill-to-stack-then-reload round-trip. Table reads come in two shapes: the in-register `vpermi2b`/`vpermi2w` page
+ *  networks below, and @ref sz_utf8_rune_flat_lookup_icelake_, which reads a page-compressed flat table with one
+ *  `vpgatherdd`. The classifiers use the latter: cross-lane shuffles are port-5-only, so a dependent cascade saturates
+ *  that single port, while the gather issues on the load ports and leaves the shuffle port to the decode. */
 
 /** @brief  Byte lane identity (lane `i` holds the value `i`: {0,1,...,63}) for `vpcompressb`-based drains and
  *          permute waves. The `_mm512_set_epi8` arguments read 63..0 because they fill highest lane first. */
@@ -166,7 +169,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
 
 #pragma endregion Decode window
 
-#pragma region In register two stage trie
+#pragma region In register page networks
 
 /**
  *  @brief  Gather one byte per 16-bit lane from a register-resident byte table @p table of @p count entries,
@@ -211,128 +214,6 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count
 }
 
 /**
- *  @brief  Gather one 16-bit word per lane from a register-resident word table @p table of @p count entries,
- *          addressed by the 16-bit @p indices, using a `vpermi2w` page network (NO `vpgather`). Each 64-word
- *          page is two ZMM tiles selected by `vpermi2w` on the low 6 index bits, page chosen by the high bits.
- *          The final partial page is `maskz`-loaded so an unpadded @p table is never over-read.
- */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_word_(sz_u16_t const *table, int count, __m512i indices) {
-    __m512i const within_u16x32 = _mm512_and_si512(indices, _mm512_set1_epi16(0x3F));
-    __m512i const page_u16x32 = _mm512_srli_epi16(indices, 6);
-    int const page_count = (count + 63) / 64;
-    // Data-dependent page loop (see `sz_utf8_rune_gather_byte_`): visit only the distinct 64-word pages
-    // present across the lanes; bit-exact since an absent page contributes no `hit`.
-    __m512i const single_bit_u32x16 = _mm512_set1_epi32(1);
-    __m512i const page_low_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_castsi512_si256(page_u16x32));
-    __m512i const page_high_half_u32x16 = _mm512_cvtepu16_epi32(_mm512_extracti64x4_epi64(page_u16x32, 1));
-    sz_u32_t present_pages = (sz_u32_t)_mm512_reduce_or_epi32(
-        _mm512_or_si512(_mm512_sllv_epi32(single_bit_u32x16, page_low_half_u32x16),
-                        _mm512_sllv_epi32(single_bit_u32x16, page_high_half_u32x16)));
-    present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
-    __m512i result_u16x32 = _mm512_setzero_si512();
-    while (present_pages) {
-        int const page_index = (int)sz_u64_ctz((sz_u64_t)present_pages);
-        present_pages &= present_pages - 1;
-        int const tile_base = page_index * 64;
-        int const tile_remaining = count - tile_base;
-        __m512i const tile_lo_u16x32 = _mm512_maskz_loadu_epi16(sz_u32_clamp_mask_until_((sz_size_t)tile_remaining),
-                                                                table + tile_base);
-        __m512i const tile_hi_u16x32 = tile_remaining > 32
-                                           ? _mm512_maskz_loadu_epi16(
-                                                 sz_u32_clamp_mask_until_((sz_size_t)(tile_remaining - 32)),
-                                                 table + tile_base + 32)
-                                           : _mm512_setzero_si512();
-        __m512i const permuted_u16x32 = _mm512_permutex2var_epi16(tile_lo_u16x32, within_u16x32, tile_hi_u16x32);
-        __mmask32 const hit = _mm512_cmpeq_epi16_mask(page_u16x32, _mm512_set1_epi16((short)page_index));
-        result_u16x32 = _mm512_mask_mov_epi16(result_u16x32, hit, permuted_u16x32);
-    }
-    return result_u16x32;
-}
-
-/**
- *  @brief  In-register two-stage trie classify of BMP codepoints `0x800..0xFFFF`, replacing the scalar
- *          `while (remaining) { ctz; classify_codepoint }` cold loop (anti-pattern #6/#7). Resolves all 64
- *          lanes uniformly via `vpermi2w` over the L1/L2 word tiles and `vpermi2b` over the leaf byte tiles
- *          held in registers; no `vpgather`, no spill. The trie shape is the canonical L1 (super-block) →
- *          L2 (block) → leaf layout:
- *
- *              offset = codepoint - 0x800
- *              block  = offset / block             ; within        = offset % block
- *              super  = block  / superblock        ; super_offset  = block  % superblock
- *              level1 = l1[super]
- *              leaf   = l2[level1 * superblock + super_offset]
- *              class  = leaf_bytes[leaf * block + within]
- *
- *  @param  high        Per-lane `codepoint >> 8` (from @ref sz_utf8_rune_decode_window_).
- *  @param  low         Per-lane `codepoint & 0xFF`.
- *  @param  l1          Stage-1 super-block table (`sz_u8_t`), @p l1_count entries.
- *  @param  l2          Stage-2 block table (`sz_u16_t` leaf indices), @p l2_count entries.
- *  @param  leaf        Leaf class bytes (`sz_u8_t`), @p leaf_count entries.
- *  @param  block       Codepoints per leaf block (power of two).
- *  @param  superblock  Blocks per super-block (power of two).
- *  @param  l1_count    Number of L1 entries (bounds the resident tiles; only @p leaf_count is read here).
- *  @param  l2_count    Number of L2 entries (bounds the resident word tiles).
- *  @param  leaf_count  Number of leaf class bytes (bounds the resident byte tiles).
- *  @return Per-lane class byte; lanes whose codepoint is outside `0x800..0xFFFF` are undefined (caller masks).
- *  @note   @p block and @p superblock are powers of two in the canonical layout; division/modulo lower to a
- *          uniform shift / mask. @p l1_count is accepted for symmetry; the L1 gather is bounded by the page loop.
- */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_trie_walk_icelake_( //
-    __m512i high, __m512i low,                          //
-    sz_u8_t const *l1, sz_u16_t const *l2, sz_u8_t const *leaf, int block, int superblock, int l1_count, int l2_count,
-    int leaf_count) {
-    __m128i const block_log2_u32x4 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)block));
-    __m128i const super_log2_u32x4 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)superblock));
-    __m512i const within_mask_u16x32 = _mm512_set1_epi16((short)(block - 1));
-    __m512i const super_off_mask_u16x32 = _mm512_set1_epi16((short)(superblock - 1));
-    __m512i const super_v16_u16x32 = _mm512_set1_epi16((short)superblock);
-    __m512i const block_v16_u16x32 = _mm512_set1_epi16((short)block);
-
-    // Reconstruct cp = (high << 8) | low into two 16-bit halves so the trie math stays exact to 0xFFFF.
-    __m512i const zero_u16x32 = _mm512_setzero_si512();
-    __m512i const offset_lo_u16x32 = _mm512_sub_epi16(
-        _mm512_or_si512(_mm512_slli_epi16(_mm512_unpacklo_epi8(high, zero_u16x32), 8),
-                        _mm512_unpacklo_epi8(low, zero_u16x32)),
-        _mm512_set1_epi16(0x800));
-    __m512i const offset_hi_u16x32 = _mm512_sub_epi16(
-        _mm512_or_si512(_mm512_slli_epi16(_mm512_unpackhi_epi8(high, zero_u16x32), 8),
-                        _mm512_unpackhi_epi8(low, zero_u16x32)),
-        _mm512_set1_epi16(0x800));
-
-    __m512i const within_lo_u16x32 = _mm512_and_si512(offset_lo_u16x32, within_mask_u16x32);
-    __m512i const within_hi_u16x32 = _mm512_and_si512(offset_hi_u16x32, within_mask_u16x32);
-    __m512i const block_idx_lo_u16x32 = _mm512_srl_epi16(offset_lo_u16x32, block_log2_u32x4);
-    __m512i const block_idx_hi_u16x32 = _mm512_srl_epi16(offset_hi_u16x32, block_log2_u32x4);
-    __m512i const super_off_lo_u16x32 = _mm512_and_si512(block_idx_lo_u16x32, super_off_mask_u16x32);
-    __m512i const super_off_hi_u16x32 = _mm512_and_si512(block_idx_hi_u16x32, super_off_mask_u16x32);
-    __m512i const super_lo_u16x32 = _mm512_srl_epi16(block_idx_lo_u16x32, super_log2_u32x4);
-    __m512i const super_hi_u16x32 = _mm512_srl_epi16(block_idx_hi_u16x32, super_log2_u32x4);
-
-    // Stage 1: level1 = l1[super].
-    __m512i const level1_lo_u8x64 = sz_utf8_rune_gather_byte_(l1, l1_count, super_lo_u16x32);
-    __m512i const level1_hi_u8x64 = sz_utf8_rune_gather_byte_(l1, l1_count, super_hi_u16x32);
-
-    // Stage 2: leaf = l2[level1 * superblock + super_offset].
-    __m512i const l2_index_lo_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(level1_lo_u8x64, super_v16_u16x32),
-                                                        super_off_lo_u16x32);
-    __m512i const l2_index_hi_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(level1_hi_u8x64, super_v16_u16x32),
-                                                        super_off_hi_u16x32);
-    __m512i const leaf_idx_lo_u16x32 = sz_utf8_rune_gather_word_(l2, l2_count, l2_index_lo_u16x32);
-    __m512i const leaf_idx_hi_u16x32 = sz_utf8_rune_gather_word_(l2, l2_count, l2_index_hi_u16x32);
-
-    // Leaf: class = leaf_bytes[leaf * block + within].
-    __m512i const leaf_byte_lo_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_lo_u16x32, block_v16_u16x32),
-                                                         within_lo_u16x32);
-    __m512i const leaf_byte_hi_u16x32 = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx_hi_u16x32, block_v16_u16x32),
-                                                         within_hi_u16x32);
-    __m512i const class_lo_u8x64 = sz_utf8_rune_gather_byte_(leaf, leaf_count, leaf_byte_lo_u16x32);
-    __m512i const class_hi_u8x64 = sz_utf8_rune_gather_byte_(leaf, leaf_count, leaf_byte_hi_u16x32);
-
-    // Re-pack the two 16-bit class halves (each already in [0,255]) into the original byte lane order.
-    return _mm512_packus_epi16(class_lo_u8x64, class_hi_u8x64);
-}
-
-/**
  *  @brief  256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane @p index in [0,256). A
  *          `vpermb` over the four resident quads; the high two bits of the index select the quad via masked blends.
  *          Tiles load directly from `.rodata` (no per-call materialization), so the family classifiers stay
@@ -364,11 +245,14 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __
 }
 
 /**
- *  @brief  Gather-free indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64 bytes, with a
+ *  @brief  In-register indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64 bytes, with a
  *          per-32-bit-lane byte @p index_dwords in [0, tile_count*64). A `vpermi2b` cascade: each ZMM pair covers 128
  *          byte slots addressed by the low 7 bits; the high bits select the pair via masked blends. Tiles load
- *          directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init. No `vpgatherdd`.
+ *          directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init.
  *          @p table must be `sz_align_(64)` and zero-padded to `tile_count * 64` bytes.
+ *
+ *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single cross-lane shuffle port.
+ *  ! The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_ instead for exactly that reason.
  */
 SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count, __m512i index_dwords) {
     __m512i const within_u32x16 = _mm512_and_si512(index_dwords, _mm512_set1_epi32(0x7F));
@@ -406,7 +290,30 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *p
     return _mm512_mask_blend_epi32(odd_cell, low_nibble_u32x16, high_nibble_u32x16);
 }
 
-#pragma endregion In register two stage trie
+#pragma endregion In register page networks
+
+#pragma region Flat table lookup
+
+/**
+ *  @brief  Class byte per lane from a page-compressed flat table: `page_lut[cp >> 8]` selects a 256-byte page via one
+ *          `vpermb`, then `flat[page * 256 + (cp & 0xFF)]` is fetched by one `vpgatherdd` at native width, riding the
+ *          load ports instead of the contended cross-lane shuffle port. @p flat must extend four bytes past its last
+ *          index, since the dword gather over-reads three.
+ *
+ *  ! Only the low byte of each lane is the class; the upper three carry gather garbage. Most callers truncate with
+ *  ! `vpmovdb` anyway; a caller that keeps the u32 lanes must mask with 0xFF itself.
+ */
+SZ_HELPER_AUTO __m512i sz_utf8_rune_flat_lookup_icelake_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, __m512i codepoints_u32x16) {
+    __m512i const high_bytes_u32x16 = _mm512_and_si512(_mm512_srli_epi32(codepoints_u32x16, 8),
+                                                       _mm512_set1_epi32(0xFF));
+    __m512i const page_indices_u32x16 = sz_utf8_rune_permute256_icelake_(page_lut, high_bytes_u32x16);
+    __m512i const flat_indices_u32x16 = _mm512_add_epi32(_mm512_slli_epi32(page_indices_u32x16, 8),
+                                                         _mm512_and_si512(codepoints_u32x16, _mm512_set1_epi32(0xFF)));
+    return _mm512_i32gather_epi32(flat_indices_u32x16, (void const *)flat, 1);
+}
+
+#pragma endregion Flat table lookup
 
 #pragma region Drains
 

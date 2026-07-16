@@ -174,7 +174,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_incomplete_tail_(sz_cptr_t text, sz_cptr_t end)
     return sz_true_k;
 }
 
-#pragma endregion
+#pragma endregion Rune Codec
 
 SZ_API_COMPTIME sz_size_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -258,7 +258,7 @@ SZ_HELPER_AUTO sz_rune_t sz_utf8_next_rune_(sz_cptr_t text, sz_size_t length, sz
  *
  *  The length is fully determined by the lead byte's high nibble: 0x0-0xB map to 1 (ASCII and, for robustness,
  *  stray continuation bytes treated as single bytes), 0xC-0xD to 2, 0xE to 3, 0xF to 4. A single 16-entry
- *  table replaces the four-way `if`-ladder that ran on every codepoint advance.
+ *  table resolves it without a four-way `if`-ladder on the codepoint advance.
  */
 SZ_HELPER_INLINE sz_size_t sz_utf8_lead_length_(sz_u8_t lead_byte) {
     static sz_u8_t const length_by_high_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
@@ -277,7 +277,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_previous_rune_start_(sz_cptr_t text, sz_size_t 
 
 /*  ISA-independent `sz_u64_t` boundary-mask algebra shared by every backend (serial / haswell / icelake / neon).
  *  It lives here so each `utf8_runes/<isa>.h` inherits it through its `#include "utf8_runes/serial.h"` and
- *  the per-family rule code is written once and reused across ISAs (CONTRIBUTING-KERNELS.md §6.8). */
+ *  the per-family rule code is written once and reused across ISAs. */
 
 /** @brief  Smear set bits rightward (toward higher lanes) for @p steps, gated by the @p reach mask each step. */
 SZ_HELPER_AUTO sz_u64_t sz_u64_smear_right_(sz_u64_t bits, sz_u64_t reach, int steps) {

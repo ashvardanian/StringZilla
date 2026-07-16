@@ -4,10 +4,10 @@
  *  @brief  Haswell (AVX2) backend for UAX-29 extended grapheme cluster boundaries, fully vectorized end-to-end.
  *
  *  The AVX2 twin of the Ice Lake grapheme kernel. Each 64-byte window lives as two `__m256i` halves; every lane is
- *  decoded through the shared codepoint substrate (`sz_utf8_rune_decode_window_haswell_`), classified gather-free
+ *  decoded through the shared codepoint substrate (`sz_utf8_rune_decode_window_haswell_`), classified
  *  into one packed Grapheme_Cluster_Break descriptor per lane by a register-resident `vpshufb` nibble cascade (the AVX2
  *  twin of the VBMI BMP trie + 4-stage astral trie), compacted to a codepoint-dense descriptor byte buffer, and
- *  resolved by the SHARED portable boundary engine (`sz_grapheme_window_boundaries_`). No `vpgatherdd`, no `vpermb` /
+ *  resolved by the SHARED portable boundary engine (`sz_grapheme_window_boundaries_`). No `vpermb` /
  *  `vpcompressb` (AVX2 lacks them), no per-lane scalar rule loop, no serial deferral.
  */
 #ifndef STRINGZILLA_UTF8_GRAPHEMES_HASWELL_H_
@@ -30,35 +30,15 @@ extern "C" {
 #pragma GCC target("avx2", "bmi", "bmi2", "popcnt")
 #endif
 
-#pragma region Gather free Grapheme_Cluster_Break classifier
+#pragma region Grapheme_Cluster_Break classifier
 
-/** @brief  Packed descriptor byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
- *          register-resident 3-stage `vpshufb` nibble cascade, the AVX2 twin of the VBMI full-BMP trie. The cascade
- *          emits the descriptor directly (the serial `id_to_desc` permute is folded into the leaf tables). Gather-free;
- *          bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included, no separate formula). */
-SZ_HELPER_AUTO __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high, __m256i low) {
-    __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
-    __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_grapheme_break_haswell_stage1_, high);
-    __m256i const low_high = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_grapheme_break_haswell_stage2_lo_,
-                                                                sz_utf8_grapheme_break_haswell_stage2_lo_count_k / 16,
-                                                                page, low_high);
-    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_grapheme_break_haswell_stage2_hi_,
-                                                                sz_utf8_grapheme_break_haswell_stage2_hi_count_k / 16,
-                                                                page, low_high);
-    __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
-                                               _mm256_slli_epi16(leaf_hi, 4));
-    __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
-    __m256i const low_low = _mm256_and_si256(low, low_nibble_mask);
-    __m256i const lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), low_low);
-    __m256i result = _mm256_setzero_si256();
-    for (int group = 0; group < (int)sz_utf8_grapheme_break_haswell_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_rune_lut256_haswell_(sz_utf8_grapheme_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
-        result = _mm256_blendv_epi8(result, value, here);
-    }
-    return result;
+/** @brief  Packed descriptor byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
+ *          `bmp_page_lut_` page LUT selects one of the 54 distinct 256-byte pages, then `flat_bmp_` is fetched by
+ *          `vpgatherdd`. The leaf carries the descriptor directly (the serial `id_to_desc` permute is folded in).
+ *          Bit-exact with `sz_rune_grapheme_break_property` over the whole BMP (Hangul included, no separate formula). */
+SZ_HELPER_AUTO __m256i sz_grapheme_bmp_descriptor_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+    return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_grapheme_break_bmp_page_lut_, sz_utf8_grapheme_break_flat_bmp_,
+                                             high_bytes_u8x32, low_bytes_u8x32);
 }
 
 /** @brief  Packed descriptor byte for thirty-two ASTRAL codepoints over offset = cp - 0x10000 (5-nibble cascade), the
@@ -165,7 +145,7 @@ typedef struct sz_grapheme_classified_haswell_t {
 } sz_grapheme_classified_haswell_t;
 
 /**
- *  @brief  Decode a 64-byte window, classify every lane to a packed descriptor gather-free, and emit the per-lane
+ *  @brief  Decode a 64-byte window, classify every lane to a packed descriptor, and emit the per-lane
  *          descriptor halves with the trimmed codepoint-start geometry. Mirrors the icelake decode/classify path
  *          (value-based blind reconstruction so malformed input agrees byte-for-byte) without `vpermb`/`vpgather`.
  */
@@ -349,7 +329,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_hasw
     }
 
     // `0xF8..0xFF` begin no valid sequence and match no lead-length mask; force their start lanes to the Other
-    // descriptor (0) so they classify neighbour-independently, matching serial/icelake (§6.2 U+FFFD -> Other).
+    // descriptor (0) so they classify neighbour-independently, matching serial/icelake (U+FFFD → Other).
     sz_u64_t const invalid_lead = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(_mm256_max_epu8(raw_lo, _mm256_set1_epi8((char)0xF8)), raw_lo),
         _mm256_cmpeq_epi8(_mm256_max_epu8(raw_hi, _mm256_set1_epi8((char)0xF8)), raw_hi));
@@ -367,7 +347,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_hasw
     return result;
 }
 
-#pragma endregion Gather free Grapheme_Cluster_Break classifier
+#pragma endregion Grapheme_Cluster_Break classifier
 
 #pragma region Boundary algebra extractor
 
@@ -376,7 +356,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_hasw
  *          lanes — the AVX2 twin of `sz_grapheme_build_masks_icelake_` feeding the SAME portable engine. Each per-class
  *          membership mask is built in the BYTE-lane domain (`vpcmpeqb` halves -> `mask_combine`), then compacted to
  *          the codepoint-dense domain by a single `_pext_u64` over the start lanes (the `vpcompressb`-free analogue of
- *          icelake's per-class `& valid` after the dense compress). No scalar loop, no `vpgather`, no rule control flow.
+ *          icelake's per-class `& valid` after the dense compress). No scalar loop and no rule control flow.
  */
 SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_haswell_(
     sz_grapheme_classified_haswell_t classified, sz_u64_t valid) {

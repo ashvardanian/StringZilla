@@ -28,14 +28,15 @@ extern "C" {
 #pragma region In register vectorized classifier
 
 /*  The NEON twin of the Ice Lake / AVX2 classifier: a contiguous run of codepoints resolves to per-codepoint
- *  (class, side, dotted) with ZERO per-lane scalar loop, ZERO `vpgather`, and NO serial deferral. Each 64-byte
- *  window lives as four `uint8x16_t` quarters (`window[0]` = lanes [0,16), ... `window[3]` = lanes [48,64)) instead
- *  of haswell's two halves; every per-lane class compare is `vceqq_u8` per quarter, the four boolean quarters
- *  OR-collapsed to a `sz_u64_t` via `mask_combine_neon_`. The BMP palette index comes from the
- *  `sz_line_break_bmp_index_neon_` nibble cascade (the NEON twin of the VBMI full-BMP trie); the astral path uses
- *  `sz_line_break_classify_astral_neon_`. The 62-entry palette descriptor is unpacked to the LB1-resolved class byte
- *  and the engine side byte by `lut256_neon_` reads of the (ISA-agnostic) palette tables, bit-identical to the
- *  icelake/haswell descriptor unpack. */
+ *  (class, side, dotted) with ZERO per-lane scalar loop and NO serial deferral.
+ *
+ *  Each 64-byte window lives as four `uint8x16_t` quarters (`window[0]` = lanes [0,16), ... `window[3]` = lanes
+ *  [48,64)) instead of haswell's two halves; every per-lane class compare is `vceqq_u8` per quarter, the four boolean
+ *  quarters OR-collapsed to a `sz_u64_t` via `mask_combine_neon_`. The BMP flat-palette index comes from the
+ *  page-compressed flat table via @ref sz_utf8_rune_flat_lookup_neon_ and expands to the LB1-resolved class / side /
+ *  dotted bytes by `sz_line_break_flat_palette_unpack_neon_`. The astral path still walks the
+ *  `sz_line_break_classify_astral_neon_` cascade and its 62-entry palette, a DIFFERENT index space, so its RESOLVED
+ *  bytes blend over the valid 4-byte lanes after the expansion, bit-identical to the icelake/haswell blend. */
 
 /** @brief Expand a 16-bit lane mask into a `uint8x16_t` select vector (byte `i` = 0xFF when bit `i` is set), the
  *         NEON twin of @ref sz_utf8_byte_mask_from_bits_haswell_ (which expands 32 bits to a `__m256i`).
@@ -51,38 +52,18 @@ SZ_HELPER_INLINE uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_u64_t bit
     return vceqq_u8(isolated, bit_select);
 }
 
-/** @brief Palette index for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a register-resident
- *         3-stage `vqtbl` nibble cascade, the NEON twin of @ref sz_line_break_bmp_index_haswell_ (and the VBMI
- *         full-BMP trie). Gather-free; bit-exact with `sz_rune_line_break_property` over the whole BMP. Operates on
- *         one quarter; the caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high, uint8x16_t low) {
-    uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
-    uint8x16_t const high_high = vandq_u8(vshrq_n_u8(high, 4), low_nibble_mask);
-    uint8x16_t const high_low = vandq_u8(high, low_nibble_mask);
-    uint8x16_t const page = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_line_break_haswell_stage1_, sz_utf8_line_break_haswell_stage1_count_k / 16, high_high, high_low);
-    uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_line_break_haswell_stage2_lo_, sz_utf8_line_break_haswell_stage2_lo_count_k / 16, page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_line_break_haswell_stage2_hi_, sz_utf8_line_break_haswell_stage2_hi_count_k / 16, page, low_high);
-    uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
-    uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
-    uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
-    uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_line_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
-    }
-    return result;
+/** @brief Flat-palette index for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the
+ *         page-compressed flat leaf via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
+ *         @ref sz_line_break_bmp_index_haswell_. Bit-exact with `sz_rune_line_break_property` over the whole BMP
+ *         once `flat_palette_` expands the index. Operates on one quarter; the caller iterates the four. */
+SZ_HELPER_AUTO uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
+    return sz_utf8_rune_flat_lookup_neon_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
+                                          (int)sz_utf8_line_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
 /** @brief Palette index for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble cascade),
  *         the NEON twin of @ref sz_line_break_classify_astral_haswell_. Per-lane bytes: @p plane = (offset>>16)&0xFF
- *         (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Gather-free; bit-exact. */
+ *         (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Bit-exact. */
 SZ_HELPER_AUTO uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane, uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
     uint8x16_t const n4 = vandq_u8(plane, low_nibble_mask);
@@ -112,6 +93,77 @@ SZ_HELPER_AUTO uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane, 
         result = vbslq_u8(here, value, result);
     }
     return result;
+}
+
+/** @brief Split sixteen flat-palette indices into the low and high byte of their 16-bit Line_Break descriptors.
+ *         Four `vld2q_u8` deinterleave the 64-word padded palette into two resident 64-byte tables (descriptor low
+ *         bytes and high bytes) and one `vqtbl4q_u8` each resolves all sixteen lanes -- the NEON stand-in for the
+ *         AVX2 scale-2 `vpgatherdd` over the same palette. Every index originates in the flat leaf, so it is always
+ *         < 56 and lands inside the four resident quads, never in the `vqtbl4q` zero-fill. */
+SZ_HELPER_INLINE void sz_line_break_flat_palette_descriptors_neon_(uint8x16_t palette_indices_u8x16,
+                                                                   uint8x16_t *descriptor_low_bytes_u8x16,
+                                                                   uint8x16_t *descriptor_high_bytes_u8x16) {
+    sz_u8_t const *palette_bytes = (sz_u8_t const *)sz_utf8_line_break_flat_palette_;
+    uint8x16x2_t const words_first = vld2q_u8(palette_bytes + 0);
+    uint8x16x2_t const words_second = vld2q_u8(palette_bytes + 32);
+    uint8x16x2_t const words_third = vld2q_u8(palette_bytes + 64);
+    uint8x16x2_t const words_fourth = vld2q_u8(palette_bytes + 96);
+    uint8x16x4_t low_table, high_table;
+    low_table.val[0] = words_first.val[0], low_table.val[1] = words_second.val[0];
+    low_table.val[2] = words_third.val[0], low_table.val[3] = words_fourth.val[0];
+    high_table.val[0] = words_first.val[1], high_table.val[1] = words_second.val[1];
+    high_table.val[2] = words_third.val[1], high_table.val[3] = words_fourth.val[1];
+    *descriptor_low_bytes_u8x16 = vqtbl4q_u8(low_table, palette_indices_u8x16);
+    *descriptor_high_bytes_u8x16 = vqtbl4q_u8(high_table, palette_indices_u8x16);
+}
+
+/** @brief Expand sixteen flat-palette indices to the LB1-resolved class byte, the engine side byte and the
+ *         DottedCircle select (0xFF where set), the NEON twin of @ref sz_line_break_flat_palette_unpack_haswell_.
+ *         Every descriptor field the engine reads lives below bit 14 -- class in bits 0-5, Pi/Pf in 6/7, EAW/Cn|Ext
+ *         in 8/9, SA-is-mark in 12, DottedCircle in 13 -- so the whole unpack stays in the byte domain. Applies the
+ *         serial resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); RI/ZWJ side bits come from the RAW
+ *         class, the mark side bit from the resolved class. */
+SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_neon_(uint8x16_t palette_indices_u8x16,
+                                                            uint8x16_t *classes_u8x16_out, uint8x16_t *side_u8x16_out,
+                                                            uint8x16_t *dotted_select_u8x16_out) {
+    uint8x16_t descriptor_low_bytes_u8x16, descriptor_high_bytes_u8x16;
+    sz_line_break_flat_palette_descriptors_neon_(palette_indices_u8x16, &descriptor_low_bytes_u8x16,
+                                                 &descriptor_high_bytes_u8x16);
+
+    uint8x16_t const raw_classes_u8x16 = vandq_u8(descriptor_low_bytes_u8x16, vdupq_n_u8(0x3F));
+    uint8x16_t const is_sa_u8x16 = vceqq_u8(raw_classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_sa_k));
+    uint8x16_t const sa_is_mark_u8x16 = vtstq_u8(descriptor_high_bytes_u8x16, vdupq_n_u8(1 << 4));
+    uint8x16_t classes_u8x16 = vbslq_u8(is_sa_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_al_k), raw_classes_u8x16);
+    classes_u8x16 = vbslq_u8(vandq_u8(is_sa_u8x16, sa_is_mark_u8x16), vdupq_n_u8((sz_u8_t)sz_line_break_cm_k),
+                             classes_u8x16);
+    uint8x16_t const is_alias_u8x16 = vorrq_u8(
+        vorrq_u8(vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_ai_k)),
+                 vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_sg_k))),
+        vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_xx_k)));
+    classes_u8x16 = vbslq_u8(is_alias_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_al_k), classes_u8x16);
+    uint8x16_t const is_cj_u8x16 = vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_cj_k));
+    classes_u8x16 = vbslq_u8(is_cj_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_ns_k), classes_u8x16);
+
+    uint8x16_t side_u8x16 = vandq_u8(vtstq_u8(descriptor_low_bytes_u8x16, vdupq_n_u8(1 << 6)),
+                                     vdupq_n_u8((sz_u8_t)sz_line_break_side_pi_k));
+    side_u8x16 = vorrq_u8(side_u8x16, vandq_u8(vtstq_u8(descriptor_low_bytes_u8x16, vdupq_n_u8(1 << 7)),
+                                               vdupq_n_u8((sz_u8_t)sz_line_break_side_pf_k)));
+    side_u8x16 = vorrq_u8(side_u8x16, vandq_u8(vtstq_u8(descriptor_high_bytes_u8x16, vdupq_n_u8(1 << 0)),
+                                               vdupq_n_u8((sz_u8_t)sz_line_break_side_eaw_k)));
+    side_u8x16 = vorrq_u8(side_u8x16,
+                          vandq_u8(vtstq_u8(descriptor_high_bytes_u8x16, vdupq_n_u8(1 << 1)),
+                                   vdupq_n_u8((sz_u8_t)(sz_line_break_side_cn_k | sz_line_break_side_ext_k))));
+    side_u8x16 = vorrq_u8(side_u8x16, vandq_u8(vceqq_u8(raw_classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_ri_k)),
+                                               vdupq_n_u8((sz_u8_t)sz_line_break_side_ri_k)));
+    side_u8x16 = vorrq_u8(side_u8x16, vandq_u8(vceqq_u8(raw_classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_zwj_k)),
+                                               vdupq_n_u8((sz_u8_t)sz_line_break_side_zwj_k)));
+    uint8x16_t const class_is_mark_u8x16 = vorrq_u8(vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_cm_k)),
+                                                    vceqq_u8(classes_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_zwj_k)));
+    side_u8x16 = vorrq_u8(side_u8x16, vandq_u8(class_is_mark_u8x16, vdupq_n_u8((sz_u8_t)sz_line_break_side_mark_k)));
+
+    *classes_u8x16_out = classes_u8x16;
+    *side_u8x16_out = side_u8x16;
+    *dotted_select_u8x16_out = vtstq_u8(descriptor_high_bytes_u8x16, vdupq_n_u8(1 << 5));
 }
 
 /** @brief A 64-bit "(byte & mask) == pattern" lane mask over the four window quarters. */
@@ -154,9 +206,10 @@ typedef struct sz_line_break_classified_neon_t {
     sz_size_t loaded;      /**< Bytes loaded into this window (<= 64). */
 } sz_line_break_classified_neon_t;
 
-/** @brief Resolve the per-lane palette index (one quarter) to class / side / dotted bytes through the precomputed
- *         62-entry palette tables. `lut256_neon_` reads each 64-entry table by `index` (index < 64); bit-identical to
- *         the icelake `vpermb` palette permute and the haswell `lut256` reads. */
+/** @brief Resolve the per-lane 62-entry-palette index (one quarter) to class / side / dotted bytes through the
+ *         precomputed palette tables; `lut256_neon_` reads each 256-byte-padded table by `index`. Serves only the
+ *         astral cascade now -- the BMP path expands flat-palette descriptors via
+ *         @ref sz_line_break_flat_palette_unpack_neon_ instead, a different index space. */
 SZ_HELPER_INLINE void sz_line_break_palette_unpack_neon_(uint8x16_t index, uint8x16_t *classes, uint8x16_t *side,
                                                          uint8x16_t *dotted) {
     *classes = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_class_, index);
@@ -224,8 +277,10 @@ SZ_HELPER_AUTO sz_line_break_classified_neon_t sz_line_break_classify_window_neo
 
     //  Rebuild high/low per lead length so cp = (plane<<16)|(high<<8)|low is exact (decode_window_ uses the
     //  2/3-byte formula only). Replacement lanes are overridden downstream, so their garbage never reaches the
-    //  palette. The 4-byte high/low mirror the icelake/haswell 4-byte reconstruction, per quarter.
-    sz_u64_t const is_astral = four_byte & loaded_mask;
+    //  palette. The 4-byte high/low mirror the icelake/haswell 4-byte reconstruction, per quarter. Only VALID 4-byte
+    //  starts take the astral blend: an invalid 4-byte lead is a replacement lane whose U+FFFD resolution must
+    //  survive it, so `valid4`, not `four_byte`, gates it.
+    sz_u64_t const is_astral = valid4 & loaded_mask;
 
     sz_u64_t const valid_start = true_ascii | valid2 | valid3 | valid4;
     sz_u64_t const consumed = (((valid2 | valid3 | valid4) << 1) | ((valid3 | valid4) << 2) | (valid4 << 3)) &
@@ -235,7 +290,8 @@ SZ_HELPER_AUTO sz_line_break_classified_neon_t sz_line_break_classify_window_neo
 
     sz_line_break_classified_neon_t result;
     uint8x16_t dotted_q[4];
-    uint8x16_t const fffd_index = sz_line_break_bmp_index_neon_(vdupq_n_u8(0xFF), vdupq_n_u8(0xFD));
+    uint8x16_t fffd_index = vdupq_n_u8(0);
+    if (replacement) fffd_index = sz_line_break_bmp_index_neon_(vdupq_n_u8(0xFF), vdupq_n_u8(0xFD));
 
     uint8x16_t const low_two_bits = vdupq_n_u8(0x03);
     uint8x16_t const low_three_bits = vdupq_n_u8(0x07);
@@ -270,23 +326,33 @@ SZ_HELPER_AUTO sz_line_break_classified_neon_t sz_line_break_classify_window_neo
                                           sz_utf8_srl8_neon_(n1, 4, 0x03));
         uint8x16_t const plane_masked = vandq_u8(four_select, plane);
 
-        //  Palette index per byte-lane. BMP through the validated full-BMP cascade; astral blended in; replacement
-        //  lanes forced to U+FFFD's index.
-        uint8x16_t index_q = sz_line_break_bmp_index_neon_(high_q, low_q);
+        //  Flat-palette index per byte-lane: BMP through the page-compressed flat leaf; replacement lanes forced to
+        //  U+FFFD's index (U+FFFD is itself BMP, so it shares this index space). Astral lanes cannot join here: the
+        //  astral cascade still speaks the 62-entry palette, a DIFFERENT index space, so their RESOLVED bytes blend
+        //  after the expansion, over the valid 4-byte lanes only.
+        uint8x16_t bmp_index_u8x16 = sz_line_break_bmp_index_neon_(high_q, low_q);
+        if (replacement) {
+            uint8x16_t const rep_select = sz_line_break_byte_mask_from_bits_neon_(replacement >> lane_base);
+            bmp_index_u8x16 = vbslq_u8(rep_select, fffd_index, bmp_index_u8x16);
+        }
+        sz_line_break_flat_palette_unpack_neon_(bmp_index_u8x16, &result.classes[quarter], &result.side[quarter],
+                                                &dotted_q[quarter]);
         if (is_astral) {
             //  The astral cascade is addressed by offset = codepoint - 0x10000; the offset plane nibble is
             //  `plane - 1`. The low 16 bits are unchanged by subtracting 0x10000, so `high`/`low` feed directly.
+            //  Its 62-entry palette's byte tables carry the very same LB1 resolution the flat descriptor unpack
+            //  applies, so blending the RESOLVED bytes is bit-identical to blending indices in one shared space.
+            uint8x16_t const astral_select_u8x16 = sz_line_break_byte_mask_from_bits_neon_(is_astral >> lane_base);
             uint8x16_t const plane_off = vsubq_u8(plane_masked, vdupq_n_u8(1));
-            uint8x16_t const astral = sz_line_break_classify_astral_neon_(plane_off, high_q, low_q);
-            index_q = vbslq_u8(four_select, astral, index_q);
+            uint8x16_t const astral_index_u8x16 = sz_line_break_classify_astral_neon_(plane_off, high_q, low_q);
+            uint8x16_t astral_classes_u8x16, astral_side_u8x16, astral_dotted_bytes_u8x16;
+            sz_line_break_palette_unpack_neon_(astral_index_u8x16, &astral_classes_u8x16, &astral_side_u8x16,
+                                               &astral_dotted_bytes_u8x16);
+            result.classes[quarter] = vbslq_u8(astral_select_u8x16, astral_classes_u8x16, result.classes[quarter]);
+            result.side[quarter] = vbslq_u8(astral_select_u8x16, astral_side_u8x16, result.side[quarter]);
+            dotted_q[quarter] = vbslq_u8(
+                astral_select_u8x16, vtstq_u8(astral_dotted_bytes_u8x16, astral_dotted_bytes_u8x16), dotted_q[quarter]);
         }
-        if (replacement) {
-            uint8x16_t const rep_select = sz_line_break_byte_mask_from_bits_neon_(replacement >> lane_base);
-            index_q = vbslq_u8(rep_select, fffd_index, index_q);
-        }
-
-        sz_line_break_palette_unpack_neon_(index_q, &result.classes[quarter], &result.side[quarter],
-                                           &dotted_q[quarter]);
     }
 
     sz_u64_t const dotted = sz_utf8_mask_combine_neon_(

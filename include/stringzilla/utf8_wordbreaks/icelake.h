@@ -2,14 +2,21 @@
  *  @file include/stringzilla/utf8_wordbreaks/icelake.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for AVX-512 (Ice Lake and later). No path scalar-walks
- *          codepoints, spills a ZMM to the stack, calls the serial oracle, or issues a gather.
+ *          codepoints, spills a ZMM to the stack, or calls the serial oracle.
  *
  *  The text is consumed in 64-byte windows. Each window is decoded by the shared codepoint substrate and classified
- *  to a per-codepoint Word_Break property (ALetter, Numeric, MidLetter, Extend, Regional_Indicator, ...) entirely
- *  in-register: an ASCII permute, big arithmetic ranges, a codepoint < 0x800 page LUT, the shared two-stage trie for the
- *  scattered BMP residue, and a aligned `.rodata` astral trie for the Supplementary Plane. Rules WB3-WB16 then run as
+ *  to a per-codepoint Word_Break property (ALetter, Numeric, MidLetter, Extend, Regional_Indicator, ...): an ASCII
+ *  permute, big arithmetic ranges, a codepoint < 0x800 page LUT, a page-compressed FLAT table for the scattered cold
+ *  BMP residue, and an aligned `.rodata` astral trie for the Supplementary Plane. Rules WB3-WB16 then run as
  *  branchless 64-lane bit algebra. The driver emits the boundaries it can fully trust and advances to the last
  *  resolved codepoint start; a small register carry (@ref sz_utf8_word_break_carry_t) threads the cross-window state.
+ *
+ *  Design note: the cold BMP classifier is `bmp_page_lut_[cp >> 8]` selecting one of 52 distinct 256-byte pages, then
+ *  `flat_bmp_[page * 256 + (cp & 0xFF)]` fetched by one `vpgatherdd` - a single indexed lookup, chosen for port
+ *  pressure over instruction count: cross-lane shuffles are port-5-only, so any dependent shuffle cascade saturates
+ *  that one port, while the gather issues on the load ports and leaves the shuffle port to the decode. The
+ *  `cp < 0x800` gate means small-page scripts never reach it. Gathers pay off on multi-KB tables in general - see
+ *  less_slow.cpp v0.3.0 "Gather and Scatter": https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
  *
  *  The hard part is that a boundary can depend on bytes beyond the current window. Three cross-window dependencies
  *  drive almost all of the complexity below.
@@ -49,8 +56,9 @@
  *  replacement char).
  *
  *  The overwhelmingly common case - well-formed BMP/ASCII text with no open bridge - is kept cheap: the astral
- *  classifier, the page LUT, the trie, the per-lead validity machinery and the partition fixpoint are all rare-class
- *  gated, so the per-window cost is proportional to the window's content, not to the size of the Unicode tables.
+ *  classifier, the page LUT, the flat-table gather, the per-lead validity machinery and the partition fixpoint are
+ *  all rare-class gated, so the per-window cost is proportional to the window's content, not to the size of the
+ *  Unicode tables.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_ICELAKE_H_
@@ -79,10 +87,10 @@ extern "C" {
                    "popcnt")
 #endif
 
-#pragma region Gather Free Word_Break Classifier
+#pragma region Word_Break Classifier
 
-/** @brief  64-byte ZMM tile counts spanning the flattened ASTRAL stage tables (BMP keeps the cheap arithmetic
- *          ranges + 2-byte page LUT, which already classify faster than a trie). */
+/** @brief  64-byte ZMM tile counts spanning the flattened ASTRAL stage tables (the BMP resolves through the cheap
+ *          arithmetic ranges, the 2-byte page LUT, and the flat-table gather). */
 enum {
     sz_utf8_word_break_astral_stage1_tiles_k = sizeof(sz_utf8_word_break_astral_s1_) / 64,
     sz_utf8_word_break_astral_stage2_tiles_k = sizeof(sz_utf8_word_break_astral_s2_) / 64,
@@ -150,7 +158,7 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
 }
 
 /** @brief  Look up one cp < 0x800 page over @ref sz_utf8_word_break_flat_lut_0800_ via an in-register `vpermi2b`
- *          network (faster than a trie for the dense 2-byte scripts). */
+ *          network (cheaper than the flat gather for the dense 2-byte scripts). */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high, __m512i low) {
     __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
     __m512i const low_high_bit = sz_utf8_srl8_icelake_(low, 7, 0x01);
@@ -177,7 +185,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high, __m5
 
 /** @brief  Classify the 4-byte (astral) lanes of a window via the aligned `.rodata` astral trie. Four 16-lane chunks
  *          reconstruct the 21-bit codepoint and walk the 4-stage trie; the caller blends the result onto `is_four_byte`
- *          lanes. Replaces the per-window 476-range linear fold. */
+ *          lanes. Bit-exact with `sz_rune_word_break_property` over the astral planes. */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window, __m512i next1, __m512i next2,
                                                                       __m512i next3) {
     __m512i const byte0 = _mm512_and_si512(window, _mm512_set1_epi8(0x07));
@@ -208,77 +216,44 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i wi
     return astral_class;
 }
 
-/** @brief  Start-compacting two-stage BMP-trie classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali,
- *          Thai, Tamil, ...). The rule engine reads classes only at codepoint-START lanes, and a 3-byte script packs
- *          at most 21 starts into a 64-byte window, so the cold-start lanes' `high`/`low` bytes are `vpcompressb`-
- *          compacted into the low <=32 lanes, widened to ONE 32x16-bit codepoint register, walked through the words
- *          two-stage trie a SINGLE time (the L1/L2/leaf gathers run once, not the lo+hi twice of
- *          @ref sz_utf8_rune_trie_walk_icelake_), then the per-start class bytes are `vpexpandb`-scattered onto
- *          @p classes at their original byte-lane positions. Windows whose cold-start count exceeds 32 (which cannot
- *          fit one 16-bit register) fall back to the unconditional two-pass walk masked onto @p classes over the FULL
- *          @p cold mask, byte-identical to today. The offset bakes in the same `-0x800` base as the substrate trie
- *          walk. Bit-identical to the legacy `mask_mov(classes, cold, trie_walk)` on every cold START lane; cold
- *          continuation lanes are don't-cares (`decide` reads only start lanes) and are left at their prior value on
- *          the compact path. */
+/** @brief  Start-compacting flat-lookup classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali, Thai,
+ *          Tamil, ...). The rule engine reads classes only at codepoint-START lanes, and every cold lane is a 3-byte
+ *          lead, so a 64-byte window holds at most 21 cold starts. Their `high`/`low` bytes are `vpcompressb`-
+ *          compacted into the low lanes, widened to full 32-bit codepoints in up to two 16-lane registers, resolved
+ *          by the shared @ref sz_utf8_rune_flat_lookup_icelake_ (page LUT `vpermb` + one `vpgatherdd` each), then
+ *          `vpexpandb`-scattered back onto @p classes at their original byte-lane positions. The second half only
+ *          runs when more than sixteen cold starts are present. Cold continuation lanes are don't-cares (`decide`
+ *          reads only start lanes) and keep their prior value. */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
-    __m512i classes, __m512i high, __m512i low, sz_u64_t cold, sz_u64_t cold_starts) {
-    if (_mm_popcnt_u64(cold_starts) > 32)
-        return _mm512_mask_mov_epi8(
-            classes, _cvtu64_mask64(cold),
-            sz_utf8_rune_trie_walk_icelake_(
-                high, low, sz_utf8_word_break_trie_l1_, sz_utf8_word_break_trie_l2_, sz_utf8_word_break_trie_leaf_,
-                sz_utf8_word_break_trie_block_k, sz_utf8_word_break_trie_subblock_k,
-                (int)(sizeof(sz_utf8_word_break_trie_l1_) / sizeof(sz_utf8_word_break_trie_l1_[0])),
-                (int)(sizeof(sz_utf8_word_break_trie_l2_) / sizeof(sz_utf8_word_break_trie_l2_[0])),
-                (int)(sizeof(sz_utf8_word_break_trie_leaf_) / sizeof(sz_utf8_word_break_trie_leaf_[0]))));
-
+    __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask = _cvtu64_mask64(cold_starts);
-    __m512i const high_packed = _mm512_maskz_compress_epi8(cold_start_mask, high);
-    __m512i const low_packed = _mm512_maskz_compress_epi8(cold_start_mask, low);
+    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, high_bytes_u8x64);
+    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, low_bytes_u8x64);
 
-    int const block = sz_utf8_word_break_trie_block_k;
-    int const superblock = sz_utf8_word_break_trie_subblock_k;
-    __m128i const block_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)block));
-    __m128i const super_log2 = _mm_cvtsi32_si128(sz_u64_ctz((sz_u64_t)superblock));
-    __m512i const within_mask = _mm512_set1_epi16((short)(block - 1));
-    __m512i const super_off_mask = _mm512_set1_epi16((short)(superblock - 1));
-    __m512i const super_v16 = _mm512_set1_epi16((short)superblock);
-    __m512i const block_v16 = _mm512_set1_epi16((short)block);
+    //  Unused (zeroed) compacted lanes decode to codepoint 0, a safe in-bounds flat index whose class is discarded.
+    __m512i const codepoints_first_u32x16 = _mm512_or_si512(
+        _mm512_slli_epi32(_mm512_cvtepu8_epi32(_mm512_castsi512_si128(high_packed_u8x64)), 8),
+        _mm512_cvtepu8_epi32(_mm512_castsi512_si128(low_packed_u8x64)));
+    __m128i const classes_first_u8x16 = _mm512_cvtepi32_epi8(sz_utf8_rune_flat_lookup_icelake_(
+        sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, codepoints_first_u32x16));
+    __m512i classes_packed_u8x64 = _mm512_castsi128_si512(classes_first_u8x16);
 
-    //  The <=32 compacted cold starts sit in the low 32 bytes; widen them to a single 32x16-bit codepoint register
-    //  with the same `-0x800` base the substrate trie walk bakes in.
-    __m512i const offset = _mm512_sub_epi16(
-        _mm512_or_si512(_mm512_slli_epi16(_mm512_cvtepu8_epi16(_mm512_castsi512_si256(high_packed)), 8),
-                        _mm512_cvtepu8_epi16(_mm512_castsi512_si256(low_packed))),
-        _mm512_set1_epi16(0x800));
-
-    __m512i const within = _mm512_and_si512(offset, within_mask);
-    __m512i const block_idx = _mm512_srl_epi16(offset, block_log2);
-    __m512i const super_off = _mm512_and_si512(block_idx, super_off_mask);
-    __m512i const super = _mm512_srl_epi16(block_idx, super_log2);
-
-    __m512i const level1 = sz_utf8_rune_gather_byte_(
-        sz_utf8_word_break_trie_l1_,
-        (int)(sizeof(sz_utf8_word_break_trie_l1_) / sizeof(sz_utf8_word_break_trie_l1_[0])), super);
-    __m512i const l2_index = _mm512_add_epi16(_mm512_mullo_epi16(level1, super_v16), super_off);
-    __m512i const leaf_idx = sz_utf8_rune_gather_word_(
-        sz_utf8_word_break_trie_l2_,
-        (int)(sizeof(sz_utf8_word_break_trie_l2_) / sizeof(sz_utf8_word_break_trie_l2_[0])), l2_index);
-    __m512i const leaf_byte = _mm512_add_epi16(_mm512_mullo_epi16(leaf_idx, block_v16), within);
-    __m512i const class_word = sz_utf8_rune_gather_byte_(
-        sz_utf8_word_break_trie_leaf_,
-        (int)(sizeof(sz_utf8_word_break_trie_leaf_) / sizeof(sz_utf8_word_break_trie_leaf_[0])), leaf_byte);
-
-    //  Narrow the 32 class words back to 32 contiguous bytes (low half) and scatter onto the original cold-start
-    //  lanes, leaving every other lane (including cold continuations) at its prior value.
-    __m512i const class_packed = _mm512_castsi256_si512(_mm512_cvtepi16_epi8(class_word));
-    return _mm512_mask_expand_epi8(classes, cold_start_mask, class_packed);
+    if (_mm_popcnt_u64(cold_starts) > 16) {
+        __m512i const codepoints_second_u32x16 = _mm512_or_si512(
+            _mm512_slli_epi32(_mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(high_packed_u8x64, 1)), 8),
+            _mm512_cvtepu8_epi32(_mm512_extracti32x4_epi32(low_packed_u8x64, 1)));
+        __m128i const classes_second_u8x16 = _mm512_cvtepi32_epi8(sz_utf8_rune_flat_lookup_icelake_(
+            sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, codepoints_second_u32x16));
+        classes_packed_u8x64 = _mm512_inserti32x4(classes_packed_u8x64, classes_second_u8x16, 1);
+    }
+    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask, classes_packed_u8x64);
 }
 
 /**
  *  @brief  Classify a 64-byte window to per-lane Word_Break properties. ASCII through the ASCII permute, BMP through
- *          arithmetic big ranges (Latin / Hangul / CJK) + the codepoint < 0x800 page LUT + the shared two-stage BMP trie for
- *          the residue; 4-byte leads through the aligned `.rodata` astral trie. All cheap paths are rare-class gated.
+ *          arithmetic big ranges (Latin / Hangul / CJK) + the codepoint < 0x800 page LUT + the start-compacted flat
+ *          table for the residue; 4-byte leads through the aligned `.rodata` astral trie. All cheap paths are
+ *          rare-class gated.
  */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
     __m512i window, __m512i high, __m512i low, __mmask64 is_four_byte, __m512i next1, __m512i next2, __m512i next3) {
@@ -315,13 +290,12 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
     if (cold) {
         __mmask64 const continuation = _mm512_cmpeq_epi8_mask(_mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)),
                                                               _mm512_set1_epi8((char)0x80));
-        classes = sz_utf8_word_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold),
-                                                           _cvtmask64_u64(cold & ~continuation));
+        classes = sz_utf8_word_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold & ~continuation));
     }
     return classes;
 }
 
-#pragma endregion Gather Free Word_Break Classifier
+#pragma endregion Word_Break Classifier
 
 #pragma region Word_Break Codepoint Partition
 
@@ -460,8 +434,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icela
 
 /**
  *  @brief  Byte-level UAX-29 rule engine, Ice Lake entry: extract the portable frame in-register, then delegate every
- *          WB1-WB16 decision to the portable @ref sz_utf8_word_break_decide_window_. Bit-exact with the legacy fused
- *          kernel and with the serial reference.
+ *          WB1-WB16 decision to the portable @ref sz_utf8_word_break_decide_window_. Bit-exact with the serial reference.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_icelake_( //
     __m512i window, __m512i high, __m512i low, __mmask64 four_byte_starts, __m512i next1, __m512i next2, __m512i next3,

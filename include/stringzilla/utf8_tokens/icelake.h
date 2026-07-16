@@ -189,7 +189,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake(  //
     return count;
 }
 
-#pragma region Gather free membership
+#pragma region Membership
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` over all 64 lanes, returned as a mask. */
 SZ_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, __m512i low) {
@@ -200,12 +200,12 @@ SZ_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte, _
 }
 
 /**
- *  @brief  BMP (codepoint < 0x10000) delimiter membership for every lane, gather-free.
+ *  @brief  BMP (codepoint < 0x10000) delimiter membership for every lane, resolved in-register.
  *
  *  `high` (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned 256-entry `bmp_block` table via
  *  `vpermb` (`sz_utf8_rune_permute256_icelake_`); the bitmap byte at `row_id*32 + (low >> 3)` is read through the
  *  substrate page network; the bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally — block 0
- *  encodes the ASCII delimiters. No `vpgather`.
+ *  encodes the ASCII delimiters.
  */
 SZ_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0, __m512i chunk1, __m512i chunk2,
                                                                 __m512i chunk3) {
@@ -257,7 +257,7 @@ SZ_HELPER_AUTO __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window, __
 }
 
 /**
- *  @brief  Astral (codepoint >= 0x10000) delimiter membership for the four-byte lanes, gather-free.
+ *  @brief  Astral (codepoint >= 0x10000) delimiter membership for the four-byte lanes, resolved in-register.
  *
  *  Reconstructs the full 21-bit codepoint per lane from the raw lead/continuation bytes, then walks the small astral
  *  network: `super = offset>>16` selects an L1 group, `group*256 + ((offset>>8)&0xFF)` selects a bitmap row id, and the
@@ -360,7 +360,7 @@ SZ_HELPER_AUTO __mmask64 sz_delimiter_valid_starts_icelake_( //
     return (ascii | two_ok | three_ok | four_ok);
 }
 
-#pragma endregion Gather free membership
+#pragma endregion Membership
 
 #pragma region Forward driver
 

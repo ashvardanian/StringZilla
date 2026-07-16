@@ -159,7 +159,7 @@ SZ_HELPER_INLINE void sz_utf8_forward_neighbours_haswell_( //
 }
 
 /** @brief  Expand a 32-bit lane mask into a 32-byte select vector (byte `i` = 0xFF when bit `i` is set) to drive
- *          `_mm256_blendv_epi8` in place of Ice Lake's `_mm512_mask_blend_epi8`. Gather-free: broadcast the mask,
+ *          `_mm256_blendv_epi8` in place of Ice Lake's `_mm512_mask_blend_epi8`. In-register: broadcast the mask,
  *          route the right mask byte to each output byte via `vpshufb`, isolate the per-lane bit, then `cmpeq`. */
 SZ_HELPER_INLINE __m256i sz_utf8_byte_mask_from_bits_haswell_(sz_u32_t bits) {
     __m256i const mask_broadcast_u32x8 = _mm256_set1_epi32((int)bits);
@@ -276,7 +276,10 @@ SZ_HELPER_AUTO sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_
  *          Each of @p tile_count 16-byte rows is one selector value; @p within is the addressing nibble (caller-masked
  *          to `[0,16)`). The AVX2 stand-in for VBMI `vpermi2b`: there is no 32-byte byte permute, so each resident row
  *          is broadcast and shuffled by @p within, then blended in for the lanes whose @p selector picks that row.
- *          Gather-free — only `vbroadcasti128`/`vpshufb`/`vpcmpeqb`/`vpblendvb`. */
+ *          In-register — only `vbroadcasti128`/`vpshufb`/`vpcmpeqb`/`vpblendvb`.
+ *
+ *  ! Cost scales with @p tile_count, not with the window: every resident row is shuffled and blended on the shuffle
+ *  ! port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_haswell_ instead for that reason. */
 SZ_HELPER_AUTO __m256i sz_utf8_rune_cascade_stage_haswell_( //
     sz_u8_t const *table, int tile_count, __m256i selector, __m256i within) {
     __m256i result_u8x32 = _mm256_setzero_si256();
@@ -297,6 +300,46 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base,
     __m256i const index_within_low_u8x32 = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
     __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index, 4), _mm256_set1_epi8(0x0F));
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 16, index_selector_high_u8x32, index_within_low_u8x32);
+}
+
+/** @brief  Narrow four `u32x8` vectors, each carrying one class byte in the low byte of every dword, into a single
+ *          `u8x32` in ascending lane order. The companion of the flat-leaf `vpgatherdd`, which resolves eight lanes
+ *          per gather and so needs four gathers per 32-lane window. `packus` saturates per 128-bit half, leaving the
+ *          dwords interleaved, so a final `vpermd` restores the order. */
+SZ_HELPER_INLINE __m256i sz_utf8_rune_pack4_u32_to_u8_haswell_( //
+    __m256i first_u32x8, __m256i second_u32x8, __m256i third_u32x8, __m256i fourth_u32x8) {
+    __m256i const first_second_u16x16 = _mm256_packus_epi32(first_u32x8, second_u32x8);
+    __m256i const third_fourth_u16x16 = _mm256_packus_epi32(third_u32x8, fourth_u32x8);
+    __m256i const interleaved_u8x32 = _mm256_packus_epi16(first_second_u16x16, third_fourth_u16x16);
+    return _mm256_permutevar8x32_epi32(interleaved_u8x32, _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7));
+}
+
+/** @brief  Class byte per lane from a page-compressed flat table: `page_lut[high]` selects a 256-byte page, then
+ *          `flat[page * 256 + low]` is fetched with four `vpgatherdd`. Unlike the nibble cascade this scales with the
+ *          window, not the table: the cascade scanned every 16-byte tile of every stage on the shuffle port, while the
+ *          gather issues on the load ports and leaves the shuffle port to the decode. @p flat must extend four bytes
+ *          past its last index, since the dword gather over-reads three. */
+SZ_HELPER_AUTO __m256i sz_utf8_rune_flat_lookup_haswell_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, __m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+    __m256i const page_indices_u8x32 = sz_utf8_rune_lut256_haswell_(page_lut, high_bytes_u8x32);
+    __m128i const page_indices_low_u8x16 = _mm256_castsi256_si128(page_indices_u8x32);
+    __m128i const page_indices_high_u8x16 = _mm256_extracti128_si256(page_indices_u8x32, 1);
+    __m128i const low_bytes_low_u8x16 = _mm256_castsi256_si128(low_bytes_u8x32);
+    __m128i const low_bytes_high_u8x16 = _mm256_extracti128_si256(low_bytes_u8x32, 1);
+    __m128i const page_quarters_u8x16[4] = {page_indices_low_u8x16, _mm_srli_si128(page_indices_low_u8x16, 8),
+                                            page_indices_high_u8x16, _mm_srli_si128(page_indices_high_u8x16, 8)};
+    __m128i const low_quarters_u8x16[4] = {low_bytes_low_u8x16, _mm_srli_si128(low_bytes_low_u8x16, 8),
+                                           low_bytes_high_u8x16, _mm_srli_si128(low_bytes_high_u8x16, 8)};
+    __m256i gathered_u32x8[4];
+    for (int quarter = 0; quarter < 4; ++quarter) {
+        __m256i const flat_indices_u32x8 = _mm256_add_epi32(
+            _mm256_slli_epi32(_mm256_cvtepu8_epi32(page_quarters_u8x16[quarter]), 8),
+            _mm256_cvtepu8_epi32(low_quarters_u8x16[quarter]));
+        gathered_u32x8[quarter] = _mm256_and_si256(_mm256_i32gather_epi32((int const *)flat, flat_indices_u32x8, 1),
+                                                   _mm256_set1_epi32(0xFF));
+    }
+    return sz_utf8_rune_pack4_u32_to_u8_haswell_(gathered_u32x8[0], gathered_u32x8[1], gathered_u32x8[2],
+                                                 gathered_u32x8[3]);
 }
 
 #pragma endregion Shared SIMD leaf substrate

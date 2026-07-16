@@ -2,12 +2,21 @@
  *  @file include/stringzilla/utf8_wordbreaks/haswell.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for AVX2 (Haswell). The AVX2 twin of the Ice Lake kernel:
- *          no path scalar-walks codepoints, spills a YMM to the stack to call the serial oracle, or issues a gather.
+ *          no path scalar-walks codepoints or spills a YMM to the stack to call the serial oracle.
  *
- *  Each 64-byte window lives as two `__m256i` halves; every per-codepoint Word_Break property resolves in-register via
- *  a `vpshufb` nibble cascade (the AVX2 stand-in for the VBMI trie / page LUT - AVX2 has no `vpermb`/`vpcompressb`),
- *  bit-identical to `sz_rune_word_break_property` over the whole BMP and Supplementary Plane. The classified window is
- *  lowered to the portable @ref sz_utf8_word_break_frame_t and handed to the shared `sz_utf8_word_break_decide_window_`
+ *  Each 64-byte window lives as two `__m256i` halves. The BMP property is one indexed lookup per codepoint into a
+ *  page-compressed flat table - `bmp_page_lut_[cp >> 8]` picks one of 52 distinct 256-byte pages, then
+ *  `flat_bmp_[page * 256 + (cp & 0xFF)]` is the class - fetched with `vpgatherdd`; the Supplementary Plane still
+ *  rides a `vpshufb` nibble cascade. Both are bit-identical to `sz_rune_word_break_property`.
+ *
+ *  Design note: the flat table is chosen for port pressure rather than instruction count. Cross-lane shuffles are
+ *  port-5-only on Intel, so any dependent multi-stage shuffle cascade saturates that single port, while `vpgatherdd`
+ *  issues on the load ports and leaves the shuffle port to the decode. Gathers pay off on multi-KB tables in
+ *  general - see less_slow.cpp v0.3.0 "Gather and Scatter":
+ *  https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0
+ *
+ *  The classified window is lowered to the portable @ref sz_utf8_word_break_frame_t and handed to the shared
+ *  `sz_utf8_word_break_decide_window_`
  *  rule engine, so WB1-WB16 (including the cross-window bridge shadow / RI parity / left-context carry) run once in
  *  portable `sz_u64_t` bit algebra. Dense-compaction of the boundary mask uses the substrate's BMI2 index loop.
  */
@@ -35,36 +44,18 @@ extern "C" {
 
 #pragma region In register vectorized classifier
 
-/** @brief  Word_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
- *          register-resident `vpshufb` nibble cascade, the AVX2 twin of the Ice Lake BMP classifier. Gather-free;
- *          bit-exact with `sz_rune_word_break_property` over the whole BMP. */
-SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high, __m256i low) {
-    __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
-    __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_stage1_, high);
-    __m256i const low_high = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_stage2_lo_, sz_utf8_word_break_haswell_stage2_lo_count_k / 16, page, low_high);
-    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_stage2_hi_, sz_utf8_word_break_haswell_stage2_hi_count_k / 16, page, low_high);
-    __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
-                                               _mm256_slli_epi16(leaf_hi, 4));
-    __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
-    __m256i const low_low = _mm256_and_si256(low, low_nibble_mask);
-    __m256i const lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), low_low);
-    __m256i result = _mm256_setzero_si256();
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
-        result = _mm256_blendv_epi8(result, value, here);
-    }
-    return result;
+/** @brief  Word_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the `bmp_page_lut_`
+ *          page LUT selects one of the 52 distinct 256-byte pages, then `flat_bmp_` is fetched by `vpgatherdd`.
+ *          Bit-exact with `sz_rune_word_break_property` over the whole BMP. */
+SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
+    return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
+                                             high_bytes_u8x32, low_bytes_u8x32);
 }
 
 /** @brief  Word_Break class byte for thirty-two ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade), the AVX2 twin of `sz_utf8_word_break_classify_astral16_icelake_`. Per-lane bytes:
  *          @p plane_off = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
- *          Gather-free; bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
+ *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
 SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off, __m256i high, __m256i low) {
     __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
     __m256i const n4 = _mm256_and_si256(plane_off, low_nibble_mask);
@@ -108,13 +99,13 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) 
     return _mm256_blendv_epi8(low_half, high_half, high_bit);
 }
 
-/** @brief  Start-compacting BMP classify: the BMP `vpshufb` nibble cascade is bit-exact but expensive (a 16-group
- *          leaf scan), and its output is consumed only on 2-/3-byte codepoint-START lanes (ASCII lanes are overwritten
- *          by the property-table blend, 4-byte lanes by the astral blend, continuation lanes are don't-cares). A
- *          64-byte window holds at most 32 such BMP starts, so this gathers their `(high, low)` bytes into ONE dense
- *          `__m256i` pair via the substrate `ctz` index loop (no `vpgather`), runs the cascade a SINGLE time instead
- *          of twice over the full halves, then scatters the dense class bytes back to their original byte lanes. The
- *          gather/scatter touch only set bits of @p bmp_starts. Bit-identical to two full
+/** @brief  Start-compacting BMP classify: the BMP flat-table lookup is bit-exact but its output is consumed only on
+ *          2-/3-byte codepoint-START lanes (ASCII lanes are overwritten by the property-table blend, 4-byte lanes by
+ *          the astral blend, continuation lanes are don't-cares). A 64-byte window holds at most 32 such BMP starts,
+ *          so this packs their `(high, low)` bytes into ONE dense `__m256i` pair via the substrate `ctz` index loop,
+ *          runs the lookup a SINGLE time instead of twice over the full halves - halving the `vpgatherdd` count -
+ *          then scatters the dense class bytes back to their original byte lanes. The pack/scatter touch only set
+ *          bits of @p bmp_starts. Bit-identical to two full
  *          @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start lane; every other lane is a
  *          don't-care left at its incoming value. */
 SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //

@@ -2,13 +2,16 @@
  *  @file   include/stringzilla/utf8_wordbreaks/neon.h
  *  @author Ash Vardanian
  *  @brief  Fully-vectorized UAX-29 Word_Break segmentation for NEON (AArch64). The NEON twin of the AVX2 (Haswell)
- *          and Ice Lake kernels: no path scalar-walks codepoints, spills a vector to the stack to call the serial
- *          oracle, or issues a gather.
+ *          and Ice Lake kernels: no path scalar-walks codepoints or spills a vector to the stack to call the serial
+ *          oracle.
  *
  *  Each 64-byte window lives as four `uint8x16_t` quarters (the codepoint substrate twin of haswell's two `__m256i`
- *  halves); every per-codepoint Word_Break property resolves in-register via a `vqtbl` nibble cascade (the NEON
- *  stand-in for the VBMI trie / page LUT), bit-identical to `sz_rune_word_break_property` over the whole BMP and
- *  Supplementary Plane. The classified window is lowered to the portable @ref sz_utf8_word_break_frame_t and handed
+ *  halves); every per-codepoint BMP Word_Break property resolves through the shared page-compressed flat table via
+ *  @ref sz_utf8_rune_flat_lookup_neon_ (the page LUT in-register, the leaf by a bounded scalar L1 walk), and the
+ *  Supplementary Plane through a `vqtbl` nibble cascade, bit-identical to `sz_rune_word_break_property` over the
+ *  whole code space.
+ *
+ *  The classified window is lowered to the portable @ref sz_utf8_word_break_frame_t and handed
  *  to the SHARED `sz_utf8_word_break_decide_window_` rule engine, so WB1-WB16 (including the cross-window bridge
  *  shadow / RI parity / left-context carry / WB3c next1/2/3 neighbour coupling) run once in portable `sz_u64_t` bit
  *  algebra. The WB3c (Extended_Pictographic) SMP neighbour precompute to the frame's `pictographic` mask is gated by
@@ -51,36 +54,19 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_word_break_byte_mask_from_bits_neon_(sz_u64_
     return vceqq_u8(vandq_u8(byte, position), position);
 }
 
-/** @brief  Word_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) via a
- *          register-resident `vqtbl` nibble cascade, the NEON twin of @ref sz_utf8_word_break_bmp_class_haswell_.
- *          Gather-free; bit-exact with `sz_rune_word_break_property` over the whole BMP. Addresses ONE quarter; the
- *          caller iterates the four quarters. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high, uint8x16_t low) {
-    uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);
-    uint8x16_t const page = sz_utf8_rune_lut256_neon_(sz_utf8_word_break_haswell_stage1_, high);
-    uint8x16_t const low_high = vandq_u8(vshrq_n_u8(low, 4), low_nibble_mask);
-    uint8x16_t const leaf_lo = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_word_break_haswell_stage2_lo_, sz_utf8_word_break_haswell_stage2_lo_count_k / 16, page, low_high);
-    uint8x16_t const leaf_hi = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_word_break_haswell_stage2_hi_, sz_utf8_word_break_haswell_stage2_hi_count_k / 16, page, low_high);
-    uint8x16_t const leaf_group = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo, 4), low_nibble_mask), vshlq_n_u8(leaf_hi, 4));
-    uint8x16_t const leaf_low_nibble = vandq_u8(leaf_lo, low_nibble_mask);
-    uint8x16_t const low_low = vandq_u8(low, low_nibble_mask);
-    uint8x16_t const lut_index = vorrq_u8(vshlq_n_u8(leaf_low_nibble, 4), low_low);
-    uint8x16_t result = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_leaf_groups_k; ++group) {
-        uint8x16_t const value = sz_utf8_rune_lut256_neon_(sz_utf8_word_break_haswell_stage3_groups_ + group * 256,
-                                                           lut_index);
-        uint8x16_t const here = vceqq_u8(leaf_group, vdupq_n_u8((sz_u8_t)group));
-        result = vbslq_u8(here, value, result);
-    }
-    return result;
+/** @brief  Word_Break class byte for sixteen BMP codepoints (per-lane high = cp>>8, low = cp&0xFF) from the flat
+ *          page-compressed table via @ref sz_utf8_rune_flat_lookup_neon_, the NEON twin of
+ *          @ref sz_utf8_word_break_bmp_class_haswell_. Bit-exact with `sz_rune_word_break_property` over the whole
+ *          BMP. Addresses ONE quarter; the caller iterates the four quarters. */
+SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
+    return sz_utf8_rune_flat_lookup_neon_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
+                                          (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
 
 /** @brief  Word_Break class byte for sixteen ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade), the NEON twin of @ref sz_utf8_word_break_astral_class_haswell_. Per-lane bytes:
  *          @p plane_off = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
- *          Gather-free; bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. Addresses ONE
+ *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. Addresses ONE
  *          quarter; the caller iterates the four quarters. */
 SZ_HELPER_AUTO uint8x16_t sz_utf8_word_break_astral_class_neon_(uint8x16_t plane_off, uint8x16_t high, uint8x16_t low) {
     uint8x16_t const low_nibble_mask = vdupq_n_u8(0x0F);

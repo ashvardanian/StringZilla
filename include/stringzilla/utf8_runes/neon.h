@@ -91,8 +91,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz
 /*  Family-agnostic NEON (AArch64) leaf helpers shared by every UTF-8 segmentation kernel (word / grapheme /
  *  sentence / line / delimiters). The exact twin of the Ice Lake @ref sz_utf8_rune_window_t substrate and the
  *  AVX2 @ref sz_utf8_rune_window_haswell_t backend: a 64-byte window held as four `uint8x16_t` quarters, masks
- *  reduced to one-bit-per-byte `sz_u64_t` lane masks (bit `i` <=> lane `i`), and gather-free table cascades. The
- *  portable rule algebra in `serial.h` consumes the `sz_u64_t` masks unchanged across all three backends. */
+ *  reduced to one-bit-per-byte `sz_u64_t` lane masks (bit `i` <=> lane `i`), in-register `vqtbl` table reads, and
+ *  the flat-table leaf walk (@ref sz_utf8_rune_flat_lookup_neon_). The portable rule algebra in `serial.h` consumes
+ *  the `sz_u64_t` masks unchanged across all three backends. */
 
 /** @brief  The decoded 64-byte window for the NEON backend. The 64 bytes live as four `uint8x16_t` quarters
  *          (`window[0]` = lanes [0, 16), ... `window[3]` = lanes [48, 64)); the per-lane byte-domain codepoint
@@ -319,6 +320,29 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, 
     return vqtbl4q_u8(vld1q_u8_x4(group_base), index);
 }
 
+/** @brief  Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte page, then
+ *          `flat[page * 256 + low]` is read per lane. Armv8 NEON has no gather and `vqtbl4q` reaches only 64 bytes,
+ *          so the page LUT resolves in-register while the leaf read is a bounded scalar L1 walk over fused 16-bit
+ *          indices `(page << 8) | low`. Lanes whose page index reaches @p page_count return zero. SVE2 does the same
+ *          lookup with a real `LD1B` gather; see @ref sz_utf8_rune_flat_lookup_sve2_. */
+SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, int page_count, uint8x16_t high_bytes_u8x16,
+    uint8x16_t low_bytes_u8x16) {
+    uint8x16_t const page_indices_u8x16 = sz_utf8_rune_lut256_neon_(page_lut, high_bytes_u8x16);
+    uint8x16_t const in_range_u8x16 = vcltq_u8(page_indices_u8x16, vdupq_n_u8((sz_u8_t)page_count));
+    uint8x16_t const page_clamped_u8x16 = vandq_u8(page_indices_u8x16, in_range_u8x16);
+    uint16x8_t const flat_indices_low_u16x8 = vorrq_u16(vshll_n_u8(vget_low_u8(page_clamped_u8x16), 8),
+                                                        vmovl_u8(vget_low_u8(low_bytes_u8x16)));
+    uint16x8_t const flat_indices_high_u16x8 = vorrq_u16(vshll_n_u8(vget_high_u8(page_clamped_u8x16), 8),
+                                                         vmovl_u8(vget_high_u8(low_bytes_u8x16)));
+    sz_align_(16) sz_u16_t flat_indices[16];
+    sz_align_(16) sz_u8_t class_lanes[16];
+    vst1q_u16(flat_indices, flat_indices_low_u16x8);
+    vst1q_u16(flat_indices + 8, flat_indices_high_u16x8);
+    for (int lane = 0; lane < 16; ++lane) class_lanes[lane] = flat[flat_indices[lane]];
+    return vandq_u8(vld1q_u8(class_lanes), in_range_u8x16);
+}
+
 #pragma endregion Shared SIMD leaf substrate
 
 #pragma region Drains
@@ -336,8 +360,8 @@ SZ_HELPER_AUTO void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
 
 /**
  *  @brief  Left-pack the set-bit positions of a 64-bit lane @p mask into @p out as a dense, ascending array of
- *          byte-offsets in [0, 64), returning the count - the NEON `vpcompressb`-free start-compaction. Replaces the
- *          scalar `ctz` walk with a 2 KB shuffle-LUT (`leftpack8`) keyed by each 8-bit sub-mask: for every 16-lane
+ *          byte-offsets in [0, 64), returning the count - the NEON `vpcompressb`-free start-compaction: a 2 KB
+ *          shuffle-LUT (`leftpack8`) keyed by each 8-bit sub-mask, with no scalar `ctz` walk: for every 16-lane
  *          quarter the mask splits into a low and a high byte, each `vqtbl1q_u8`-shuffles the LUT row of its set-bit
  *          positions, the high half is offset by +8, and the two halves are stitched at `popcount(low8)` with one
  *          `vqtbl1q_u8` over a gap-shift index (no scalar per-lane index walk). The quarter offset `q*16` is added in

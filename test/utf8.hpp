@@ -699,7 +699,7 @@ struct utf8_rule_case_t {
 };
 
 /**
- *  @brief Per-family rule-coverage gate. Two obligations (CONTRIBUTING-KERNELS.md §6.12):
+ *  @brief Per-family rule-coverage gate. Two obligations:
  *         (1) every motif segments identically on @p reference and @p candidate, one-shot AND re-anchored at the
  *             window-edge phases 61/62/63 so a rule firing across the 64-byte boundary is exercised too; and
  *         (2) every id in @p required_rule_ids is exercised by at least one motif, so no spec rule is left untested.
@@ -1033,7 +1033,7 @@ inline void utf8_differential_phase_sweep_(utf8_differential_context_t &context)
 
 /** @brief Deterministic: drop a malformed fragment at a rule-critical seam (after MidLetter, inside an SP-run, after
  *         an ATerm, between a base and a combining mark, ...) at the window-edge phases. Both backends apply the same
- *         U+FFFD substitution (§6.2), so they must still agree (malformed flavor relaxes the alignment invariant). */
+ *         U+FFFD substitution, so they must still agree (malformed flavor relaxes the alignment invariant). */
 inline void utf8_differential_malformed_seams_(utf8_differential_context_t &context) {
     std::printf("  - testing %s malformed-at-seam injection...\n", context.corpora->family_name);
     std::size_t const host_count = sizeof(utf8_malformed_seam_prefixes) / sizeof(utf8_malformed_seam_prefixes[0]);
