@@ -751,43 +751,43 @@ cleanup:
     return NULL;
 }
 
-static char const doc_LevenshteinDistances[] =                                                                      //
-    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"                              //
-    "\n"                                                                                                            //
-    "Compute the cross-product matrix of Levenshtein edit distances between two string collections.\n"              //
-    "\n"                                                                                                            //
-    "Args:\n"                                                                                                       //
-    "  match (int): Cost for matching characters (default: 0).\n"                                                   //
-    "  mismatch (int): Cost for mismatched characters (default: 1).\n"                                              //
-    "  open (int): Cost for opening a gap (default: 1).\n"                                                          //
-    "  extend (int): Cost for extending a gap (default: 1).\n"                                                      //
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                         //
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"             //
-    "                                       or a DeviceScope for automatic capability inference.\n"                 //
-    "\n"                                                                                                            //
-    "Call with:\n"                                                                                                  //
-    "  queries (sequence): Query strings forming the matrix rows.\n"                                                //
-    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"               //
-    "                                   (or None), computes the symmetric self-similarity of queries.\n"            //
-    "  device (DeviceScope, optional): Device execution context.\n"                                                 //
-    "  out (np.ndarray, optional): 2-D uint64 output buffer of shape (len(queries), len(candidates)).\n"            //
-    "\n"                                                                                                            //
-    "Returns:\n"                                                                                                    //
-    "  np.ndarray: 2-D uint64 matrix where result[query_index, candidate_index] is the distance\n"                  //
-    "              between queries[query_index] and candidates[candidate_index].\n"                                 //
-    "\n"                                                                                                            //
-    "Examples:\n"                                                                                                   //
-    "  >>> # Minimal CPU example with auto-inferred capabilities\n"                                                 //
-    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                         //
-    "  >>> engine = szs.LevenshteinDistances()\n"                                                                   //
-    "  >>> strings_a = sz.Strs(['hello', 'world'])\n"                                                               //
-    "  >>> strings_b = sz.Strs(['hallo', 'word'])\n"                                                                //
-    "  >>> distances = engine(strings_a, strings_b)\n"                                                              //
-    "  >>> # GPU example with custom costs and auto-inferred capabilities\n"                                        //
-    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                           //
-    "  >>> match, mismatch, gap_open, gap_extend = 0, 2, 3, 1\n"                                                    //
-    "  >>> engine = szs.LevenshteinDistances(match, mismatch, gap_open, gap_extend, gpu_scope)  # doctest: +SKIP\n" //
-    "  >>> distances = engine(strings_a, strings_b, device=gpu_scope)  # doctest: +SKIP";
+static char const doc_LevenshteinDistances[] =                                                               //
+    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"                       //
+    "\n"                                                                                                     //
+    "Compute the cross-product matrix of Levenshtein edit distances between two string collections.\n"       //
+    "\n"                                                                                                     //
+    "Args:\n"                                                                                                //
+    "  match (int): Cost for matching characters (default: 0).\n"                                            //
+    "  mismatch (int): Cost for mismatched characters (default: 1).\n"                                       //
+    "  open (int): Cost for opening a gap (default: 1).\n"                                                   //
+    "  extend (int): Cost for extending a gap (default: 1).\n"                                               //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                  //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"      //
+    "                                       or a DeviceScope for automatic capability inference.\n"          //
+    "\n"                                                                                                     //
+    "Call with:\n"                                                                                           //
+    "  queries (sequence): Query strings forming the matrix rows.\n"                                         //
+    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"        //
+    "                                   (or None), computes the symmetric self-similarity of queries.\n"     //
+    "  device (DeviceScope, optional): Device execution context.\n"                                          //
+    "  out (np.ndarray, optional): 2-D uint64 output buffer of shape (len(queries), len(candidates)).\n"     //
+    "\n"                                                                                                     //
+    "Returns:\n"                                                                                             //
+    "  np.ndarray: 2-D uint64 matrix where result[query_index, candidate_index] is the distance\n"           //
+    "              between queries[query_index] and candidates[candidate_index].\n"                          //
+    "\n"                                                                                                     //
+    "Examples:\n"                                                                                            //
+    "  >>> # Minimal CPU example with auto-inferred capabilities\n"                                          //
+    "  >>> import stringzilla as sz, stringzillas as szs\n"                                                  //
+    "  >>> engine = szs.LevenshteinDistances()\n"                                                            //
+    "  >>> strings_a = sz.Strs(['hello', 'world'])\n"                                                        //
+    "  >>> strings_b = sz.Strs(['hallo', 'word'])\n"                                                         //
+    "  >>> distances = engine(strings_a, strings_b)\n"                                                       //
+    "  >>> # GPU example with custom costs; falls back to CPU when CUDA is unavailable\n"                    //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> match, mismatch, gap_open, gap_extend = 0, 2, 3, 1\n"                                             //
+    "  >>> engine = szs.LevenshteinDistances(match, mismatch, gap_open, gap_extend, scope)\n"                //
+    "  >>> distances = engine(strings_a, strings_b, device=scope)";
 static char const doc_capabilities[] =                                          //
     "Hardware backends and SIMD capabilities this engine selects at runtime.\n" //
     "\n"                                                                        //
@@ -1172,10 +1172,10 @@ static char const doc_LevenshteinDistancesUTF8[] =                              
     "  >>> strings_a = sz.Strs(['café', 'naïve'])\n"                                                         //
     "  >>> strings_b = sz.Strs(['caffe', 'naive'])\n"                                                        //
     "  >>> distances = engine(strings_a, strings_b)\n"                                                       //
-    "  >>> # GPU example with high mismatch penalty\n"                                                       //
-    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                    //
-    "  >>> engine = szs.LevenshteinDistancesUTF8(mismatch=5, capabilities=gpu_scope)  # doctest: +SKIP\n"    //
-    "  >>> distances = engine(strings_a, strings_b, device=gpu_scope)  # doctest: +SKIP";
+    "  >>> # GPU example with high mismatch penalty; falls back to CPU when CUDA is unavailable\n"           //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> engine = szs.LevenshteinDistancesUTF8(mismatch=5, capabilities=scope)\n"                          //
+    "  >>> distances = engine(strings_a, strings_b, device=scope)";
 static PyGetSetDef LevenshteinDistancesUTF8_getsetters[] = {
     {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL, doc_capabilities, NULL}, //
     {NULL} /* Sentinel */
@@ -1563,46 +1563,46 @@ cleanup:
     return NULL;
 }
 
-static char const doc_NeedlemanWunsch[] =                                                                           //
-    "NeedlemanWunschScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n"       //
-    "\n"                                                                                                            //
-    "Needleman-Wunsch global alignment scoring engine.\n"                                                           //
-    "Computes the cross-product matrix of alignment scores between two string collections.\n"                       //
-    "\n"                                                                                                            //
-    "Args:\n"                                                                                                       //
-    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"                    //
-    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                        //
-    "  open (int): Cost for opening a gap (default: -1).\n"                                                         //
-    "  extend (int): Cost for extending a gap (default: -1).\n"                                                     //
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                         //
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"             //
-    "                                       or a DeviceScope for automatic capability inference.\n"                 //
-    "\n"                                                                                                            //
-    "Call with:\n"                                                                                                  //
-    "  queries (sequence): Query strings forming the matrix rows.\n"                                                //
-    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"               //
-    "                                   (or None), computes the symmetric self-similarity of queries.\n"            //
-    "  device (DeviceScope, optional): Device execution context.\n"                                                 //
-    "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"             //
-    "\n"                                                                                                            //
-    "Returns:\n"                                                                                                    //
-    "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"                      //
-    "              between queries[query_index] and candidates[candidate_index].\n"                                 //
-    "\n"                                                                                                            //
-    "Examples:\n"                                                                                                   //
-    "  >>> # Minimal CPU example mapping every byte to its own class modulo 32\n"                                   //
-    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                            //
-    "  >>> classes = (np.arange(256) % 32).astype(np.uint8)\n"                                                      //
-    "  >>> costs = np.zeros((32, 32), dtype=np.int8)\n"                                                             //
-    "  >>> engine = szs.NeedlemanWunschScores(classes, costs)\n"                                                    //
-    "  >>> proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"                                                                //
-    "  >>> proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"                                                                //
-    "  >>> scores = engine(proteins_a, proteins_b)\n"                                                               //
-    "  >>> # GPU example with custom gap penalties\n"                                                               //
-    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                           //
-    "  >>> gap_open, gap_extend = -2, -1\n"                                                                         //
-    "  >>> engine = szs.NeedlemanWunschScores(classes, costs, gap_open, gap_extend, gpu_scope)  # doctest: +SKIP\n" //
-    "  >>> scores = engine(proteins_a, proteins_b, device=gpu_scope)  # doctest: +SKIP";
+static char const doc_NeedlemanWunsch[] =                                                                     //
+    "NeedlemanWunschScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n" //
+    "\n"                                                                                                      //
+    "Needleman-Wunsch global alignment scoring engine.\n"                                                     //
+    "Computes the cross-product matrix of alignment scores between two string collections.\n"                 //
+    "\n"                                                                                                      //
+    "Args:\n"                                                                                                 //
+    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"              //
+    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                  //
+    "  open (int): Cost for opening a gap (default: -1).\n"                                                   //
+    "  extend (int): Cost for extending a gap (default: -1).\n"                                               //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                   //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"       //
+    "                                       or a DeviceScope for automatic capability inference.\n"           //
+    "\n"                                                                                                      //
+    "Call with:\n"                                                                                            //
+    "  queries (sequence): Query strings forming the matrix rows.\n"                                          //
+    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"         //
+    "                                   (or None), computes the symmetric self-similarity of queries.\n"      //
+    "  device (DeviceScope, optional): Device execution context.\n"                                           //
+    "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"       //
+    "\n"                                                                                                      //
+    "Returns:\n"                                                                                              //
+    "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"                //
+    "              between queries[query_index] and candidates[candidate_index].\n"                           //
+    "\n"                                                                                                      //
+    "Examples:\n"                                                                                             //
+    "  >>> # Minimal CPU example mapping every byte to its own class modulo 32\n"                             //
+    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                      //
+    "  >>> classes = (np.arange(256) % 32).astype(np.uint8)\n"                                                //
+    "  >>> costs = np.zeros((32, 32), dtype=np.int8)\n"                                                       //
+    "  >>> engine = szs.NeedlemanWunschScores(classes, costs)\n"                                              //
+    "  >>> proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"                                                          //
+    "  >>> proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"                                                          //
+    "  >>> scores = engine(proteins_a, proteins_b)\n"                                                         //
+    "  >>> # GPU example with custom gap penalties; falls back to CPU when CUDA is unavailable\n"             //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n"  //
+    "  >>> gap_open, gap_extend = -2, -1\n"                                                                   //
+    "  >>> engine = szs.NeedlemanWunschScores(classes, costs, gap_open, gap_extend, scope)\n"                 //
+    "  >>> scores = engine(proteins_a, proteins_b, device=scope)";
 static PyGetSetDef NeedlemanWunsch_getsetters[] = {
     {"__capabilities__", (getter)NeedlemanWunsch_get_capabilities, NULL, doc_capabilities, NULL}, //
     {NULL}                                                                                        /* Sentinel */
@@ -1993,46 +1993,46 @@ static PyGetSetDef SmithWaterman_getsetters[] = {
     {NULL}                                                                                      /* Sentinel */
 };
 
-static char const doc_SmithWaterman[] =                                                                           //
-    "SmithWatermanScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n"       //
-    "\n"                                                                                                          //
-    "Smith-Waterman local alignment scoring engine.\n"                                                            //
-    "Computes the cross-product matrix of local alignment scores between two string collections.\n"               //
-    "\n"                                                                                                          //
-    "Args:\n"                                                                                                     //
-    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"                  //
-    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                      //
-    "  open (int): Cost for opening a gap (default: -1).\n"                                                       //
-    "  extend (int): Cost for extending a gap (default: -1).\n"                                                   //
-    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                       //
-    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"           //
-    "                                       or a DeviceScope for automatic capability inference.\n"               //
-    "\n"                                                                                                          //
-    "Call with:\n"                                                                                                //
-    "  queries (sequence): Query strings forming the matrix rows.\n"                                              //
-    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"             //
-    "                                   (or None), computes the symmetric self-similarity of queries.\n"          //
-    "  device (DeviceScope, optional): Device execution context.\n"                                               //
-    "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"           //
-    "\n"                                                                                                          //
-    "Returns:\n"                                                                                                  //
-    "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"                    //
-    "              between queries[query_index] and candidates[candidate_index].\n"                               //
-    "\n"                                                                                                          //
-    "Examples:\n"                                                                                                 //
-    "  >>> # Minimal CPU example for local alignment\n"                                                           //
-    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                          //
-    "  >>> classes = (np.arange(256) % 32).astype(np.uint8)\n"                                                    //
-    "  >>> costs = np.eye(32, dtype=np.int8)  # Identity matrix\n"                                                //
-    "  >>> engine = szs.SmithWatermanScores(classes, costs)\n"                                                    //
-    "  >>> seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"                                                          //
-    "  >>> seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"                                                          //
-    "  >>> scores = engine(seqs_a, seqs_b)\n"                                                                     //
-    "  >>> # GPU example with different gap costs\n"                                                              //
-    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                         //
-    "  >>> gap_open, gap_extend = -3, -1\n"                                                                       //
-    "  >>> engine = szs.SmithWatermanScores(classes, costs, gap_open, gap_extend, gpu_scope)  # doctest: +SKIP\n" //
-    "  >>> scores = engine(seqs_a, seqs_b, device=gpu_scope)  # doctest: +SKIP";
+static char const doc_SmithWaterman[] =                                                                      //
+    "SmithWatermanScores(byte_to_class, class_substitution_costs, open=-1, extend=-1, capabilities=None)\n"  //
+    "\n"                                                                                                     //
+    "Smith-Waterman local alignment scoring engine.\n"                                                       //
+    "Computes the cross-product matrix of local alignment scores between two string collections.\n"          //
+    "\n"                                                                                                     //
+    "Args:\n"                                                                                                //
+    "  byte_to_class (np.ndarray): 256-element uint8 map from each byte to one of 32 classes.\n"             //
+    "  class_substitution_costs (np.ndarray): 32x32 int8 matrix of costs between classes.\n"                 //
+    "  open (int): Cost for opening a gap (default: -1).\n"                                                  //
+    "  extend (int): Cost for extending a gap (default: -1).\n"                                              //
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"                  //
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"      //
+    "                                       or a DeviceScope for automatic capability inference.\n"          //
+    "\n"                                                                                                     //
+    "Call with:\n"                                                                                           //
+    "  queries (sequence): Query strings forming the matrix rows.\n"                                         //
+    "  candidates (sequence, optional): Candidate strings forming the matrix columns. When omitted\n"        //
+    "                                   (or None), computes the symmetric self-similarity of queries.\n"     //
+    "  device (DeviceScope, optional): Device execution context.\n"                                          //
+    "  out (np.ndarray, optional): 2-D int64 output buffer of shape (len(queries), len(candidates)).\n"      //
+    "\n"                                                                                                     //
+    "Returns:\n"                                                                                             //
+    "  np.ndarray: 2-D int64 matrix where result[query_index, candidate_index] is the score\n"               //
+    "              between queries[query_index] and candidates[candidate_index].\n"                          //
+    "\n"                                                                                                     //
+    "Examples:\n"                                                                                            //
+    "  >>> # Minimal CPU example for local alignment\n"                                                      //
+    "  >>> import numpy as np, stringzilla as sz, stringzillas as szs\n"                                     //
+    "  >>> classes = (np.arange(256) % 32).astype(np.uint8)\n"                                               //
+    "  >>> costs = np.eye(32, dtype=np.int8)  # Identity matrix\n"                                           //
+    "  >>> engine = szs.SmithWatermanScores(classes, costs)\n"                                               //
+    "  >>> seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"                                                     //
+    "  >>> seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"                                                     //
+    "  >>> scores = engine(seqs_a, seqs_b)\n"                                                                //
+    "  >>> # GPU example with different gap costs; falls back to CPU when CUDA is unavailable\n"             //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n" //
+    "  >>> gap_open, gap_extend = -3, -1\n"                                                                  //
+    "  >>> engine = szs.SmithWatermanScores(classes, costs, gap_open, gap_extend, scope)\n"                  //
+    "  >>> scores = engine(seqs_a, seqs_b, device=scope)";
 static PyTypeObject SmithWatermanType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.SmithWatermanScores",
     .tp_doc = doc_SmithWaterman,
@@ -2331,10 +2331,10 @@ static char const doc_Fingerprints[] =                                          
     "  >>> engine = szs.Fingerprints(ndim=128)\n"                                                                    //
     "  >>> docs = sz.Strs(['document one', 'document two', 'document three'])\n"                                     //
     "  >>> hashes, counts = engine(docs)\n"                                                                          //
-    "  >>> # GPU example with custom dimensions\n"                                                                   //
-    "  >>> gpu_scope = szs.DeviceScope(gpu_device=0)  # doctest: +SKIP\n"                                            //
-    "  >>> engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)  # doctest: +SKIP\n"                          //
-    "  >>> hashes, counts = engine(docs, device=gpu_scope)  # doctest: +SKIP";
+    "  >>> # GPU example with custom dimensions; falls back to CPU when CUDA is unavailable\n"                       //
+    "  >>> scope = szs.DeviceScope(gpu_device=0) if 'cuda' in szs.__capabilities__ else szs.DeviceScope()\n"         //
+    "  >>> engine = szs.Fingerprints(ndim=256, capabilities=scope)\n"                                                //
+    "  >>> hashes, counts = engine(docs, device=scope)";
 static PyGetSetDef Fingerprints_getsetters[] = {
     {"capabilities", (getter)Fingerprints_get_capabilities, NULL, doc_capabilities, NULL}, //
     {NULL}                                                                                 /* Sentinel */
@@ -2409,7 +2409,8 @@ static char const doc_to_device[] =                                             
     "\n"                                                                             //
     "Examples:\n"                                                                    //
     "  >>> import stringzilla as sz, stringzillas as szs\n"                          //
-    "  >>> device_strs = szs.to_device(sz.Strs(['alpha', 'beta']))";
+    "  >>> strs = sz.Strs(['alpha', 'beta'])\n"                                      //
+    "  >>> device_strs = szs.to_device(strs) if 'cuda' in szs.__capabilities__ else strs";
 
 static PyObject *module_to_device(PyObject *self, PyObject *strs_obj) {
     if (!try_swap_to_unified_allocator(strs_obj)) return NULL;
