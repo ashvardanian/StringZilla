@@ -19,40 +19,59 @@
 #include <cuda.h>         // `CUresult`, `cuLaunchKernelEx`, `cuFuncSetAttribute`, `cuGetErrorName`
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
 
-#include <optional>  // `std::optional`
-#include <algorithm> // `std::sort`
-
-#include <cub/device/device_merge_sort.cuh> // `cub::DeviceMergeSort` — moves the O(n log n) grouping sort onto the GPU
-#include <cub/device/device_partition.cuh>  // `cub::DevicePartition` — device/warp/empty tier split
-#include <cub/device/device_run_length_encode.cuh> // `cub::DeviceRunLengthEncode` — warp-tier group run lengths
-#include <cub/device/device_scan.cuh>              // `cub::DeviceScan` — group begin offsets via exclusive sum
-#include <cub/device/device_segmented_reduce.cuh>  // `cub::DeviceSegmentedReduce` — per-group max memory requirement
-
-// CUB 3+ (CCCL 3.x / CUDA 13+) moved iterator types from cub:: to cuda::
-#if CUB_MAJOR_VERSION < 3
-#include <cub/iterator/counting_input_iterator.cuh>
-#include <cub/iterator/transform_input_iterator.cuh>
-#else
-#include <cuda/iterator>
-#endif
+#include <cub/block/block_reduce.cuh> // `cub::BlockReduce` — block collective behind our `_across_cuda_device_` reductions
+#include <cub/block/block_scan.cuh> // `cub::BlockScan` — block collective behind our `exclusive_sum_across_cuda_device_`
 
 namespace ashvardanian {
 namespace stringzillas {
 
 using namespace stringzilla;
 
-// Project-local iterator aliases so the rest of the codebase is CUB-version-agnostic.
-#if CUB_MAJOR_VERSION < 3
+/** @brief Minimal random-index iterator yielding `start + i` — the counting-sequence base the transform iterators and
+ *         the `_across_cuda_device_` histograms/reductions index into. Only `operator[]` is used (no CUB consumers
+ *         remain), so this replaces `cub::CountingInputIterator` / `cuda::counting_iterator` outright. */
 template <typename value_type_>
-using counting_iterator = cub::CountingInputIterator<value_type_>;
+struct counting_iterator {
+    value_type_ start {};
+    constexpr counting_iterator() noexcept = default;
+    constexpr explicit counting_iterator(value_type_ start_value) noexcept : start(start_value) {}
+    constexpr value_type_ operator[](size_t index) const noexcept { return start + static_cast<value_type_>(index); }
+};
+
+/** @brief Minimal transform iterator yielding `op(base[i])` — feeds a per-element field or derived value into a
+ *         reduction / histogram without materializing it. Replaces `cub::TransformInputIterator` /
+ *         `cuda::transform_iterator`. */
 template <typename value_type_, typename conversion_op_, typename input_iterator_>
-using transform_input_iterator = cub::TransformInputIterator<value_type_, conversion_op_, input_iterator_>;
-#else
-template <typename value_type_>
-using counting_iterator = ::cuda::counting_iterator<value_type_>;
-template <typename value_type_, typename conversion_op_, typename input_iterator_>
-using transform_input_iterator = ::cuda::transform_iterator<conversion_op_, input_iterator_>;
-#endif
+struct transform_input_iterator {
+    input_iterator_ base {};
+    conversion_op_ op {};
+    constexpr transform_input_iterator() noexcept = default;
+    constexpr transform_input_iterator(input_iterator_ base_iterator, conversion_op_ conversion) noexcept
+        : base(base_iterator), op(conversion) {}
+    constexpr value_type_ operator[](size_t index) const noexcept { return op(base[index]); }
+};
+
+/**
+ *  @brief Ensures the calling thread has a current CUDA context, returning device 0's primary context (or `nullptr`).
+ *
+ *  The driver memory allocators (`cuMemAllocManaged`/`cuMemAlloc`/`cuMemHostAlloc`) require a current context, which -
+ *  unlike the runtime's implicit lazy init behind `cudaMallocManaged` - the driver never creates on its own. Grow-only
+ *  engine buffers may allocate before `cuda_executor_t::try_scheduling` retains a context, so every allocator ensures
+ *  device 0's primary context here. `cuInit` + retain happen exactly once (C++ magic-static), while `cuCtxSetCurrent`
+ *  is re-issued per call since the current context is per-thread and allocations may arrive on any thread.
+ */
+inline CUcontext ensure_primary_context_() noexcept {
+    static CUcontext primary_context = []() -> CUcontext {
+        if (cuInit(0) != CUDA_SUCCESS) return nullptr;
+        CUdevice device = 0;
+        if (cuDeviceGet(&device, 0) != CUDA_SUCCESS) return nullptr;
+        CUcontext context = nullptr;
+        if (cuDevicePrimaryCtxRetain(&context, device) != CUDA_SUCCESS) return nullptr;
+        return context;
+    }();
+    if (primary_context) cuCtxSetCurrent(primary_context);
+    return primary_context;
+}
 
 /**
  *  @brief A custom allocator that uses CUDA Unified Memory for allocation.
@@ -82,15 +101,16 @@ struct unified_alloc {
     constexpr unified_alloc(unified_alloc<other_value_type_> const &) noexcept {}
 
     value_type *allocate(size_type n) const noexcept {
-        value_type *result = nullptr;
-        auto error = cudaMallocManaged((value_type **)&result, n * sizeof(value_type));
-        if (error != cudaSuccess) return nullptr;
-        return result;
+        if (!ensure_primary_context_()) return nullptr;
+        CUdeviceptr device_pointer = 0;
+        CUresult error = cuMemAllocManaged(&device_pointer, n * sizeof(value_type), CU_MEM_ATTACH_GLOBAL);
+        if (error != CUDA_SUCCESS) return nullptr;
+        return reinterpret_cast<value_type *>(device_pointer);
     }
 
     void deallocate(pointer p, size_type) const noexcept {
         if (!p) return;
-        cudaFree(p);
+        cuMemFree(reinterpret_cast<CUdeviceptr>(p));
     }
 
     template <typename other_type_>
@@ -106,11 +126,8 @@ struct unified_alloc {
 
 using unified_alloc_t = unified_alloc<char>;
 
-/**
- *  @brief A custom allocator that uses plain CUDA @b device memory (`cudaMalloc`) - not host-accessible.
- *         Used for buffers that live entirely on the GPU (e.g. the materialized task array and sort/group
- *         scratch), so the host never touches them and no unified-memory page migration can occur.
- */
+/** @brief Allocator over plain CUDA @b device memory via @b cuMemAlloc — not host-accessible, for buffers that live
+ *         entirely on the GPU like materialized tasks and sort scratch, avoiding unified-memory page migration. */
 template <typename value_type_>
 struct device_alloc {
     using value_type = value_type_;
@@ -130,13 +147,14 @@ struct device_alloc {
     constexpr device_alloc(device_alloc<other_value_type_> const &) noexcept {}
 
     value_type *allocate(size_type n) const noexcept {
-        value_type *result = nullptr;
-        auto error = cudaMalloc((value_type **)&result, n * sizeof(value_type));
-        if (error != cudaSuccess) return nullptr;
-        return result;
+        if (!ensure_primary_context_()) return nullptr;
+        CUdeviceptr device_pointer = 0;
+        CUresult error = cuMemAlloc(&device_pointer, n * sizeof(value_type));
+        if (error != CUDA_SUCCESS) return nullptr;
+        return reinterpret_cast<value_type *>(device_pointer);
     }
     void deallocate(pointer p, size_type) const noexcept {
-        if (p) cudaFree(p);
+        if (p) cuMemFree(reinterpret_cast<CUdeviceptr>(p));
     }
     template <typename other_type_>
     bool operator==(device_alloc<other_type_> const &) const noexcept {
@@ -150,11 +168,8 @@ struct device_alloc {
 
 using device_alloc_t = device_alloc<char>;
 
-/**
- *  @brief A custom allocator that uses CUDA @b pinned (page-locked) host memory (`cudaMallocHost`).
- *         Host-built staging (e.g. the per-string descriptors) that is bulk-copied to the device at full
- *         bandwidth - pinned memory is required for fast, async `cudaMemcpyAsync` transfers.
- */
+/** @brief Allocator over CUDA @b pinned page-locked host memory via @b cuMemHostAlloc — required for fast async
+ *         @b cuMemcpyAsync staging of host-built descriptors bulk-copied to the device. */
 template <typename value_type_>
 struct pinned_alloc {
     using value_type = value_type_;
@@ -174,13 +189,14 @@ struct pinned_alloc {
     constexpr pinned_alloc(pinned_alloc<other_value_type_> const &) noexcept {}
 
     value_type *allocate(size_type n) const noexcept {
+        if (!ensure_primary_context_()) return nullptr;
         value_type *result = nullptr;
-        auto error = cudaMallocHost((value_type **)&result, n * sizeof(value_type));
-        if (error != cudaSuccess) return nullptr;
+        CUresult error = cuMemHostAlloc((void **)&result, n * sizeof(value_type), 0u);
+        if (error != CUDA_SUCCESS) return nullptr;
         return result;
     }
     void deallocate(pointer p, size_type) const noexcept {
-        if (p) cudaFreeHost(p);
+        if (p) cuMemFreeHost(p);
     }
     template <typename other_type_>
     bool operator==(pinned_alloc<other_type_> const &) const noexcept {
@@ -254,14 +270,8 @@ inline cuda_status_t make_cuda_status(cudaError_t cuda_error) noexcept {
     return {status, cuda_error};
 }
 
-/**
- *  @brief Maps a CUDA @b driver error (`CUresult`) into a first-class `cuda_status_t`, carrying the `CUresult`.
- *
- *  The driver launch entry points (`cuLaunchKernelEx`, `cuFuncSetAttribute`) return `CUresult` rather than the
- *  runtime `cudaError_t`. We classify the common launch-configuration faults into actionable statuses, mirroring
- *  the `make_cuda_status(cudaError_t)` mapping, while forwarding the raw `CUresult` so the caller can always
- *  print `cuGetErrorName`/`cuGetErrorString`.
- */
+/** @brief @b CUresult mirror of @ref make_cuda_status for the driver launch entry points @b cuLaunchKernelEx and
+ *         @b cuFuncSetAttribute, forwarding the raw @b CUresult so callers can print @b cuGetErrorName. */
 inline cuda_status_t make_cuda_status(CUresult driver_error) noexcept {
     if (driver_error == CUDA_SUCCESS) return {status_t::success_k, cudaSuccess, CUDA_SUCCESS};
     status_t status = status_t::unknown_k;
@@ -281,47 +291,64 @@ inline cuda_status_t make_cuda_status(CUresult driver_error) noexcept {
 }
 
 inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
-    // Runtime API by design: this is a one-time startup bulk query of ~9 device properties. The driver
-    // equivalent is one `cuDeviceGetAttribute` per field for no benefit - the runtime (`cudart`) is already a
-    // hard dependency via `cudaGetFuncBySymbol` (the only bridge from a registered `__global__` to a
-    // `CUfunction`), so the whole launch/sync hot path is CU* while these cold setup calls stay runtime.
-    cudaDeviceProp prop;
-    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device_id);
+    // One cold, one-time startup query of ~9 device properties. The driver has no bulk `cudaGetDeviceProperties`
+    // equivalent, so each field is read with its own `cuDeviceGetAttribute` (plus `cuDeviceTotalMem` for VRAM). The
+    // driver never implicitly initializes, so `cuInit` (idempotent) precedes the device-handle lookup.
+    CUresult init_error = cuInit(0);
+    if (init_error != CUDA_SUCCESS) {
+        status_t status = init_error == CUDA_ERROR_NO_DEVICE ? status_t::missing_gpu_k : status_t::unknown_k;
+        return {status, cudaSuccess, init_error};
+    }
+    CUdevice device = 0;
+    CUresult device_error = cuDeviceGet(&device, device_id);
 
     // Distinguish between "no GPU available" vs other CUDA errors for clearer handling upstream.
-    if (cuda_error != cudaSuccess) {
+    if (device_error != CUDA_SUCCESS) {
         status_t status = status_t::unknown_k;
-        if (cuda_error == cudaErrorNoDevice) status = status_t::missing_gpu_k;
-        if (cuda_error == cudaErrorInvalidDevice) status = status_t::missing_gpu_k;
-        if (cuda_error == cudaErrorInsufficientDriver) status = status_t::missing_gpu_k;
-        return {status, cuda_error};
+        if (device_error == CUDA_ERROR_NO_DEVICE) status = status_t::missing_gpu_k;
+        if (device_error == CUDA_ERROR_INVALID_DEVICE) status = status_t::missing_gpu_k;
+        return {status, cudaSuccess, device_error};
     }
 
+    int multiprocessor_count = 0, warp_size = 0, major = 0, minor = 0;
+    int constant_memory_bytes = 0, shared_per_multiprocessor = 0;
+    int max_blocks_per_multiprocessor = 0, reserved_shared_per_block = 0;
+    size_t total_global_memory = 0;
+    cuDeviceGetAttribute(&multiprocessor_count, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
+    cuDeviceGetAttribute(&constant_memory_bytes, CU_DEVICE_ATTRIBUTE_TOTAL_CONSTANT_MEMORY, device);
+    cuDeviceGetAttribute(&warp_size, CU_DEVICE_ATTRIBUTE_WARP_SIZE, device);
+    cuDeviceGetAttribute(&shared_per_multiprocessor, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR, device);
+    cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+    cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+    cuDeviceGetAttribute(&max_blocks_per_multiprocessor, CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR, device);
+    cuDeviceGetAttribute(&reserved_shared_per_block, CU_DEVICE_ATTRIBUTE_RESERVED_SHARED_MEMORY_PER_BLOCK, device);
+    cuDeviceTotalMem(&total_global_memory, device);
+
     // Set the GPU specs
-    specs.streaming_multiprocessors = prop.multiProcessorCount;
-    specs.constant_memory_bytes = prop.totalConstMem;
-    specs.vram_bytes = prop.totalGlobalMem;
-    specs.warp_size = prop.warpSize;
+    specs.streaming_multiprocessors = multiprocessor_count;
+    specs.constant_memory_bytes = constant_memory_bytes;
+    specs.vram_bytes = total_global_memory;
+    specs.warp_size = warp_size;
 
     // Infer other global settings, that CUDA doesn't expose directly
-    specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
-    specs.sm_code = gpu_specs_t::pack_sm_code(prop.major, prop.minor);
+    specs.shared_memory_bytes = static_cast<size_t>(shared_per_multiprocessor) * multiprocessor_count;
+    specs.sm_code = gpu_specs_t::pack_sm_code(major, minor);
     specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(specs.sm_code) * specs.streaming_multiprocessors;
 
     // Scheduling-related constants
-    specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
-    specs.reserved_memory_per_block = prop.reservedSharedMemPerBlock;
+    specs.max_blocks_per_multiprocessor = max_blocks_per_multiprocessor;
+    specs.reserved_memory_per_block = reserved_shared_per_block;
     return {status_t::success_k, cudaSuccess};
 }
 
 class cuda_executor_t {
-    cudaStream_t stream_ = 0;
+    CUstream stream_ = 0;
     int device_id_ = 0;
 
   public:
     constexpr cuda_executor_t() noexcept = default;
 
-    // The executor owns its `cudaStream_t`. Copying would alias a single stream handle across instances and let
+    // The executor owns its `CUstream`. Copying would alias a single stream handle across instances and let
     // one copy's destructor tear down a stream the others still reference, so the executor is move-only: callers
     // hold one owner and hand it to the engines by `const &`.
     cuda_executor_t(cuda_executor_t const &) = delete;
@@ -346,11 +373,20 @@ class cuda_executor_t {
 
     cuda_status_t try_scheduling(int device_id) noexcept {
         device_id_ = -1; // ? Invalid device ID
-        // `cudaSetDevice` selects the device and makes its primary context current on this thread - the same
-        // context the runtime registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves
-        // against. The stream itself is then created through the driver so the whole launch/sync path is CU*.
-        cudaError_t switching_error = cudaSetDevice(device_id);
-        if (switching_error != cudaSuccess) return {status_t::unknown_k, switching_error};
+        // The driver never implicitly creates a context (the runtime's `cudaSetDevice` did). Initialize the driver,
+        // retain the device's primary context, and make it current on this thread - the same context the runtime
+        // registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves against. The stream itself
+        // is then created through the driver so the whole launch/sync path is CU*.
+        CUresult init_error = cuInit(0);
+        if (init_error != CUDA_SUCCESS) return make_cuda_status(init_error);
+        CUdevice device = 0;
+        CUresult device_error = cuDeviceGet(&device, device_id);
+        if (device_error != CUDA_SUCCESS) return make_cuda_status(device_error);
+        CUcontext context = nullptr;
+        CUresult context_error = cuDevicePrimaryCtxRetain(&context, device);
+        if (context_error != CUDA_SUCCESS) return make_cuda_status(context_error);
+        CUresult current_error = cuCtxSetCurrent(context);
+        if (current_error != CUDA_SUCCESS) return make_cuda_status(current_error);
         CUresult creation_error = cuStreamCreate((CUstream *)&stream_, CU_STREAM_NON_BLOCKING);
         if (creation_error != CUDA_SUCCESS) return make_cuda_status(creation_error);
         device_id_ = device_id;
@@ -358,7 +394,7 @@ class cuda_executor_t {
     }
 
     explicit operator bool() const noexcept { return device_id_ >= 0; }
-    inline cudaStream_t stream() const noexcept { return stream_; }
+    inline CUstream stream() const noexcept { return stream_; }
     inline int device_id() const noexcept { return device_id_; }
 };
 
@@ -400,9 +436,9 @@ struct cuda_timer_t {
         return cuEventCreate(&stop_event, CU_EVENT_BLOCKING_SYNC);
     }
 
-    inline CUresult record_start(cudaStream_t stream) noexcept { return cuEventRecord(start_event, (CUstream)stream); }
-    inline CUresult record_stop(cudaStream_t stream) noexcept { return cuEventRecord(stop_event, (CUstream)stream); }
-    inline CUresult synchronize(cudaStream_t stream) noexcept { return cuStreamSynchronize((CUstream)stream); }
+    inline CUresult record_start(CUstream stream) noexcept { return cuEventRecord(start_event, (CUstream)stream); }
+    inline CUresult record_stop(CUstream stream) noexcept { return cuEventRecord(stop_event, (CUstream)stream); }
+    inline CUresult synchronize(CUstream stream) noexcept { return cuStreamSynchronize((CUstream)stream); }
     inline float elapsed_milliseconds() noexcept {
         float milliseconds = 0;
         cuEventElapsedTime(&milliseconds, start_event, stop_event);
@@ -515,7 +551,7 @@ struct cuda_launch_t {
         config_.sharedMemBytes = bytes;
         return *this;
     }
-    inline cuda_launch_t &stream(cudaStream_t stream) noexcept {
+    inline cuda_launch_t &stream(CUstream stream) noexcept {
         config_.hStream = (CUstream)stream;
         return *this;
     }
@@ -538,6 +574,393 @@ struct cuda_launch_t {
         return cuLaunchKernelEx(&config_, function, arguments, nullptr);
     }
 };
+
+#pragma region Device Wide Collective Primitives
+
+/**
+ *  @brief Driver-only replacements for `cub::Device*` host dispatch: each `__global__` template folds its grid-stride
+ *         slice with a `cub::Block*` collective and merges into a pre-initialized output slot, so no device-wide
+ *         temporary storage (and no "size then run" round-trip) is needed. Each host launcher fires one kernel through
+ *         @ref cuda_launch_t from a resolved @ref kernel_shape_t plus the same data the CUB call took.
+ */
+
+/** @brief Block dimension of every collective primitive; the block collectives need it as a compile-time constant. */
+static constexpr unsigned cuda_device_collective_threads_k = 256;
+
+/** @brief Single-block per-segment block-max: for each @p segment in [0, segment_count) reduces
+ *         @p input[segment_offsets[segment], segment_offsets[segment + 1]) into @p output[segment]. */
+template <typename value_type_, typename input_iterator_, typename offset_type_>
+__global__ void segmented_reduce_max_across_cuda_device_(input_iterator_ input, offset_type_ const *segment_offsets,
+                                                         u32_t const *segment_count, value_type_ *output) {
+    using block_reduce_t = cub::BlockReduce<value_type_, cuda_device_collective_threads_k>;
+    __shared__ typename block_reduce_t::TempStorage temp_storage;
+    u32_t const segments = *segment_count; // device-resident, so no host round-trip gates this launch
+    for (u32_t segment = 0; segment < segments; ++segment) {
+        size_t const begin = static_cast<size_t>(segment_offsets[segment]);
+        size_t const end = static_cast<size_t>(segment_offsets[segment + 1]);
+        value_type_ local = value_type_(0);
+        for (size_t i = begin + threadIdx.x; i < end; i += blockDim.x) {
+            value_type_ const value = static_cast<value_type_>(input[i]);
+            local = local > value ? local : value;
+        }
+        value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local, ::cuda::maximum<> {});
+        if (threadIdx.x == 0) output[segment] = block_max;
+        __syncthreads(); // reuse of `temp_storage` on the next segment must wait for this segment's readers
+    }
+}
+
+/** @brief Single-block exclusive prefix sum of @p input[0, count) into @p output[0, count), with the inclusive total
+ *         written to @p output[count] (so the segment-end array a segmented reduce needs comes for free). */
+template <typename value_type_>
+__global__ void exclusive_sum_across_cuda_device_(value_type_ const *input, size_t count, value_type_ *output) {
+    using block_scan_t = cub::BlockScan<value_type_, cuda_device_collective_threads_k>;
+    __shared__ typename block_scan_t::TempStorage temp_storage;
+    value_type_ running = value_type_(0);
+    for (size_t base = 0; base < count; base += blockDim.x) {
+        size_t const i = base + threadIdx.x;
+        value_type_ const value = i < count ? input[i] : value_type_(0);
+        value_type_ exclusive = value_type_(0), block_aggregate = value_type_(0);
+        block_scan_t(temp_storage).ExclusiveSum(value, exclusive, block_aggregate);
+        if (i < count) output[i] = running + exclusive;
+        running += block_aggregate;
+        __syncthreads(); // reuse of `temp_storage` on the next tile must wait for this tile's readers
+    }
+    if (threadIdx.x == 0) output[count] = running;
+}
+
+/** @brief Three `u32` values reduced together — one per output field of a fused maxima pass. */
+struct u32x3_t {
+    u32_t a, b, c;
+};
+
+/** @brief Grid-stride block-max of a 3-field task projection: each task is loaded once and its three fields
+ *         (from @p extract) folded through one `cub::BlockReduce` temp storage, then `atomicMax`-ed into the
+ *         pre-zeroed 3-slot @p output — replacing three separate max-reduction passes over the
+ *         same array. */
+template <typename task_type_, typename extractor_>
+__global__ void reduce_maxima3_across_cuda_device_(task_type_ const *tasks, size_t count, extractor_ extract,
+                                                   u32_t *output) {
+    using block_reduce_t = cub::BlockReduce<u32_t, cuda_device_collective_threads_k>;
+    __shared__ typename block_reduce_t::TempStorage temp_storage;
+    u32_t local_a = 0, local_b = 0, local_c = 0;
+    for (size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += size_t(gridDim.x) * blockDim.x) {
+        u32x3_t const value = extract(tasks[i]);
+        local_a = local_a > value.a ? local_a : value.a;
+        local_b = local_b > value.b ? local_b : value.b;
+        local_c = local_c > value.c ? local_c : value.c;
+    }
+    u32_t const block_a = block_reduce_t(temp_storage).Reduce(local_a, ::cuda::maximum<> {});
+    __syncthreads();
+    u32_t const block_b = block_reduce_t(temp_storage).Reduce(local_b, ::cuda::maximum<> {});
+    __syncthreads();
+    u32_t const block_c = block_reduce_t(temp_storage).Reduce(local_c, ::cuda::maximum<> {});
+    if (threadIdx.x == 0) {
+        atomicMax(output + 0, block_a);
+        atomicMax(output + 1, block_b);
+        atomicMax(output + 2, block_c);
+    }
+}
+
+/** @brief Launches @ref reduce_maxima3_across_cuda_device_ over @p count tasks, pre-zeroing the 3-slot @p output. */
+template <typename task_type_, typename extractor_>
+inline cuda_status_t cuda_launch_reduce_maxima3_(kernel_shape_t const &shape, task_type_ const *tasks, size_t count,
+                                                 extractor_ extract, u32_t *output, CUstream stream) noexcept {
+    CUresult memset_error = cuMemsetD8Async((CUdeviceptr)output, 0, 3 * sizeof(u32_t), (CUstream)stream);
+    if (memset_error != CUDA_SUCCESS) return make_cuda_status(memset_error);
+    task_type_ const *tasks_arg = tasks;
+    size_t count_arg = count;
+    extractor_ extract_arg = extract;
+    u32_t *output_arg = output;
+    void *args[4] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&extract_arg, (void *)&output_arg};
+    unsigned const blocks = static_cast<unsigned>(
+        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    CUresult error = cuda_launch_t {}
+                         .grid(blocks ? blocks : 1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Grid-stride block min-and-max of @p input[0, count) in one pass: `atomicMin` into the pre-filled (all-ones)
+ *         @p out_min and `atomicMax` into the pre-zeroed @p out_max — replacing a separate min and max pass over the
+ *         same iterator (and re-evaluating its transform functor once, not twice). */
+template <typename value_type_, typename input_iterator_>
+__global__ void reduce_minmax_across_cuda_device_(input_iterator_ input, size_t count, value_type_ *out_min,
+                                                  value_type_ *out_max) {
+    using block_reduce_t = cub::BlockReduce<value_type_, cuda_device_collective_threads_k>;
+    __shared__ typename block_reduce_t::TempStorage temp_storage;
+    value_type_ local_min = static_cast<value_type_>(~value_type_(0)), local_max = value_type_(0);
+    for (size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += size_t(gridDim.x) * blockDim.x) {
+        value_type_ const value = static_cast<value_type_>(input[i]);
+        local_min = local_min < value ? local_min : value;
+        local_max = local_max > value ? local_max : value;
+    }
+    value_type_ const block_min = block_reduce_t(temp_storage).Reduce(local_min, ::cuda::minimum<> {});
+    __syncthreads();
+    value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local_max, ::cuda::maximum<> {});
+    if (threadIdx.x == 0) {
+        atomicMin(out_min, block_min);
+        atomicMax(out_max, block_max);
+    }
+}
+
+/** @brief Launches @ref reduce_minmax_across_cuda_device_ over @p input[0, count), pre-filling @p out_min all-ones
+ *         and @p out_max zero. */
+template <typename value_type_, typename input_iterator_>
+inline cuda_status_t cuda_launch_reduce_minmax_(kernel_shape_t const &shape, input_iterator_ input, size_t count,
+                                                value_type_ *out_min, value_type_ *out_max, CUstream stream) noexcept {
+    CUresult min_memset_error = cuMemsetD8Async((CUdeviceptr)out_min, 0xFF, sizeof(value_type_), (CUstream)stream);
+    if (min_memset_error != CUDA_SUCCESS) return make_cuda_status(min_memset_error);
+    CUresult max_memset_error = cuMemsetD8Async((CUdeviceptr)out_max, 0, sizeof(value_type_), (CUstream)stream);
+    if (max_memset_error != CUDA_SUCCESS) return make_cuda_status(max_memset_error);
+    input_iterator_ input_arg = input;
+    size_t count_arg = count;
+    value_type_ *min_arg = out_min;
+    value_type_ *max_arg = out_max;
+    void *args[4] = {(void *)&input_arg, (void *)&count_arg, (void *)&min_arg, (void *)&max_arg};
+    unsigned const blocks = static_cast<unsigned>(
+        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    CUresult error = cuda_launch_t {}
+                         .grid(blocks ? blocks : 1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Launches the single-block @ref segmented_reduce_max_across_cuda_device_ (writes directly, no pre-init). The
+ *         segment count is read from device memory, so the launch needs no host round-trip. */
+template <typename value_type_, typename input_iterator_, typename offset_type_>
+inline cuda_status_t cuda_launch_segmented_reduce_max_(kernel_shape_t const &shape, input_iterator_ input,
+                                                       offset_type_ const *segment_offsets, u32_t const *segment_count,
+                                                       value_type_ *output, CUstream stream) noexcept {
+    input_iterator_ input_arg = input;
+    offset_type_ const *offsets_arg = segment_offsets;
+    u32_t const *count_arg = segment_count;
+    value_type_ *output_arg = output;
+    void *args[4] = {(void *)&input_arg, (void *)&offsets_arg, (void *)&count_arg, (void *)&output_arg};
+    CUresult error = cuda_launch_t {}
+                         .grid(1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Launches the single-block @ref exclusive_sum_across_cuda_device_ (writes directly, no pre-init). */
+template <typename value_type_>
+inline cuda_status_t cuda_launch_exclusive_sum_(kernel_shape_t const &shape, value_type_ const *input, size_t count,
+                                                value_type_ *output, CUstream stream) noexcept {
+    value_type_ const *input_arg = input;
+    size_t count_arg = count;
+    value_type_ *output_arg = output;
+    void *args[3] = {(void *)&input_arg, (void *)&count_arg, (void *)&output_arg};
+    CUresult error = cuda_launch_t {}
+                         .grid(1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Upper bound on the bucket count a @ref histogram_dense_across_cuda_device_ block-shared partial holds; the
+ *         tier / launch-group consumers stay well under this. */
+static constexpr u32_t cuda_dense_histogram_max_buckets_k = 64;
+
+/** @brief Scatters each task into @p output at its bucket's running cursor (pre-set to the exclusive bucket offsets),
+ *         grouping tasks by `bucket_of(task)` in one pass. Order within a bucket is unspecified — the consumers only
+ *         need tasks grouped by bucket, and every task carries its own index for the result scatter. */
+template <typename task_type_, typename bucket_functor_>
+__global__ void scatter_tasks_by_bucket_across_cuda_device_(task_type_ const *tasks, size_t count,
+                                                            bucket_functor_ bucket_of, u32_t *bucket_cursors,
+                                                            task_type_ *output) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += size_t(gridDim.x) * blockDim.x) {
+        // Warp-aggregate: lanes hitting the same bucket reserve their whole run with one `atomicAdd`, then each takes
+        // its slot within the run. With few buckets the cursors are highly contended, so this is the decisive win.
+        u32_t const bucket = bucket_of(tasks[i]);
+        unsigned const active = __activemask();
+        unsigned const peers = __match_any_sync(active, bucket);
+        unsigned const leader = static_cast<unsigned>(__ffs(static_cast<int>(peers)) - 1);
+        u32_t base = 0;
+        if (lane == leader) base = atomicAdd(&bucket_cursors[bucket], static_cast<u32_t>(__popc(peers)));
+        base = __shfl_sync(active, base, leader);
+        u32_t const rank = static_cast<u32_t>(__popc(peers & ((1u << lane) - 1u)));
+        output[base + rank] = tasks[i];
+    }
+}
+
+/** @brief Launches @ref scatter_tasks_by_bucket_across_cuda_device_ over @p count tasks into @p output. */
+template <typename task_type_, typename bucket_functor_>
+inline cuda_status_t cuda_launch_scatter_tasks_by_bucket_(kernel_shape_t const &shape, task_type_ const *tasks,
+                                                          size_t count, bucket_functor_ bucket_of,
+                                                          u32_t *bucket_cursors, task_type_ *output,
+                                                          CUstream stream) noexcept {
+    task_type_ const *tasks_arg = tasks;
+    size_t count_arg = count;
+    bucket_functor_ bucket_arg = bucket_of;
+    u32_t *cursors_arg = bucket_cursors;
+    task_type_ *output_arg = output;
+    void *args[5] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&bucket_arg, (void *)&cursors_arg,
+                     (void *)&output_arg};
+    unsigned const blocks = static_cast<unsigned>(
+        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    CUresult error = cuda_launch_t {}
+                         .grid(blocks ? blocks : 1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Per-bucket histogram of `bucket_of(task)` over @p count tasks into the pre-zeroed @p bucket_counts. Like
+ *         @ref histogram_dense_across_cuda_device_ but for a runtime (dynamic-shared) @p bucket_count beyond the static
+ *         @ref cuda_dense_histogram_max_buckets_k cap: each block accumulates into a shared partial, then flushes one
+ *         atomic per non-empty bin — so the N global atomics collapse to `blocks * non_empty_bins`. Pairs with
+ *         @ref scatter_tasks_by_bucket_across_cuda_device_. Launched with `sharedMemBytes = bucket_count * 4`. */
+template <typename task_type_, typename bucket_functor_>
+__global__ void histogram_tasks_by_bucket_across_cuda_device_(task_type_ const *tasks, size_t count,
+                                                              bucket_functor_ bucket_of, u32_t bucket_count,
+                                                              u32_t *bucket_counts) {
+    extern __shared__ u32_t partial[];
+    for (u32_t b = threadIdx.x; b < bucket_count; b += blockDim.x) partial[b] = 0u;
+    __syncthreads();
+    for (size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += size_t(gridDim.x) * blockDim.x)
+        atomicAdd(&partial[bucket_of(tasks[i])], 1u);
+    __syncthreads();
+    for (u32_t b = threadIdx.x; b < bucket_count; b += blockDim.x)
+        if (partial[b]) atomicAdd(&bucket_counts[b], partial[b]);
+}
+
+/** @brief One single-threaded pass over a counting-sort histogram that both exclusive-scans every bucket into
+ *         @p bucket_cursors (the scatter's per-bucket offsets) and compacts the non-empty buckets into dense ascending
+ *         run descriptors — for each non-zero bucket it appends (unique key = bucket id, run length = count, begin
+ *         offset = running total), then writes the trailing end at `[groups]` and the group count. Fuses the exclusive
+ *         sum and the compaction the counting sort would otherwise run as two launches. */
+template <typename size_type_>
+__global__ void scan_and_compact_bucket_runs_across_cuda_device_(u32_t const *bucket_counts, u32_t num_buckets,
+                                                                 u32_t *bucket_cursors, u32_t *unique_keys,
+                                                                 size_type_ *run_lengths, size_type_ *begin_offsets,
+                                                                 u32_t *group_count_out) {
+    if (blockIdx.x || threadIdx.x) return;
+    u32_t groups = 0;
+    size_type_ running = 0;
+    for (u32_t bucket = 0; bucket < num_buckets; ++bucket) {
+        bucket_cursors[bucket] = static_cast<u32_t>(running); // exclusive offset for the scatter (every bucket)
+        u32_t const count = bucket_counts[bucket];
+        if (count) {
+            unique_keys[groups] = bucket;
+            run_lengths[groups] = count;
+            begin_offsets[groups] = running;
+            ++groups;
+        }
+        running += count;
+    }
+    bucket_cursors[num_buckets] = static_cast<u32_t>(running);
+    begin_offsets[groups] = running; // trailing segment end for the per-group segmented Max
+    *group_count_out = groups;
+}
+
+/** @brief Launches @ref histogram_tasks_by_bucket_across_cuda_device_ over @p count tasks, pre-zeroing @p bucket_counts. */
+template <typename task_type_, typename bucket_functor_>
+inline cuda_status_t cuda_launch_histogram_tasks_by_bucket_(kernel_shape_t const &shape, task_type_ const *tasks,
+                                                            size_t count, bucket_functor_ bucket_of, u32_t num_buckets,
+                                                            u32_t *bucket_counts, CUstream stream) noexcept {
+    CUresult memset_error = cuMemsetD8Async((CUdeviceptr)bucket_counts, 0,
+                                            static_cast<size_t>(num_buckets) * sizeof(u32_t), (CUstream)stream);
+    if (memset_error != CUDA_SUCCESS) return make_cuda_status(memset_error);
+    task_type_ const *tasks_arg = tasks;
+    size_t count_arg = count;
+    bucket_functor_ bucket_arg = bucket_of;
+    u32_t bucket_count_arg = num_buckets;
+    u32_t *counts_arg = bucket_counts;
+    void *args[5] = {(void *)&tasks_arg, (void *)&count_arg, (void *)&bucket_arg, (void *)&bucket_count_arg,
+                     (void *)&counts_arg};
+    unsigned const blocks = static_cast<unsigned>(
+        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    CUresult error = cuda_launch_t {}
+                         .grid(blocks ? blocks : 1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(num_buckets * static_cast<unsigned>(sizeof(u32_t)))
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Launches the single-threaded @ref scan_and_compact_bucket_runs_across_cuda_device_. */
+template <typename size_type_>
+inline cuda_status_t cuda_launch_scan_and_compact_bucket_runs_(kernel_shape_t const &shape, u32_t const *bucket_counts,
+                                                               u32_t num_buckets, u32_t *bucket_cursors,
+                                                               u32_t *unique_keys, size_type_ *run_lengths,
+                                                               size_type_ *begin_offsets, u32_t *group_count_out,
+                                                               CUstream stream) noexcept {
+    u32_t const *counts_arg = bucket_counts;
+    u32_t num_buckets_arg = num_buckets;
+    u32_t *cursors_arg = bucket_cursors;
+    u32_t *keys_arg = unique_keys;
+    size_type_ *lengths_arg = run_lengths;
+    size_type_ *offsets_arg = begin_offsets;
+    u32_t *group_count_arg = group_count_out;
+    void *args[7] = {(void *)&counts_arg,  (void *)&num_buckets_arg, (void *)&cursors_arg,    (void *)&keys_arg,
+                     (void *)&lengths_arg, (void *)&offsets_arg,     (void *)&group_count_arg};
+    CUresult error = cuda_launch_t {}.grid(1u).block(1u).shared(0).stream(stream).launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+/** @brief Small dense histogram: counts each element's bucket id (from @p buckets, any iterator yielding an id in
+ *         `[0, bucket_count)`) into the pre-zeroed @p out through a block-shared partial, so the few global bins take
+ *         one atomic per block, not per element. Gives a consumer its per-tier / per-group counts straight from the
+ *         reordered tasks. */
+template <typename input_iterator_>
+__global__ void histogram_dense_across_cuda_device_(input_iterator_ buckets, size_t count, u32_t bucket_count,
+                                                    u32_t *out) {
+    __shared__ u32_t partial[cuda_dense_histogram_max_buckets_k];
+    for (u32_t b = threadIdx.x; b < bucket_count; b += blockDim.x) partial[b] = 0;
+    __syncthreads();
+    for (size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count; i += size_t(gridDim.x) * blockDim.x)
+        atomicAdd(&partial[static_cast<u32_t>(buckets[i])], 1u);
+    __syncthreads();
+    for (u32_t b = threadIdx.x; b < bucket_count; b += blockDim.x) atomicAdd(&out[b], partial[b]);
+}
+
+/** @brief Launches @ref histogram_dense_across_cuda_device_ over @p count elements, pre-zeroing @p out[0, bucket_count). */
+template <typename input_iterator_>
+inline cuda_status_t cuda_launch_histogram_dense_(kernel_shape_t const &shape, input_iterator_ buckets, size_t count,
+                                                  u32_t bucket_count, u32_t *out, CUstream stream) noexcept {
+    CUresult memset_error = cuMemsetD8Async((CUdeviceptr)out, 0, static_cast<size_t>(bucket_count) * sizeof(u32_t),
+                                            (CUstream)stream);
+    if (memset_error != CUDA_SUCCESS) return make_cuda_status(memset_error);
+    input_iterator_ buckets_arg = buckets;
+    size_t count_arg = count;
+    u32_t bucket_count_arg = bucket_count;
+    u32_t *out_arg = out;
+    void *args[4] = {(void *)&buckets_arg, (void *)&count_arg, (void *)&bucket_count_arg, (void *)&out_arg};
+    unsigned const blocks = static_cast<unsigned>(
+        sz_min_of_two((count + cuda_device_collective_threads_k - 1) / cuda_device_collective_threads_k, size_t(1024)));
+    CUresult error = cuda_launch_t {}
+                         .grid(blocks ? blocks : 1u)
+                         .block(cuda_device_collective_threads_k)
+                         .shared(0)
+                         .stream(stream)
+                         .launch(shape.function, args);
+    if (error != CUDA_SUCCESS) return make_cuda_status(error);
+    return {status_t::success_k, cudaSuccess};
+}
+
+#pragma endregion Device Wide Collective Primitives
 
 /**
  *  @brief Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
@@ -625,26 +1048,8 @@ struct warp_tasks_groups {
     span<task_type_> empty_tasks;
 };
 
-/**
- *  @brief Orders warp-level tasks from the least to the most shared-memory-hungry: primarily by `bytes_per_cell`
- *      (the kernel-family boundary), then by `density`. Marked `__host__ __device__` so the same predicate drives
- *      the GPU `thrust::sort` and the host `std::sort` fallback.
- */
-template <typename task_type_>
-struct warp_tasks_density_order_ {
-    __host__ __device__ bool operator()(task_type_ const &lhs, task_type_ const &rhs) const noexcept {
-        return lhs.bytes_per_cell == rhs.bytes_per_cell ? lhs.density < rhs.density
-                                                        : lhs.bytes_per_cell < rhs.bytes_per_cell;
-    }
-};
-
-/**
- *  @brief A small, host-readable descriptor of one warp-tier launch group, run-length-encoded from the sorted
- *         warp tasks. Carries only the launch-shaping fields, so the host never dereferences a device task to
- *         drive a warp-tier launch: the kernel family from @p bytes_per_cell, the occupancy from @p density and
- *         @p max_memory_requirement, and the task subrange from @p begin_offset / @p count (absolute into the
- *         original task array).
- */
+/** @brief Host-readable launch-shaping descriptor of one warp-tier group, run-length-encoded from the sorted
+ *         warp tasks, so the host never dereferences a device task to drive a warp-tier launch. */
 struct warp_tasks_group_descriptor_t {
     /** @brief DP cell-width tier shared by every task in the group (selects the warp kernel family). */
     bytes_per_cell_t bytes_per_cell = one_byte_per_cell_k;
@@ -658,21 +1063,7 @@ struct warp_tasks_group_descriptor_t {
     size_t max_memory_requirement = 0;
 };
 
-/**
- *  @brief Composite RLE key for one warp task: `(bytes_per_cell << 8) | density`. The sort orders tasks by
- *         (`bytes_per_cell`, `density`), so equal composite keys are exactly the contiguous launch groups.
- *         Marked `__host__ __device__` so it drives the `cub` device run-length-encode.
- */
-template <typename task_type_>
-struct warp_tasks_group_key_functor_ {
-    task_type_ const *tasks = nullptr;
-    __host__ SZ_DEVICE_INLINE u32_t operator()(size_t index) const noexcept {
-        task_type_ const &task = tasks[index];
-        return (static_cast<u32_t>(task.bytes_per_cell) << 8) | static_cast<u32_t>(task.density);
-    }
-};
-
-/** @brief Reads one warp task's `memory_requirement` for the per-group `cub::DeviceSegmentedReduce::Max`. */
+/** @brief Reads one warp task's `memory_requirement` for the per-group @ref segmented_reduce_max_across_cuda_device_. */
 template <typename task_type_>
 struct warp_tasks_memory_requirement_functor_ {
     __host__ SZ_DEVICE_INLINE size_t operator()(task_type_ const &task) const noexcept {
@@ -680,80 +1071,99 @@ struct warp_tasks_memory_requirement_functor_ {
     }
 };
 
-/** @brief `cub::DevicePartition::If` predicate selecting device-level tasks (whole-device cooperative). */
+/** @brief Classifies one task into the contiguous split bucket the counting sort lays out: device-cooperative (0),
+ *         warp-level (1), or empty (2). Ascending buckets give the `[device | warp | empty]` layout directly. */
 template <typename task_type_>
-struct task_is_device_level_functor_ {
-    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
-        return task.density == warps_working_together_k;
+struct warp_group_tier_functor_ {
+    constexpr u32_t operator()(task_type_ const &task) const noexcept {
+        if (task.density == warps_working_together_k) return 0u;
+        if (task.density == infinite_warps_per_multiprocessor_k) return 2u;
+        return 1u;
     }
 };
 
-/** @brief `cub::DevicePartition::If` predicate selecting non-empty tasks (a pre-seeded cell is `infinite_*`). */
+/** @brief `log2` of a power-of-two value (small inputs only; returns 0 for 0/1). */
+static constexpr u32_t log2_pow2_(u32_t value) noexcept {
+    u32_t bit = 0;
+    while (value > 1u) {
+        value >>= 1;
+        ++bit;
+    }
+    return bit;
+}
+
+/** @brief Packs a warp task's @p bytes_per_cell and @p density into a dense 5-bit counting-sort key — 2 bits for
+ *         the kernel family, 3 for the density tier — and implicitly converts back to that key for the sort. */
+struct warp_group_key_t {
+    static constexpr u32_t bytes_bits_k = 2;
+    static constexpr u32_t density_bits_k = 3;
+    static constexpr u32_t density_mask_k = (1u << density_bits_k) - 1u;
+
+    u32_t packed = 0;
+
+    constexpr warp_group_key_t() = default;
+    constexpr explicit warp_group_key_t(u32_t packed_key) noexcept : packed(packed_key) {}
+    constexpr warp_group_key_t(bytes_per_cell_t bytes_per_cell, warp_tasks_density_t density) noexcept
+        : packed((log2_pow2_(static_cast<u32_t>(bytes_per_cell)) << density_bits_k) |
+                 log2_pow2_(static_cast<u32_t>(density))) {}
+
+    constexpr bytes_per_cell_t bytes_per_cell() const noexcept {
+        return static_cast<bytes_per_cell_t>(1u << (packed >> density_bits_k));
+    }
+    constexpr warp_tasks_density_t density() const noexcept {
+        return static_cast<warp_tasks_density_t>(1u << (packed & density_mask_k));
+    }
+    constexpr operator u32_t() const noexcept { return packed; }
+};
+
+/** @brief Reads one warp task's dense @ref warp_group_key_t for the counting sort's histogram/scatter. */
 template <typename task_type_>
-struct task_is_non_empty_functor_ {
-    __host__ SZ_DEVICE_INLINE bool operator()(task_type_ const &task) const noexcept {
-        return task.density != infinite_warps_per_multiprocessor_k;
+struct warp_group_key_functor_ {
+    constexpr u32_t operator()(task_type_ const &task) const noexcept {
+        return warp_group_key_t {task.bytes_per_cell, task.density};
     }
 };
+
+/** @brief Bucket count for the dense warp launch-group key: 2 bits `bytes_per_cell` | 3 bits `density` → 32. */
+static constexpr u32_t warp_group_key_buckets_k = 1u << (warp_group_key_t::bytes_bits_k +
+                                                         warp_group_key_t::density_bits_k);
 
 /**
- *  Let's say you have a list of GPU tasks of similar nature, but all of them require different amount of
- *  shared memory for efficiency. Ideally, we want each warp to receive it's own task (independent of the
- *  others), and have enough shared memory for more than one warp per multiprocessor.
+ *  @brief Reorders warp tasks into contiguous launch groups and describes each group for the host to launch.
  *
- *  To optimize the scheduling we will look into several factors of individual tasks.
+ *  Each warp ideally gets its own task, with enough shared memory for several warps per multiprocessor. Two task
+ *  fields drive the scheduling:
  *
- *  @p `tasks[i].bytes_per_cell` - defines the actual kernel template to be used and serves as the natural boundary,
- *  as different kernels *kind of* can't run concurrently.
+ *  @p bytes_per_cell selects the kernel template and is a hard group boundary, since distinct kernels do not run
+ *  concurrently — even on an H200 with 140 GB of VRAM, @b cudaDeviceProp::concurrentKernels reports 1.
  *
- *      Theoretically, that isn't true. On paper, several CUDA kernels can run concurrently on the same physical device.
- *      It makes sense, assuming the Multi-Instance GPU (MIG) virtualization feature on them. But even when pulling
- *      the `cudaGetDeviceProperties` and logging @b `cudaDeviceProp::concurrentKernels` for the H200 GPU with 140 GB
- *      of VRAM, it states 1. 🤯
+ *  @p density is the max warps per multiprocessor, inferred from the device shared memory minus the per-block
+ *  reserved memory. Addressing more than 48 KB per block needs a per-kernel
+ *  @b cudaFuncAttributeMaxDynamicSharedMemorySize override, and @b cuFuncSetAttribute is synchronous — so we keep
+ *  the launches few to stay asynchronous.
  *
- *  @p `tasks[i].density` - max number of warps per multiprocessor, executing simultaneously. It's inferred from the
- *  shared memory amount, supported by device, which is of the order of 100-200 KB, minus the reserved memory per block.
+ *  @p specs.streaming_multiprocessors sets the sensible lower bound per launch: on an H100 that is 132, so a group
+ *  admitting 2 warps per multiprocessor but fewer than 66 blocks is better merged with a more memory-hungry group
+ *  than launched on its own.
  *
- *      Theoretically, it's true, but in practice, to address more than 48 KB of shared memory from a single block,
- *      you need to override that @b `cudaFuncAttributeMaxDynamicSharedMemorySize` setting for each individual kernel,
- *      also subtracting the reserved memory for the expected number of blocks. 🤯
- *      Moreover, calling @b `cudaFuncSetAttribute` is a synchronous operation, so say goodbye to asynchronous kernel
- *      launches and latency hiding. So to reduce the overall runtime, we need to have as few individual launches
- *      as possible.
- *
- *  @p `specs.shared_memory_per_multiprocessor()` and @p `specs.reserved_memory_per_block` - our memory limits.
- *  @p `specs.streaming_multiprocessors` - the actual number of physical multiprocessors on the device. It defines
- *  the reasonable lower bound for a single kernel launch. On H100 it would be 132, so if a particular group of inputs
- *  can have 2 simultaneous warps per multiprocessor, but has fewer than (132 / 2 = 66) blocks, it would be better to
- *  merge it with a more memory-hungry group to avoid the overhead of additional kernel launches.
- *
- *  It's possible to have a very memory-efficient task, that allows for 32 warps per multiprocessor, and it would be
- *  best schedule them in the largest possible block size - 1024 threads.
- *
- *  @note Every data-touching stage runs on the GPU and the host reads only small scalars / the descriptor array:
- *  the device/warp/empty split is two `cub::DevicePartition::If` passes (the two split COUNTS are the only host
- *  reads), the warp middle is sorted with `cub::DeviceMergeSort`, and the launch groups are run-length-encoded
- *  with `cub::DeviceRunLengthEncode::Encode` (unique `(bytes_per_cell, density)` keys + run lengths), turned into
- *  begin offsets via `cub::DeviceScan::ExclusiveSum`, and given a per-group max `memory_requirement` via
- *  `cub::DeviceSegmentedReduce::Max`. All CUB temporaries come from the caller-owned, grow-only buffers (hoisted
- *  on the engine, reused across calls — never a per-call `cudaMalloc`). On any scratch-allocation failure the
- *  routine degrades gracefully: the middle stays partition-ordered and one descriptor per raw run is emitted.
- *
- *  @post The @p tasks are reordered in-place into [device-level | warp-level (sorted) | empty]; @p group_count
- *  host-readable @ref warp_tasks_group_descriptor_t entries are written to @p group_descriptors, each carrying a
- *  warp-tier launch group's absolute task subrange and launch-shaping fields. The host drives the warp-tier
- *  launches from those descriptors alone — never by dereferencing a device task.
+ *  @post @p tasks are reordered in-place into [device-level | warp-level, sorted | empty], and @p group_count
+ *  host-readable @ref warp_tasks_group_descriptor_t entries are written to @p group_descriptors — each a warp-tier
+ *  group's absolute task subrange and launch-shaping fields, so the host launches from the descriptors alone,
+ *  never by dereferencing a device task.
  */
 template <typename task_type_, typename scratch_buffer_type_, typename task_buffer_type_, typename count_buffer_type_,
           typename key_buffer_type_, typename size_buffer_type_, typename descriptor_buffer_type_>
 warp_tasks_groups<task_type_> warp_tasks_grouping( //
-    span<task_type_> tasks, gpu_specs_t const &specs, cudaStream_t stream,
-    scratch_buffer_type_ &grouping_scratch, // grow-only CUB temporary storage (bytes)
-    task_buffer_type_ &partition_scratch,   // grow-only task ping-pong for the two device partitions
-    count_buffer_type_ &counts_scratch,     // device-accessible 2-slot partition selected-counts
+    span<task_type_> tasks, gpu_specs_t const &specs, CUstream stream,
+    scratch_buffer_type_ &grouping_scratch, // grow-only device bucket histogram + cursors (bytes)
+    task_buffer_type_ &partition_scratch,   // grow-only task ping-pong for the counting-sort scatters
+    count_buffer_type_ &counts_scratch,     // device-accessible tier split counts + cursors
     key_buffer_type_ &group_keys_scratch,   // device-accessible unique composite keys + run count
     size_buffer_type_ &group_sizes_scratch, // device-accessible run lengths, begin offsets, per-group max memory
-    descriptor_buffer_type_ &group_descriptors, size_t &group_count) noexcept {
+    descriptor_buffer_type_ &group_descriptors, size_t &group_count, kernel_shape_t const &segmented_reduce_max_shape,
+    kernel_shape_t const &tier_histogram_shape, kernel_shape_t const &tier_scatter_shape,
+    kernel_shape_t const &exclusive_sum_u32_shape, kernel_shape_t const &warp_group_histogram_shape,
+    kernel_shape_t const &warp_group_scatter_shape, kernel_shape_t const &scan_compact_shape) noexcept {
 
     using task_t = task_type_;
     warp_tasks_groups<task_t> result;
@@ -765,42 +1175,34 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     result.empty_tasks = {tasks.begin(), tasks.end()};
     if (!total_tasks) return result;
 
-    // Split the array into [device-level | warp-level | empty] entirely on the device with two
-    // `cub::DevicePartition::If` passes; only the two selected-counts cross back to the host.
+    // Split the array into [device-level | warp-level | empty] with a 3-bucket counting sort of the tier classifier:
+    // histogram the three tiers, exclusive-scan them into cursors, scatter the tasks into the contiguous layout, and
+    // copy it back into `tasks` (the scatter can't run in place). Only the two leading counts cross back to the host.
     if (partition_scratch.try_resize_uninitialized(total_tasks) == status_t::bad_alloc_k) return result;
-    if (counts_scratch.try_resize_uninitialized(2) == status_t::bad_alloc_k) return result;
+    if (counts_scratch.try_resize_uninitialized(7) == status_t::bad_alloc_k) return result; // 3 counts + 4 cursors
     task_t *const partition_buffer = partition_scratch.data();
-    u32_t *const device_count_out = counts_scratch.data();
-    u32_t *const warp_count_out = device_count_out + 1;
+    u32_t *const tier_counts = counts_scratch.data();
+    u32_t *const tier_cursors = tier_counts + 3; // exclusive offsets + the scan's trailing total
 
-    auto const cub_partition = [&](task_t const *input, task_t *output, u32_t *count_out, auto predicate) noexcept {
-        size_t partition_bytes = 0;
-        if (cub::DevicePartition::If(nullptr, partition_bytes, input, output, count_out, static_cast<int>(total_tasks),
-                                     predicate, stream) != cudaSuccess)
-            return false;
-        if (grouping_scratch.try_resize_uninitialized(partition_bytes) == status_t::bad_alloc_k) return false;
-        return cub::DevicePartition::If(grouping_scratch.data(), partition_bytes, input, output, count_out,
-                                        static_cast<int>(total_tasks), predicate, stream) == cudaSuccess;
-    };
-
-    // Pass 1: device-level tasks (`density == warps_working_together_k`) to the front of `partition_buffer`.
-    if (!cub_partition(tasks.data(), partition_buffer, device_count_out, task_is_device_level_functor_<task_t> {}))
+    warp_group_tier_functor_<task_t> const tier_of {};
+    transform_input_iterator<u32_t, warp_group_tier_functor_<task_t>, task_t const *> tier_bucket_iterator(tasks.data(),
+                                                                                                           tier_of);
+    if (cuda_launch_histogram_dense_(tier_histogram_shape, tier_bucket_iterator, total_tasks, 3u, tier_counts, stream)
+            .status != status_t::success_k)
         return result;
-    if (cudaStreamSynchronize(stream) != cudaSuccess) return result;
-    size_t const device_level_count = *device_count_out;
-    size_t const rest_count = total_tasks - device_level_count;
-
-    // Pass 2: of the remaining `partition_buffer[device_level_count, total_tasks)`, the non-empty (warp-level)
-    // tasks to the front; the input count for `cub::DevicePartition::If` is the FULL `total_tasks`, so we restore
-    // the device-level prefix into `partition_buffer` first and partition the whole array back into `tasks`.
-    if (!cub_partition(partition_buffer, tasks.data(), warp_count_out, task_is_non_empty_functor_<task_t> {}))
+    if (cuda_launch_exclusive_sum_(exclusive_sum_u32_shape, tier_counts, 3u, tier_cursors, stream).status !=
+        status_t::success_k)
         return result;
-    if (cudaStreamSynchronize(stream) != cudaSuccess) return result;
-    // The whole-array pass also moved the device-level tasks (their `density == warps_working_together_k != infinite`
-    // so they sort to the warp front); the warp-front then holds [device-level | warp-level]. Recover the warp count
-    // by subtracting the device prefix the second predicate also kept ahead of the empties.
-    size_t const non_empty_count = *warp_count_out;
-    size_t const warp_level_count = non_empty_count - device_level_count;
+    if (cuda_launch_scatter_tasks_by_bucket_(tier_scatter_shape, tasks.data(), total_tasks, tier_of, tier_cursors,
+                                             partition_buffer, stream)
+            .status != status_t::success_k)
+        return result;
+    if (cuMemcpyDtoDAsync((CUdeviceptr)tasks.data(), (CUdeviceptr)partition_buffer, total_tasks * sizeof(task_t),
+                          (CUstream)stream) != CUDA_SUCCESS)
+        return result;
+    if (cuStreamSynchronize((CUstream)stream) != CUDA_SUCCESS) return result;
+    size_t const device_level_count = tier_counts[0];
+    size_t const warp_level_count = tier_counts[1];
 
     auto const warp_tasks_begin = tasks.begin() + device_level_count;
     auto const warp_tasks_end = warp_tasks_begin + warp_level_count;
@@ -808,85 +1210,55 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     result.warp_level_tasks = {warp_tasks_begin, warp_tasks_end};
     result.empty_tasks = {warp_tasks_end, tasks.end()};
 
-    // Sort the warp-level middle from smallest to largest shared-memory footprint on the GPU; equal
-    // `(bytes_per_cell, density)` keys become the contiguous launch groups the run-length-encode below discovers.
-    if (warp_level_count > 1) {
-        warp_tasks_density_order_<task_t> const order {};
-        size_t temp_storage_bytes = 0;
-        cub::DeviceMergeSort::SortKeys(nullptr, temp_storage_bytes, warp_tasks_begin, warp_level_count, order, stream);
-        if (grouping_scratch.try_resize(temp_storage_bytes) == status_t::success_k)
-            cub::DeviceMergeSort::SortKeys(grouping_scratch.data(), temp_storage_bytes, warp_tasks_begin,
-                                           warp_level_count, order, stream);
-        // No drain here: the run-length-encode below consumes the sort on the same stream, so it is already ordered
-        // after it. On scratch-allocation failure the middle stays partition-ordered: correct, only less optimally
-        // grouped.
-    }
     if (!warp_level_count) return result;
 
-    // Run-length-encode the sorted warp tasks on the composite `(bytes_per_cell << 8) | density` key to discover the
-    // raw launch groups; an exclusive sum of the run lengths gives each group's begin offset, and a segmented Max of
-    // `memory_requirement` gives each group's dynamic-shared-memory footprint. All on the device.
+    // Dense-key counting sort of the warp middle. Histogram the `(log2 bytes, log2 density)` groups, then in one pass
+    // exclusive-scan them into scatter cursors AND compact the non-empty buckets into ascending run descriptors; scatter
+    // the tasks into contiguous launch groups and copy the layout back (the scatter can't run in place). A segmented Max
+    // of `memory_requirement` — sized by the device-resident group count, so no sync gates it — gives each group's
+    // dynamic-shared-memory footprint. One synchronize drains the whole stage.
     if (group_keys_scratch.try_resize_uninitialized(warp_level_count + 1) == status_t::bad_alloc_k) return result;
     if (group_sizes_scratch.try_resize_uninitialized(3 * warp_level_count + 1) == status_t::bad_alloc_k) return result;
+    if (grouping_scratch.try_resize_uninitialized((2u * warp_group_key_buckets_k + 1) * sizeof(u32_t)) ==
+        status_t::bad_alloc_k)
+        return result;
     u32_t *const unique_keys = group_keys_scratch.data();
     u32_t *const run_count_out = unique_keys + warp_level_count;
     size_t *const run_lengths = group_sizes_scratch.data();
     size_t *const begin_offsets = run_lengths + warp_level_count; // `warp_level_count + 1` slots (trailing end)
     size_t *const group_max_memory = begin_offsets + (warp_level_count + 1);
+    u32_t *const group_bucket_counts = reinterpret_cast<u32_t *>(grouping_scratch.data());
+    u32_t *const group_bucket_cursors = group_bucket_counts + warp_group_key_buckets_k;
+    task_t *const warp_tasks_ptr = tasks.data() + device_level_count;
 
-    warp_tasks_group_key_functor_<task_t> const key_functor {warp_tasks_begin};
-    counting_iterator<size_t> iota(0);
-    transform_input_iterator<u32_t, warp_tasks_group_key_functor_<task_t>, counting_iterator<size_t>> key_iterator(
-        iota, key_functor);
-    {
-        size_t rle_bytes = 0;
-        if (cub::DeviceRunLengthEncode::Encode(nullptr, rle_bytes, key_iterator, unique_keys, run_lengths,
-                                               run_count_out, static_cast<int>(warp_level_count),
-                                               stream) != cudaSuccess)
-            return result;
-        if (grouping_scratch.try_resize_uninitialized(rle_bytes) == status_t::bad_alloc_k) return result;
-        if (cub::DeviceRunLengthEncode::Encode(grouping_scratch.data(), rle_bytes, key_iterator, unique_keys,
-                                               run_lengths, run_count_out, static_cast<int>(warp_level_count),
-                                               stream) != cudaSuccess)
-            return result;
-    }
-    if (cudaStreamSynchronize(stream) != cudaSuccess) return result;
-    size_t const raw_group_count = *run_count_out;
-    if (!raw_group_count) return result;
-
+    warp_group_key_functor_<task_t> const group_key_of {};
+    if (cuda_launch_histogram_tasks_by_bucket_(warp_group_histogram_shape, warp_tasks_ptr, warp_level_count,
+                                               group_key_of, warp_group_key_buckets_k, group_bucket_counts, stream)
+            .status != status_t::success_k)
+        return result;
+    if (cuda_launch_scan_and_compact_bucket_runs_(scan_compact_shape, group_bucket_counts, warp_group_key_buckets_k,
+                                                  group_bucket_cursors, unique_keys, run_lengths, begin_offsets,
+                                                  run_count_out, stream)
+            .status != status_t::success_k)
+        return result;
+    if (cuda_launch_scatter_tasks_by_bucket_(warp_group_scatter_shape, warp_tasks_ptr, warp_level_count, group_key_of,
+                                             group_bucket_cursors, partition_buffer, stream)
+            .status != status_t::success_k)
+        return result;
+    if (cuMemcpyDtoDAsync((CUdeviceptr)warp_tasks_ptr, (CUdeviceptr)partition_buffer, warp_level_count * sizeof(task_t),
+                          (CUstream)stream) != CUDA_SUCCESS)
+        return result;
     {
         warp_tasks_memory_requirement_functor_<task_t> const memory_functor {};
         transform_input_iterator<size_t, warp_tasks_memory_requirement_functor_<task_t>, task_t const *>
             memory_iterator(warp_tasks_begin, memory_functor);
-        // Size BOTH the exclusive-sum (group begin offsets) and the segmented Max (per-group shared-memory footprint)
-        // up front, then grow the shared CUB scratch ONCE to the larger - so no `try_resize` (a `cudaFree`/`cudaMalloc`
-        // device barrier) ever runs while a previously-enqueued CUB kernel is still in flight on the stream. Both calls
-        // pass their own byte count (<= capacity) and run sequentially on the stream, so they safely share the buffer.
-        size_t scan_bytes = 0, reduce_bytes = 0;
-        if (cub::DeviceScan::ExclusiveSum(nullptr, scan_bytes, run_lengths, begin_offsets,
-                                          static_cast<int>(raw_group_count), stream) != cudaSuccess)
-            return result;
-        if (cub::DeviceSegmentedReduce::Max(nullptr, reduce_bytes, memory_iterator, group_max_memory,
-                                            static_cast<int>(raw_group_count), begin_offsets, begin_offsets + 1,
-                                            stream) != cudaSuccess)
-            return result;
-        if (grouping_scratch.try_resize_uninitialized(sz_max_of_two(scan_bytes, reduce_bytes)) == status_t::bad_alloc_k)
-            return result;
-        if (cub::DeviceScan::ExclusiveSum(grouping_scratch.data(), scan_bytes, run_lengths, begin_offsets,
-                                          static_cast<int>(raw_group_count), stream) != cudaSuccess)
-            return result;
-        // The segmented Max needs each segment's [begin, end); `begin_offsets` is the begin array and `begin_offsets + 1`
-        // the end array, so the trailing end (== `warp_level_count`) is appended on the stream after the scan. The host
-        // source outlives the trailing `cudaStreamSynchronize` that drains this block.
-        if (cudaMemcpyAsync(begin_offsets + raw_group_count, &warp_level_count, sizeof(size_t), cudaMemcpyHostToDevice,
-                            stream) != cudaSuccess)
-            return result;
-        if (cub::DeviceSegmentedReduce::Max(grouping_scratch.data(), reduce_bytes, memory_iterator, group_max_memory,
-                                            static_cast<int>(raw_group_count), begin_offsets, begin_offsets + 1,
-                                            stream) != cudaSuccess)
-            return result;
+        cuda_status_t const reduce_status = cuda_launch_segmented_reduce_max_(
+            segmented_reduce_max_shape, memory_iterator, begin_offsets, run_count_out, group_max_memory, stream);
+        if (reduce_status.status != status_t::success_k) return result;
     }
-    if (cudaStreamSynchronize(stream) != cudaSuccess) return result;
+    if (cuStreamSynchronize((CUstream)stream) != CUDA_SUCCESS) return result;
+    size_t const raw_group_count = *run_count_out;
+    if (!raw_group_count) return result;
 
     if (group_descriptors.try_resize_uninitialized(raw_group_count) == status_t::bad_alloc_k) return result;
     warp_tasks_group_descriptor_t *const descriptors = group_descriptors.data();
@@ -899,10 +1271,10 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
     size_t emitted = 0;
     size_t raw_index = 0;
     while (raw_index < raw_group_count) {
-        u32_t const head_key = unique_keys[raw_index];
+        warp_group_key_t const head_key {unique_keys[raw_index]};
         warp_tasks_group_descriptor_t descriptor;
-        descriptor.bytes_per_cell = static_cast<bytes_per_cell_t>(head_key >> 8);
-        descriptor.density = static_cast<warp_tasks_density_t>(head_key & 0xFFu);
+        descriptor.bytes_per_cell = head_key.bytes_per_cell();
+        descriptor.density = head_key.density();
         descriptor.begin_offset = device_level_count + begin_offsets[raw_index];
         descriptor.count = run_lengths[raw_index];
         descriptor.max_memory_requirement = group_max_memory[raw_index];
@@ -912,12 +1284,11 @@ warp_tasks_groups<task_type_> warp_tasks_grouping( //
             size_t const possible_warps = size_t(descriptor.density) * specs.streaming_multiprocessors;
             if (descriptor.count > possible_warps) break; // enough tasks to saturate the device
 
-            u32_t const next_key = unique_keys[next];
-            bytes_per_cell_t const next_bytes_per_cell = static_cast<bytes_per_cell_t>(next_key >> 8);
-            if (next_bytes_per_cell != descriptor.bytes_per_cell) break; // different kernel family, can't merge
+            warp_group_key_t const next_key {unique_keys[next]};
+            if (next_key.bytes_per_cell() != descriptor.bytes_per_cell) break; // different kernel family, can't merge
 
             // Merge the next group in: adopt its (sparser) density, grow the span, take the larger memory footprint.
-            descriptor.density = static_cast<warp_tasks_density_t>(next_key & 0xFFu);
+            descriptor.density = next_key.density();
             descriptor.count += run_lengths[next];
             if (group_max_memory[next] > descriptor.max_memory_requirement)
                 descriptor.max_memory_requirement = group_max_memory[next];
