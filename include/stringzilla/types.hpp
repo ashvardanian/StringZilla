@@ -509,21 +509,41 @@ struct indexed_container_iterator {
     }
 };
 
+/** @brief  Length convention for @ref arrow_strings_view element spans. */
+enum class arrow_termination_t {
+    /** Matches @ref arrow_strings_tape : a trailing @c '\0' is excluded, so elements read as C-strings. */
+    nul_terminated_k,
+    /** Raw Apache Arrow / cuDF / Parquet: the full @c [offsets[i],offsets[i+1]) span, no terminator. */
+    packed_k,
+};
+
 /**
- *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
- *      Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
+ *  @brief Apache @b Arrow-compatible view over back-to-back variable-length byte spans in one buffer,
+ *      delimited by a @c count+1 offsets array. Doesn't own the memory.
+ *  @tparam char_type_ Buffer element type: @c char , @c std::byte , or a wider unit.
+ *  @tparam offset_type_ Offset type into @p buffer_ , typically @c int32_t or @c int64_t .
+ *  @tparam termination_ Length convention, see @ref arrow_termination_t . Default @c nul_terminated_k
+ *      (matching @ref arrow_strings_tape ) excludes the trailing NUL, so element @c i spans
+ *      @c offsets[i] to @c offsets[i+1]-1 and reads as a C-string; @c packed_k spans the full
+ *      @c offsets[i] to @c offsets[i+1] . A device-resident cuDF string / list<uint8> column is thus
+ *      @c arrow_strings_view<std::byte,int64_t,arrow_termination_t::packed_k> .
  *  @sa arrow_strings_tape
  */
-template <typename char_type_, typename offset_type_>
+template <typename char_type_, typename offset_type_,
+          arrow_termination_t termination_ = arrow_termination_t::nul_terminated_k>
 struct arrow_strings_view {
     using char_t = char_type_;
     using offset_t = offset_type_;
-    using self_t = arrow_strings_view<char_t, offset_t>;
+    using self_t = arrow_strings_view<char_t, offset_t, termination_>;
 
     using value_t = span<char_t const>;
     using value_type = value_t; // ? For STL compatibility
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
+
+    /** @brief Bytes excluded from every element's length — one for the NULL terminator, zero for the
+     *      terminator-free Apache Arrow / cuDF convention. */
+    static constexpr size_t terminator_width_k = termination_ == arrow_termination_t::nul_terminated_k ? 1u : 0u;
 
     span<char_t const> buffer_;
     span<offset_t const> offsets_;
@@ -532,9 +552,9 @@ struct arrow_strings_view {
     constexpr arrow_strings_view(span<char_t const> buf, span<offset_t const> offs) noexcept
         : buffer_(buf), offsets_(offs) {}
 
-    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
+    constexpr size_t size() const noexcept { return offsets_.size() != 0 ? offsets_.size() - 1 : 0; }
     constexpr value_t operator[](size_t i) const noexcept {
-        return {&buffer_[offsets_[i]], offsets_[i + 1] - offsets_[i] - 1};
+        return {&buffer_[offsets_[i]], static_cast<size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
     }
 
     constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
@@ -542,6 +562,11 @@ struct arrow_strings_view {
     constexpr iterator_t cbegin() const noexcept { return begin(); }
     constexpr iterator_t cend() const noexcept { return end(); }
 };
+
+/** @brief The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref arrow_strings_view : element
+ *      @c i is the full @c [offsets[i],offsets[i+1]) span, no NULL excluded. */
+template <typename char_type_, typename offset_type_>
+using arrow_packed_view = arrow_strings_view<char_type_, offset_type_, arrow_termination_t::packed_k>;
 
 /**
  *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
@@ -574,10 +599,23 @@ struct arrow_strings_tape {
   public:
     constexpr arrow_strings_tape() = default;
 
-    arrow_strings_tape(arrow_strings_tape &&) = delete;
     arrow_strings_tape(arrow_strings_tape const &) = delete;
-    arrow_strings_tape &operator=(arrow_strings_tape &&) = delete;
     arrow_strings_tape &operator=(arrow_strings_tape const &) = delete;
+
+    sz_constexpr_if_cpp20 arrow_strings_tape(arrow_strings_tape &&other) noexcept
+        : buffer_(other.buffer_), offsets_(other.offsets_), char_alloc_(std::move(other.char_alloc_)),
+          offset_alloc_(std::move(other.offset_alloc_)), count_(other.count_) {
+        other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
+    }
+
+    sz_constexpr_if_cpp20 arrow_strings_tape &operator=(arrow_strings_tape &&other) noexcept {
+        reset();
+        buffer_ = other.buffer_, offsets_ = other.offsets_;
+        char_alloc_ = std::move(other.char_alloc_), offset_alloc_ = std::move(other.offset_alloc_);
+        count_ = other.count_;
+        other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
+        return *this;
+    }
 
     constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t alloc)
         : buffer_(buffer), offsets_(offsets), char_alloc_(alloc), offset_alloc_(alloc) {}
