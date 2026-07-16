@@ -671,10 +671,19 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
     // `.std()` only reaches the host compiler (`-Xcompiler -std:c++20`); nvcc's device frontend would otherwise
     // default to an older standard and `cudafe++` chokes on the C++20 device code (templated lambdas, designated
     // initializers), so set nvcc's own device standard too — as the CMake build does.
-    build
-        .flag("-std=c++20")
-        .flag("--expt-relaxed-constexpr")
-        .flag("-arch=sm_90a");
+    build.flag("-std=c++20").flag("--expt-relaxed-constexpr");
+    // Coverage-parity with the CMake build and setup.py: Ampere (sm_80) and Hopper (sm_90) real SASS plus forward PTX.
+    // Those two link loose objects and give the Hopper-only DPX TUs a narrower sm_90 set; the `cc` crate emits one
+    // static archive (per-tier splitting would need non-portable linker grouping), so every TU shares this union set -
+    // the Hopper providers' extra sm_80 cubin is their guarded scalar fallback, which `--compress-all` erases.
+    for gencode in [
+        "-gencode=arch=compute_80,code=sm_80",
+        "-gencode=arch=compute_90,code=sm_90",
+        "-gencode=arch=compute_90,code=compute_90",
+    ] {
+        build.flag(gencode);
+    }
+    build.flag("-Xfatbin=--compress-all");
     // Forward the MSVC conformance flags and the no-builtin flags to the host compiler through nvcc.
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(format!("-Xcompiler={flag}"));

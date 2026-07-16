@@ -59,6 +59,28 @@ def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
                 raise RuntimeError(f"Compilation failed: {futures[future]}") from error
 
 
+# CUDA architecture partition, kept in lockstep with the CMake build (`define_stringzillas_cuda_library` in
+# CMakeLists.txt) and build.rs. Two tiers: the base group (C-API entry TUs + base-SIMT + Kepler providers) ships
+# sm_80 and sm_90 real SASS; the Hopper DPX group (`*_hopper.cu`) is sm_90 only. Both add forward-compatible PTX
+# (`-virtual`) for the distributed wheel, which the driver JITs on newer GPUs. sm_80/sm_90 are valid on CUDA 12.x
+# and 13.x alike (13.x dropped the older floors), so the set needs no per-toolkit probing.
+_CUDA_BASE_ARCHES: Final = ["80-real", "90-real", "90-virtual"]
+_CUDA_HOPPER_ARCHES: Final = ["90-real", "90-virtual"]
+
+
+def _cuda_gencode_flags(cuda_source: str) -> List[str]:
+    """`-gencode` flags for one `.cu`, by tier so the Hopper providers carry no dead sm_80 cubin. Mirrors the CMake
+    `<x>-real` / `<x>-virtual` arch lists: `-real` emits SASS (`code=sm_x`), `-virtual` emits PTX (`code=compute_x`)."""
+    stem = os.path.splitext(os.path.basename(cuda_source))[0]
+    arches = _CUDA_HOPPER_ARCHES if stem.endswith("_hopper") else _CUDA_BASE_ARCHES
+    flags = []
+    for arch in arches:
+        number, kind = arch.split("-")
+        code = f"sm_{number}" if kind == "real" else f"compute_{number}"
+        flags += ["-gencode", f"arch=compute_{number},code={code}"]
+    return flags
+
+
 def _parallel_compiler_compile(
     self,
     sources,
@@ -294,7 +316,10 @@ class CudaBuildExtension(NumpyBuildExt):
                 "-O2",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
-                "-arch=sm_90a",  # Default to Hopper
+                # Per-TU arch partition: one real cubin per GPU-major for the tier this TU serves, plus a single PTX
+                # floor on the base tier - a no-overlap manual fatbin (see `_cuda_gencode_flags`).
+                *_cuda_gencode_flags(cuda_source),
+                "-Xfatbin=--compress-all",  # erases the size cost of multi-arch breadth (compressed ~= single arch)
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
             ]

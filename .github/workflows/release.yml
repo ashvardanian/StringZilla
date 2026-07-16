@@ -284,7 +284,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04] # Linux only
+        os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
         python-version: ["310", "311", "312", "313", "314"]
     steps:
       - uses: actions/checkout@v6
@@ -296,24 +296,31 @@ jobs:
         uses: actions/setup-python@v6.2.0
         with:
           python-version: 3.x
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cuda PATH=/usr/local/cuda-12.9/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH CUDA_HOME=/usr/local/cuda-12.9
+          # Build only the runner's native architecture (x86_64 on ubuntu-24.04, aarch64 on ubuntu-24.04-arm), so the
+          # CUDA toolchain runs natively instead of under QEMU - the old cross-arch emulation is what made this job
+          # take hours and flake.
+          CIBW_ARCHS_LINUX: auto64
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cuda PATH=/usr/local/cuda-12.9/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH CUDA_HOME=/usr/local/cuda-12.9
+          # Install just nvcc + the CUDA runtime/driver dev headers from NVIDIA's repo (the manylinux base is
+          # AlmaLinux 8 / rhel8; pick the repo matching the container arch), instead of the ~4 GB `.run` installer.
+          # This lands the standard /usr/local/cuda-12.9 layout every StringZilla build system expects via CUDA_HOME.
           CIBW_BEFORE_ALL_LINUX: |
-            yum update -y && yum install -y glibc-devel wget python3-devel &&
-            wget https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run &&
-            sh cuda_12.9.1_575.57.08_linux.run --silent --toolkit --override &&
-            rm cuda_12.9.1_575.57.08_linux.run &&
-            echo "CUDA installed successfully" &&
+            case "$(uname -m)" in x86_64) repo_arch=x86_64 ;; aarch64) repo_arch=sbsa ;; esac &&
+            dnf -y install dnf-plugins-core &&
+            dnf config-manager --add-repo "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${repo_arch}/cuda-rhel8.repo" &&
+            dnf -y install cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9 &&
+            ln -sf /usr/local/cuda-12.9 /usr/local/cuda &&
             /usr/local/cuda-12.9/bin/nvcc --version
+          # Never vendor the CUDA driver (`libcuda`) into the wheel - it is resolved against the user's installed driver
+          # at load time; bundling a build-host stub would shadow it. cudart stays bundled so the wheel is self-contained.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 -w {dest_dir} {wheel}
           SZ_TARGET: stringzillas-cuda
-          CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:

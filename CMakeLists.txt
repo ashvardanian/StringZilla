@@ -262,7 +262,10 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
-    set(CMAKE_CUDA_ARCHITECTURES 90a) # Hopper is the newest architecture we specialize for
+    # Fallback for any CUDA target that does not set its own `CUDA_ARCHITECTURES`; the shipping libraries and the
+    # test/bench launchers override this with their per-tier sets below. Ampere+Hopper real SASS (the DPX kernels need
+    # only sm_90, not the H100-locked sm_90a).
+    set(CMAKE_CUDA_ARCHITECTURES 80-real 90-real)
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     # CUDA 13+ / CCCL 3.x ships CUB, Thrust, and libcudacxx under include/cccl/
@@ -854,7 +857,7 @@ function (define_stringzillas_cuda_objects name sources gpu_archs)
     if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
     endif ()
-    target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr")
+    target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr" "-Xfatbin=--compress-all")
     set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CUDA_COMPILER_ID}")
 endfunction ()
