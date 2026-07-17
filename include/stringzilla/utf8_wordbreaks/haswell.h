@@ -474,9 +474,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
-    sz_size_t words = 0;      // words written to the output
-    sz_size_t word_start = 0; // start byte of the currently open (unfinished) word
-    sz_size_t position = 0;   // codepoint-aligned anchor of the next window (advances cleanly)
+    sz_size_t words = 0;         // words written to the output
+    sz_size_t word_start = 0;    // start byte of the currently open (unfinished) word
+    sz_size_t bridge_anchor = 0; // byte offset of the consumed, still-unresolved Mid* (valid while bridge_open)
+    sz_size_t position = 0;      // codepoint-aligned anchor of the next window (advances cleanly)
 
     sz_utf8_word_break_carry_t carry = sz_utf8_word_break_carry_sot_();
 
@@ -540,6 +541,16 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
 
         sz_size_t const adv = win.resolved;
         sz_u64_t const boundary_lanes = win.breaks & sz_u64_mask_until_serial_(adv);
+        if (win.deferred_break) {
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = bridge_anchor - word_start;
+            ++words;
+            word_start = bridge_anchor;
+        }
 
         words = sz_utf8_rune_drain_forward_haswell_(boundary_lanes, position, word_starts, word_lengths, words,
                                                     words_capacity, &word_start);
@@ -556,7 +567,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
             position += adv;
         }
         else {
+            int const bridge_opened = carry_full.bridge_open && !carry.bridge_open;
             carry = carry_full;
+            if (bridge_opened) bridge_anchor = position;
             position += complete_limit ? complete_limit : loaded;
         }
     }

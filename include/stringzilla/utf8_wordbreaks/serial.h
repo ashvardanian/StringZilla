@@ -780,6 +780,10 @@ typedef struct sz_utf8_word_break_carry_t {
     sz_u8_t bridge_open;
     /** Which left letter opened the shadow (@ref sz_utf8_word_break_bridge_none_k ...). */
     sz_u8_t bridge_kind;
+    /** Word_Break class of the consumed, still-unresolved Mid* (the left context if the bridge fails). */
+    sz_u8_t bridge_mid_class;
+    /** 0 when WB7a (Hebrew_Letter x Single_Quote) forbids the deferred break at the mid. */
+    sz_u8_t bridge_unprotected;
     /** Effective `previous_property` at the next window's first emitted lane. */
     sz_u8_t left_property;
     /** 0 only at the very start of the text (WB1 sot). */
@@ -798,6 +802,8 @@ typedef struct sz_utf8_word_break_window_t {
     sz_u64_t breaks;
     /** Exclusive upper bound, in bytes, on lanes whose break bit is fully trusted. */
     sz_size_t resolved;
+    /** 1 when a carried bridge failed: the driver emits one boundary at its anchored mid byte. */
+    sz_u8_t deferred_break;
 } sz_utf8_word_break_window_t;
 
 /** @brief  Start-of-text carry: no previous element, all runs closed. */
@@ -805,6 +811,8 @@ SZ_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
     sz_utf8_word_break_carry_t carry;
     carry.bridge_open = 0;
     carry.bridge_kind = sz_utf8_word_break_bridge_none_k;
+    carry.bridge_mid_class = (sz_u8_t)sz_utf8_word_break_other_k;
+    carry.bridge_unprotected = 0;
     carry.left_property = (sz_u8_t)sz_utf8_word_break_other_k; // WB1: sot has no left context
     carry.have_prev = 0;
     carry.ri_parity = 0;
@@ -898,7 +906,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
     // from the raw-byte WB3c (pictograph) and WB3d (WSegSpace) checks, which read the raw membership masks directly.
     sz_u64_t const truncated = truncated_raw | (forced_other & valid);
 
-    sz_u8_t const left_property = carry->left_property;
+    sz_u8_t left_property = carry->left_property;
 
     sz_u64_t const class_aletter = (frame->class_aletter | frame->class_hebrew) & start_bytes;
     sz_u64_t const class_hebrew = frame->class_hebrew & start_bytes;
@@ -929,23 +937,37 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
     sz_u64_t const aletter_left_base = sz_u64_fill_left_(class_aletter, flow_ignorable);
     sz_u64_t const numeric_left_base = sz_u64_fill_left_(class_numeric, flow_ignorable);
     sz_u64_t const hebrew_left_base = sz_u64_fill_left_(class_hebrew, flow_ignorable);
-    int const left_is_aletter = left_property == sz_utf8_word_break_aletter_k;
-    int const left_is_hebrew = left_property == sz_utf8_word_break_hebrew_letter_k;
-    int const left_is_numeric = left_property == sz_utf8_word_break_numeric_k;
-
     // The leading window-edge region runs from lane 0 up to and including the first significant (non-ignorable) lead.
     sz_u64_t const significant_leads = start_bytes & ~lead_ignorable;
     sz_u64_t const edge_region = significant_leads
                                      ? sz_u64_mask_until_serial_((sz_size_t)sz_u64_ctz(significant_leads) + 1)
                                      : valid;
 
-    int const carry_bridge_aletter = carry->bridge_open && carry->bridge_kind == sz_utf8_word_break_bridge_aletter_k;
-    int const carry_bridge_numeric = carry->bridge_open && carry->bridge_kind == sz_utf8_word_break_bridge_numeric_k;
-    int const carry_bridge_hebrew = carry->bridge_open && carry->bridge_kind == sz_utf8_word_break_bridge_hebrew_k;
-    sz_u64_t const seed_aletter_pre = sz_u64_or_if_(0ull, edge_region,
-                                                    left_is_aletter || left_is_hebrew || carry_bridge_aletter);
-    sz_u64_t const seed_numeric_pre = sz_u64_or_if_(0ull, edge_region, left_is_numeric || carry_bridge_numeric);
-    sz_u64_t const seed_hebrew_pre = sz_u64_or_if_(0ull, edge_region, left_is_hebrew || carry_bridge_hebrew);
+    // Carried bridge resolution: the first significant lead either completes the deferred WB6/7/11/12 bridge (and
+    // joins through the plain left-property seeds below), or fails it — the driver then emits one boundary at its
+    // anchored mid byte, and the mid becomes the effective left context.
+    sz_u8_t deferred_break = 0;
+    if (carry->bridge_open && (significant_leads || at_tail)) {
+        sz_u8_t const first_class = significant_leads ? frame->classes_byte[(sz_size_t)sz_u64_ctz(significant_leads)]
+                                                      : (sz_u8_t)sz_utf8_word_break_other_k;
+        int const completes = (carry->bridge_kind == sz_utf8_word_break_bridge_numeric_k &&
+                               first_class == sz_utf8_word_break_numeric_k) ||
+                              (carry->bridge_kind == sz_utf8_word_break_bridge_aletter_k &&
+                               sz_utf8_word_break_is_aletter_or_hebrew_(first_class)) ||
+                              (carry->bridge_kind == sz_utf8_word_break_bridge_hebrew_k &&
+                               first_class == sz_utf8_word_break_hebrew_letter_k);
+        deferred_break = (sz_u8_t)(!completes && carry->bridge_unprotected);
+        if (!completes) left_property = carry->bridge_mid_class;
+        carry->bridge_open = 0;
+        carry->bridge_kind = sz_utf8_word_break_bridge_none_k;
+    }
+    int const left_is_aletter = left_property == sz_utf8_word_break_aletter_k;
+    int const left_is_hebrew = left_property == sz_utf8_word_break_hebrew_letter_k;
+    int const left_is_numeric = left_property == sz_utf8_word_break_numeric_k;
+
+    sz_u64_t const seed_aletter_pre = sz_u64_or_if_(0ull, edge_region, left_is_aletter || left_is_hebrew);
+    sz_u64_t const seed_numeric_pre = sz_u64_or_if_(0ull, edge_region, left_is_numeric);
+    sz_u64_t const seed_hebrew_pre = sz_u64_or_if_(0ull, edge_region, left_is_hebrew);
 
     // WB6/WB7 and WB11/WB12: a Mid* lane between two letters (or numerics) bridges the run. MidNumLetQ excludes
     // Double_Quote, which bridges ONLY Hebrew x " x Hebrew (WB7b/WB7c) through a Hebrew-only bridge.
@@ -1119,33 +1141,21 @@ SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( 
         carry->prev_ends_in_zwj = 0;
     }
 
-    // Outbound bridge shadow.
-    sz_u64_t const open_at_edge = sz_u64_fill_right_(mid_open, reach_gate) & resolved_valid;
-    sz_u64_t const open_run = open_at_edge & ~sz_u64_mask_until_serial_(resolved > 0 ? resolved - 1 : 0);
-    if (open_run) {
-        sz_u64_t const reaching = mid_open & sz_u64_fill_left_(open_run, back_gate);
-        if (reaching) {
-            sz_size_t const mid_lane = (sz_size_t)(63 - sz_u64_clz(reaching));
-            sz_u64_t const mid_bit = 1ull << mid_lane;
-            carry->bridge_open = 1;
-            carry->bridge_kind = (sz_u8_t)((mid_open_hebrew & mid_bit)
-                                               ? sz_utf8_word_break_bridge_hebrew_k
-                                               : ((mid_open_numeric & mid_bit) ? sz_utf8_word_break_bridge_numeric_k
-                                                                               : sz_utf8_word_break_bridge_aletter_k));
-        }
-        else {
-            carry->bridge_open = 0;
-            carry->bridge_kind = sz_utf8_word_break_bridge_none_k;
-        }
-    }
-    else if (resolved_significant) {
-        carry->bridge_open = 0;
-        carry->bridge_kind = sz_utf8_word_break_bridge_none_k;
+    // Outbound bridge shadow: an unresolved Mid* at lane 0 (`resolved == 0`) is about to be consumed by the
+    // driver's forced advance; carry its kind, class, and WB7a protection until a significant lead resolves it.
+    if (undecided & 1ull) {
+        carry->bridge_open = 1;
+        carry->bridge_kind = (sz_u8_t)((mid_open_hebrew & 1ull)    ? sz_utf8_word_break_bridge_hebrew_k
+                                       : (mid_open_numeric & 1ull) ? sz_utf8_word_break_bridge_numeric_k
+                                                                   : sz_utf8_word_break_bridge_aletter_k);
+        carry->bridge_mid_class = frame->classes_byte[0];
+        carry->bridge_unprotected = (sz_u8_t)(~(single_quote & previous_hebrew) & 1ull);
     }
 
     sz_utf8_word_break_window_t result;
     result.breaks = boundary;
     result.resolved = resolved;
+    result.deferred_break = deferred_break;
     return result;
 }
 

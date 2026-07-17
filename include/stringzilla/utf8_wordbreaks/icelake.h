@@ -474,9 +474,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
 
-    sz_size_t words = 0;      // words written to the output
-    sz_size_t word_start = 0; // start byte of the currently open (unfinished) word
-    sz_size_t position = 0;   // codepoint-aligned anchor of the next window (advances cleanly)
+    sz_size_t words = 0;         // words written to the output
+    sz_size_t word_start = 0;    // start byte of the currently open (unfinished) word
+    sz_size_t bridge_anchor = 0; // byte offset of the consumed, still-unresolved Mid* (valid while bridge_open)
+    sz_size_t position = 0;      // codepoint-aligned anchor of the next window (advances cleanly)
 
     sz_utf8_word_break_carry_t carry;
     carry.bridge_open = 0;
@@ -560,6 +561,16 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
 
         sz_size_t const adv = win.resolved;
         sz_u64_t boundary_lanes = win.breaks & sz_u64_mask_until_(adv);
+        if (win.deferred_break) {
+            if (words == words_capacity) {
+                if (bytes_consumed) *bytes_consumed = word_start;
+                return words;
+            }
+            word_starts[words] = word_start;
+            word_lengths[words] = bridge_anchor - word_start;
+            ++words;
+            word_start = bridge_anchor;
+        }
 
         words = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity, word_starts, word_lengths, words,
                                             words_capacity, &word_start);
@@ -582,7 +593,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
             // The whole complete region resolved (adv == complete_limit), or the clamp sits at lane 0 (adv == 0, a
             // Mid* shadow longer than one window): step past the complete span with guaranteed progress, keeping the
             // window-end run-state (`carry_full`) so any open shadow stays exact.
+            int const bridge_opened = carry_full.bridge_open && !carry.bridge_open;
             carry = carry_full;
+            if (bridge_opened) bridge_anchor = position;
             position += complete_limit ? complete_limit : loaded;
         }
     }
