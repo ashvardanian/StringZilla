@@ -157,6 +157,10 @@ void bench_utf8_delimiters(environment_t const &env) {
     bench_unary(env, "sz_utf8_delimiters_neon", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_neon> {env})
         .log(base);
 #endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_delimiters_sve2", base_v, utf8_enumerate_delimiters<sz_utf8_delimiters_sve2> {env})
+        .log(base);
+#endif
 }
 
 #pragma endregion

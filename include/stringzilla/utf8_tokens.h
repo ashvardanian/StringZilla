@@ -211,6 +211,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_sve2(sz_cptr_t text, sz_size_t length
 SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
                                                    sz_size_t *match_lengths, sz_size_t matches_capacity,
                                                    sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_delimiters */
+SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *match_offsets,
+                                                  sz_size_t *match_lengths, sz_size_t matches_capacity,
+                                                  sz_size_t *bytes_consumed);
 #endif
 
 #if SZ_USE_V128
@@ -313,7 +317,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_whitespaces_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
     return sz_utf8_whitespaces_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+#elif SZ_USE_SVE2
     return sz_utf8_whitespaces_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_whitespaces_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
@@ -329,6 +333,8 @@ SZ_API_RUNTIME sz_size_t sz_utf8_delimiters(sz_cptr_t text, sz_size_t length, sz
     return sz_utf8_delimiters_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
     return sz_utf8_delimiters_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_delimiters_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_delimiters_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #else

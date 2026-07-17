@@ -913,6 +913,9 @@ void test_utf8_delimiters_unit() {
 #if SZ_USE_NEON
         {sz_utf8_delimiters_neon, "neon"},
 #endif
+#if SZ_USE_SVE2
+        {sz_utf8_delimiters_sve2, "sve2"},
+#endif
     };
 
     std::vector<sz_size_t> offsets, lengths;
@@ -1029,6 +1032,9 @@ static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
 #endif
 #if SZ_USE_NEON
     {"neon", sz_utf8_delimiters_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_delimiters_sve2},
 #endif
 };
 

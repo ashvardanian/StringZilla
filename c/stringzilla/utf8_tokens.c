@@ -40,11 +40,12 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_tokens_update_(sz_capability_t caps) 
 
 #if SZ_USE_SVE2
     if (caps & sz_cap_sve2_k) {
-        // Wider-than-NEON registers are where the scalable token-scanning kernels win; at the common
-        // 128-bit vector length the NEON kernels stay faster, so keep them.
+        // The peeked-tile whitespace scan beats NEON at every vector length; newlines and the gather-fed
+        // delimiters only win with wider-than-NEON registers, so they keep NEON at the common 128-bit length.
+        impl->utf8_whitespaces = sz_utf8_whitespaces_sve2;
         if (sz_sve_wider_than_neon_()) {
             impl->utf8_newlines = sz_utf8_newlines_sve2;
-            impl->utf8_whitespaces = sz_utf8_whitespaces_sve2;
+            impl->utf8_delimiters = sz_utf8_delimiters_sve2;
         }
     }
 #endif
