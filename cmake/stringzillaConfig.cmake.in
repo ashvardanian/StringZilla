@@ -1,0 +1,22 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/stringzillaTargets.cmake")
+
+# The export defines `stringzilla::stringzilla_header`. Add the plain spelling too, so a consumer
+# can write either:
+# ~~~
+# target_link_libraries(my_executable PRIVATE stringzilla_header)
+# target_link_libraries(my_executable PRIVATE stringzilla::stringzilla_header)
+# ~~~
+# `add_subdirectory` consumers get the mirror image from the `ALIAS` target in `CMakeLists.txt`.
+#
+# Aliasing a non-GLOBAL imported target - which is what `install(EXPORT)` writes - is only legal from
+# CMake 3.18, and this file runs under the *consumer's* CMake, not ours. Below that, the namespaced
+# spelling still works; only this convenience is skipped, which beats failing the `find_package`.
+if (NOT CMAKE_VERSION VERSION_LESS 3.18)
+    if (NOT TARGET stringzilla_header)
+        add_library(stringzilla_header ALIAS stringzilla::stringzilla_header)
+    endif ()
+endif ()
+
+set(stringzilla_VERSION @PACKAGE_VERSION@)

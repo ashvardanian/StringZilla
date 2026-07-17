@@ -51,7 +51,7 @@
 # * stringzillas_bench_fingerprints_cu20: A benchmark for finding many substrings on GPU.
 #
 # For higher-level language bindings separate build scripts are provided, native to each toolchain.
-cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 project(
     stringzilla
     VERSION 4.6.2
@@ -92,14 +92,11 @@ else ()
     message(STATUS "Pointer size: 32-bit")
 endif ()
 
-# Set a default build type to "Release" if none was specified
+# Set a default build type to "Release" if none was specified - as a plain directory-scope variable,
+# so a subproject build never forces its default into the parent project's cache.
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'Release' as none was specified.")
-    set(CMAKE_BUILD_TYPE
-        Release
-        CACHE STRING "Choose the type of build." FORCE
-    )
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+    set(CMAKE_BUILD_TYPE Release)
 endif ()
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
@@ -199,7 +196,10 @@ foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
     endif ()
     set(sz_to_run_ ${sz_to_compile_})
     string(TOLOWER "${sz_tier_}" sz_token_)
-    if (sz_to_run_ AND SZ_RUN_TIERS_KNOWN AND NOT sz_token_ IN_LIST sz_machine_tokens_)
+    if (sz_to_run_
+        AND SZ_RUN_TIERS_KNOWN
+        AND NOT sz_token_ IN_LIST sz_machine_tokens_
+    )
         set(sz_to_run_ 0)
     endif ()
     if (DEFINED SZ_USE_${sz_tier_}) # The user override wins both verdicts, except past a failed compile probe.
@@ -230,10 +230,14 @@ if (SZ_RUN_TIERS_KNOWN)
 endif ()
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
-set(STRINGZILLA_IS_MAIN_PROJECT OFF)
+set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
 
-if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(STRINGZILLA_IS_MAIN_PROJECT ON)
+# CUDA auto-enables only for top-level builds: a parent project consuming StringZilla for strings
+# should not sprout CUDA targets just because `nvcc` happens to be on the PATH.
+set(STRINGZILLA_DEFAULT_CUDA OFF)
+
+if (STRINGZILLA_IS_MAIN_PROJECT AND STRINGZILLA_CAN_BUILD_CUDA)
+    set(STRINGZILLA_DEFAULT_CUDA ON)
 endif ()
 
 # Installation options
@@ -242,15 +246,27 @@ option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" ${STRINGZILLA_
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
-option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
+option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_DEFAULT_CUDA})
 option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
 
 # ForkUnion supplies the CPU thread pools, consumed through its C API: `forkunion::header` carries the headers, and
 # `forkunion::static` carries the compiled runtime with the capability dispatch (NUMA-aware placement, colocated
 # scheduling, huge pages - all via sysfs and raw syscalls, no libnuma), so no StringZilla translation unit
 # instantiates its C++ core.
-add_subdirectory(forkunion)
-set_target_properties(forkunion_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# A parent project may already provide ForkUnion - as its own submodule or an installed package - and
+# adding the vendored copy on top would collide on target names. The vendored copy is only the
+# fallback, and an unpopulated nested submodule fails with an actionable message instead of a
+# cryptic `add_subdirectory` error.
+if (NOT TARGET forkunion_header)
+    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/forkunion/CMakeLists.txt")
+        message(FATAL_ERROR "The `forkunion` submodule is not populated - run: git submodule update --init --recursive")
+    endif ()
+    add_subdirectory(forkunion)
+endif ()
+
+if (TARGET forkunion_static)
+    set_target_properties(forkunion_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif ()
 
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
 # build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
@@ -310,7 +326,9 @@ include(GNUInstallDirs)
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
 
-if (CMAKE_VERSION VERSION_EQUAL 3.13 OR CMAKE_VERSION VERSION_GREATER 3.13)
+# CTest machinery only for top-level builds: a parent project decides its own testing story, and
+# `add_test` calls below are inert without `enable_testing()`.
+if (STRINGZILLA_IS_MAIN_PROJECT)
     include(CTest)
     enable_testing()
 endif ()
@@ -664,7 +682,7 @@ function (set_architecture_simd_definitions target mode)
         target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
     endif ()
     if (NOT SZ_${mode}_TIERS_KNOWN)
-        return () # No verdicts here — `types.h` auto-detection under the target's own flags decides.
+        return() # No verdicts here — `types.h` auto-detection under the target's own flags decides.
     endif ()
     foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
         target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=${SZ_USE_${sz_tier_}_TO_${mode}}")
@@ -746,7 +764,10 @@ if (STRINGZILLA_BUILD_SHARED)
     define_stringzilla_shared(stringzilla_shared)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
-    target_include_directories(stringzilla_shared PUBLIC include)
+    target_include_directories(
+        stringzilla_shared PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
 
     # Force aggressive inlining for SHA-256 functions to avoid stack overflow in Go CGO (-mno-red-zone) The SHA-256
     # block processor has ~200-350 instructions and must be inlined to avoid nested stack frames
@@ -765,7 +786,10 @@ if (STRINGZILLA_BUILD_SHARED)
         define_stringzilla_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
-        target_include_directories(stringzilla_bare PUBLIC include)
+        target_include_directories(
+            stringzilla_bare PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        )
 
         # For stringzilla_bare, enforce strict C99 standard conformance with `-pedantic`. This ensures the bare build
         # remains strictly standards-compliant without POSIX extensions. Explore `SZ_HAS_POSIX_EXTENSIONS_` macro usage
@@ -826,7 +850,10 @@ function (define_stringzillas_shared target source_file backend_flags)
     # headers and its compiled runtime to both the library and its consumers. The consumer still picks its own ISA
     # via `set_compiler_flags`.
     foreach (variant ${target} ${static})
-        target_include_directories(${variant} PUBLIC include)
+        target_include_directories(
+            ${variant} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        )
         target_link_libraries(${variant} PUBLIC forkunion::static)
         target_compile_definitions(${variant} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
     endforeach ()
@@ -1064,7 +1091,33 @@ endif ()
 # define_stringzillas_shared(stringzillas_rocm_shared "SZ_USE_CUDA=0;SZ_USE_ROCM=1") endif ()
 
 if (STRINGZILLA_INSTALL)
-    if (TARGET stringzilla_header)
+    # The header-only target is the package's heart: export it, so `find_package(stringzilla)` works
+    # after installation and consumers link `stringzilla::stringzilla_header` - mirroring ForkUnion's
+    # packaging story.
+    install(TARGETS stringzilla_header EXPORT stringzillaTargets)
+    install(
+        EXPORT stringzillaTargets
+        FILE stringzillaTargets.cmake
+        NAMESPACE stringzilla::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
+    )
+    include(CMakePackageConfigHelpers)
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/stringzillaConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY AnyNewerVersion
+    )
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stringzillaConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/stringzillaConfig.cmake"
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
+    )
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stringzillaConfig.cmake"
+                  "${CMAKE_CURRENT_BINARY_DIR}/stringzillaConfigVersion.cmake"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
+    )
+
+    if (TARGET stringzilla_shared)
         install(
             TARGETS stringzilla_shared
             ARCHIVE
