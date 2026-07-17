@@ -10,7 +10,6 @@
 #include <thread>  // `std::thread::hardware_concurrency`
 
 #define FU_ENABLE_NUMA 0
-#include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include "stringzillas/fingerprints.hpp"
 
@@ -42,7 +41,6 @@ using ashvardanian::stringzillas::rabin_karp_rolling_hasher;
 using ashvardanian::stringzillas::unified_alloc;
 #endif
 
-namespace fu = fork_union;
 using namespace stringzilla;
 using namespace stringzilla::scripts;
 

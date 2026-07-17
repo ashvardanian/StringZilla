@@ -8,17 +8,13 @@
 #ifndef STRINGZILLAS_SCAFFOLDING_CUH_
 #define STRINGZILLAS_SCAFFOLDING_CUH_
 
-#if !defined(FU_ENABLE_NUMA)
-#define FU_ENABLE_NUMA 0
-#endif
-
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
-#include <variant>        // For `std::variant`
-#include <cstring>        // For `std::memcpy`
-#include <string_view>    // For `std::string_view`
-#include <thread>         // For `std::thread::hardware_concurrency`
-#include <fork_union.hpp> // Fork-join scoped thread pool
+#include <cstring> // For `std::memcpy`
+#include <cassert> // For `assert`
+
+#include <variant>     // For `std::variant`
+#include <string_view> // For `std::string_view`
 
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity
@@ -28,7 +24,6 @@
 #include <stringzillas/similarities.cuh> // Parallel string similarity in CUDA
 #endif
 
-namespace fu = ashvardanian::fork_union;
 namespace sz = ashvardanian::stringzilla;
 namespace szs = ashvardanian::stringzillas;
 
@@ -283,14 +278,14 @@ inline szs::dummy_executor_t get_executor(default_scope_t const &) noexcept { re
 inline sz::cpu_specs_t get_specs(default_scope_t const &) noexcept { return {}; }
 
 struct cpu_scope_t {
-    std::unique_ptr<fu::basic_pool_t> executor_ptr;
+    std::unique_ptr<szs::forkunion_executor_t> executor_ptr;
     sz::cpu_specs_t specs;
 
     cpu_scope_t() = default;
-    cpu_scope_t(std::unique_ptr<fu::basic_pool_t> exec_ptr, sz::cpu_specs_t cpu_specs) noexcept
+    cpu_scope_t(std::unique_ptr<szs::forkunion_executor_t> exec_ptr, sz::cpu_specs_t cpu_specs) noexcept
         : executor_ptr(std::move(exec_ptr)), specs(cpu_specs) {}
 };
-inline fu::basic_pool_t &get_executor(cpu_scope_t &scope) noexcept { return *scope.executor_ptr; }
+inline szs::forkunion_executor_t &get_executor(cpu_scope_t &scope) noexcept { return *scope.executor_ptr; }
 inline sz::cpu_specs_t get_specs(cpu_scope_t const &scope) noexcept { return scope.specs; }
 
 #if SZ_USE_CUDA

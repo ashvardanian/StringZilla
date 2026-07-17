@@ -339,7 +339,7 @@ A CPU slice spreads the cross-product (or the corpus of texts) across a thread p
 A GPU device offloads the whole batch to one CUDA device, where each engine routes string pairs into size-tiered kernels.
 Unified memory is what makes the GPU path seamless: allocate inputs and outputs through the unified allocator, and the same pointers are valid on host and device with no explicit copies.
 
-The underlying C++ engines are templated on an __executor__: `dummy_executor_t` runs serially, `openmp_executor_t` parallelizes through OpenMP, and the fork_union pool (`fu::basic_pool_t`) is the preferred library-grade thread pool.
+The underlying C++ engines are templated on an __executor__: `dummy_executor_t` runs serially, and `forkunion_executor_t` is the preferred library-grade thread pool, wrapping a [ForkUnion](https://github.com/ashvardanian/ForkUnion) pool through its C API so the compiled runtime handles NUMA-aware placement.
 The C ABI hides this choice behind the device scope, picking the right executor for the cores or GPU you requested.
 
 ## Runtime Dispatch and Capabilities

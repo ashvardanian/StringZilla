@@ -15,3 +15,9 @@ runner = "wasmtime -W relaxed-simd=y --dir ."
 
 [target.wasm32-wasip1-threads]
 runner = "wasmtime -W relaxed-simd=y -S threads=y --dir ."
+
+# Resolve `forkunion` from the submodule until its next crates.io release ships the
+# `cargo:include=` metadata and the libnuma-free runtime; registry consumers are unaffected,
+# since this file is not part of the published package.
+[patch.crates-io]
+forkunion = { path = "forkunion" }

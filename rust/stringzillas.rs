@@ -7,6 +7,11 @@ use core::ptr;
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use stringtape::{BytesTape, BytesTapeView, CharsTape, CharsTapeView};
 
+// The `forkunion` crate's build script compiles and links the thread-pool runtime resolving the `fu_*`
+// symbols behind the StringZillas engines; referencing the crate keeps that native library in the final
+// link even though all calls happen on the C++ side.
+use forkunion as _;
+
 // Re-export common types from stringzilla
 pub use crate::stringzilla::{SortedIdx, Status as SzStatus};
 

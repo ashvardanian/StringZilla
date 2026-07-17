@@ -538,7 +538,7 @@ Where vectorization stops being effective, parallelism takes over with the new l
 
 - StringZilla C library w/out dependencies
 - StringZillas parallel extensions:
-  - Parallel C++ algorithms built with [Fork Union](https://github.com/ashvardanian/fork_union)
+  - Parallel C++ algorithms built with [ForkUnion](https://github.com/ashvardanian/ForkUnion)
   - Parallel CUDA algorithms for Nvidia GPUs
   - Parallel ROCm algorithms for AMD GPUs 🔜
 

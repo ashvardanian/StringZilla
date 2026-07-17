@@ -68,15 +68,17 @@ SZ_API_RUNTIME sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, 
                                                            char const **error_message) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
-    // If `cpu_cores` is 0, use all available cores
-    if (cpu_cores == 0) cpu_cores = std::thread::hardware_concurrency();
+    // `cpu_cores == 0` sizes the pool from the ForkUnion topology: the ALLOWED cores, not the raw hardware count.
+    if (cpu_cores == 0) cpu_cores = szs::forkunion_executor_t::allowed_cores_count();
+    if (cpu_cores == 0)
+        return propagate_error(sz::status_t::unknown_k, error_message, "Failed to probe the CPU topology");
 
     // If `cpu_cores` is 1, redirect to default scope
     if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned, error_message);
 
     sz::cpu_specs_t specs;
-    auto executor = std::make_unique<fu::basic_pool_t>();
-    if (!executor->try_spawn(cpu_cores))
+    auto executor = std::make_unique<szs::forkunion_executor_t>();
+    if (executor->try_spawn(cpu_cores) != sz::status_t::success_k)
         return propagate_error(sz::status_t::bad_alloc_k, error_message, "Failed to spawn thread pool");
 
     auto *scope = new (std::nothrow)

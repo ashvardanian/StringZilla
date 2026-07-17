@@ -1,6 +1,6 @@
 // Only the C API umbrella is exposed as a Clang module. The C++ headers
 // (similarities.hpp / fingerprints.hpp) pull in heavy templated dependencies
-// (fork_union, <chrono>, <atomic>) that don't build cleanly as Clang modules
+// (forkunion, <chrono>, <atomic>) that don't build cleanly as Clang modules
 // against current libstdc++, so they stay textual includes.
 module StringZillasC {
     header "stringzillas.h"

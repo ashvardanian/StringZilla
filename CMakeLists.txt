@@ -240,6 +240,13 @@ option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZI
 option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
 option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
 
+# ForkUnion supplies the CPU thread pools, consumed through its C API: `forkunion::header` carries the headers, and
+# `forkunion::static` carries the compiled runtime with the capability dispatch (NUMA-aware placement, colocated
+# scheduling, huge pages - all via sysfs and raw syscalls, no libnuma), so no StringZilla translation unit
+# instantiates its C++ core.
+add_subdirectory(forkunion)
+set_target_properties(forkunion_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
 # build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
 # build_cov --target stringzilla_test_cpp17 -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test_cpp17
@@ -315,7 +322,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     get_target_property(target_type ${target} TYPE)
 
     target_include_directories(${target} PRIVATE test bench)
-    target_include_directories(${target} PRIVATE fork_union/include)
+    target_link_libraries(${target} PRIVATE forkunion::header)
 
     # Set output directory for single-configuration generators (like Make)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
@@ -794,12 +801,10 @@ function (define_stringzillas_shared target source_file backend_flags)
     set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
 
     # Compile settings for the library's own translation units (the OBJECT compilation).
-    target_include_directories(${objects} PRIVATE include fork_union/include)
+    target_include_directories(${objects} PRIVATE include)
+    target_link_libraries(${objects} PRIVATE forkunion::header)
     target_compile_definitions(${objects} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
     target_compile_definitions(${objects} PRIVATE "SZ_AVOID_LIBC=0")
-    # The precompiled per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so
-    # libnuma-free cross-builds (e.g. aarch64) compile (matches the `stringzillas.cuh` default).
-    target_compile_definitions(${objects} PRIVATE "FU_ENABLE_NUMA=0")
     if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${objects} PRIVATE "SZ_DEBUG=0")
     endif ()
@@ -812,11 +817,12 @@ function (define_stringzillas_shared target source_file backend_flags)
     set_architecture_simd_definitions(${objects} COMPILE)
 
     # Usage requirements seen by consumers (tests and benchmarks linking the library). Defining `SZ_DYNAMIC_DISPATCH=1`
-    # makes a consumer extern, rather than re-instantiate, the engines, and fork_union is needed by the extern block in
-    # `similarities.hpp`. The consumer still picks its own ISA via `set_compiler_flags`.
+    # makes a consumer extern, rather than re-instantiate, the engines; `forkunion::static` brings the ForkUnion
+    # headers and its compiled runtime to both the library and its consumers. The consumer still picks its own ISA
+    # via `set_compiler_flags`.
     foreach (variant ${target} ${static})
         target_include_directories(${variant} PUBLIC include)
-        target_include_directories(${variant} INTERFACE fork_union/include)
+        target_link_libraries(${variant} PUBLIC forkunion::static)
         target_compile_definitions(${variant} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
     endforeach ()
 
@@ -846,13 +852,14 @@ function (define_stringzillas_cuda_objects name sources gpu_archs)
                    CUDA_SEPARABLE_COMPILATION OFF
                    CUDA_ARCHITECTURES "${gpu_archs}"
     )
-    target_include_directories(${name} PRIVATE include fork_union/include)
+    target_include_directories(${name} PRIVATE include)
+    target_link_libraries(${name} PRIVATE forkunion::header)
     target_include_directories(
         ${name} SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
                                $<$<BOOL:${STRINGZILLA_CCCL_INCLUDE_DIR}>:${STRINGZILLA_CCCL_INCLUDE_DIR}>
     )
     target_compile_definitions(
-        ${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0" "FU_ENABLE_NUMA=0"
+        ${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0"
     )
     if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
@@ -927,9 +934,8 @@ function (define_stringzillas_cuda_library target kind base_archs hopper_archs)
     # Consumers (tests/benches) extern the engines and link cudart themselves; the static archive does not resolve
     # cudart, so expose it (plus the dynamic-dispatch macro and headers) on the variant's interface.
     target_include_directories(${target} PUBLIC include)
-    target_include_directories(${target} INTERFACE fork_union/include)
     target_compile_definitions(${target} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
-    target_link_libraries(${target} PUBLIC CUDA::cudart Threads::Threads)
+    target_link_libraries(${target} PUBLIC forkunion::static CUDA::cudart Threads::Threads)
 endfunction ()
 
 if (STRINGZILLAS_BUILD_SHARED)

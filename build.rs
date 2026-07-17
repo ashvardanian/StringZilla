@@ -640,17 +640,14 @@ fn stringzillas_base_build(serial_flags: &HashMap<String, bool>) -> cc::Build {
     let mut build = cc::Build::new();
     build
         .include("include")
-        .include("fork_union/include")
         .warnings(false)
         .define("SZ_DYNAMIC_DISPATCH", "1")
         .define("SZ_AVOID_LIBC", "0")
         .define("SZ_DEBUG", "0")
-        // The per-capability providers pull in fork_union directly for `fu::basic_pool_t`; keep NUMA off so the
-        // build does not require libnuma (matches the `stringzillas.cuh` default and the CMake build).
-        .define("FU_ENABLE_NUMA", "0")
         .std("c++20")
         .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
+    build.include(std::env::var("DEP_FORKUNION_INCLUDE").expect("exported by the `forkunion` crate"));
     // Apply the same architecture-specific flags as determined for stringzilla.
     for (flag, enabled) in serial_flags.iter() {
         build.define(flag, if *enabled { "1" } else { "0" });
@@ -769,7 +766,7 @@ fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(
 fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     println!("cargo:rerun-if-changed=c/stringzillas");
     println!("cargo:rerun-if-changed=include/stringzillas");
-    println!("cargo:rerun-if-changed=fork_union/include/fork_union.hpp");
+    println!("cargo:rerun-if-changed=forkunion/include/forkunion.h");
 
     // `cuda` and `rocm` both imply `cpus`. Try the requested GPU backend first; if it can't build (commonly: no GPU
     // toolkit on this machine), fall through to the CPU-only backend so the crate still works.

@@ -3680,18 +3680,16 @@ status_t cross_product_candidate_lanes_parallel_( //
     size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
     size_t const worker_scratch = cross_product_candidate_lanes_scratch_(narrow_kernel, wide_kernel, fallback, queries,
                                                                          candidates, fits_wide, specs);
-    size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
+    size_t const workers = sz_max_of_two(executor.threads_count(), (size_t)1);
     if (status_t status = scratch_buffer.try_resize(worker_scratch * workers); status != status_t::success_k)
         return status;
-    std::atomic<size_t> next_worker {0};
+    using prong_t = typename remove_cvref<executor_type_>::prong_t;
     std::atomic<status_t> error {status_t::success_k};
-    executor.for_slices(cells_count, [&](size_t cell_begin, size_t length) noexcept {
-        if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
-        size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
-        scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(worker * worker_scratch, worker_scratch);
+    executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+        scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(prong.thread * worker_scratch, worker_scratch);
         status_t status = cross_product_candidate_lanes_range_(
-            narrow_kernel, wide_kernel, fallback, queries, candidates, results, cross_kind, cell_begin,
-            cell_begin + length, fits_narrow, fits_wide, empty_cell, slice, specs);
+            narrow_kernel, wide_kernel, fallback, queries, candidates, results, cross_kind, prong.task,
+            prong.task + 1, fits_narrow, fits_wide, empty_cell, slice, specs);
         if (status != status_t::success_k) error.store(status);
     });
     return error.load();

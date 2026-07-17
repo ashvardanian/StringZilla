@@ -616,12 +616,20 @@ STRINGZILLAS_CUDA_PROVIDER_STEMS = [
     "smith_waterman_cuda",
     "smith_waterman_hopper",
 ]
+# The compiled ForkUnion runtime rides along in every StringZillas extension as a host C++ translation unit;
+# `ParallelBuildExt` splits sources by extension, so it never reaches `nvcc`. `FU_WITH_TOPOLOGY=0` keeps the
+# wheels on the flat thread pool: measured on a 2-socket Sapphire Rapids, the topology-aware pool runs small
+# 16-thread jobs 1.8x slower and larger ones at parity, so the single-domain pool is the better default until
+# ForkUnion picks the pool kind from the requested thread count.
+STRINGZILLAS_RUNTIME_SOURCES = ["forkunion/c/forkunion.cpp"]
 STRINGZILLAS_CPU_SOURCES = [
     f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
-]
-STRINGZILLAS_CUDA_SOURCES = [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS] + [
-    f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS
-]
+] + STRINGZILLAS_RUNTIME_SOURCES
+STRINGZILLAS_CUDA_SOURCES = (
+    [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
+    + [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS]
+    + STRINGZILLAS_RUNTIME_SOURCES
+)
 
 ext_modules = []
 entry_points = {}
@@ -650,10 +658,10 @@ elif sz_target == "stringzillas-cpus":
         Extension(
             "stringzillas",
             ["python/stringzillas.c"] + STRINGZILLAS_CPU_SOURCES,
-            include_dirs=["include", "c/stringzillas", "fork_union/include"],
+            include_dirs=["include", "c/stringzillas", "forkunion/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_ENABLE_NUMA", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
         ),
     ]
     command_class = {"build_ext": NumpyBuildExt}
@@ -675,10 +683,10 @@ elif sz_target == "stringzillas-cuda":
         Extension(
             "stringzillas",
             ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
-            include_dirs=["include", "c/stringzillas", "fork_union/include", f"{cuda_home}/include"],
+            include_dirs=["include", "c/stringzillas", "forkunion/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
             extra_link_args=cuda_link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_ENABLE_NUMA", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),
     ]

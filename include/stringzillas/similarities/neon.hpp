@@ -5773,24 +5773,23 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         return status_t::success_k;
     }
 
-    /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
+    /** @brief Scores the cross-product in parallel: uneven per-cell costs ride the work-stealing scheduler. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
     SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
                                          results_type_ &&results, cross_similarities_t cross_kind,
                                          executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
-        size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
+        size_t const workers = sz_max_of_two(executor.threads_count(), (size_t)1);
         if (status_t status = score_scratch_.try_resize(worker_scratch * workers); status != status_t::success_k)
             return status;
-        std::atomic<size_t> next_worker {0};
+        using prong_t = typename remove_cvref<executor_type_>::prong_t;
         std::atomic<status_t> error {status_t::success_k};
-        executor.for_slices(cells_count, [&](size_t cell_begin, size_t length) noexcept {
-            if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
-            size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
-            scratch_space_t slice = scratch_space_t(score_scratch_).subspan(worker * worker_scratch, worker_scratch);
-            status_t status = score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length,
-                                           slice, specs);
+        executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+            scratch_space_t slice =
+                scratch_space_t(score_scratch_).subspan(prong.thread * worker_scratch, worker_scratch);
+            status_t status =
+                score_range_(queries, candidates, results, cross_kind, prong.task, prong.task + 1, slice, specs);
             if (status != status_t::success_k) error.store(status);
         });
         return error.load();
@@ -7079,24 +7078,23 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         return status_t::success_k;
     }
 
-    /** @brief Scores the cross-product in parallel: each worker takes a contiguous slice of the live-cell range. */
+    /** @brief Scores the cross-product in parallel: uneven per-cell costs ride the work-stealing scheduler. */
     template <typename queries_type_, typename candidates_type_, typename results_type_, typename executor_type_>
     SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
                                          results_type_ &&results, cross_similarities_t cross_kind,
                                          executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
         size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
-        size_t const workers = sz_max_of_two(sz_min_of_two(executor.threads_count(), cells_count), (size_t)1);
+        size_t const workers = sz_max_of_two(executor.threads_count(), (size_t)1);
         if (status_t status = score_scratch_.try_resize(worker_scratch * workers); status != status_t::success_k)
             return status;
-        std::atomic<size_t> next_worker {0};
+        using prong_t = typename remove_cvref<executor_type_>::prong_t;
         std::atomic<status_t> error {status_t::success_k};
-        executor.for_slices(cells_count, [&](size_t cell_begin, size_t length) noexcept {
-            if (length == 0) return; // empty slice: no work, and it must not consume a scratch partition
-            size_t const worker = next_worker.fetch_add(1, std::memory_order_relaxed);
-            scratch_space_t slice = scratch_space_t(score_scratch_).subspan(worker * worker_scratch, worker_scratch);
-            status_t status = score_range_(queries, candidates, results, cross_kind, cell_begin, cell_begin + length,
-                                           slice, specs);
+        executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+            scratch_space_t slice =
+                scratch_space_t(score_scratch_).subspan(prong.thread * worker_scratch, worker_scratch);
+            status_t status =
+                score_range_(queries, candidates, results, cross_kind, prong.task, prong.task + 1, slice, specs);
             if (status != status_t::success_k) error.store(status);
         });
         return error.load();

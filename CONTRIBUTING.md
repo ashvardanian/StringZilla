@@ -6,7 +6,7 @@ Depending on the type of contribution, you may need to follow different steps.
 ---
 
 Before building the first time, please pull `git` submodules.
-That's how we bring in `fork_union` and other optional dependencies to test all of the available functionality.
+That's how we bring in `forkunion` and other optional dependencies to test all of the available functionality.
 
 
 ```sh

@@ -10,6 +10,9 @@
 #include <atomic>   // `std::atomic`, `std::memory_order`
 #include <concepts> // `std::convertible_to`, `std::same_as`
 #include <cstdlib>  // `std::malloc`, `std::free`
+#include <memory>   // `std::addressof`
+
+#include <forkunion.h> // `fu_pool_t`, `fu_topology_t`, capability-dispatched parallel loops
 
 #include "stringzilla/types.hpp"
 
@@ -29,6 +32,17 @@ enum bytes_per_cell_t : unsigned {
 struct dummy_mutex_t {
     constexpr void lock() noexcept {}
     constexpr void unlock() noexcept {}
+};
+
+/** @brief Minimal test-and-set spin lock guarding the executors' rare cross-thread merges; `lock_guard`-compatible. */
+class spin_mutex_t {
+    std::atomic<bool> locked_ {false};
+
+  public:
+    void lock() noexcept {
+        while (locked_.exchange(true, std::memory_order_acquire)) {}
+    }
+    void unlock() noexcept { locked_.store(false, std::memory_order_release); }
 };
 
 /**
@@ -107,6 +121,115 @@ struct dummy_executor_t {
     template <typename function_type_>
     void for_threads(function_type_ &&function) noexcept {
         function(0);
+    }
+};
+
+/**
+ *  @brief Adapts a ForkUnion pool, consumed through its C API, to the `executor_like` shape the engines
+ *      are templated on. The compiled ForkUnion runtime performs the capability dispatch (NUMA-aware
+ *      placement, colocated scheduling, huge pages) behind the opaque `fu_pool_t` handle, so consumer
+ *      translation units never instantiate its C++ core.
+ */
+class forkunion_executor_t {
+    fu_topology_t topology_ = nullptr;
+    fu_pool_t pool_ = nullptr;
+
+  public:
+    using prong_t = dummy_prong_t;
+
+    forkunion_executor_t() noexcept = default;
+    forkunion_executor_t(forkunion_executor_t const &) = delete;
+    forkunion_executor_t &operator=(forkunion_executor_t const &) = delete;
+    forkunion_executor_t(forkunion_executor_t &&) = delete;
+    forkunion_executor_t &operator=(forkunion_executor_t &&) = delete;
+
+    ~forkunion_executor_t() noexcept {
+        if (pool_) fu_pool_delete(pool_);
+        if (topology_) fu_topology_delete(topology_);
+    }
+
+    /** @brief Logical cores the process may actually use (affinity mask, cgroup cpuset), per the ForkUnion topology. */
+    static size_t allowed_cores_count() noexcept {
+        fu_topology_t topology = fu_topology_new();
+        if (!topology) return 0;
+        size_t const count = fu_logical_cores_count(topology);
+        fu_topology_delete(topology);
+        return count;
+    }
+
+    /** @brief Spawns @p threads workers (the caller included) over the detected machine topology. */
+    status_t try_spawn(size_t threads) noexcept {
+        topology_ = fu_topology_new();
+        pool_ = fu_pool_new("stringzillas", fu_capabilities_all_k);
+        if (!topology_ || !pool_) return status_t::bad_alloc_k;
+        if (!fu_pool_spawn(topology_, pool_, threads, fu_caller_inclusive_k)) return status_t::bad_alloc_k;
+        return status_t::success_k;
+    }
+
+    size_t threads_count() const noexcept { return fu_pool_threads_count(pool_); }
+    spin_mutex_t make_mutex() const noexcept { return {}; }
+
+    /**
+     *  @brief Calls the @p function for each index from 0 to @p (n) in such
+     *      a way that consecutive elements are likely to be processed by
+     *      the same thread.
+     */
+    template <typename function_type_>
+    void for_n(size_t n, function_type_ &&function) const noexcept {
+        using function_t = typename std::remove_reference<function_type_>::type;
+        fu_pool_for_n(
+            pool_, n,
+            [](fu_lambda_context_t context, size_t task, size_t thread, size_t) noexcept {
+                (*reinterpret_cast<function_t *>(context))(prong_t {task, thread});
+            },
+            const_cast<function_t *>(std::addressof(function)));
+    }
+
+    /**
+     *  @brief Calls the @p function for each index from 0 to @p (n) expecting
+     *      that individual invocations can have drastically different duration,
+     *      so each thread eagerly steals the next index in the range.
+     */
+    template <typename function_type_>
+    void for_n_dynamic(size_t n, function_type_ &&function) const noexcept {
+        using function_t = typename std::remove_reference<function_type_>::type;
+        fu_pool_for_n_dynamic(
+            pool_, n,
+            [](fu_lambda_context_t context, size_t task, size_t thread, size_t) noexcept {
+                (*reinterpret_cast<function_t *>(context))(prong_t {task, thread});
+            },
+            const_cast<function_t *>(std::addressof(function)));
+    }
+
+    /**
+     *  @brief Calls the @p function on each thread propagating 2 indices to the
+     *      function: the inclusive start and the exclusive end of the sub-range
+     *      handled by that thread.
+     */
+    template <typename function_type_>
+    void for_slices(size_t n, function_type_ &&function) const noexcept {
+        using function_t = typename std::remove_reference<function_type_>::type;
+        fu_pool_for_slices(
+            pool_, n,
+            [](fu_lambda_context_t context, size_t first, size_t count, size_t, size_t) noexcept {
+                (*reinterpret_cast<function_t *>(context))(first, first + count);
+            },
+            const_cast<function_t *>(std::addressof(function)));
+    }
+
+    /**
+     *  @brief Executes a function in parallel on the current and all worker threads.
+     *  @param[in] function The callback, receiving the thread index as an argument.
+     */
+    template <typename function_type_>
+    void for_threads(function_type_ &&function) const noexcept {
+        using function_t = typename std::remove_reference<function_type_>::type;
+        fu_pool_for_threads(
+            pool_,
+            [](fu_lambda_context_t context, size_t thread, size_t) noexcept {
+                (*reinterpret_cast<function_t *>(context))(thread);
+            },
+            const_cast<function_t *>(std::addressof(function)));
     }
 };
 

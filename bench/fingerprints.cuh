@@ -5,8 +5,6 @@
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`
 
-#define FU_ENABLE_NUMA 0
-#include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 
@@ -21,6 +19,7 @@ namespace stringzilla {
 namespace scripts {
 
 // StringZillas library symbols available on every backend:
+using ashvardanian::stringzillas::forkunion_executor_t;
 using ashvardanian::stringzillas::basic_rolling_hashers;
 using ashvardanian::stringzillas::buz_rolling_hasher;
 using ashvardanian::stringzillas::floating_rolling_hasher;
@@ -106,7 +105,6 @@ struct fingerprint_callable {
 
 void bench_fingerprints(environment_t const &env) {
 
-    namespace fu = fork_union;
 
 #if SZ_USE_CUDA
     gpu_specs_t specs;
@@ -126,8 +124,9 @@ void bench_fingerprints(environment_t const &env) {
     min_counts_baseline.resize(env.tokens.size()), min_counts_accelerated.resize(env.tokens.size());
 
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
-    alignas(fu::default_alignment_k) fu::basic_pool_t pool;
-    if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
+    forkunion_executor_t pool;
+    if (pool.try_spawn(std::thread::hardware_concurrency()) != status_t::success_k)
+        throw std::runtime_error("Failed to spawn thread pool.");
 
     auto scramble_accelerated_results = [&]() {
         std::shuffle(min_hashes_accelerated.begin(), min_hashes_accelerated.end(), global_random_generator());
@@ -207,7 +206,7 @@ void bench_fingerprints(environment_t const &env) {
 #endif // SZ_USE_CUDA
 
     // Perform the benchmarks, passing the dictionary to the engines
-    auto basic_rolling_f64_serial_call = fingerprint_callable<basic_rolling_f64_serial_t, fu::basic_pool_t &>(
+    auto basic_rolling_f64_serial_call = fingerprint_callable<basic_rolling_f64_serial_t, forkunion_executor_t &>(
         tape, min_hashes_baseline, min_counts_baseline, *basic_rolling_f64_serial, pool);
     bench_result_t basic_rolling_f64_serial_result =
         bench_nullary(env, "basic_rolling_f64_serial", basic_rolling_f64_serial_call).log();
@@ -216,31 +215,31 @@ void bench_fingerprints(environment_t const &env) {
     // Only the CUDA backend consumes this as its equality reference, so guard it to keep CPU-only builds free
     // of an unused-but-set variable under `-Werror`.
 #if SZ_USE_CUDA
-    auto basic_rabin_u64_serial_call = fingerprint_callable<basic_rabin_u64_serial_t, fu::basic_pool_t &>(
+    auto basic_rabin_u64_serial_call = fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &>(
         tape, min_hashes_baseline, min_counts_baseline, *basic_rabin_u64_serial, pool);
 #endif // SZ_USE_CUDA
 
     // Semi-serial variants
     bench_nullary(env, "basic_rolling_f32_serial",
-                  fingerprint_callable<basic_rolling_f32_serial_t, fu::basic_pool_t &>(
+                  fingerprint_callable<basic_rolling_f32_serial_t, forkunion_executor_t &>(
                       tape, min_hashes_accelerated, min_counts_accelerated, *basic_rolling_f32_serial, pool))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
     bench_nullary(env, "basic_rabin_u64_serial",
-                  fingerprint_callable<basic_rabin_u64_serial_t, fu::basic_pool_t &>(
+                  fingerprint_callable<basic_rabin_u64_serial_t, forkunion_executor_t &>(
                       tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_serial, pool))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
     bench_nullary(env, "basic_buz_u32_serial",
-                  fingerprint_callable<basic_buz_u32_serial_t, fu::basic_pool_t &>(
+                  fingerprint_callable<basic_buz_u32_serial_t, forkunion_executor_t &>(
                       tape, min_hashes_accelerated, min_counts_accelerated, *basic_buz_u32_serial, pool)) //
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
     bench_nullary(env, "basic_multiply_u32_serial",
-                  fingerprint_callable<basic_multiply_u32_serial_t, fu::basic_pool_t &>(
+                  fingerprint_callable<basic_multiply_u32_serial_t, forkunion_executor_t &>(
                       tape, min_hashes_accelerated, min_counts_accelerated, *basic_multiply_u32_serial, pool))
         .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
@@ -270,7 +269,7 @@ void bench_fingerprints(environment_t const &env) {
     bench_result_t floating_serial_result =                                                    //
         bench_nullary(                                                                         //
             env, "floating_serial", basic_rolling_f64_serial_call,                             //
-            fingerprint_callable<floating_serial_t, fu::basic_pool_t &>(                       //
+            fingerprint_callable<floating_serial_t, forkunion_executor_t &>(                       //
                 tape, min_hashes_accelerated, min_counts_accelerated, *floating_serial, pool), //
             callable_no_op_t {},                                                               // preprocessing
             fingerprints_equality_t {})                                                        // equality check
@@ -280,7 +279,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_HASWELL
     bench_nullary(                                                                          //
         env, "floating_haswell", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_haswell_t, fu::basic_pool_t &>(                       //
+        fingerprint_callable<floating_haswell_t, forkunion_executor_t &>(                       //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_haswell, pool), //
         callable_no_op_t {},                                                                // preprocessing
         fingerprints_equality_t {})                                                         // equality check
@@ -291,7 +290,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     bench_nullary(                                                                          //
         env, "floating_skylake", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_skylake_t, fu::basic_pool_t &>(                       //
+        fingerprint_callable<floating_skylake_t, forkunion_executor_t &>(                       //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_skylake, pool), //
         callable_no_op_t {},                                                                // preprocessing
         fingerprints_equality_t {})                                                         // equality check
@@ -302,7 +301,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_NEON
     bench_nullary(                                                                       //
         env, "floating_neon", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_neon_t, fu::basic_pool_t &>(                       //
+        fingerprint_callable<floating_neon_t, forkunion_executor_t &>(                       //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_neon, pool), //
         callable_no_op_t {},                                                             // preprocessing
         fingerprints_equality_t {})                                                      // equality check
