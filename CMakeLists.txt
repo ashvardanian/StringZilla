@@ -126,7 +126,8 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|RISCV64")
     set(SZ_IS_64BIT_RISCV_ TRUE)
     message(STATUS "Platform: RISC-V 64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
-elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64")
+elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64|loong64|LOONG64")
+    # "loongarch64" is the GNU triple and `uname -m` spelling; "loong64" is the Debian/dpkg port name.
     set(SZ_IS_64BIT_LOONGARCH_ TRUE)
     message(STATUS "Platform: LoongArch64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
@@ -162,6 +163,10 @@ elseif (
 )
     include(cmake/sz_wasm_isa_probes.cmake)
 else ()
+    # Unknown architecture: no SIMD tier probes, but the shared probe module must still load so the
+    # `sz_runtime_detectable_` / `sz_machine_capabilities_` calls below resolve and configuration
+    # degrades to a serial-only build instead of failing.
+    include(cmake/sz_isa_probe.cmake)
     set(SZ_ISA_TIERS "")
 endif ()
 

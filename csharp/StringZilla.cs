@@ -1280,7 +1280,9 @@ internal static unsafe partial class Native {
             Architecture.X64 => "x64",
             Architecture.Arm64 => "arm64",
             Architecture.X86 => "x86",
-            _ => "x64",
+            // Ppc64le, LoongArch64, RiscV64, S390x, ... - the enum names lowercase into the matching RID arch,
+            // so an unlisted architecture resolves to its own native directory instead of masquerading as x64.
+            _ => RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
         };
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return $"win-{arch}";
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return $"osx-{arch}";
