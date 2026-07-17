@@ -122,4 +122,26 @@ if [ -n "$frozen_fuzz" ]; then
   exit 1
 fi
 
+# Serial bit-op helpers and raw compiler builtins inside ISA-specific kernel files are a symptom of not
+# leveraging the platform: masks were materialized into a scalar just to count or scan them, when native
+# mask/lane instructions do it in place (RVV `vcpop.m`/`vfirst.m`, x86 `popcnt` on a fresh movemask is fine
+# but a `k`-register `kortest`/`vpopcnt` path may be cheaper, NEON `cnt`+`addv`). `sz_u64_clz` stays exempt:
+# find-last-set has no mask-native counterpart on any of our targets.
+serial_bitops=$(git diff --cached --no-color -U0 \
+  -- 'include/stringzilla/*/westmere.h' 'include/stringzilla/*/goldmont.h' 'include/stringzilla/*/haswell.h' \
+     'include/stringzilla/*/skylake.h' 'include/stringzilla/*/icelake.h' 'include/stringzilla/*/neon.h' \
+     'include/stringzilla/*/sve.h' 'include/stringzilla/*/sve2.h' 'include/stringzilla/*/rvv.h' \
+     'include/stringzilla/*/rvvcrypto.h' 'include/stringzilla/*/v128.h' 'include/stringzilla/*/lasx.h' \
+     'include/stringzilla/*/powervsx.h' 'include/stringzillas/*/*.hpp' ':(exclude)include/stringzillas/*/serial.hpp' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E 'sz_u(32|64)_(popcount|ctz)|__builtin_(popcount|ctz|clz|ffs|parity)' || true)
+if [ -n "$serial_bitops" ]; then
+  echo "pre-commit: serial bit-op helper or raw __builtin_* in a staged ISA kernel file." >&2
+  echo "Prefer the native mask/lane instruction (vcpop.m / vfirst.m on RVV, kortest / popcnt-on-movemask on x86," >&2
+  echo "cnt+addv on NEON) over materializing a mask into a scalar just to count or scan it:" >&2
+  echo "$serial_bitops" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
 exit 0
