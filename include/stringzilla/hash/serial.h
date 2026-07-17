@@ -332,7 +332,19 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_align
 SZ_HELPER_AUTO void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
     // One of the ridiculous things about x86, the `bsrli` instruction requires its operand to be an immediate.
     // On GCC and Clang, we could use the provided `__int128` type, but MSVC doesn't support it.
-    // So we need to emulate it with 2x 64-bit shifts.
+    // So we need to emulate it with 2x 64-bit shifts. The contract is a BYTE-ARRAY shift - byte `i` receives
+    // byte `i + shift_bytes` - so the 64-bit lane shifts mirror between endiannesses: moving bytes down in
+    // memory order is a right shift of little-endian lanes but a left shift of big-endian ones.
+#if SZ_IS_BIG_ENDIAN_
+    if (shift_bytes >= 8) {
+        vec->u64s[0] = (vec->u64s[1] << (shift_bytes - 8) * 8);
+        vec->u64s[1] = (0);
+    }
+    else if (shift_bytes) { //! If `shift_bytes == 0`, the shift would cause UB.
+        vec->u64s[0] = (vec->u64s[0] << shift_bytes * 8) | (vec->u64s[1] >> (8 - shift_bytes) * 8);
+        vec->u64s[1] = (vec->u64s[1] << shift_bytes * 8);
+    }
+#else
     if (shift_bytes >= 8) {
         vec->u64s[0] = (vec->u64s[1] >> (shift_bytes - 8) * 8);
         vec->u64s[1] = (0);
@@ -341,6 +353,7 @@ SZ_HELPER_AUTO void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int sh
         vec->u64s[0] = (vec->u64s[0] >> shift_bytes * 8) | (vec->u64s[1] << (8 - shift_bytes) * 8);
         vec->u64s[1] = (vec->u64s[1] >> shift_bytes * 8);
     }
+#endif
 }
 
 SZ_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) {
