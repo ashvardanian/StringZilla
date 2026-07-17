@@ -71,8 +71,10 @@ SZ_HELPER_AUTO int sz_utf8_word_break_local_decision_rvv_(sz_u8_t prev_prop, sz_
     if (after_raw == sz_utf8_word_break_newline_k || after_raw == sz_utf8_word_break_cr_k ||
         after_raw == sz_utf8_word_break_lf_k)
         return 1;
-    // WB3c: ZWJ x (anything)
-    if (prev_prop == sz_utf8_word_break_zwj_k) return 0;
+    // WB4: Extend/Format/ZWJ attach to the preceding element - never a break before them.
+    if (sz_utf8_word_break_is_ignorable_(after_raw)) return 0;
+    // WB3c: ZWJ x Extended_Pictographic needs the raw pictographic check -> consult serial.
+    if (prev_prop == sz_utf8_word_break_zwj_k) return -1;
 
     // From here serial uses the WB4-effective `after_prop`.
     int prev_ah = (prev_prop == sz_utf8_word_break_aletter_k || prev_prop == sz_utf8_word_break_hebrew_letter_k);
@@ -133,6 +135,12 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_word_break_decision_at_rvv_(sz_cptr_t text, sz_
     sz_u8_t after_raw = sz_rune_word_break_property(sz_utf8_next_rune_(text, length, &after_position));
     sz_u8_t after_prop = sz_utf8_word_break_effective_property_(text, length, position, (sz_size_t *)0);
     int decision = sz_utf8_word_break_local_decision_rvv_(prev_prop, after_raw, after_prop);
+    // WB3c rides RAW adjacency (the previous element's LAST codepoint being a ZWJ, U+200D = E2 80 8D),
+    // invisible to the WB4-effective `prev_prop`; a ZWJ immediately behind `position` can only suppress
+    // a break, so a local "break" verdict defers to the full oracle.
+    if (decision > 0 && position >= 3 && (sz_u8_t)text[position - 3] == 0xE2 && (sz_u8_t)text[position - 2] == 0x80 &&
+        (sz_u8_t)text[position - 1] == 0x8D)
+        decision = -1;
     return (decision < 0) ? sz_utf8_is_word_boundary_serial(text, length, position) : (sz_bool_t)decision;
 }
 
