@@ -629,6 +629,21 @@ SZ_HELPER_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
     return carry;
 }
 
+/** @brief  Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64 lane
+ *          masks - the mask-domain twin of the per-ISA `complete_limit` helpers, for back-ends that carry their
+ *          window state as scalars. Never below 1 when the window is non-empty. */
+SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, sz_u64_t start_bytes,
+                                                             sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                             sz_u64_t four_byte_starts, sz_bool_t more_text) {
+    if (!more_text) return loaded;
+    sz_u64_t const straddle = ((two_byte_starts & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
+                               (three_byte_starts & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
+                               (four_byte_starts & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
+                              start_bytes;
+    sz_size_t const limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+    return limit > 0 ? limit : loaded;
+}
+
 /** @brief Per-lane class/side membership of one decoded 64-byte window, precomputed by a per-ISA extractor so the
  *         portable rule engine sources every mask from `sz_u64_t` words without touching the codepoint vectors. */
 typedef struct sz_line_break_frame_t {

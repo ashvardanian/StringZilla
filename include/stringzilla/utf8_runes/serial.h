@@ -73,6 +73,24 @@ SZ_HELPER_AUTO sz_rune_length_t sz_rune_decode(sz_cptr_t utf8, sz_cptr_t utf8_en
  *         @pre `[utf8, utf8_end)` does not begin a well-formed rune (`sz_rune_decode` returned `sz_rune_invalid_k`).
  *         Shares `sz_utf8_first_continuation_ok_`/`sz_utf8_is_continuation_` with `sz_rune_decode` so the two never
  *         disagree on where a sequence stops being well-formed. */
+/** @brief  Emit one `(start, length)` segment per set boundary lane of @p boundary (ascending), honoring
+ *          @p capacity and the carried previous boundary in @p previous_io - the portable scalar twin of the
+ *          per-ISA `drain_forward` leaves, shared by back-ends that carry their window state as `sz_u64_t` masks. */
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_serial_( //
+    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_size_t *previous_io) {
+    sz_size_t previous = *previous_io;
+    for (; boundary && produced < capacity; boundary &= boundary - 1) {
+        sz_size_t const position = base + (sz_size_t)sz_u64_ctz(boundary);
+        starts[produced] = previous;
+        lengths[produced] = position - previous;
+        previous = position;
+        ++produced;
+    }
+    *previous_io = previous;
+    return produced;
+}
+
 SZ_HELPER_AUTO sz_size_t sz_utf8_maximal_subpart_(sz_cptr_t utf8, sz_cptr_t utf8_end) {
     sz_u8_t const *u = (sz_u8_t const *)utf8;
     sz_size_t const available = (sz_size_t)((sz_u8_t const *)utf8_end - u);

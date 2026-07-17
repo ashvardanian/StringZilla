@@ -73,6 +73,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t l
                                                      sz_size_t *bytes_consumed);
 #endif
 
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_linebreaks */
+SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *starts,
+                                                  sz_size_t *lengths, sz_size_t capacity, sz_size_t *bytes_consumed);
+#endif
+
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
@@ -80,6 +86,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake(sz_cptr_t text, sz_size_t l
 #include "stringzilla/utf8_linebreaks/haswell.h"
 #include "stringzilla/utf8_linebreaks/neon.h"
 #include "stringzilla/utf8_linebreaks/icelake.h"
+#include "stringzilla/utf8_linebreaks/sve2.h"
 
 #pragma region Dynamic Dispatch
 
@@ -92,6 +99,8 @@ SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz
     return sz_utf8_linebreaks_icelake(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
     return sz_utf8_linebreaks_haswell(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_linebreaks_sve2(text, length, starts, lengths, capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_linebreaks_neon(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
 #else

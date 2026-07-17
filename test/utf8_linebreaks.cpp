@@ -56,6 +56,9 @@ static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
 #if SZ_USE_NEON
     {"neon", sz_utf8_linebreaks_neon},
 #endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_linebreaks_sve2},
+#endif
 };
 
 /** @brief Known-answer line-break vectors through dispatched, serial, and each ISA backend + the C++ range. */

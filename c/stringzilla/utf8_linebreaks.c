@@ -21,6 +21,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_linebreaks_update_(sz_capability_t ca
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_linebreaks = sz_utf8_linebreaks_icelake; }
 #endif
+#if SZ_USE_SVE2
+    // Wider-than-NEON registers are where the scalable front wins; measure before un-gating at 128 bits.
+    if ((caps & sz_cap_sve2_k) && sz_sve_wider_than_neon_()) { impl->utf8_linebreaks = sz_utf8_linebreaks_sve2; }
+#endif
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_linebreaks(sz_cptr_t text, sz_size_t length, sz_size_t *line_starts,
