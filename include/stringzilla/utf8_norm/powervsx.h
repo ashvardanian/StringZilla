@@ -47,8 +47,10 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
     sz_u8_t previous_canonical_combining_class = 0;
 
-    __vector unsigned char const table_low_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 0);   // entries [0,31]
-    __vector unsigned char const table_high_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 32); // entries [32,63]
+    __vector unsigned char const table_low_0_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 0);   // entries [0,15]
+    __vector unsigned char const table_low_1_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 16);  // entries [16,31]
+    __vector unsigned char const table_high_0_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 32); // entries [32,47]
+    __vector unsigned char const table_high_1_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 48); // entries [48,63]
     __vector unsigned char const high_bit_vec = vec_splats((unsigned char)0x80);
     __vector unsigned char const continuation_mask_vec = vec_splats((unsigned char)0xC0);
     __vector unsigned char const continuation_pattern_vec = vec_splats((unsigned char)0x80);
@@ -69,11 +71,12 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_
         __vector unsigned char continuation_vec = (__vector unsigned char)vec_cmpeq(
             vec_and(bytes_vec, continuation_mask_vec), continuation_pattern_vec);
         __vector unsigned char is_lead_vec = vec_andc(non_ascii_vec, continuation_vec);
-        // 64-entry lookup: `vec_perm` selects from a 32-byte concatenation by the low 5 bits of each index,
-        // so cover [0,31] and [32,63] with two `vec_perm` and merge on the index's bit 5 (>= 32) via `vec_sel`.
+        // 64-entry lookup: `vec_perm` selects from the 32-byte concatenation of its two table operands by the
+        // low 5 bits of each index, so cover [0,31] and [32,63] with two `vec_perm` over adjacent 16-entry
+        // quarters and merge on the index's bit 5 (>= 32) via `vec_sel`.
         __vector unsigned char index_vec = vec_and(bytes_vec, low_six_bits_vec);
-        __vector unsigned char families_low_vec = vec_perm(table_low_vec, table_low_vec, index_vec);
-        __vector unsigned char families_high_vec = vec_perm(table_high_vec, table_high_vec, index_vec);
+        __vector unsigned char families_low_vec = vec_perm(table_low_0_vec, table_low_1_vec, index_vec);
+        __vector unsigned char families_high_vec = vec_perm(table_high_0_vec, table_high_1_vec, index_vec);
         __vector unsigned char select_high_vec = (__vector unsigned char)vec_cmpge(index_vec, quadrant_select_vec);
         __vector unsigned char families_vec = vec_sel(families_low_vec, families_high_vec, select_high_vec);
         __vector unsigned char flagged_vec = vec_and(
