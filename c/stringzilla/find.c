@@ -82,11 +82,20 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
         // 128-bit vector length the NEON kernels stay faster, so keep them.
         if (sz_sve_wider_than_neon_()) {
             impl->find = sz_find_sve;
-            // TODO: impl->rfind = sz_rfind_sve;
+            impl->rfind = sz_rfind_sve;
         }
 
         impl->find_byte = sz_find_byte_sve;
         impl->rfind_byte = sz_rfind_byte_sve;
+    }
+#endif
+
+#if SZ_USE_SVE2
+    if (caps & sz_cap_sve2_k) {
+        // One `MATCH` covers a whole small set per instruction; the dense-set `svtbl` path matches NEON's
+        // two-table bit test with predicated tails, so SVE2 wins at every vector length.
+        impl->find_byteset = sz_find_byteset_sve2;
+        impl->rfind_byteset = sz_rfind_byteset_sve2;
     }
 #endif
 

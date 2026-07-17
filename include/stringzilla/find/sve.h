@@ -154,6 +154,50 @@ SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_len
     }
 }
 
+SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length) {
+    // Empty needle matches at the end.
+    if (!needle_length) return haystack + haystack_length;
+    if (haystack_length < needle_length) return SZ_NULL_CHAR;
+    if (needle_length == 1) return sz_rfind_byte_sve(haystack, haystack_length, needle);
+
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
+    sz_u8_t const n_first = ((sz_u8_t *)needle)[offset_first];
+    sz_u8_t const n_mid = ((sz_u8_t *)needle)[offset_mid];
+    sz_u8_t const n_last = ((sz_u8_t *)needle)[offset_last];
+
+    // Walk candidate blocks from the end; within a block the matches are consumed in REVERSED lane order, so
+    // the candidate loop is the forward `sz_find_sve` loop over the reversed match predicate.
+    sz_size_t const vector_bytes = svcntb();
+    sz_size_t const candidates = haystack_length - needle_length + 1;
+    sz_size_t progress = 0;
+    do {
+        svbool_t const pred = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)candidates);
+        svbool_t const backward_mask = svrev_b8(pred);
+        sz_cptr_t const block = haystack + candidates - progress - vector_bytes;
+        svuint8_t const hay_first = svld1(backward_mask, (sz_u8_t const *)(block + offset_first));
+        svuint8_t const hay_mid = svld1(backward_mask, (sz_u8_t const *)(block + offset_mid));
+        svuint8_t const hay_last = svld1(backward_mask, (sz_u8_t const *)(block + offset_last));
+        svbool_t const cmp0 = svcmpeq_n_u8(backward_mask, hay_first, n_first);
+        svbool_t const cmp1 = svcmpeq_n_u8(backward_mask, hay_mid, n_mid);
+        svbool_t const cmp2 = svcmpeq_n_u8(backward_mask, hay_last, n_last);
+        svbool_t matches = svrev_b8(svand_b_z(cmp0, cmp1, cmp2)); //? A 3-way AND, reversed to walk back-to-front.
+        while (svptest_any(pred, matches)) {
+            svbool_t const pred_to_skip = svbrkb_b_z(pred, matches);
+            sz_size_t const backward_offset = svcntp_b8(pred, pred_to_skip);
+            sz_size_t const candidate = candidates - progress - backward_offset - 1;
+            if (sz_equal_sve(haystack + candidate, needle, needle_length)) return haystack + candidate;
+            // If it doesn't match - clear the first (i.e. rightmost) bit and continue.
+            svbool_t const first_match = svpnext_b8(svptrue_b8(), pred_to_skip);
+            matches = svbic_b_z(svptrue_b8(), matches, first_match);
+        }
+        progress += vector_bytes;
+    } while (progress < candidates);
+    return SZ_NULL_CHAR;
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)

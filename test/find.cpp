@@ -812,9 +812,12 @@ static search_backend_t const find_backends[] = {
 #endif
 };
 
-/** @brief Backward substring-search (`sz_rfind`) backends; same tiers as forward minus SVE. */
+/** @brief Backward substring-search (`sz_rfind`) backends; same tiers as forward. */
 static search_backend_t const rfind_backends[] = {
     {"dispatched", sz_rfind},
+#if SZ_USE_SVE
+    {"sve", sz_rfind_sve},
+#endif
 #if SZ_USE_WESTMERE
     {"westmere", sz_rfind_westmere},
 #endif
@@ -856,6 +859,9 @@ static byteset_backend_t const find_byteset_backends[] = {
 #if SZ_USE_NEON
     {"neon", sz_find_byteset_neon},
 #endif
+#if SZ_USE_SVE2
+    {"sve2", sz_find_byteset_sve2},
+#endif
 #if SZ_USE_V128
     {"v128", sz_find_byteset_v128},
 #endif
@@ -884,6 +890,9 @@ static byteset_backend_t const rfind_byteset_backends[] = {
 #endif
 #if SZ_USE_NEON
     {"neon", sz_rfind_byteset_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_rfind_byteset_sve2},
 #endif
 #if SZ_USE_V128
     {"v128", sz_rfind_byteset_v128},

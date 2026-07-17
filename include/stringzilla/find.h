@@ -203,6 +203,9 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_l
 /** @copydoc sz_find */
 SZ_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length);
+/** @copydoc sz_rfind */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                       sz_size_t needle_length);
 #endif
 
 #if SZ_USE_V128RELAXED
@@ -310,6 +313,13 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 /** @copydoc sz_rfind_byteset */
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+#endif
+
+#if SZ_USE_SVE2
+/** @copydoc sz_find_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_V128RELAXED
@@ -429,6 +439,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t haystack, sz_size_t h
 #include "stringzilla/find/icelake.h"
 #include "stringzilla/find/neon.h"
 #include "stringzilla/find/sve.h"
+#include "stringzilla/find/sve2.h"
 #include "stringzilla/find/v128relaxed.h"
 #include "stringzilla/find/v128.h"
 #include "stringzilla/find/rvv.h"
@@ -540,6 +551,8 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length,
     return sz_rfind_haswell(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_WESTMERE
     return sz_rfind_westmere(haystack, haystack_length, needle, needle_length);
+#elif SZ_USE_SVE // ? actually faster than NEON on most machines
+    return sz_rfind_sve(haystack, haystack_length, needle, needle_length);
 #elif SZ_USE_NEON
     return sz_rfind_neon(haystack, haystack_length, needle, needle_length);
 #else
@@ -562,6 +575,8 @@ SZ_API_RUNTIME sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_by
     return sz_find_byteset_icelake(text, length, set);
 #elif SZ_USE_HASWELL
     return sz_find_byteset_haswell(text, length, set);
+#elif SZ_USE_SVE2 // ? `MATCH` covers a whole small set per instruction
+    return sz_find_byteset_sve2(text, length, set);
 #elif SZ_USE_NEON
     return sz_find_byteset_neon(text, length, set);
 #else
@@ -584,6 +599,8 @@ SZ_API_RUNTIME sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_b
     return sz_rfind_byteset_icelake(text, length, set);
 #elif SZ_USE_HASWELL
     return sz_rfind_byteset_haswell(text, length, set);
+#elif SZ_USE_SVE2 // ? `MATCH` covers a whole small set per instruction
+    return sz_rfind_byteset_sve2(text, length, set);
 #elif SZ_USE_NEON
     return sz_rfind_byteset_neon(text, length, set);
 #else

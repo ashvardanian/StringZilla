@@ -231,6 +231,9 @@ void bench_substring_search(environment_t const &env) {
     bench_unary(env, "sz_find_sve", base_call,
                 callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<sz_find_sve>>(env))
         .log(base);
+    bench_unary(env, "sz_rfind_sve", base_call,
+                callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<sz_rfind_sve>>(env))
+        .log(base_reverse);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_find_neon", base_call,
@@ -672,6 +675,16 @@ void bench_byteset_search(environment_t const &env) {
         .log(base);
     bench_unary(env, "sz_rfind_byteset_neon", base_call,
                 callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_neon>,
+                                            sz::byteset>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_find_byteset_sve2", base_call,
+                callable_for_byteset_search<sz::find_matches_view, matcher_from_sz_find_byteset<sz_find_byteset_sve2>,
+                                            sz::byteset>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byteset_sve2", base_call,
+                callable_for_byteset_search<sz::rfind_matches_view, matcher_from_sz_find_byteset<sz_rfind_byteset_sve2>,
                                             sz::byteset>(env))
         .log(base_reverse);
 #endif

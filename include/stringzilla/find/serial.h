@@ -95,6 +95,22 @@ SZ_HELPER_AUTO void sz_locate_needle_anomalies_( //
     }
 }
 
+/** @brief  Number of byte values present in @p set - four branchless word popcounts. */
+SZ_HELPER_INLINE sz_size_t sz_byteset_population_serial_(sz_byteset_t const *set) {
+    return (sz_size_t)(sz_u64_popcount(set->_u64s[0]) + sz_u64_popcount(set->_u64s[1]) +
+                       sz_u64_popcount(set->_u64s[2]) + sz_u64_popcount(set->_u64s[3]));
+}
+
+/** @brief  Unpack the member byte values of @p set into @p members in ascending order; the caller has already
+ *          sized the destination from @ref sz_byteset_population_serial_. Shared by the ISA back-ends whose
+ *          small-set fast paths broadcast the members as a needle segment. */
+SZ_HELPER_INLINE void sz_byteset_members_serial_(sz_byteset_t const *set, sz_u8_t *members) {
+    sz_size_t filled = 0;
+    for (sz_size_t word_index = 0; word_index != 4; ++word_index)
+        for (sz_u64_t word_bits = set->_u64s[word_index]; word_bits; word_bits &= word_bits - 1)
+            members[filled++] = (sz_u8_t)(word_index * 64 + sz_u64_ctz(word_bits));
+}
+
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_byteset_contains(set, *text)) return text;
