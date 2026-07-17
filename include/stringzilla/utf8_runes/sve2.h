@@ -617,6 +617,81 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_sve2_( //
             }
         }
 
+        // Third clean lane, "ASCII + 2-byte + 3-byte" mixed: scripts like Vietnamese interleave all three widths
+        // in one chunk, declining both specialized lanes above; the same coverage algebra proves the mix with the
+        // owed-lane smear built from both lead kinds. Reaching here already implies 3-byte leads are present.
+        svbool_t const mixed_clean_b8x = svorr_b_z(loaded_b8x, ascii_b8x, svorr_b_z(loaded_b8x, lead2_b8x, lead3_b8x));
+        if (!svptest_any(decodable_b8x, svbic_b_z(decodable_b8x, decodable_starts_b8x, mixed_clean_b8x))) {
+            svuint8_t const lead2_u8x = svdup_u8_z(lead2_b8x, 1);
+            svuint8_t const lead3_u8x = svdup_u8_z(lead3_b8x, 1);
+            svuint8_t const owe1_u8x = svorr_u8_x(all_b8x, lead2_u8x, lead3_u8x);
+            svuint8_t const covered_u8x = svorr_u8_x(
+                all_b8x,
+                svorr_u8_x(all_b8x,
+                           sz_utf8_shift_value_up_pair_sve2_(carry_step2_u8x, owe1_u8x, 1, lane_iota_u8x,
+                                                             (sz_u8_t)chunk_bytes),
+                           sz_utf8_shift_value_up_pair_sve2_(carry_step3_u8x, lead3_u8x, 2, lane_iota_u8x,
+                                                             (sz_u8_t)chunk_bytes)),
+                sz_utf8_shift_value_up_pair_sve2_(carry_step4_u8x, zeros_u8x, 3, lane_iota_u8x, (sz_u8_t)chunk_bytes));
+            svbool_t const mismatch_b8x = sveor_b_z(decodable_b8x, is_continuation_b8x,
+                                                    svcmpne_n_u8(all_b8x, covered_u8x, 0));
+            svuint8_t const down2_u8x = svext_u8(cont_cur_u8x, cont_peek_u8x, 2);
+            svbool_t const incomplete_b8x = svorr_b_z(
+                decodable_b8x, svand_b_z(decodable_b8x, lead2_b8x, svcmpeq_n_u8(all_b8x, down1_u8x, 0)),
+                svand_b_z(
+                    decodable_b8x, lead3_b8x,
+                    svorr_b_z(all_b8x, svcmpeq_n_u8(all_b8x, down1_u8x, 0), svcmpeq_n_u8(all_b8x, down2_u8x, 0))));
+            svbool_t const bounds_bad_b8x = svorr_b_z(decodable_b8x,
+                                                      svand_b_z(decodable_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xE0),
+                                                                svcmplt_n_u8(all_b8x, next1_u8x, 0xA0)),
+                                                      svand_b_z(decodable_b8x, svcmpeq_n_u8(all_b8x, bytes_u8x, 0xED),
+                                                                svcmpge_n_u8(all_b8x, next1_u8x, 0xA0)));
+            if (!svptest_any(decodable_b8x, mismatch_b8x) && !svptest_any(decodable_b8x, incomplete_b8x) &&
+                !svptest_any(decodable_b8x, bounds_bad_b8x)) {
+                svuint8_t const next2_u8x = svext_u8(bytes_u8x, peek_u8x, 2);
+                svuint8_t const two_lo_u8x = svorr_u8_x(
+                    all_b8x, svand_n_u8_x(all_b8x, svlsl_n_u8_x(all_b8x, bytes_u8x, 6), 0xC0),
+                    svand_n_u8_x(all_b8x, next1_u8x, 0x3F));
+                svuint8_t const three_lo_u8x = svorr_u8_x(
+                    all_b8x, svand_n_u8_x(all_b8x, svlsl_n_u8_x(all_b8x, next1_u8x, 6), 0xC0),
+                    svand_n_u8_x(all_b8x, next2_u8x, 0x3F));
+                svuint8_t const three_hi_u8x = svorr_u8_x(
+                    all_b8x, svlsl_n_u8_x(all_b8x, svand_n_u8_x(all_b8x, bytes_u8x, 0x0F), 4),
+                    svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, next1_u8x, 2), 0x0F));
+                svuint8_t const cp_lo_u8x = svsel_u8(lead3_b8x, three_lo_u8x,
+                                                     svsel_u8(lead2_b8x, two_lo_u8x, bytes_u8x));
+                svuint8_t const cp_hi_u8x = svsel_u8(
+                    lead3_b8x, three_hi_u8x, svand_n_u8_z(lead2_b8x, svlsr_n_u8_x(all_b8x, bytes_u8x, 2), 0x07));
+                svuint8_t const lengths_u8x = svadd_u8_x(all_b8x, svdup_n_u8(1),
+                                                         svadd_u8_x(all_b8x, owe1_u8x, lead3_u8x));
+                if (svptest_any(decodable_b8x, decodable_starts_b8x)) {
+                    // Trailing overhang: a last-lane 2-byte lead owes one peeked continuation, a last-lane 3-byte
+                    // lead owes two, a second-to-last 3-byte lead owes one; the cases are mutually exclusive in a
+                    // structure-clean chunk.
+                    sz_size_t const trailing2 = (sz_size_t)svlastb_u8(decodable_b8x, lead2_u8x);
+                    sz_size_t const trailing3 = (sz_size_t)svlastb_u8(decodable_b8x, lead3_u8x);
+                    sz_size_t const second3 = decodable_end > 1
+                                                  ? (sz_size_t)svlastb_u8(
+                                                        svwhilelt_b8_u64(0, (sz_u64_t)(decodable_end - 1)), lead3_u8x)
+                                                  : 0;
+                    sz_size_t const full_consumed = decodable_end + trailing2 + trailing3 * 2 + second3;
+                    sz_size_t consumed_local = 0;
+                    sz_size_t const produced = sz_utf8_rune_drain_packed_sve2_(
+                        cp_lo_u8x, cp_hi_u8x, lengths_u8x, decodable_starts_b8x, runes + produced_total,
+                        runes_capacity - produced_total, full_consumed, &consumed_local);
+                    produced_total += produced;
+                    consumed_total = chunk_base + consumed_local;
+                }
+                carry_step2_u8x = svdup_u8_z(
+                    svand_b_z(decodable_b8x, svorr_b_z(decodable_b8x, lead2_b8x, lead3_b8x), decodable_b8x), 1);
+                carry_step3_u8x = svdup_u8_z(svand_b_z(decodable_b8x, lead3_b8x, decodable_b8x), 1);
+                carry_step4_u8x = zeros_u8x;
+                if (decodable_end < chunk_span) break;
+                chunk_base += chunk_bytes;
+                continue;
+            }
+        }
+
         svbool_t const cont2_b8x = svcmpne_n_u8(all_b8x, svext_u8(cont_cur_u8x, cont_peek_u8x, 2), 0);
         svbool_t const cont3_b8x = svcmpne_n_u8(all_b8x, svext_u8(cont_cur_u8x, cont_peek_u8x, 3), 0);
 
