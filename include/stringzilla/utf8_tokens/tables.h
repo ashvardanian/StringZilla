@@ -80,6 +80,14 @@ static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_block_[256] = {
     1, 1, 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  48, 1,  49, 50, 51,
 };
 
+/** @brief  High bytes whose BMP block holds at least one delimiter, i.e. `bmp_block_[high] != 1` (row 1 is the
+ *          unique all-zero row), as a 256-bit bitmap: suspicious iff `[high>>3] & (1<<(high&7))`. Bit 0 is cleared:
+ *          vector fronts resolve `high == 0` lanes exactly against bitmap row 0 and pre-filter the rest here. */
+static sz_align_(64) sz_u8_t const sz_utf8_delimiter_bmp_suspicious_highs_[32] = {
+    0xFC, 0xFF, 0xD9, 0x9F, 0xFF, 0xFF, 0x0F, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xD0, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE8,
+};
+
 /** @brief  Unique 256-bit (32-byte) BMP membership bitmaps; member iff `bitmap[id*32 + (low>>3)] & (1<<(low&7))`. */
 static sz_u8_t const sz_utf8_delimiter_bmp_bitmaps_[1664] = {
     0,   62,  0,   0,   255, 255, 0,   252, 1,   0,   0,   248, 1,   0,   0,   120, 32,  0,   0,   0,   255, 219, 211,

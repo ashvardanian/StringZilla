@@ -138,6 +138,24 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_st
     return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
 }
 
+/** @brief  Emit already-decided delimiter starts from a vector tile's lane mask: bit `i` of @p hits marks a
+ *          verified match at `base + i`, and its byte length rereads only the lead's high nibble. The portable
+ *          ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_; returns the appended match count. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
+    sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
+    sz_size_t capacity) {
+    static sz_u8_t const length_by_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
+    sz_size_t count = 0;
+    while (hits && count < capacity) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+        hits &= hits - 1;
+        match_offsets[count] = base + lane;
+        match_lengths[count] = length_by_nibble[text[base + lane] >> 4];
+        ++count;
+    }
+    return count;
+}
+
 /**
  *  @brief Reference scan emitting every delimiter codepoint into parallel offset/length arrays.
  *
