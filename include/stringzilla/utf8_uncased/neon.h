@@ -533,27 +533,6 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_western_europe_( //
 #pragma region Central European Uncased Find
 
 /**
- *  Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
- *  byte's low 6 bits (`text & 0x3F`). Entry value is the in-place add: 0 = identity, 1 = fold by
- *  +1. The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF,
- *  'Ÿ' C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so
- *  the fold leaves them untouched. Same parity that the explicit range checks used to compute, but
- *  resolved in one `vqtbl4q_u8` per lead family. Verified against the serial reference in tests.
- */
-static sz_u8_t const sz_utf8_uncased_neon_central_c4_deltas_lut_[64] = {
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 80-8F: 'Ā'-'ď' even-parity pairs
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 90-9F
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 A0-AF
-    0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C4 B0-BF: 'İ'/'ĸ'/'Ŀ' caseless or cross-block
-};
-static sz_u8_t const sz_utf8_uncased_neon_central_c5_deltas_lut_[64] = {
-    0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, // C5 80-8F: odd head, 'ŉ' (C5 89) irregular -> 0
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 90-9F
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 A0-AF
-    1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C5 B0-BF: 'Ÿ'/'ſ' cross-block -> 0
-};
-
-/**
  *  @brief Fold a 32-byte chunk using Central European case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  *
@@ -569,8 +548,8 @@ static sz_u8_t const sz_utf8_uncased_neon_central_c5_deltas_lut_[64] = {
 SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_neon_central_c4_deltas_lut_);
-    uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_neon_central_c5_deltas_lut_);
+    uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_central_c4_deltas_lut_);
+    uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_central_c5_deltas_lut_);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
@@ -861,35 +840,6 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_armenian_( //
 #pragma region Greek Uncased Find
 
 /**
- *  Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`. The deltas
- *  the per-rule range checks used to assemble, resolved in one `vqtbl4q_u8`:
- *  'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
- *  'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό' (8C) keeps its byte (lead-only change).
- */
-static sz_u8_t const sz_utf8_uncased_neon_greek_ce_deltas_lut_[64] = {
-    0,    0,    0,    0,    0,    0,    0x26, 0,
-    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
-    0,    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, // CE 90-9F
-    0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0,
-    0xE0, 0xE0, 0xE0, 0xE0, 0,    0,    0,    0, // CE A0-AF
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF (already lowercase)
-};
-
-/**
- *  Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
- *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay
- *  under CE, so they do not promote. Propagated one lane back through `next_bytes` onto the lead.
- */
-static sz_u8_t const sz_utf8_uncased_neon_greek_ce_promotes_lut_[64] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, // CE 80-8F: 8C, 8E, 8F promote
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F: stay under CE
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // CE A0-AB: promote to CF
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE B0-BF
-};
-
-/**
  *  @brief Fold a 32-byte chunk using Greek case-folding rules.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  *
@@ -915,8 +865,8 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(
     uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
     uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
 
-    uint8x16x4_t const ce_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_neon_greek_ce_deltas_lut_);
-    uint8x16x4_t const ce_promotes_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_neon_greek_ce_promotes_lut_);
+    uint8x16x4_t const ce_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_greek_ce_deltas_lut_);
+    uint8x16x4_t const ce_promotes_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_greek_ce_promotes_lut_);
 
     uint8x16x2_t promote_seconds_u8x16x2; // CE → CF (+1) second-byte flags, pre-shift
     uint8x16x2_t micro_seconds_u8x16x2;   // C2 → CE (+0x0C) micro-sign second flags, pre-shift

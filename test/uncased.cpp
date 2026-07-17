@@ -1079,6 +1079,9 @@ void test_uncased_unit() {
 #if SZ_USE_NEON
         assert(sz_utf8_find_cased_neon(deep, deep_length) == deep + 64);
 #endif
+#if SZ_USE_SVE2
+        assert(sz_utf8_find_cased_sve2(deep, deep_length) == deep + 64);
+#endif
 #if SZ_USE_V128
         assert(sz_utf8_find_cased_v128(deep, deep_length) == deep + 64);
 #endif
@@ -2296,6 +2299,9 @@ static uncased_safety_backend_t const uncased_safety_backends[] = {
 #if SZ_USE_NEON
     {"neon", sz_utf8_uncased_fold_neon, sz_utf8_uncased_search_neon, sz_utf8_find_cased_neon},
 #endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_uncased_fold_sve2, sz_utf8_uncased_search_sve2, sz_utf8_find_cased_sve2},
+#endif
 };
 
 /**
@@ -2339,6 +2345,9 @@ static uncased_backend_t const uncased_backends[] = {
 #endif
 #if SZ_USE_NEON
     {"neon", sz_utf8_uncased_fold_neon, sz_utf8_uncased_search_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_uncased_fold_sve2, sz_utf8_uncased_search_sve2},
 #endif
 #if SZ_USE_V128
     {"v128", sz_utf8_uncased_fold_v128, sz_utf8_uncased_search_v128},

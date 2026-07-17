@@ -28,6 +28,95 @@ SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A
  *  equal malformed bytes still produce equal tagged runes, preserving byte-for-byte matching.
  */
 SZ_HELPER_INLINE sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
+
+/**
+ *  Bit flags describing which UTF-8 lead-byte families occur in a chunk - the same values and
+ *  semantics as the Ice Lake `sz_utf8_fold_lead_family_t_`, shared by the NEON and SVE2 back-ends. Each family shares one folding strategy,
+ *  so the union of flags picks the chunk handler in a single dispatch - instead of sequentially
+ *  probing per-script fast paths, which degrades on mixed-script text.
+ */
+enum sz_utf8_fold_lead_family_t_ {
+    sz_utf8_fold_lead_caseless_flag_ = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
+    sz_utf8_fold_lead_latin_flag_ = 1 << 1,          // C2-C3: Latin-1 Supplement
+    sz_utf8_fold_lead_latin_extended_flag_ = 1 << 2, // C4-C6: Latin Extended-A and the Ext-B +1 pairs
+    sz_utf8_fold_lead_cyrillic_flag_ = 1 << 3,       // D0-D1: basic Cyrillic
+    sz_utf8_fold_lead_greek_flag_ = 1 << 4,          // CE-CF: basic Greek
+    sz_utf8_fold_lead_e1_flag_ = 1 << 5,             // E1: Latin Ext Additional, Georgian, Greek Extended
+    sz_utf8_fold_lead_guarded_flag_ = 1 << 6,        // E2, EA, EF: case-awareness depends on the second byte
+    sz_utf8_fold_lead_complex_flag_ = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
+};
+
+/**
+ *  Lead-byte family table indexed by the low 6 bits of the lead byte: leads 0xC0-0xFF map onto
+ *  indices 0x00-0x3F injectively, and ASCII/continuation bytes are masked out before the lookup.
+ *  Byte-for-byte the same 64 values as the Ice Lake `lead_families_lut`, but laid out in
+ *  ascending index order: `vqtbl4q_u8` reads its `uint8x16x4_t` table in memory order, whereas
+ *  `_mm512_set_epi8` lists lanes 0x3F → 0x00.
+ */
+static sz_u8_t const sz_utf8_fold_lead_families_lut_[64] = {
+    // clang-format off
+    // Indices 0x00-0x0F (leads C0-CF): C2-C3 Latin, C4-C6 Latin Ext, C7-CD complex, CE-CF Greek
+    0x80, 0x80, 0x02, 0x02, 0x04, 0x04, 0x04, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x10, 0x10,
+    // Indices 0x10-0x1F (leads D0-DF): D0-D1 Cyrillic, D2-D6 complex, D7-DF caseless
+    0x08, 0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    // Indices 0x20-0x2F (leads E0-EF): E1 special, E2/EA/EF guarded, the rest caseless
+    0x01, 0x20, 0x40, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x40, 0x01, 0x01, 0x01, 0x01, 0x40,
+    // Indices 0x30-0x3F (leads F0-FF): supplementary planes and invalid leads
+    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+    // clang-format on
+};
+
+/**
+ *  Per-codepoint deltas for 2-byte Latin Extended sequences, indexed by the continuation byte's
+ *  low 6 bits: 0x00 = identity, 0x01 = fold by +1, 0x80 = irregular (serial fallback). The same
+ *  64 values as the Ice Lake `c4_deltas_lut`, but in ascending index order: `vqtbl4q_u8` reads
+ *  its table in memory order, whereas `_mm512_set_epi8` lists lanes 0x3F → 0x00.
+ *  Generated from Unicode full case folding; verified against the serial reference in tests.
+ */
+static sz_u8_t const sz_utf8_fold_c4_deltas_lut_[64] = {
+    // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
+    // clang-format off
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x00-0x0F: even-parity pairs
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x10-0x1F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // 0x20-0x2F
+    // 0x30-0x3F: 'İ' (U+0130, C4 B0) expands to "i" + combining dot, and 'Ŀ' (U+013F, C4 BF)
+    // folds to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead byte, so neither can
+    // fold in place and both are flagged irregular; 'ĸ' (U+0138) is caseless, parity flips after.
+    0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80,
+    // clang-format on
+};
+static sz_u8_t const sz_utf8_fold_c5_deltas_lut_[64] = {
+    // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
+    // clang-format off
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, // 0x00-0x0F: odd head, 'ŉ' (U+0149) irregular
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    // 0x10-0x1F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,    // 0x20-0x2F
+    // 0x30-0x3F: 'Ÿ' (U+0178) folds down to 'ÿ' (U+00FF) and 'ſ' (U+017F) folds down to 's' -
+    // both cross blocks, so both are flagged irregular.
+    1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, 0x80,
+    // clang-format on
+};
+static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
+    // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
+    // clang-format off
+    // Latin Extended-B mixes +1 parity pairs with uppercase letters whose lowercase lives in
+    // the IPA Extensions block (U+0250+) - those 20 cross-block folds are flagged irregular.
+    0, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0x80, 0x80, 1, 0, 0, 0x80, 0x80, // 0x00-0x0F
+    0x80, 1, 0, 0x80, 0x80, 0, 0x80, 0x80, 1, 0, 0, 0, 0x80, 0x80, 0, 0x80, // 0x10-0x1F
+    1, 0, 1, 0, 1, 0, 0x80, 1, 0, 0x80, 0, 0, 1, 0, 0x80, 1, // 0x20-0x2F
+    0, 0x80, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0, 0, 1, 0, 0, 0, // 0x30-0x3F
+    // clang-format on
+};
+
+/** @brief  Character boundary of the first stop lane in a 64-byte superchunk: takes the lowest set bit of
+ *          @p stop_lanes and walks back over continuation bytes so the consumed prefix ends on a boundary.
+ *          Shared u64 mask math for the windowed ISA fold handlers; landing on byte 0 routes one rune to the
+ *          serial fallback. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_fold_stop_boundary_serial_(sz_u64_t stop_lanes, sz_cptr_t source) {
+    sz_size_t first_flagged_position = (sz_size_t)sz_u64_ctz(stop_lanes);
+    while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80) --first_flagged_position;
+    return first_flagged_position;
+}
 /**  Helper macro for readable assertions - use for SIMD implementation reference */
 #define sz_is_in_range_(x, low, high) ((x) >= (low) && (x) <= (high))
 

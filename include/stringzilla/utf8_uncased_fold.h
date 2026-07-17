@@ -79,6 +79,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon( //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
 #endif
 
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_uncased_fold */
+SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2( //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t destination);
+#endif
+
 #if SZ_USE_V128
 /** @copydoc sz_utf8_uncased_fold */
 SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128( //
@@ -111,6 +117,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx( //
 #include "stringzilla/utf8_uncased_fold/icelake.h"
 #include "stringzilla/utf8_uncased_fold/haswell.h"
 #include "stringzilla/utf8_uncased_fold/neon.h"
+#include "stringzilla/utf8_uncased_fold/sve2.h"
 #include "stringzilla/utf8_uncased_fold/v128.h"
 #include "stringzilla/utf8_uncased_fold/rvv.h"
 #include "stringzilla/utf8_uncased_fold/lasx.h"
@@ -127,6 +134,8 @@ SZ_API_RUNTIME sz_size_t sz_utf8_uncased_fold(sz_cptr_t source, sz_size_t source
     return sz_utf8_uncased_fold_icelake(source, source_length, destination);
 #elif SZ_USE_HASWELL
     return sz_utf8_uncased_fold_haswell(source, source_length, destination);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_uncased_fold_sve2(source, source_length, destination);
 #elif SZ_USE_NEON
     return sz_utf8_uncased_fold_neon(source, source_length, destination);
 #elif SZ_USE_V128

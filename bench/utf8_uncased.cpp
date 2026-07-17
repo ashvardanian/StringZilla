@@ -95,6 +95,10 @@ void bench_utf8_uncased_fold(environment_t const &env) {
     bench_unary(env, "sz_utf8_uncased_fold_neon", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_neon> {env})
         .log(base);
 #endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_uncased_fold_sve2", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_sve2> {env})
+        .log(base);
+#endif
 #if SZ_USE_V128
     bench_unary(env, "sz_utf8_uncased_fold_v128", validator, utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_v128> {env})
         .log(base);
@@ -176,6 +180,11 @@ void bench_utf8_uncased_search(environment_t const &env) {
 #if SZ_USE_NEON
     bench_unary(env, "sz_utf8_uncased_search_neon", validator,
                 utf8_uncased_search_from_sz<sz_utf8_uncased_search_neon> {env})
+        .log(base);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_utf8_uncased_search_sve2", validator,
+                utf8_uncased_search_from_sz<sz_utf8_uncased_search_sve2> {env})
         .log(base);
 #endif
 #if SZ_USE_V128

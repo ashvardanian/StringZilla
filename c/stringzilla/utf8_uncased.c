@@ -38,6 +38,15 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
         impl->utf8_uncased_order = sz_utf8_uncased_order_neon;
     }
 #endif
+#if SZ_USE_SVE2
+    // Same chunk granularity as NEON at the minimal vector length with slower
+    // predicate compares; the scalable front only wins on wider-than-NEON registers.
+    if ((caps & sz_cap_sve2_k) && sz_sve_wider_than_neon_()) {
+
+        impl->utf8_uncased_search = sz_utf8_uncased_search_sve2;
+        impl->utf8_uncased_order = sz_utf8_uncased_order_sve2;
+    }
+#endif
 
 #if SZ_USE_V128
     if (caps & sz_cap_v128_k) {

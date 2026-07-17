@@ -989,6 +989,14 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_neon( //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
 #endif
 
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_uncased_search */
+SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_sve2( //
+    sz_cptr_t haystack, sz_size_t haystack_length,     //
+    sz_cptr_t needle, sz_size_t needle_length,         //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length);
+#endif
+
 #if SZ_USE_V128
 /** @copydoc sz_utf8_uncased_search */
 SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
@@ -1030,6 +1038,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_powervsx( //
 #include "stringzilla/utf8_uncased/icelake.h"
 #include "stringzilla/utf8_uncased/haswell.h"
 #include "stringzilla/utf8_uncased/neon.h"
+#include "stringzilla/utf8_uncased/sve2.h"
 #include "stringzilla/utf8_uncased/v128.h"
 #include "stringzilla/utf8_uncased/rvv.h"
 #include "stringzilla/utf8_uncased/lasx.h"
@@ -1063,6 +1072,9 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_uncased_search(sz_cptr_t haystack, sz_size_t ha
 #elif SZ_USE_HASWELL
     return sz_utf8_uncased_search_haswell(haystack, haystack_length, needle, needle_length, needle_metadata,
                                           matched_length);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_uncased_search_sve2(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                       matched_length);
 #elif SZ_USE_NEON
     return sz_utf8_uncased_search_neon(haystack, haystack_length, needle, needle_length, needle_metadata,
                                        matched_length);
@@ -1085,6 +1097,8 @@ SZ_API_RUNTIME sz_ordering_t sz_utf8_uncased_order(sz_cptr_t a, sz_size_t a_leng
     return sz_utf8_uncased_order_icelake(a, a_length, b, b_length);
 #elif SZ_USE_HASWELL
     return sz_utf8_uncased_order_haswell(a, a_length, b, b_length);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_uncased_order_sve2(a, a_length, b, b_length);
 #elif SZ_USE_NEON
     return sz_utf8_uncased_order_neon(a, a_length, b, b_length);
 #else
@@ -1105,6 +1119,8 @@ SZ_API_RUNTIME sz_cptr_t sz_utf8_find_cased(sz_cptr_t str, sz_size_t length) {
     return sz_utf8_find_cased_icelake(str, length);
 #elif SZ_USE_HASWELL
     return sz_utf8_find_cased_haswell(str, length);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_find_cased_sve2(text, length);
 #elif SZ_USE_NEON
     return sz_utf8_find_cased_neon(str, length);
 #else

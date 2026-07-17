@@ -334,6 +334,64 @@ SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_
 
 #pragma endregion // Case Invariance & Ordering
 
+/** @brief  Pops the lowest candidate position from @p matches and returns its bit index - the shared scalar
+ *          walk behind every ISA probe filter, so the vector kernels never materialize their own bit scans. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_uncased_pop_candidate_(sz_u64_t *matches) {
+    sz_size_t const position = (sz_size_t)sz_u64_ctz(*matches);
+    *matches &= *matches - 1;
+    return position;
+}
+
+/**
+ *  Per-codepoint Latin Extended-A fold deltas after a C4/C5 lead, indexed by the continuation
+ *  byte's low 6 bits (`text & 0x3F`). Entry value is the in-place add: 0 = identity, 1 = fold by
+ *  +1. The cross-block irregulars that the case-fold tables flag with 0x80 ('İ' C4 B0, 'Ŀ' C4 BF,
+ *  'Ÿ' C5 B8, 'ſ' C5 BF) are 0 here because the alarm routes them to the danger-zone handler, so
+ *  the fold leaves them untouched. Same parity that the explicit range checks used to compute, but
+ *  resolved in one `vqtbl4q_u8` per lead family. Verified against the serial reference in tests.
+ */
+static sz_u8_t const sz_utf8_uncased_central_c4_deltas_lut_[64] = {
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 80-8F: 'Ā'-'ď' even-parity pairs
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 90-9F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C4 A0-AF
+    0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C4 B0-BF: 'İ'/'ĸ'/'Ŀ' caseless or cross-block
+};
+static sz_u8_t const sz_utf8_uncased_central_c5_deltas_lut_[64] = {
+    0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, // C5 80-8F: odd head, 'ŉ' (C5 89) irregular -> 0
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 90-9F
+    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, // C5 A0-AF
+    1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, // C5 B0-BF: 'Ÿ'/'ſ' cross-block -> 0
+};
+
+/**
+ *  Monotonic-Greek second-byte fold deltas after a CE lead, indexed by `text & 0x3F`. The deltas
+ *  the per-rule range checks used to assemble, resolved in one `vqtbl4q_u8`:
+ *  'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
+ *  'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό' (8C) keeps its byte (lead-only change).
+ */
+static sz_u8_t const sz_utf8_uncased_greek_ce_deltas_lut_[64] = {
+    0,    0,    0,    0,    0,    0,    0x26, 0,
+    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
+    0,    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, // CE 90-9F
+    0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0,
+    0xE0, 0xE0, 0xE0, 0xE0, 0,    0,    0,    0, // CE A0-AF
+    0,    0,    0,    0,    0,    0,    0,    0,
+    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF (already lowercase)
+};
+
+/**
+ *  Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
+ *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay
+ *  under CE, so they do not promote. Propagated one lane back through `next_bytes` onto the lead.
+ */
+static sz_u8_t const sz_utf8_uncased_greek_ce_promotes_lut_[64] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, // CE 80-8F: 8C, 8E, 8F promote
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F: stay under CE
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // CE A0-AB: promote to CF
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE B0-BF
+};
+
 #pragma region Substring Search
 
 /**
