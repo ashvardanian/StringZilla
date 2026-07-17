@@ -393,6 +393,8 @@ void test_utf8_wordbreaks_rules() {
         {"WB999", utf8_rule_breaks_k, "a b"_sv}, // Any / Any (default break at the space)
         // Opposite-direction motifs (E1): the same rule firing the other way.
         {"WB6", utf8_rule_breaks_k, "a''b"_sv},           // two MidLetters: the bridge fails -> break
+        {"WB6", utf8_rule_breaks_k, "a\"b"_sv},           // Double_Quote is not MidNumLetQ for Latin: break twice
+        {"WB11", utf8_rule_breaks_k, "1\"2"_sv},          // Double_Quote never bridges numerics either
         {"WB11", utf8_rule_breaks_k, "1,,2"_sv},          // two MidNum: numeric bridge fails -> break
         {"WB13", utf8_rule_breaks_k, "\xE3\x82\xA2z"_sv}, // Katakana then Latin: script change -> break
         {"WB15", utf8_rule_breaks_k,
