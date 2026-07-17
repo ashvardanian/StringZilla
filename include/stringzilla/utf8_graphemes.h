@@ -98,9 +98,9 @@ SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_
     return sz_utf8_graphemes_haswell(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
     return sz_utf8_graphemes_sve2(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
-#elif SZ_USE_NEON
-    return sz_utf8_graphemes_neon(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #else
+    // Not NEON: grapheme clusters are dense enough that the scalar walk outruns the 128-bit windowed
+    // fronts on every corpus and capacity; the vector kernels remain compiled and tested reserves.
     return sz_utf8_graphemes_serial(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #endif
 }

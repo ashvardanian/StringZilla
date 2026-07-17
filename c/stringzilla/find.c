@@ -85,6 +85,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps) {
             impl->rfind = sz_rfind_sve;
         }
 
+        // Byte search stays scalable at EVERY vector length: predicated heads make short inputs nearly
+        // free (Graviton 5 short words: 1.55 GiB/s vs 0.82 NEON) and long scans tie NEON.
         impl->find_byte = sz_find_byte_sve;
         impl->rfind_byte = sz_rfind_byte_sve;
     }

@@ -119,6 +119,13 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_uncased_update_(sz_capability_t caps)
  *  @brief Whether the running CPU's SVE registers are wider than NEON's 128 bits - the point where the
  *         scalable kernels start outrunning NEON in the length-sensitive families (the runtime
  *         counterpart of the compile-time `SZ_SVE_WIDER_THAN_NEON_` in `types.h`).
+ *
+ *  The Arm tie-break policy, per Graviton 5 measurements: a scalable kernel dispatches UNCONDITIONALLY
+ *  only when it wins at the minimal 128-bit length on the mixed multilingual corpus (byte search with its
+ *  predicated heads, byteset scans, UTF-8 delimiters and sentences); kernels that only win with wider
+ *  registers (substring find, memory ops, argsort, newlines, whitespaces, line breaks) stay behind this
+ *  gate; and families whose scalar walk beats every 128-bit front (graphemes) install no Arm SIMD at all
+ *  until the width flips the economics.
  */
 SZ_MAYBE_UNUSED SZ_C_INLINE sz_bool_t sz_sve_wider_than_neon_(void) { return svcntb() > 16 ? sz_true_k : sz_false_k; }
 #if defined(__clang__)

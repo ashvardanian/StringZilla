@@ -317,7 +317,7 @@ SZ_API_RUNTIME sz_size_t sz_utf8_whitespaces(sz_cptr_t text, sz_size_t length, s
     return sz_utf8_whitespaces_icelake(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
     return sz_utf8_whitespaces_haswell(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
     return sz_utf8_whitespaces_sve2(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_whitespaces_neon(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);

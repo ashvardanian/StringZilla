@@ -122,6 +122,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_sve2aes;
         impl->hash_state_digest = sz_hash_state_digest_sve2aes;
         impl->fill_random = sz_fill_random_sve2aes;
+        // `hash_multiseed` intentionally keeps NEONAES: a scalable batch would need the up-to-16-byte
+        // x-wide keyed substrate the Z/Q bridge makes unprofitable at 128 bits (see hash/sve2aes.h).
     }
 #endif
 

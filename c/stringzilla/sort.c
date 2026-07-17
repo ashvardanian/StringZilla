@@ -30,16 +30,18 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps) {
     }
 #endif
 
-#if SZ_USE_SVE
-    if (caps & sz_cap_sve_k) {
-        impl->sequence_argsort = sz_sequence_argsort_sve;
-        impl->sequence_argsort_uncased = sz_sequence_argsort_uncased_sve;
-    }
-#endif
 #if SZ_USE_NEON
     if (caps & sz_cap_neon_k) {
         impl->sequence_argsort = sz_sequence_argsort_neon;
         impl->sequence_argsort_uncased = sz_sequence_argsort_uncased_neon;
+    }
+#endif
+#if SZ_USE_SVE
+    // At the common 128-bit vector length the NEON argsort leads (Graviton 5 words: 53 vs 43 MiB/s SVE,
+    // 50 serial); the scalable kernel pays off only with wider registers.
+    if ((caps & sz_cap_sve_k) && sz_sve_wider_than_neon_()) {
+        impl->sequence_argsort = sz_sequence_argsort_sve;
+        impl->sequence_argsort_uncased = sz_sequence_argsort_uncased_sve;
     }
 #endif
 #if SZ_USE_RVV
