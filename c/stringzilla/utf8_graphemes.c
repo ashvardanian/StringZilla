@@ -21,6 +21,10 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_utf8_graphemes_update_(sz_capability_t cap
 #if SZ_USE_ICELAKE
     if (caps & sz_cap_icelake_k) { impl->utf8_graphemes = sz_utf8_graphemes_icelake; }
 #endif
+#if SZ_USE_SVE2
+    // Gated until the 128-bit measurement lands; the front is vector-length generic.
+    if ((caps & sz_cap_sve2_k) && sz_sve_wider_than_neon_()) { impl->utf8_graphemes = sz_utf8_graphemes_sve2; }
+#endif
 }
 
 SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,

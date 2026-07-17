@@ -69,6 +69,13 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t le
                                                     sz_size_t *bytes_consumed);
 #endif
 
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_graphemes */
+SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *cluster_starts,
+                                                 sz_size_t *cluster_lengths, sz_size_t clusters_capacity,
+                                                 sz_size_t *bytes_consumed);
+#endif
+
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
@@ -76,6 +83,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t le
 #include "stringzilla/utf8_graphemes/haswell.h"
 #include "stringzilla/utf8_graphemes/neon.h"
 #include "stringzilla/utf8_graphemes/icelake.h"
+#include "stringzilla/utf8_graphemes/sve2.h"
 
 #pragma region Dynamic Dispatch
 
@@ -88,6 +96,8 @@ SZ_API_RUNTIME sz_size_t sz_utf8_graphemes(sz_cptr_t text, sz_size_t length, sz_
     return sz_utf8_graphemes_icelake(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #elif SZ_USE_HASWELL
     return sz_utf8_graphemes_haswell(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
+#elif SZ_USE_SVE2 && SZ_SVE_WIDER_THAN_NEON_
+    return sz_utf8_graphemes_sve2(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_graphemes_neon(text, length, cluster_starts, cluster_lengths, clusters_capacity, bytes_consumed);
 #else

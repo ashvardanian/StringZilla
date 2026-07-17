@@ -34,55 +34,6 @@ extern "C" {
 
 #pragma region Branchless bit gather and scatter
 
-/** @brief  Precomputed routing masks for the Hacker's-Delight bit-compress network — the BMI2-free `pext`/`pdep`.
- *          NEON has no `pext`/`pdep`, and one grapheme window applies the @b same `start_lanes` selector to 18 class
- *          masks plus the boundary scatter, so the six routing masks are built once and shared, and the
- *          apply stays branchless and constant-time. Bit-exact with BMI2. */
-typedef struct sz_grapheme_bit_route_t {
-    sz_u64_t selector;
-    sz_u64_t move_masks[6];
-} sz_grapheme_bit_route_t;
-
-/** @brief  Build the per-selector routing plan once; reuse it for every gather/scatter sharing this @p selector. */
-SZ_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
-    sz_grapheme_bit_route_t route;
-    route.selector = selector;
-    sz_u64_t routing_selector = selector;
-    sz_u64_t shifted_complement = ~selector << 1;
-    for (int step = 0; step < 6; ++step) {
-        sz_u64_t parallel_prefix = shifted_complement ^ (shifted_complement << 1);
-        parallel_prefix ^= parallel_prefix << 2;
-        parallel_prefix ^= parallel_prefix << 4;
-        parallel_prefix ^= parallel_prefix << 8;
-        parallel_prefix ^= parallel_prefix << 16;
-        parallel_prefix ^= parallel_prefix << 32;
-        sz_u64_t const movable_selector = parallel_prefix & routing_selector;
-        route.move_masks[step] = movable_selector;
-        routing_selector = (routing_selector ^ movable_selector) | (movable_selector >> (1u << step));
-        shifted_complement &= ~parallel_prefix;
-    }
-    return route;
-}
-
-/** @brief  `pext` via a precomputed @p route: gather the bits of @p value at the selector positions to the low end. */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
-    value &= route->selector;
-    for (int step = 0; step < 6; ++step) {
-        sz_u64_t const movable_value = value & route->move_masks[step];
-        value = (value ^ movable_value) | (movable_value >> (1u << step));
-    }
-    return value;
-}
-
-/** @brief  `pdep` via a precomputed @p route: scatter the low bits of @p value into the selector positions. */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
-    for (int step = 5; step >= 0; --step) {
-        sz_u64_t const movable_value = value << (1u << step);
-        value = (value & ~route->move_masks[step]) | (movable_value & route->move_masks[step]);
-    }
-    return value & route->selector;
-}
-
 /** @brief  Drop-in branchless `_pext_u64` (builds a one-shot route). Prefer `sz_grapheme_bit_gather_` when one
  *          selector serves several values, as inside `sz_grapheme_build_masks_neon_`. Bit-exact with BMI2. */
 SZ_HELPER_AUTO sz_u64_t sz_grapheme_pext_neon_(sz_u64_t value, sz_u64_t selector) {
@@ -225,15 +176,15 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
     sz_utf8_rune_window_neon_t const decoded = sz_utf8_rune_decode_window_neon_(text + base, length - base);
     sz_size_t const loaded = decoded.loaded;
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
-    sz_u64_t start_lanes = decoded.codepoint_starts;
+    sz_u64_t start_lanes = decoded.codepoint_starts & loaded_mask;
 
-    // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode against
-    // a wrapped neighbour; defer it to the next window. Branchless union of overrunning starts, take the lowest.
+    // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode
+    // against a wrapped neighbour; defer it to the next window.
     sz_size_t byte_span = loaded;
     if (loaded >= 64) {
-        sz_u64_t const two = decoded.two_byte_starts;
-        sz_u64_t const three = decoded.three_byte_starts;
-        sz_u64_t const four = decoded.four_byte_starts;
+        sz_u64_t const two = decoded.two_byte_starts & loaded_mask;
+        sz_u64_t const three = decoded.three_byte_starts & loaded_mask;
+        sz_u64_t const four = decoded.four_byte_starts & loaded_mask;
         sz_u64_t const overrun = (two & ~sz_u64_mask_until_serial_(loaded - 1)) |
                                  (three & ~sz_u64_mask_until_serial_(loaded - 2)) |
                                  (four & ~sz_u64_mask_until_serial_(loaded - 3));
@@ -241,6 +192,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
         start_lanes &= sz_u64_mask_until_serial_(byte_span);
     }
 
+    int const quarters_used = (int)((loaded + 15) >> 4); // classify work proportional to the loaded span
     uint8x16_t raw[4];
     for (int quarter = 0; quarter < 4; ++quarter) raw[quarter] = decoded.window[quarter];
     uint8x16_t next1[4], next2[4], next3[4];
@@ -270,7 +222,9 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
 
     uint8x16_t high[4], low[4], plane[4], mid[4], alo[4], ascii_desc[4], desc[4];
     uint8x16_t ascii_bool[4];
-    for (int quarter = 0; quarter < 4; ++quarter) {
+    for (int quarter = quarters_used; quarter < 4; ++quarter)
+        desc[quarter] = ascii_bool[quarter] = plane[quarter] = vdupq_n_u8(0);
+    for (int quarter = 0; quarter < quarters_used; ++quarter) {
         uint8x16_t const here = raw[quarter];
         uint8x16_t const n1 = next1[quarter], n2 = next2[quarter], n3 = next3[quarter];
 
@@ -321,14 +275,14 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
         sz_u64_t const cjk_other = sz_grapheme_cjk_other_neon_(high, low) & non_ascii;
         cold = non_ascii & ~cjk_other;
         // Force the CJK-other lanes to descriptor 0 (their ASCII-LUT value on a non-ASCII byte is junk; clear it).
-        for (int quarter = 0; quarter < 4; ++quarter)
+        for (int quarter = 0; quarter < quarters_used; ++quarter)
             desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(cjk_other, quarter * 16));
     }
     if (cold) {
         // A cold (non-ASCII, non-CJK-other) lane is present: resolve EVERY lane through the full-BMP cascade,
         // overwriting the ASCII fast path. ASCII and CJK-other lanes resolve identically (the cascade reproduces 0
         // for the carved CJK ranges), so the blend below is exact.
-        for (int quarter = 0; quarter < 4; ++quarter) {
+        for (int quarter = 0; quarter < quarters_used; ++quarter) {
             uint8x16_t const bmp = sz_grapheme_bmp_descriptor_neon_(high[quarter], low[quarter]);
             desc[quarter] = vbslq_u8(ascii_bool[quarter], ascii_desc[quarter], bmp);
         }
@@ -354,7 +308,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
     sz_u64_t const is_overrange = four_byte & plane_nonzero & ~plane_le_16 & loaded_mask;
     if (is_astral) {
         // offset = cp - 0x10000; high16/low16 unchanged, plane nibble = cp_plane - 1.
-        for (int quarter = 0; quarter < 4; ++quarter) {
+        for (int quarter = 0; quarter < quarters_used; ++quarter) {
             uint8x16_t const four_sel = sz_grapheme_byte_mask_from_bits_neon_(is_astral, quarter * 16);
             uint8x16_t const plane_off = vsubq_u8(vandq_u8(four_sel, plane[quarter]), vdupq_n_u8(1));
             uint8x16_t const astral = sz_grapheme_astral_descriptor_neon_(plane_off, mid[quarter], alo[quarter]);
@@ -363,17 +317,19 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
     }
     if (is_overrange) {
         // cp ≥ 0x110000: clear to Other (0); the BMP-path value seated on these lanes is meaningless.
-        for (int quarter = 0; quarter < 4; ++quarter)
+        for (int quarter = 0; quarter < quarters_used; ++quarter)
             desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(is_overrange, quarter * 16));
     }
 
     // `0xF8..0xFF` begin no valid sequence and match no lead-length mask; force their start lanes to the Other
     // descriptor (0) so they classify neighbour-independently, matching serial/haswell (U+FFFD → Other).
     uint8x16_t invalid_bool[4];
-    for (int quarter = 0; quarter < 4; ++quarter) invalid_bool[quarter] = vcgeq_u8(raw[quarter], vdupq_n_u8(0xF8));
+    for (int quarter = quarters_used; quarter < 4; ++quarter) invalid_bool[quarter] = vdupq_n_u8(0);
+    for (int quarter = 0; quarter < quarters_used; ++quarter)
+        invalid_bool[quarter] = vcgeq_u8(raw[quarter], vdupq_n_u8(0xF8));
     sz_u64_t const invalid_lead = sz_utf8_mask_combine_neon_(invalid_bool[0], invalid_bool[1], invalid_bool[2],
                                                              invalid_bool[3]);
-    for (int quarter = 0; quarter < 4; ++quarter)
+    for (int quarter = 0; quarter < quarters_used; ++quarter)
         desc[quarter] = vbicq_u8(desc[quarter], sz_grapheme_byte_mask_from_bits_neon_(invalid_lead, quarter * 16));
 
     sz_grapheme_classified_neon_t result;
@@ -466,7 +422,6 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_neon(          //
     sz_grapheme_carry_t carry = sz_grapheme_carry_empty_();
     sz_size_t cluster_start = 0;
     sz_size_t base = 0;
-
     while (base < length) {
         sz_grapheme_classified_neon_t const window = sz_grapheme_classify_window_neon_(text_u8, length, base);
         if (window.codepoint_count == 0) break; // defensive: cannot happen for valid input

@@ -66,6 +66,9 @@ static utf8_segment_backend_t const utf8_graphemes_backends[] = {
 #if SZ_USE_NEON
     {"neon", sz_utf8_graphemes_neon},
 #endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_graphemes_sve2},
+#endif
 };
 
 /** @brief Known-answer grapheme-cluster vectors through dispatched, serial, and each ISA backend + the C++ range. */

@@ -358,6 +358,67 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_serial(        //
 
 #pragma region Portable grapheme boundary algebra
 
+/** @brief  Largest byte prefix of a FULL decode window whose multi-byte leads are entirely loaded: the first
+ *          2-/3-/4-byte start whose declared span crosses the window edge defers to the next window. Shared u64
+ *          mask math for the windowed ISA fronts (short final windows keep everything - their neighbours read 0). */
+SZ_HELPER_INLINE sz_size_t sz_grapheme_byte_span_serial_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                         sz_u64_t four_byte_starts, sz_size_t loaded) {
+    sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                             (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                             (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
+    return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+}
+
+/** @brief  Precomputed routing masks for the Hacker's-Delight bit-compress network — the BMI2-free `pext`/`pdep`.
+ *          shared by every back-end without
+ *          hardware bit-permutes: one grapheme window applies the @b same `start_lanes` selector to 18 class
+ *          masks plus the boundary scatter, so the six routing masks are built once and reused, and the
+ *          apply stays branchless and constant-time. Bit-exact with BMI2. */
+typedef struct sz_grapheme_bit_route_t {
+    sz_u64_t selector;
+    sz_u64_t move_masks[6];
+} sz_grapheme_bit_route_t;
+
+/** @brief  Build the per-selector routing plan once; reuse it for every gather/scatter sharing this @p selector. */
+SZ_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
+    sz_grapheme_bit_route_t route;
+    route.selector = selector;
+    sz_u64_t routing_selector = selector;
+    sz_u64_t shifted_complement = ~selector << 1;
+    for (int step = 0; step < 6; ++step) {
+        sz_u64_t parallel_prefix = shifted_complement ^ (shifted_complement << 1);
+        parallel_prefix ^= parallel_prefix << 2;
+        parallel_prefix ^= parallel_prefix << 4;
+        parallel_prefix ^= parallel_prefix << 8;
+        parallel_prefix ^= parallel_prefix << 16;
+        parallel_prefix ^= parallel_prefix << 32;
+        sz_u64_t const movable_selector = parallel_prefix & routing_selector;
+        route.move_masks[step] = movable_selector;
+        routing_selector = (routing_selector ^ movable_selector) | (movable_selector >> (1u << step));
+        shifted_complement &= ~parallel_prefix;
+    }
+    return route;
+}
+
+/** @brief  `pext` via a precomputed @p route: gather the bits of @p value at the selector positions to the low end. */
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+    value &= route->selector;
+    for (int step = 0; step < 6; ++step) {
+        sz_u64_t const movable_value = value & route->move_masks[step];
+        value = (value ^ movable_value) | (movable_value >> (1u << step));
+    }
+    return value;
+}
+
+/** @brief  `pdep` via a precomputed @p route: scatter the low bits of @p value into the selector positions. */
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+    for (int step = 5; step >= 0; --step) {
+        sz_u64_t const movable_value = value << (1u << step);
+        value = (value & ~route->move_masks[step]) | (movable_value & route->move_masks[step]);
+    }
+    return value & route->selector;
+}
+
 /**
  *  @brief  Cross-window left-context carry: the situation just AFTER the previous window's last codepoint, so this
  *          window's codepoint 0 sees an exact (i-1) context for all of GB3..GB13. ISA-independent.
