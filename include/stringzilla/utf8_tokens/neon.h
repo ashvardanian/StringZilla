@@ -221,45 +221,50 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
     uint8x16_t x_af_u8x16 = vdupq_n_u8(0xAF);
     uint8x16_t x_9f_u8x16 = vdupq_n_u8(0x9F);
 
-    static sz_u8_t const trusted_lanes[16] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                                              0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00};
-    uint8x16_t trusted_lanes_u8x16 = vld1q_u8(trusted_lanes);
-
-    while (position + 16 <= length && count < matches_capacity) {
+    // Shifted views come from overlapping unaligned loads on the free load pipes, so every lane of the window
+    // is trusted and the step is the full register; the two extra bytes past the window keep a trailing 3-byte
+    // start fully visible. A window without a single possible multi-byte lead (all bytes below 0xC2) skips the
+    // entire multi-byte class block.
+    while (position + 18 <= length && count < matches_capacity) {
         uint8x16_t window = vld1q_u8(text_u8 + position);
-        uint8x16_t window1 = vextq_u8(window, window, 1); // next lane
-        uint8x16_t window2 = vextq_u8(window, window, 2); // lane after next
+        uint8x16_t window1 = vld1q_u8(text_u8 + position + 1);
+        uint8x16_t window2 = vld1q_u8(text_u8 + position + 2);
 
         // 1-byte: space, plus the contiguous range [\t, \r] == [9, 13].
         uint8x16_t one_byte_cmp = vorrq_u8(
             vceqq_u8(window, x_20_u8x16),
             vandq_u8(vcgeq_u8(window, tab_u8x16), vcleq_u8(window, carriage_return_u8x16)));
 
-        // 2-byte: C2 85 (NEL), C2 A0 (NBSP).
+        uint8x16_t two_byte_cmp = vdupq_n_u8(0);
+        uint8x16_t three_byte_cmp = vdupq_n_u8(0);
         uint8x16_t lead_c2_cmp = vceqq_u8(window, lead_c2_u8x16);
-        uint8x16_t two_byte_cmp = vandq_u8(lead_c2_cmp,
-                                           vorrq_u8(vceqq_u8(window1, x_85_u8x16), vceqq_u8(window1, x_a0_u8x16)));
+        uint8x16_t lead_e2_cmp = vceqq_u8(window, lead_e2_u8x16);
+        uint8x16_t any_lead_cmp = vorrq_u8(vorrq_u8(lead_c2_cmp, lead_e2_cmp),
+                                           vorrq_u8(vceqq_u8(window, x_e1_u8x16), vceqq_u8(window, x_e3_u8x16)));
+        if (vmaxvq_u8(any_lead_cmp)) {
+            // 2-byte: C2 85 (NEL), C2 A0 (NBSP).
+            two_byte_cmp = vandq_u8(lead_c2_cmp,
+                                    vorrq_u8(vceqq_u8(window1, x_85_u8x16), vceqq_u8(window1, x_a0_u8x16)));
 
-        // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
-        uint8x16_t window1_is_80 = vceqq_u8(window1, byte_80_u8x16);
-        uint8x16_t lead_e280_cmp = vandq_u8(vceqq_u8(window, lead_e2_u8x16), window1_is_80);
-        uint8x16_t ogham_cmp = vandq_u8(vceqq_u8(window, x_e1_u8x16),
-                                        vandq_u8(vceqq_u8(window1, x_9a_u8x16), vceqq_u8(window2, byte_80_u8x16)));
-        uint8x16_t range_e280_cmp = vandq_u8(lead_e280_cmp,
-                                             vandq_u8(vcgeq_u8(window2, byte_80_u8x16), vcleq_u8(window2, x_8a_u8x16)));
-        uint8x16_t nnbsp_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_af_u8x16));
-        uint8x16_t mmsp_cmp = vandq_u8(vandq_u8(vceqq_u8(window, lead_e2_u8x16), vceqq_u8(window1, x_81_u8x16)),
-                                       vceqq_u8(window2, x_9f_u8x16));
-        uint8x16_t line_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_a8_u8x16));
-        uint8x16_t paragraph_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_a9_u8x16));
-        uint8x16_t ideographic_cmp = vandq_u8(vandq_u8(vceqq_u8(window, x_e3_u8x16), window1_is_80),
-                                              vceqq_u8(window2, byte_80_u8x16));
-        uint8x16_t three_byte_cmp = vorrq_u8(
-            vorrq_u8(vorrq_u8(ogham_cmp, range_e280_cmp), vorrq_u8(nnbsp_cmp, mmsp_cmp)),
-            vorrq_u8(vorrq_u8(line_cmp, paragraph_cmp), ideographic_cmp));
+            // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
+            uint8x16_t window1_is_80 = vceqq_u8(window1, byte_80_u8x16);
+            uint8x16_t lead_e280_cmp = vandq_u8(lead_e2_cmp, window1_is_80);
+            uint8x16_t ogham_cmp = vandq_u8(vceqq_u8(window, x_e1_u8x16),
+                                            vandq_u8(vceqq_u8(window1, x_9a_u8x16), vceqq_u8(window2, byte_80_u8x16)));
+            uint8x16_t range_e280_cmp = vandq_u8(
+                lead_e280_cmp, vandq_u8(vcgeq_u8(window2, byte_80_u8x16), vcleq_u8(window2, x_8a_u8x16)));
+            uint8x16_t nnbsp_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_af_u8x16));
+            uint8x16_t mmsp_cmp = vandq_u8(vandq_u8(lead_e2_cmp, vceqq_u8(window1, x_81_u8x16)),
+                                           vceqq_u8(window2, x_9f_u8x16));
+            uint8x16_t line_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_a8_u8x16));
+            uint8x16_t paragraph_cmp = vandq_u8(lead_e280_cmp, vceqq_u8(window2, x_a9_u8x16));
+            uint8x16_t ideographic_cmp = vandq_u8(vandq_u8(vceqq_u8(window, x_e3_u8x16), window1_is_80),
+                                                  vceqq_u8(window2, byte_80_u8x16));
+            three_byte_cmp = vorrq_u8(vorrq_u8(vorrq_u8(ogham_cmp, range_e280_cmp), vorrq_u8(nnbsp_cmp, mmsp_cmp)),
+                                      vorrq_u8(vorrq_u8(line_cmp, paragraph_cmp), ideographic_cmp));
+        }
 
-        uint8x16_t starts_cmp = vandq_u8(vorrq_u8(vorrq_u8(one_byte_cmp, two_byte_cmp), three_byte_cmp),
-                                         trusted_lanes_u8x16);
+        uint8x16_t starts_cmp = vorrq_u8(vorrq_u8(one_byte_cmp, two_byte_cmp), three_byte_cmp);
 
         sz_u64_t start_bits = sz_utf8_vreinterpretq_u8_u4_neon_(starts_cmp);
 
@@ -267,7 +272,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
         uint8x16_t length_per_lane = vaddq_u8(
             vdupq_n_u8(1), vaddq_u8(vshrq_n_u8(two_byte_cmp, 7), vshlq_n_u8(vshrq_n_u8(three_byte_cmp, 7), 1)));
 
-        // One set bit per match (nibble stride 4), so popcount is the true count of trusted set lanes.
+        // One set bit per match (nibble stride 4), so popcount is the true count of set lanes.
         sz_size_t const window_matches = (sz_size_t)sz_u64_popcount(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
@@ -278,7 +283,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
             position = match_offsets[count - 1] + match_lengths[count - 1];
             break;
         }
-        position += 14;
+        position += 16;
     }
 
     count += sz_utf8_whitespaces_serial_((sz_cptr_t)(text_u8 + position), length - position, position,
