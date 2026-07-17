@@ -543,6 +543,58 @@ SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_blo
     return result;
 }
 
+/** @brief  Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64 lane
+ *          masks - the mask-domain twin of the per-ISA `complete_limit` helpers, shared by back-ends that carry
+ *          their window state as scalars. Never below 1 when the window is non-empty. */
+SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_masks_( //
+    sz_size_t loaded, sz_u64_t start_bytes, sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+    sz_u64_t four_byte_starts, sz_u8_t byte_after, sz_bool_t more_text) {
+    if (!more_text || !start_bytes) return loaded;
+    sz_u64_t const straddle = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
+                              (three_byte_starts & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
+                              (four_byte_starts & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0));
+    sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+    if ((byte_after & 0xC0) == 0x80) {
+        sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes));
+        if (last_lead < limit) limit = last_lead;
+    }
+    return limit > 0 ? limit : loaded;
+}
+
+/** @brief  Emit the resolved dense sentence boundaries as `(start, length)` segments, walking the codepoint-start
+ *          lanes once: dense index `j` maps to the `j`-th set bit of @p start_lanes, a set bit of @p dense_breaks
+ *          below @p dense_limit closes the running segment at that byte, and the walk also reports the byte lane
+ *          of the `dense_limit`-th start (the resume position of a partially resolved window). Honors @p capacity
+ *          and the carried previous boundary exactly like @ref sz_utf8_rune_drain_forward_.
+ *  @return Number of segments produced; sets @p advance_lane_out to the byte lane of start @p dense_limit, or
+ *          @p loaded when every start resolved. */
+SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_emit_dense_serial_(                                     //
+    sz_u64_t start_lanes, sz_u64_t dense_breaks, sz_size_t dense_limit, sz_size_t base, int skip_lane0, //
+    sz_size_t loaded, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_size_t *segment_start_io, sz_size_t *advance_lane_out) {
+    sz_size_t segment_start = *segment_start_io;
+    sz_size_t dense_index = 0;
+    sz_size_t advance_lane = loaded;
+    for (sz_u64_t remaining = start_lanes; remaining; remaining &= remaining - 1, ++dense_index) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        if (dense_index == dense_limit) {
+            advance_lane = lane;
+            break;
+        }
+        if (((dense_breaks >> dense_index) & 1ull) == 0) continue;
+        if (skip_lane0 && lane == 0) continue;
+        if (produced == capacity) break;
+        sz_size_t const boundary = base + lane;
+        starts[produced] = segment_start;
+        lengths[produced] = boundary - segment_start;
+        segment_start = boundary;
+        ++produced;
+    }
+    *segment_start_io = segment_start;
+    *advance_lane_out = advance_lane;
+    return produced;
+}
+
 /** @brief  Convenience entry for backends without vector class compares: build the dense frame in one pass, then run
  *          @ref sz_utf8_sentence_break_decide_block_. The vector backends build the frame with `vpcmpeqb` instead. */
 SZ_HELPER_AUTO sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_( //

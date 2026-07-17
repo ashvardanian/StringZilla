@@ -69,6 +69,13 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t le
                                                     sz_size_t *bytes_consumed);
 #endif
 
+#if SZ_USE_SVE2
+/** @copydoc sz_utf8_sentences */
+SZ_API_COMPTIME sz_size_t sz_utf8_sentences_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *sentence_starts,
+                                                 sz_size_t *sentence_lengths, sz_size_t sentences_capacity,
+                                                 sz_size_t *bytes_consumed);
+#endif
+
 #pragma endregion
 
 /*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
@@ -76,6 +83,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t le
 #include "stringzilla/utf8_sentences/haswell.h"
 #include "stringzilla/utf8_sentences/neon.h"
 #include "stringzilla/utf8_sentences/icelake.h"
+#include "stringzilla/utf8_sentences/sve2.h"
 
 #pragma region Dynamic Dispatch
 
@@ -90,6 +98,8 @@ SZ_API_RUNTIME sz_size_t sz_utf8_sentences(sz_cptr_t text, sz_size_t length, sz_
 #elif SZ_USE_HASWELL
     return sz_utf8_sentences_haswell(text, length, sentence_starts, sentence_lengths, sentences_capacity,
                                      bytes_consumed);
+#elif SZ_USE_SVE2
+    return sz_utf8_sentences_sve2(text, length, sentence_starts, sentence_lengths, sentences_capacity, bytes_consumed);
 #elif SZ_USE_NEON
     return sz_utf8_sentences_neon(text, length, sentence_starts, sentence_lengths, sentences_capacity, bytes_consumed);
 #else

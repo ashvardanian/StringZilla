@@ -58,6 +58,9 @@ static utf8_segment_backend_t const utf8_sentences_backends[] = {
 #if SZ_USE_NEON
     {"neon", sz_utf8_sentences_neon},
 #endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_sentences_sve2},
+#endif
 };
 
 /** @brief Known-answer sentence-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
