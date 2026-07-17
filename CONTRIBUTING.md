@@ -217,6 +217,27 @@ SZ_TESTS_SEED=42 pytest test/ --ignore=test/stringzillas.py -v
 When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
 This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
 
+The scalable-vector backends must stay correct at every hardware vector length, and the CI `test_cross_qemu` matrix sweeps them all.
+The same sweep runs locally with user-mode QEMU - on an Arm host that covers NEON-only dispatch plus SVE at 128/256/512 bits, and cross-compilers unlock the RISC-V, x86, LoongArch, and POWER backends too:
+
+```bash
+sudo apt install qemu-user gcc-x86-64-linux-gnu gcc-riscv64-linux-gnu gcc-loongarch64-linux-gnu gcc-powerpc64le-linux-gnu
+
+# Sweep SVE vector lengths on the native Arm binary (sve-max-vq is VL/128)
+for vq in 1 2 4; do
+  SZ_TESTS_FILTER=utf8 SZ_TESTS_MULTIPLIER=0.1 qemu-aarch64 -cpu max,sve-max-vq=$vq build_release/stringzilla_test_cpp20
+done
+
+# NEON-only dispatch (otherwise SVE2 always wins and NEON is never exercised)
+qemu-aarch64 -cpu max,sve=off build_release/stringzilla_test_cpp20
+
+# Cross-compile a single-TU probe against another backend and run it emulated
+x86_64-linux-gnu-gcc -O2 -mavx2 -mbmi -mbmi2 -mpopcnt -DSZ_USE_HASWELL=1 -Iinclude probe.c -o probe -static
+qemu-x86_64 -cpu max ./probe
+```
+
+Note that QEMU's TCG cannot execute AVX-512, so the Ice Lake and Skylake backends are compile-checked only under emulation and need real x86 hardware to run.
+
 To use CppCheck for static analysis make sure to export the compilation commands.
 Overall, CppCheck and Clang-Tidy are extremely noisy and not suitable for CI, but may be useful for local development.
 
