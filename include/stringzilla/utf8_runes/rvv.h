@@ -8,7 +8,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_utf8_incomplete_tail_`
-#include "stringzilla/utf8_runes/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -512,6 +511,170 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_
  *  iteration is the masked tail (carry bytes past `length` read as 0, so a truncated delimiter at EOF never
  *  matches) — no serial tail call. A small per-set classifier builds the per-lane byte-length vector; one
  *  shared driver (`sz_utf8_iterate_multistep_rvv_`) handles the window/carry/trusted-lane/peel scaffolding. */
+
+#pragma region Shared SIMD leaf substrate
+
+/*  The 64-byte windowed-engine substrate (RVV 1.0). Everything below runs at `e8m4`, the one SEW/LMUL pair that
+ *  works at every vector length: VLEN=128 gives VLMAX = exactly the 64 lanes the shared rule engine consumes, and
+ *  wider machines clamp `vl` to 64 with idle upper lanes. `e8m4` is also the MAXIMUM data LMUL that admits the
+ *  16-bit indexed `vluxei16` byte gather (index EMUL = 2x data LMUL; `m8` data would need an illegal EMUL=16).
+ *  Discipline: every window-domain operation runs at `vl = 64` over a zero-padded window; the `loaded` clamp
+ *  lives ONLY in the `sz_u64_t` mask domain (`& sz_u64_mask_until_serial_(loaded)`), never as a vector `vl`. */
+
+/** @brief  The decoded 64-byte window for the RVV backend, mirroring @ref sz_utf8_rune_window_neon_t in spirit.
+ *          RVV vector registers are sizeless and cannot live in a struct, so ONLY the scalar lane masks are
+ *          carried here; the raw window vector is materialized once by the driver and threaded through the leaves
+ *          by value, and the BMP codepoint halves are recomputed in-leaf via @ref sz_utf8_rune_bmp_halves_rvv_. */
+typedef struct sz_utf8_rune_window_rvv_t {
+    sz_u64_t continuation;      /**< Bit `i` => lane `i` is a continuation byte `10xxxxxx`. */
+    sz_u64_t codepoint_starts;  /**< Bit `i` => lane `i` begins a codepoint (loaded, non-continuation). */
+    sz_u64_t two_byte_starts;   /**< Bit `i` => lane `i` is a 2-byte lead `110xxxxx`. */
+    sz_u64_t three_byte_starts; /**< Bit `i` => lane `i` is a 3-byte lead `1110xxxx`. */
+    sz_u64_t four_byte_starts;  /**< Bit `i` => lane `i` is a 4-byte lead `11110xxx`. */
+    sz_size_t loaded;           /**< Number of bytes actually loaded (<= 64). */
+} sz_utf8_rune_window_rvv_t;
+
+/** @brief  Load up to 64 window bytes with a guaranteed-zero tail: a zero splat at VLMAX then a tail-undisturbed
+ *          `vle8`, so `vslidedown` neighbour reads past the window are deterministic zeros at any VLEN. */
+SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_load64_rvv_(sz_u8_t const *bytes, sz_size_t loaded) {
+    vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
+    return __riscv_vle8_v_u8m4_tu(zero_u8m4, bytes, loaded);
+}
+
+/** @brief  Lower a 64-lane `vbool2_t` mask to the engine's `sz_u64_t`, bit `i` <=> lane `i`, in ONE register move:
+ *          the mask register's low 64 bits reinterpret as a `u64` element and `vmv.x.s` reads it — no memory, no
+ *          `vsm.v` stack staging. This is the one-way bridge OUT of the vector domain at every genuine engine
+ *          boundary (the window struct fields, the frame's per-class masks). The producing compare must have run
+ *          at `vl = 64` so all 64 bits are defined; the mask register's tail bits past lane 63 are never read. */
+SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_mask_to_bits_rvv_(vbool2_t lanes_b2) {
+    vuint64m1_t const words_u64m1 = __riscv_vreinterpret_v_u8m1_u64m1(__riscv_vreinterpret_v_b2_u8m1(lanes_b2));
+    return __riscv_vmv_x_s_u64m1_u64(words_u64m1);
+}
+
+/** @brief  Raise an engine-domain `sz_u64_t` lane mask back into a 64-lane `vbool2_t` in ONE register move
+ *          (`vmv.s.x` into the mask register's low word), the inverse of @ref sz_utf8_rune_mask_to_bits_rvv_.
+ *          Reserved for values that genuinely ORIGINATE in the portable `sz_u64_t` domain (a partition-resolver
+ *          output, an engine `breaks` mask, a scalar `loaded`-clamped mix); a compare that was only just lowered
+ *          must be recomputed in-register instead, never round-tripped. Consumers read only lanes `[0, 64)`. */
+SZ_HELPER_INLINE vbool2_t sz_utf8_rune_bits_to_mask_rvv_(sz_u64_t bits) {
+    vuint64m1_t const words_u64m1 = __riscv_vmv_s_x_u64m1(bits, 1);
+    return __riscv_vreinterpret_v_u8m1_b2(__riscv_vreinterpret_v_u64m1_u8m1(words_u64m1));
+}
+
+/** @brief  Forward neighbour `next[i] = window[(i + distance) & 63]`, wrapping modulo 64 exactly like the NEON
+ *          `vextq` quarters and the Ice Lake `vpermb`, so every intermediate partition mask stays bit-identical
+ *          across backends. Requires the window's lanes past 63 to be zero (see @ref sz_utf8_rune_load64_rvv_),
+ *          so the `vslidedown` spill lanes OR cleanly with the wrapped head. */
+SZ_HELPER_INLINE vuint8m4_t sz_utf8_rune_forward_neighbour_rvv_(vuint8m4_t window_u8m4, sz_size_t distance) {
+    vuint8m4_t const zero_u8m4 = __riscv_vmv_v_x_u8m4(0, __riscv_vsetvlmax_e8m4());
+    vuint8m4_t const slid_u8m4 = __riscv_vslidedown_vx_u8m4(window_u8m4, distance, 64);
+    vuint8m4_t const wrapped_u8m4 = __riscv_vslideup_vx_u8m4(zero_u8m4, window_u8m4, 64 - distance, 64);
+    return __riscv_vor_vv_u8m4(slid_u8m4, wrapped_u8m4, 64);
+}
+
+/** @brief  Extract the lead-class lane masks of a 64-byte window — the mask half of the RVV twin of
+ *          @ref sz_utf8_rune_decode_window_neon_. The raw window vector arrives from the driver's single
+ *          @ref sz_utf8_rune_load64_rvv_ materialization; the BMP halves are recomputed in-leaf via
+ *          @ref sz_utf8_rune_bmp_halves_rvv_, so no byte array is ever staged. */
+SZ_HELPER_AUTO sz_utf8_rune_window_rvv_t sz_utf8_rune_decode_window_rvv_(vuint8m4_t const raw_u8m4,
+                                                                         sz_size_t const loaded) {
+    sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
+    sz_utf8_rune_window_rvv_t window;
+    window.loaded = loaded;
+    window.continuation = sz_utf8_rune_mask_to_bits_rvv_(
+                              __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xC0, 64), 0x80, 64)) &
+                          loaded_mask;
+    window.codepoint_starts = loaded_mask & ~window.continuation;
+    window.two_byte_starts = sz_utf8_rune_mask_to_bits_rvv_(
+                                 __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xE0, 64), 0xC0, 64)) &
+                             loaded_mask;
+    window.three_byte_starts = sz_utf8_rune_mask_to_bits_rvv_(
+                                   __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xF0, 64), 0xE0, 64)) &
+                               loaded_mask;
+    window.four_byte_starts = sz_utf8_rune_mask_to_bits_rvv_(
+                                  __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xF8, 64), 0xF0, 64)) &
+                              loaded_mask;
+    return window;
+}
+
+/** @brief  BMP per-lane `(high, low)` codepoint halves from the raw window and its forward neighbours, as a
+ *          register tuple `{high, low}` — 2-/3-byte reconstruction merged on the 3-byte-lead mask, bit-identical
+ *          to the NEON decode. ASCII and 4-byte lanes carry don't-cares, exactly like NEON. Recomputed in each
+ *          consuming leaf instead of threaded, so no 8-register liveness spans the leaves. */
+SZ_HELPER_AUTO vuint8m4x2_t sz_utf8_rune_bmp_halves_rvv_(vuint8m4_t const raw_u8m4) {
+    vuint8m4_t const next1_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 1);
+    vuint8m4_t const next2_u8m4 = sz_utf8_rune_forward_neighbour_rvv_(raw_u8m4, 2);
+    vbool2_t const three_byte_b2 = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(raw_u8m4, 0xF0, 64), 0xE0, 64);
+
+    // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = (b0 >> 2) & 0x07, low = ((b0 & 3) << 6) | (b1 & 0x3F).
+    vuint8m4_t const high_two_u8m4 = __riscv_vand_vx_u8m4(__riscv_vsrl_vx_u8m4(raw_u8m4, 2, 64), 0x07, 64);
+    vuint8m4_t const low_two_u8m4 = __riscv_vor_vv_u8m4(
+        __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(raw_u8m4, 0x03, 64), 6, 64),
+        __riscv_vand_vx_u8m4(next1_u8m4, 0x3F, 64), 64);
+
+    // 3-byte: high = ((b0 & 0x0F) << 4) | ((b1 >> 2) & 0x0F), low = ((b1 & 0x03) << 6) | (b2 & 0x3F).
+    vuint8m4_t const high_three_u8m4 = __riscv_vor_vv_u8m4(
+        __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(raw_u8m4, 0x0F, 64), 4, 64),
+        __riscv_vand_vx_u8m4(__riscv_vsrl_vx_u8m4(next1_u8m4, 2, 64), 0x0F, 64), 64);
+    vuint8m4_t const low_three_u8m4 = __riscv_vor_vv_u8m4(
+        __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(next1_u8m4, 0x03, 64), 6, 64),
+        __riscv_vand_vx_u8m4(next2_u8m4, 0x3F, 64), 64);
+
+    return __riscv_vcreate_v_u8m4x2(__riscv_vmerge_vvm_u8m4(high_two_u8m4, high_three_u8m4, three_byte_b2, 64),
+                                    __riscv_vmerge_vvm_u8m4(low_two_u8m4, low_three_u8m4, three_byte_b2, 64));
+}
+
+/** @brief  Class byte per lane from a page-compressed flat table, the RVV twin of
+ *          @ref sz_utf8_rune_flat_lookup_sve2_: `page_lut[high]` by an unmasked `vluxei8` gather (the LUT is
+ *          total over the byte domain, so every lane is in-bounds by construction), then `flat[(page << 8) | low]`
+ *          by a masked `vluxei16` gather. @p inactive_u8m4 rides through on masked-off lanes, which perform no
+ *          memory access. Index safety never depends on @p active_b2. */
+SZ_HELPER_AUTO vuint8m4_t sz_utf8_rune_flat_lookup_rvv_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, vuint8m4_t high_u8m4, vuint8m4_t low_u8m4, vbool2_t active_b2,
+    vuint8m4_t inactive_u8m4) {
+    vuint8m4_t const page_u8m4 = __riscv_vluxei8_v_u8m4(page_lut, high_u8m4, 64);
+    vuint16m8_t const page_base_u16m8 = __riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(page_u8m4, 64), 8, 64);
+    vuint16m8_t const fused_u16m8 = __riscv_vwaddu_wv_u16m8(page_base_u16m8, low_u8m4, 64);
+    return __riscv_vluxei16_v_u8m4_mu(active_b2, inactive_u8m4, flat, fused_u16m8, 64);
+}
+
+/** @brief  RVV forward drain — the vector twin of @ref sz_utf8_rune_drain_forward_neon_, bit-exact with it. The
+ *          set boundary lanes compress to dense u16 indices (`vid` + `vcompress`), widen to u64 absolute
+ *          positions, and emit as a shifted-difference stream: `starts = vslide1up(positions, previous)`,
+ *          `lengths = positions - starts`, honoring @p capacity and the carried open-word start @p previous_io. */
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_rvv_( //
+    sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+    sz_size_t *previous_io) {
+    if (!boundary || produced >= capacity) return produced;
+
+    // The one `vlm.v` raise this leaf owns: @p boundary genuinely ORIGINATES in the engine (`win.breaks`), and it is
+    // consumed as a mask by both `vcpop.m` (base rv64gcv has no scalar Zbb `cpop`) and the `vcompress` below — so the
+    // raise pays for two mask-register operations, not a round-trip.
+    vbool2_t const boundary_b2 = sz_utf8_rune_bits_to_mask_rvv_(boundary);
+    sz_size_t const boundary_count = (sz_size_t)__riscv_vcpop_m_b2(boundary_b2, 64);
+    vuint16m8_t const packed_u16m8 = __riscv_vcompress_vm_u16m8(__riscv_vid_v_u16m8(64), boundary_b2, 64);
+    sz_size_t const emit_count = sz_min_of_two(boundary_count, capacity - produced);
+
+    sz_size_t emitted = 0;
+    sz_u64_t previous = (sz_u64_t)*previous_io;
+    while (emitted < emit_count) {
+        sz_size_t const chunk = __riscv_vsetvl_e64m8(emit_count - emitted);
+        vuint16m2_t const chunk_indices_u16m2 = __riscv_vget_v_u16m8_u16m2(
+            __riscv_vslidedown_vx_u16m8(packed_u16m8, emitted, 64), 0);
+        vuint64m8_t const positions_u64m8 = __riscv_vadd_vx_u64m8(__riscv_vzext_vf4_u64m8(chunk_indices_u16m2, chunk),
+                                                                  (sz_u64_t)base, chunk);
+        vuint64m8_t const starts_u64m8 = __riscv_vslide1up_vx_u64m8(positions_u64m8, previous, chunk);
+        __riscv_vse64_v_u64m8((sz_u64_t *)starts + produced + emitted, starts_u64m8, chunk);
+        __riscv_vse64_v_u64m8((sz_u64_t *)lengths + produced + emitted,
+                              __riscv_vsub_vv_u64m8(positions_u64m8, starts_u64m8, chunk), chunk);
+        emitted += chunk;
+        previous = starts[produced + emitted - 1] + lengths[produced + emitted - 1];
+    }
+    *previous_io = (sz_size_t)previous;
+    return produced + emit_count;
+}
+
+#pragma endregion Shared SIMD leaf substrate
 
 #if defined(__clang__)
 #pragma clang attribute pop

@@ -479,14 +479,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
     sz_size_t bridge_anchor = 0; // byte offset of the consumed, still-unresolved Mid* (valid while bridge_open)
     sz_size_t position = 0;      // codepoint-aligned anchor of the next window (advances cleanly)
 
-    sz_utf8_word_break_carry_t carry;
-    carry.bridge_open = 0;
-    carry.bridge_kind = sz_utf8_word_break_bridge_none_k;
-    carry.left_property = (sz_u8_t)sz_utf8_word_break_other_k; // WB1: sot has no left context
-    carry.have_prev = 0;
-    carry.ri_parity = 0;
-    carry.prev_is_wseg = 0;
-    carry.prev_ends_in_zwj = 0;
+    sz_utf8_word_break_carry_t carry = sz_utf8_word_break_carry_sot_();
 
     while (position < length) {
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,

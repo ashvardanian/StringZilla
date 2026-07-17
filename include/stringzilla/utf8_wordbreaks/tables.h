@@ -765,7 +765,7 @@ static const sz_u8_t sz_utf8_word_break_astral_cls_[476] = {
  *  #         class=astral_stage4_groups[leaf_group][lut_index]
  *  @endcode
  */
-#if SZ_USE_HASWELL || SZ_USE_NEON
+#if SZ_USE_HASWELL || SZ_USE_NEON || SZ_USE_RVV || SZ_USE_V128 || SZ_USE_LASX || SZ_USE_POWERVSX
 static const sz_u8_t sz_utf8_word_break_bmp_page_lut_[256] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 1,  17, 18, 19, 1,  20, 21, 22, 23, 24, 25, 26,
     27, 1,  28, 29, 30, 31, 31, 32, 31, 31, 31, 31, 31, 31, 31, 33, 34, 35, 31, 36, 37, 38, 39, 31, 31, 31, 31, 31, 31,
@@ -1006,19 +1006,19 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage4_groups_[3328] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
 };
-#endif // SZ_USE_HASWELL || SZ_USE_NEON
+#endif // SZ_USE_HASWELL || SZ_USE_NEON || SZ_USE_RVV || SZ_USE_V128 || SZ_USE_LASX || SZ_USE_POWERVSX
 
 #pragma endregion Word_Break tables
 
 #pragma region Flat BMP classifier tables
-#if SZ_USE_HASWELL || SZ_USE_NEON
+#if SZ_USE_HASWELL || SZ_USE_NEON || SZ_USE_RVV || SZ_USE_V128 || SZ_USE_LASX || SZ_USE_POWERVSX
 // clang-format off
 
 /**
  *  @brief  Flat Word_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 52 distinct
  *          256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor, one indexed lookup per
- *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, and a bounded scalar leaf walk on NEON,
- *          which has no gather. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
+ *          codepoint, read by `vpgatherdd` on x86, `svld1_gather` on SVE2, `vluxei16` on RVV, and a bounded
+ *          scalar leaf walk on NEON, WASM, LASX, and POWER VSX, which have no gathers. The page LUT is `bmp_page_lut_` itself, reused rather than duplicated.
  *          Bit-exact with `sz_rune_word_break_property` across the BMP by construction. Derived by:
  *
  *  @code{.py}
@@ -1877,7 +1877,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_word_break_flat_bmp_[13376] = {
 };
 
 // clang-format on
-#endif // SZ_USE_HASWELL || SZ_USE_NEON
+#endif // SZ_USE_HASWELL || SZ_USE_NEON || SZ_USE_RVV || SZ_USE_V128 || SZ_USE_LASX || SZ_USE_POWERVSX
 #pragma endregion Flat BMP classifier tables
 
 #ifdef __cplusplus
