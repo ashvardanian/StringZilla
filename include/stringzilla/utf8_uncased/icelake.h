@@ -2451,7 +2451,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
         // 1. ASCII letter check (zeros beyond string are fine - not letters)
         __mmask64 is_upper_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_upper_u8x64), range26_u8x64);
         __mmask64 is_lower_mask = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_lower_u8x64), range26_u8x64);
-        if (is_upper_mask | is_lower_mask) return sz_utf8_find_cased_serial(str, length);
+        if (is_upper_mask | is_lower_mask) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
 
         // 2. Check for non-ASCII in lead positions
         __mmask64 is_non_ascii_mask = _mm512_movepi8_mask(text_u8x64) & lead_mask;
@@ -2473,7 +2473,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                 __mmask64 is_9d_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9D));
                 __mmask64 is_9e_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9E));
                 if (after_f0_mask & (is_90_mask | is_91_mask | is_96_mask | is_9d_mask | is_9e_mask))
-                    return sz_utf8_find_cased_serial(str, length);
+                    return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
 
             // 5. Check 2-byte bicameral leads: C3-D6
@@ -2488,7 +2488,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                 if (is_c2_mask) {
                     __mmask64 after_c2_mask = is_c2_mask << 1;
                     __mmask64 is_b5_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB5));
-                    if (after_c2_mask & is_b5_mask) return sz_utf8_find_cased_serial(str, length);
+                    if (after_c2_mask & is_b5_mask) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
@@ -2496,18 +2496,18 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
                 // So we must NOT exclude this range from bicameral check.
 
-                if (is_bicameral_mask & is_two_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_bicameral_mask & is_two_mask) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
 
             // 6. Check 3-byte bicameral sequences
             if (is_three_mask) {
                 // E1: Georgian, Greek Extended, Latin Extended Additional
                 __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
-                if (is_e1_mask & is_three_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_e1_mask & is_three_mask) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
 
                 // EF: Fullwidth Latin
                 __mmask64 is_ef_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xEF));
-                if (is_ef_mask & is_three_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_ef_mask & is_three_mask) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
 
                 // E2: Safe only for second byte 80-83
                 __mmask64 is_e2_mask = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE2)) & is_three_mask;
@@ -2515,7 +2515,8 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                     __mmask64 after_e2_mask = is_e2_mask << 1;
                     __mmask64 e2_second_safe_mask = _mm512_cmplt_epu8_mask( //
                         _mm512_sub_epi8(text_u8x64, x80_u8x64), _mm512_set1_epi8(0x04));
-                    if (after_e2_mask & ~e2_second_safe_mask) return sz_utf8_find_cased_serial(str, length);
+                    if (after_e2_mask & ~e2_second_safe_mask)
+                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
 
                 // EA: Bicameral second bytes 99-9F, AD-AE
@@ -2527,7 +2528,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t le
                     __mmask64 is_ad_range_mask = _mm512_cmplt_epu8_mask( //
                         _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8((char)0xAC)), _mm512_set1_epi8(0x03));
                     if (after_ea_mask & (is_99_range_mask | is_ad_range_mask))
-                        return sz_utf8_find_cased_serial(str, length);
+                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
             }
         }

@@ -1059,6 +1059,29 @@ void test_uncased_unit() {
 #if SZ_USE_ICELAKE
         assert(sz_utf8_find_cased_icelake(mixed, mixed_length) == mixed + 3); // Manual: icelake kernel
 #endif
+
+        // A cased rune hiding behind a caseless prefix longer than any SIMD front's block: sixteen
+        // emojis (64 bytes) then 'a'. Regression vector for the serial-bail call that rescanned the
+        // proven-caseless prefix instead of the remaining suffix and reported the string caseless.
+        std::string deep_cased;
+        for (std::size_t i = 0; i < 16; ++i) deep_cased += "\xF0\x9F\x98\x80"; // "😀"
+        deep_cased += 'a';
+        char const *deep = deep_cased.data();
+        sz_size_t const deep_length = (sz_size_t)deep_cased.size();
+        assert(sz_utf8_find_cased(deep, deep_length) == deep + 64);
+        assert(sz_utf8_find_cased_serial(deep, deep_length) == deep + 64);
+#if SZ_USE_HASWELL
+        assert(sz_utf8_find_cased_haswell(deep, deep_length) == deep + 64);
+#endif
+#if SZ_USE_ICELAKE
+        assert(sz_utf8_find_cased_icelake(deep, deep_length) == deep + 64);
+#endif
+#if SZ_USE_NEON
+        assert(sz_utf8_find_cased_neon(deep, deep_length) == deep + 64);
+#endif
+#if SZ_USE_V128
+        assert(sz_utf8_find_cased_v128(deep, deep_length) == deep + 64);
+#endif
     }
 
     // Equal strings (ASCII)

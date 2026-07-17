@@ -1148,7 +1148,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
             sz_utf8_uncased_haswell_in_byte_range_(text_ymm, 'A', 26));
         sz_u32_t is_lower_mask = (sz_u32_t)_mm256_movemask_epi8(
             sz_utf8_uncased_haswell_in_byte_range_(text_ymm, 'a', 26));
-        if (is_upper_mask | is_lower_mask) return sz_utf8_find_cased_serial(str, length);
+        if (is_upper_mask | is_lower_mask) return sz_utf8_find_cased_serial(text_cursor, length);
 
         // 2. Check for non-ASCII in lead positions
         sz_u32_t is_non_ascii_mask = (sz_u32_t)_mm256_movemask_epi8(text_ymm) & lead_mask;
@@ -1180,7 +1180,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                 sz_u32_t is_9e_mask = (sz_u32_t)_mm256_movemask_epi8(
                     _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0x9E)));
                 if (after_f0_mask & (is_90_mask | is_91_mask | is_96_mask | is_9d_mask | is_9e_mask))
-                    return sz_utf8_find_cased_serial(str, length);
+                    return sz_utf8_find_cased_serial(text_cursor, length);
             }
 
             // 5. Check 2-byte bicameral leads: C3-D6
@@ -1197,14 +1197,14 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                 if (is_c2_mask) {
                     sz_u32_t is_b5_mask = (sz_u32_t)_mm256_movemask_epi8(
                         _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB5)));
-                    if ((is_c2_mask << 1) & is_b5_mask) return sz_utf8_find_cased_serial(str, length);
+                    if ((is_c2_mask << 1) & is_b5_mask) return sz_utf8_find_cased_serial(text_cursor, length);
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
                 // (U+02B0-02BF). Spacing Modifier Letters CAN appear in case fold expansions:
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
                 // So we must NOT exclude this range from the bicameral check.
-                if (is_bicameral_mask & is_two_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_bicameral_mask & is_two_mask) return sz_utf8_find_cased_serial(text_cursor, length);
             }
 
             // 6. Check 3-byte bicameral sequences
@@ -1212,12 +1212,12 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                 // E1: Georgian, Greek Extended, Latin Extended Additional
                 sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(
                     _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
-                if (is_e1_mask & is_three_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_e1_mask & is_three_mask) return sz_utf8_find_cased_serial(text_cursor, length);
 
                 // EF: Fullwidth Latin
                 sz_u32_t is_ef_mask = (sz_u32_t)_mm256_movemask_epi8(
                     _mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xEF)));
-                if (is_ef_mask & is_three_mask) return sz_utf8_find_cased_serial(str, length);
+                if (is_ef_mask & is_three_mask) return sz_utf8_find_cased_serial(text_cursor, length);
 
                 // E2: Safe only for second byte 80-83
                 sz_u32_t is_e2_mask = (sz_u32_t)_mm256_movemask_epi8(
@@ -1226,7 +1226,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                 if (is_e2_mask) {
                     sz_u32_t e2_second_safe_mask = (sz_u32_t)_mm256_movemask_epi8(
                         sz_utf8_uncased_haswell_in_byte_range_(text_ymm, 0x80, 0x04));
-                    if ((is_e2_mask << 1) & ~e2_second_safe_mask) return sz_utf8_find_cased_serial(str, length);
+                    if ((is_e2_mask << 1) & ~e2_second_safe_mask) return sz_utf8_find_cased_serial(text_cursor, length);
                 }
 
                 // EA: Bicameral second bytes 99-9F, AC-AE
@@ -1239,7 +1239,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_haswell(sz_cptr_t str, sz_size_t le
                     sz_u32_t is_ac_range_mask = (sz_u32_t)_mm256_movemask_epi8(
                         sz_utf8_uncased_haswell_in_byte_range_(text_ymm, 0xAC, 0x03));
                     if ((is_ea_mask << 1) & (is_99_range_mask | is_ac_range_mask))
-                        return sz_utf8_find_cased_serial(str, length);
+                        return sz_utf8_find_cased_serial(text_cursor, length);
                 }
             }
         }

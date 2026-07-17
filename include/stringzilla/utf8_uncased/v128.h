@@ -658,7 +658,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
                                                              sz_utf8_in_range_v128_(high, 'A', 26));
         sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'a', 26),
                                                              sz_utf8_in_range_v128_(high, 'a', 26));
-        if (is_upper | is_lower) return sz_utf8_find_cased_serial(str, length);
+        if (is_upper | is_lower) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
 
         v128_t x80 = wasm_i8x16_splat((sz_i8_t)0x80);
         sz_u32_t is_non_ascii = sz_utf8_uncased_movemask_v128x2_(wasm_u8x16_ge(low, x80), wasm_u8x16_ge(high, x80)) &
@@ -682,7 +682,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
                     v128_t b = wasm_i8x16_splat((sz_i8_t)seconds[value]);
                     hit |= sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, b), wasm_i8x16_eq(high, b));
                 }
-                if ((is_four << 1) & hit) return sz_utf8_find_cased_serial(str, length);
+                if ((is_four << 1) & hit) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
             if (is_two) {
                 sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xC3, 0x14),
@@ -693,23 +693,23 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
                 if (is_c2) {
                     sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xb5),
                                                                       wasm_i8x16_eq(high, xb5));
-                    if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial(str, length);
+                    if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
-                if (is_bicameral & is_two) return sz_utf8_find_cased_serial(str, length);
+                if (is_bicameral & is_two) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
             if (is_three) {
                 v128_t xe1 = wasm_i8x16_splat((sz_i8_t)0xE1), xef = wasm_i8x16_splat((sz_i8_t)0xEF);
                 sz_u32_t is_e1 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe1), wasm_i8x16_eq(high, xe1));
-                if (is_e1 & is_three) return sz_utf8_find_cased_serial(str, length);
+                if (is_e1 & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 sz_u32_t is_ef = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xef), wasm_i8x16_eq(high, xef));
-                if (is_ef & is_three) return sz_utf8_find_cased_serial(str, length);
+                if (is_ef & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 v128_t xe2 = wasm_i8x16_splat((sz_i8_t)0xE2);
                 sz_u32_t is_e2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe2), wasm_i8x16_eq(high, xe2)) &
                                  is_three;
                 if (is_e2) {
                     sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x80, 0x04),
                                                                         sz_utf8_in_range_v128_(high, 0x80, 0x04));
-                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial(str, length);
+                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
                 v128_t xea = wasm_i8x16_splat((sz_i8_t)0xEA);
                 sz_u32_t is_ea = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xea), wasm_i8x16_eq(high, xea)) &
@@ -719,7 +719,8 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
                                                                       sz_utf8_in_range_v128_(high, 0x99, 0x07));
                     sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xAC, 0x03),
                                                                       sz_utf8_in_range_v128_(high, 0xAC, 0x03));
-                    if ((is_ea << 1) & (is_99 | is_ac)) return sz_utf8_find_cased_serial(str, length);
+                    if ((is_ea << 1) & (is_99 | is_ac))
+                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
             }
         }
