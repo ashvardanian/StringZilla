@@ -96,28 +96,31 @@ def test_unit_strs_sequence():
 
 
 def test_unit_strs_argsort_out():
-    """`argsort(out=...)` writes the permutation into a caller `uint64` buffer and returns it."""
+    """`argsort(out=...)` writes the permutation into a caller pointer-width buffer and returns it."""
     import array
+    import struct
 
     strs = Str("banana\napple\ncherry\nApple\nBANANA").splitlines()
     n = len(strs)
 
-    # `array('Q')` matches `sz_sorted_idx_t` (unsigned 64-bit); out is filled and returned.
-    buf = array.array("Q", [0] * n)
+    # `out` must match `sz_sorted_idx_t` exactly: one pointer-width unsigned integer per index.
+    index_code = next(code for code in "LQ" if array.array(code).itemsize == struct.calcsize("P"))
+    buf = array.array(index_code, [0] * n)
     assert strs.argsort(uncased=True, out=buf) is buf
     assert tuple(buf) == strs.argsort(uncased=True)
 
     # Top-K writes exactly `top` indices and leaves the rest of a wider buffer untouched.
-    wide = array.array("Q", [12345] * n)
+    wide = array.array(index_code, [12345] * n)
     strs.argsort(top=2, out=wide)
     assert tuple(wide[:2]) == strs.argsort(top=2)
     assert all(x == 12345 for x in wide[2:]), "argsort(out=...) clobbered past `top`"
 
-    # Rejections: wrong itemsize, undersized, read-only, and `sorted()` has no `out=`.
+    # Rejections: wrong itemsize (2-byte `'H'` on every platform), undersized, read-only, and
+    # `sorted()` has no `out=`.
     with pytest.raises(TypeError):
-        strs.argsort(out=array.array("I", [0] * n))
+        strs.argsort(out=array.array("H", [0] * n))
     with pytest.raises(ValueError):
-        strs.argsort(out=array.array("Q", [0] * (n - 1)))
+        strs.argsort(out=array.array(index_code, [0] * (n - 1)))
     with pytest.raises((TypeError, BufferError)):
         strs.argsort(out=bytes(8 * n))
     with pytest.raises(TypeError):

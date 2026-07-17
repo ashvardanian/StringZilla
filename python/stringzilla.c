@@ -7868,8 +7868,8 @@ static char const doc_argsort[] =                                               
     "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                   //
     "  uncased (bool, optional): Order by Unicode case-folding. Defaults to False.\n"              //
     "  top (int, optional): Keep only the `top` leading indices. Defaults to None (all).\n"        //
-    "  out (buffer, optional): Writable, C-contiguous buffer of 64-bit unsigned integers "         //
-    "(e.g. numpy.uintp or array('Q')) to receive the indices with zero allocation. "               //
+    "  out (buffer, optional): Writable, C-contiguous buffer of pointer-width unsigned integers "  //
+    "(e.g. numpy.uintp) to receive the indices with zero allocation. "                             //
     "Defaults to None.\n"                                                                          //
     "Returns:\n"                                                                                   //
     "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n" //
@@ -7945,10 +7945,9 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         // PyBUF_CONTIG = writable + C-contiguous; rejects strided/read-only targets up front.
         if (PyObject_GetBuffer(out_obj, &out_view, PyBUF_CONTIG) != 0) return NULL;
         if (out_view.itemsize != (Py_ssize_t)sizeof(sz_sorted_idx_t)) {
-            PyErr_Format(
-                PyExc_TypeError,
-                "out must be a contiguous buffer of %zu-byte unsigned integers (e.g. numpy.uintp or array('Q'))",
-                sizeof(sz_sorted_idx_t));
+            PyErr_Format(PyExc_TypeError,
+                         "out must be a contiguous buffer of %zu-byte unsigned integers (e.g. numpy.uintp)",
+                         sizeof(sz_sorted_idx_t));
             PyBuffer_Release(&out_view);
             return NULL;
         }
