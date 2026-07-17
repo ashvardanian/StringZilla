@@ -865,6 +865,80 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                              
 }
 
 /**
+ *  @brief  Pure 3-byte tile: when the cursor sits on an E0..EF lead - the steady state of CJK, Hangul, and Thai
+ *          prose - one `vld3q_u8` structure load deinterleaves 16 (lead, cont1, cont2) triples, so ~7 range checks
+ *          validate 16 runes at once and the codepoints assemble with zip/widen and store, no compaction and no
+ *          per-lane gather. The clean 3-byte prefix is accepted when it covers the whole attempt (a capacity clamp)
+ *          or is long enough to out-run the general window engine; a short prefix cut by an irregular byte means
+ *          separator-dense text (Hangul, Devanagari), left to the general engine that digests it with its
+ *          separators. The NEON twin of the SVE2 `svld3_u8` tile.
+ *
+ *  Requires @p length >= 48 so the unpredicated `vld3q_u8` never over-reads; shorter spans fall to the general
+ *  engine (masked load). Emits only well-formed 3-byte runes, so the consumed span is exactly `clean * 3`.
+ *
+ *  @return Number of runes emitted (0 => tile declined); sets @p consumed_bytes to `clean * 3` when it emits.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_tile3_neon_( //
+    sz_u8_t const *text, sz_size_t length,         //
+    sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
+
+    if (length < 48 || capacity == 0 || (text[0] & 0xF0) != 0xE0) return 0;
+    sz_size_t tile_runes = length / 3;
+    if (tile_runes > 16) tile_runes = 16;
+    if (tile_runes > capacity) tile_runes = capacity;
+
+    uint8x16x3_t const triple_u8x16x3 = vld3q_u8(text); // deinterleaves 48 bytes into (lead, cont1, cont2)
+    uint8x16_t const b0_u8x16 = triple_u8x16x3.val[0];
+    uint8x16_t const b1_u8x16 = triple_u8x16x3.val[1];
+    uint8x16_t const b2_u8x16 = triple_u8x16x3.val[2];
+
+    // Shape: `(b0 & 0xF0) == 0xE0` and both trailing bytes are continuations `10xxxxxx`.
+    uint8x16_t const shape_ok_u8x16 = vandq_u8(
+        vceqq_u8(vandq_u8(b0_u8x16, vdupq_n_u8(0xF0)), vdupq_n_u8(0xE0)),
+        vandq_u8(vceqq_u8(vandq_u8(b1_u8x16, vdupq_n_u8(0xC0)), vdupq_n_u8(0x80)),
+                 vceqq_u8(vandq_u8(b2_u8x16, vdupq_n_u8(0xC0)), vdupq_n_u8(0x80))));
+    // First-continuation bounds: E0 lifts the floor to 0xA0 (overlong), ED drops the ceiling to 0x9F (surrogates).
+    uint8x16_t const bounds_bad_u8x16 = vorrq_u8(
+        vandq_u8(vceqq_u8(b0_u8x16, vdupq_n_u8(0xE0)), vcltq_u8(b1_u8x16, vdupq_n_u8(0xA0))),
+        vandq_u8(vceqq_u8(b0_u8x16, vdupq_n_u8(0xED)), vcgeq_u8(b1_u8x16, vdupq_n_u8(0xA0))));
+    uint8x16_t const bad_u8x16 = vorrq_u8(vmvnq_u8(shape_ok_u8x16), bounds_bad_u8x16);
+
+    // First bad lane index (or >= 16 when none): non-bad lanes become 0xFF and lose the min, mirroring the
+    // `vminvq_u8` first-set scan used for the overrun position; no scalar ctz walk.
+    static sz_u8_t const iota16_lanes[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const iota16_u8x16 = vld1q_u8(iota16_lanes);
+    uint8x16_t const candidate_u8x16 = vorrq_u8(iota16_u8x16, vmvnq_u8(bad_u8x16));
+    sz_size_t clean = (sz_size_t)vminvq_u8(candidate_u8x16);
+    if (clean > tile_runes) clean = tile_runes;
+    if (clean == 0 || (clean != tile_runes && clean < 4)) return 0;
+
+    // Codepoint = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F); split into low and high bytes.
+    uint8x16_t const cp_lo_u8x16 = vorrq_u8(vandq_u8(vshlq_n_u8(b1_u8x16, 6), vdupq_n_u8(0xC0)),
+                                            vandq_u8(b2_u8x16, vdupq_n_u8(0x3F)));
+    uint8x16_t const cp_hi_u8x16 = vorrq_u8(vshlq_n_u8(vandq_u8(b0_u8x16, vdupq_n_u8(0x0F)), 4),
+                                            vandq_u8(vshrq_n_u8(b1_u8x16, 2), vdupq_n_u8(0x0F)));
+    uint16x8_t const cp16_lo_u16x8 = vorrq_u16(vmovl_u8(vget_low_u8(cp_lo_u8x16)),
+                                               vshlq_n_u16(vmovl_u8(vget_low_u8(cp_hi_u8x16)), 8));
+    uint16x8_t const cp16_hi_u16x8 = vorrq_u16(vmovl_u8(vget_high_u8(cp_lo_u8x16)),
+                                               vshlq_n_u16(vmovl_u8(vget_high_u8(cp_hi_u8x16)), 8));
+    uint32x4_t const words_u32x4[4] = {vmovl_u16(vget_low_u16(cp16_lo_u16x8)), vmovl_u16(vget_high_u16(cp16_lo_u16x8)),
+                                       vmovl_u16(vget_low_u16(cp16_hi_u16x8)), vmovl_u16(vget_high_u16(cp16_hi_u16x8))};
+    for (int sub = 0; sub < 4; ++sub) {
+        sz_size_t const out_base = (sz_size_t)sub * 4;
+        if (out_base >= clean) break;
+        sz_size_t lanes = clean - out_base;
+        if (lanes >= 4) { vst1q_u32((sz_u32_t *)(runes + out_base), words_u32x4[sub]); }
+        else {
+            sz_u32_t lane_values[4];
+            vst1q_u32(lane_values, words_u32x4[sub]);
+            for (sz_size_t lane = 0; lane < lanes; ++lane) runes[out_base + lane] = (sz_rune_t)lane_values[lane];
+        }
+    }
+    *consumed_bytes = clean * 3;
+    return clean;
+}
+
+/**
  *  @brief  Decode one <=64-byte window of @p text into dense UTF-32 @p runes by the uniform "classify -> whole-window
  *          soundness gate -> compress starts -> gather -> width-blend" path, the NEON twin of @ref
  *          sz_utf8_decode_once_icelake_. Pure ASCII takes a dedicated widen lane. An ill-formed (overlong /
@@ -913,6 +987,100 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
         return text + runes_to_unpack;
     }
 
+    // Clean "ASCII + 2/3-byte" fast lane: when the whole decodable window is ASCII bytes and well-formed C2..DF
+    // 2-byte pairs and/or E0..EF 3-byte triples - Latin/Cyrillic/Greek/Hebrew/Arabic (2-byte), CJK/Hangul/
+    // Devanagari/Thai (3-byte), and Vietnamese (both) prose with ASCII separators - the structure is proven with a
+    // handful of shifted-mask tests (every start is ASCII or a 2-/3-byte lead, every lead owns its continuations, no
+    // continuation is an orphan, E0-overlong / ED-surrogate first-continuation bounds) and the codepoints drain
+    // through the same gather path the general engine uses, skipping the length / range classification that
+    // dominates its per-window cost. Gated to windows with no 4-byte-or-invalid lead (>= 0xF0); anything irregular
+    // (an orphan, a truncation, a bad lead) declines to the general path below at the same cursor. The NEON twin of
+    // the three SVE2 "clean lanes", fused: the 3-byte masks and gather are built only when a 3-byte lead is present.
+    {
+        uint8x16_t four_or_u8x16 = vdupq_n_u8(0);
+        for (int quarter = 0; quarter < 4; ++quarter)
+            four_or_u8x16 = vorrq_u8(four_or_u8x16, vcgeq_u8(window_u8x16[quarter], vdupq_n_u8(0xF0)));
+        if (vmaxvq_u8(four_or_u8x16) == 0) {
+            sz_u64_t continuation_bits2 = 0, ascii_bits2 = 0, lead2_bits = 0, lead3_bits = 0;
+            for (int quarter = 0; quarter < 4; ++quarter) {
+                sz_u64_t const shift = (sz_u64_t)quarter * 16;
+                uint8x16_t const here_u8x16 = window_u8x16[quarter];
+                int8x16_t const signed_s8x16 = vreinterpretq_s8_u8(here_u8x16);
+                continuation_bits2 |= sz_utf8_movemask16_neon_(vcltq_s8(signed_s8x16, vdupq_n_s8(-64))) << shift;
+                ascii_bits2 |= sz_utf8_movemask16_neon_(vcgeq_s8(signed_s8x16, vdupq_n_s8(0))) << shift;
+                lead2_bits |= sz_utf8_movemask16_neon_(vandq_u8(vcgeq_u8(here_u8x16, vdupq_n_u8(0xC2)),
+                                                                vcleq_u8(here_u8x16, vdupq_n_u8(0xDF))))
+                              << shift;
+                lead3_bits |=
+                    sz_utf8_movemask16_neon_(vceqq_u8(vandq_u8(here_u8x16, vdupq_n_u8(0xF0)), vdupq_n_u8(0xE0)))
+                    << shift;
+            }
+            continuation_bits2 &= loaded_mask;
+            ascii_bits2 &= loaded_mask;
+            lead2_bits &= loaded_mask;
+            lead3_bits &= loaded_mask;
+            sz_u64_t const starts_bits2 = loaded_mask & ~continuation_bits2;
+            sz_u64_t const owe1_bits = lead2_bits | lead3_bits; // every 2-/3-byte lead owes a continuation +1 lane up
+            // Defer any start whose sequence crosses the window edge: a 2-/3-byte lead in the last lane, or a 3-byte
+            // lead in the second-to-last lane (its second continuation lands past the window). The cases are exclusive.
+            sz_size_t decodable_end2 = chunk;
+            if (chunk && ((owe1_bits >> (chunk - 1)) & 1u)) decodable_end2 = chunk - 1;
+            else if (chunk >= 2 && ((lead3_bits >> (chunk - 2)) & 1u)) decodable_end2 = chunk - 2;
+            sz_u64_t const decodable2 = sz_u64_mask_until_serial_(decodable_end2);
+            sz_u64_t const starts_decodable2 = starts_bits2 & decodable2;
+            sz_u64_t const cont_decodable2 = continuation_bits2 & decodable2;
+            sz_u64_t const owe1_decodable2 = owe1_bits & decodable2;
+            sz_u64_t const lead3_decodable2 = lead3_bits & decodable2;
+            sz_u64_t const covered_bits = (owe1_bits << 1) | (lead3_bits << 2);
+            // First-continuation bounds (E0 overlong / ED surrogate) only bite for 3-byte leads; build them lazily so
+            // pure 2-byte scripts pay four masks, not eight.
+            int const has_three = lead3_bits != 0;
+            sz_u64_t bounds_bad2 = 0;
+            if (has_three) {
+                sz_u64_t e0_bits = 0, ed_bits = 0, n1_lt_a0_bits = 0, n1_ge_a0_bits = 0;
+                for (int quarter = 0; quarter < 4; ++quarter) {
+                    sz_u64_t const shift = (sz_u64_t)quarter * 16;
+                    uint8x16_t const here_u8x16 = window_u8x16[quarter];
+                    e0_bits |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xE0))) << shift;
+                    ed_bits |= sz_utf8_movemask16_neon_(vceqq_u8(here_u8x16, vdupq_n_u8(0xED))) << shift;
+                    n1_lt_a0_bits |= sz_utf8_movemask16_neon_(vcltq_u8(here_u8x16, vdupq_n_u8(0xA0))) << shift;
+                    n1_ge_a0_bits |= sz_utf8_movemask16_neon_(vcgeq_u8(here_u8x16, vdupq_n_u8(0xA0))) << shift;
+                }
+                bounds_bad2 = ((e0_bits & (n1_lt_a0_bits >> 1)) | (ed_bits & (n1_ge_a0_bits >> 1))) & decodable2;
+            }
+            int const clean2 = ((starts_decodable2 & ~(ascii_bits2 | lead2_bits | lead3_bits)) == 0) &&
+                               ((owe1_decodable2 & ~(continuation_bits2 >> 1)) == 0) &&
+                               ((lead3_decodable2 & ~(continuation_bits2 >> 2)) == 0) &&
+                               ((cont_decodable2 & ~covered_bits) == 0) && (bounds_bad2 == 0);
+            if (clean2 && starts_decodable2) {
+                uint8x16_t ill_quarter2[4];
+                sz_u8_t consumed_length2[64];
+                uint8x16_t const one_u8x16 = vdupq_n_u8(1), two_u8x16 = vdupq_n_u8(2);
+                sz_size_t emit_count2 = 0;
+                for (int quarter = 0; quarter < 4; ++quarter) {
+                    sz_u32_t const shift = (sz_u32_t)quarter * 16;
+                    ill_quarter2[quarter] = vdupq_n_u8(0);
+                    uint8x16_t const lead2_q_u8x16 = sz_utf8_expand16_neon_(
+                        (sz_u32_t)((lead2_bits >> shift) & 0xFFFFu));
+                    uint8x16_t const lead3_q_u8x16 = sz_utf8_expand16_neon_(
+                        (sz_u32_t)((lead3_bits >> shift) & 0xFFFFu));
+                    // Per-lane maximal-subpart length: 1 + (2-byte lead) + 2 * (3-byte lead).
+                    uint8x16_t length_q_u8x16 = vaddq_u8(one_u8x16, vandq_u8(lead2_q_u8x16, one_u8x16));
+                    length_q_u8x16 = vaddq_u8(length_q_u8x16, vandq_u8(lead3_q_u8x16, two_u8x16));
+                    vst1q_u8(consumed_length2 + quarter * 16, length_q_u8x16);
+                    uint8x16_t const start_q_u8x16 = sz_utf8_expand16_neon_(
+                        (sz_u32_t)((starts_decodable2 >> shift) & 0xFFFFu));
+                    emit_count2 += (sz_size_t)vaddvq_u8(vandq_u8(start_q_u8x16, one_u8x16));
+                }
+                sz_size_t consumed2 = 0;
+                sz_size_t const produced2 = sz_utf8_rune_drain_neon_(window_u8x16, starts_decodable2, ill_quarter2,
+                                                                     has_three, 0, consumed_length2, emit_count2, runes,
+                                                                     runes_capacity, &consumed2);
+                *runes_unpacked = produced2;
+                return text + consumed2;
+            }
+        }
+    }
     // Single-source classification: a high-nibble LUT gives the per-lane byte length (the SAME LUT the serial
     // reference uses, so 0xF8..0xFF map to length 4 and cannot slip the gate). Derive `len == k` masks per lane.
     static sz_u8_t const length_by_high_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
@@ -1069,6 +1237,17 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_neon(  //
     sz_cptr_t const end = text + length;
     sz_size_t runes_written = 0;
     while (runes_written < runes_capacity && cursor < end) {
+        // Pure 3-byte tile fast path: on an E0..EF lead a single `vld3q_u8` decodes up to 16 CJK/Hangul/Thai runes
+        // ahead of the general window engine, which handles everything the tile declines at the same cursor.
+        sz_size_t tile_consumed = 0;
+        sz_size_t const tile_runes = sz_utf8_rune_tile3_neon_((sz_u8_t const *)cursor, (sz_size_t)(end - cursor),
+                                                              runes + runes_written, runes_capacity - runes_written,
+                                                              &tile_consumed);
+        if (tile_runes) {
+            runes_written += tile_runes;
+            cursor += tile_consumed;
+            continue;
+        }
         sz_size_t step_unpacked = 0;
         sz_cptr_t next = sz_utf8_decode_once_neon_(cursor, (sz_size_t)(end - cursor), runes + runes_written,
                                                    runes_capacity - runes_written, &step_unpacked);
