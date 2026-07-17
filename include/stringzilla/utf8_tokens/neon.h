@@ -300,41 +300,42 @@ SZ_HELPER_INLINE uint8x16_t sz_delimiter_test_bit_neon_(uint8x16_t bitmap_byte, 
 }
 
 /**
- *  @brief  Read one bitmap byte per lane from the row-major bitmap rows: `bitmap_byte = bitmaps[block_id*32 +
- *          (low >> 3)]`. NEON has no gather and the rows span up to ~1.7 KB, so the fused 11-bit indices take a
- *          bounded scalar L1 walk - the same leaf pattern as @ref sz_utf8_rune_flat_lookup_neon_. @p block_id and
- *          @p low address one quarter; every block id indexes a real row, so the read is always in-bounds.
- */
-SZ_HELPER_AUTO uint8x16_t sz_delimiter_bitmap_byte_neon_(sz_u8_t const *bitmaps, uint8x16_t block_id, uint8x16_t low) {
-    uint8x16_t const column = vshrq_n_u8(low, 3); // (low >> 3) in [0, 32): the byte within the row
-    uint16x8_t const bitmap_indices_low_u16x8 = vorrq_u16(vshll_n_u8(vget_low_u8(block_id), 5),
-                                                          vmovl_u8(vget_low_u8(column)));
-    uint16x8_t const bitmap_indices_high_u16x8 = vorrq_u16(vshll_n_u8(vget_high_u8(block_id), 5),
-                                                           vmovl_u8(vget_high_u8(column)));
-    sz_align_(16) sz_u16_t bitmap_indices[16];
-    sz_align_(16) sz_u8_t bitmap_bytes[16];
-    vst1q_u16(bitmap_indices, bitmap_indices_low_u16x8);
-    vst1q_u16(bitmap_indices + 8, bitmap_indices_high_u16x8);
-    for (int lane = 0; lane < 16; ++lane) bitmap_bytes[lane] = bitmaps[bitmap_indices[lane]];
-    return vld1q_u8(bitmap_bytes);
-}
-
-/**
  *  @brief  BMP (codepoint < 0x10000) delimiter membership for one quarter, in-register; returns 0x00/0xFF lanes.
  *
  *  The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
  *  codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
- *  `high` (cp >> 8, in [0,256)) selects a 32-byte bitmap row id through the aligned 256-entry `bmp_block` table via
- *  `vqtbl4q_u8`; the bitmap byte at `row_id*32 + (low >> 3)` is read from the row-major rows; the bit `(low & 7)` is
- *  tested.
+ *  Lanes below U+0100 read bitmap row 0 directly; the rest survive a 256-bit pre-filter over `high` only if
+ *  their 256-codepoint block holds ANY delimiter (row 1 - most of the plane, including all CJK letters - is the
+ *  unique empty row), and the survivors resolve one DISTINCT high byte at a time: running text shares one to
+ *  three highs per quarter, and each round loads that block's 32-byte row into a `vqtbl2q_u8` pair and settles
+ *  every lane carrying it - no per-lane scalar walk.
  */
 SZ_HELPER_AUTO uint8x16_t sz_delimiter_bmp_membership_neon_(uint8x16_t window, uint8x16_t high_in, uint8x16_t low_in) {
     uint8x16_t const is_ascii = vcltq_u8(window, vdupq_n_u8(0x80));
     uint8x16_t const high = vbicq_u8(high_in, is_ascii);       // high = is_ascii ? 0 : high_in
     uint8x16_t const low = vbslq_u8(is_ascii, window, low_in); // low  = is_ascii ? byte : low_in
-    uint8x16_t const block_id = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_bmp_block_, high);
-    uint8x16_t const bitmap_byte = sz_delimiter_bitmap_byte_neon_(sz_utf8_delimiter_bmp_bitmaps_, block_id, low);
-    return sz_delimiter_test_bit_neon_(bitmap_byte, low);
+
+    uint8x16x2_t const row0 = vld1q_u8_x2(sz_utf8_delimiter_bmp_bitmaps_);
+    uint8x16x2_t const suspicious = vld1q_u8_x2(sz_utf8_delimiter_bmp_suspicious_highs_);
+    uint8x16_t const high_is_zero = vceqq_u8(high, vdupq_n_u8(0));
+    uint8x16_t const row0_byte = vqtbl2q_u8(row0, vshrq_n_u8(low, 3));
+    uint8x16_t result = vandq_u8(sz_delimiter_test_bit_neon_(row0_byte, low), high_is_zero);
+
+    uint8x16_t const suspicious_byte = vqtbl2q_u8(suspicious, vshrq_n_u8(high, 3));
+    uint8x16_t const is_continuation = vceqq_u8(vandq_u8(window, vdupq_n_u8(0xC0)), vdupq_n_u8(0x80));
+    uint8x16_t unresolved = vbicq_u8(vbicq_u8(sz_delimiter_test_bit_neon_(suspicious_byte, high), high_is_zero),
+                                     is_continuation);
+    for (;;) {
+        sz_u8_t const shared_high = vmaxvq_u8(vandq_u8(high, unresolved)); // zero iff no lane left
+        if (!shared_high) break;
+        uint8x16x2_t const row = vld1q_u8_x2(sz_utf8_delimiter_bmp_bitmaps_ +
+                                             (sz_size_t)sz_utf8_delimiter_bmp_block_[shared_high] * 32);
+        uint8x16_t const same = vandq_u8(unresolved, vceqq_u8(high, vdupq_n_u8(shared_high)));
+        uint8x16_t const row_byte = vqtbl2q_u8(row, vshrq_n_u8(low, 3));
+        result = vorrq_u8(result, vandq_u8(sz_delimiter_test_bit_neon_(row_byte, low), same));
+        unresolved = vbicq_u8(unresolved, same);
+    }
+    return result;
 }
 
 /**
@@ -353,25 +354,35 @@ SZ_HELPER_AUTO uint8x16_t sz_delimiter_astral_membership_neon_(uint8x16_t window
     uint8x16_t const b2 = vandq_u8(next2, vdupq_n_u8(0x3F));
     uint8x16_t const b3 = vandq_u8(next3, vdupq_n_u8(0x3F));
 
-    // cp >> 16 = (b0 << 2) | (b1 >> 4); super = (cp >> 16) - 1.
+    // cp >> 16 = (b0 << 2) | (b1 >> 4), kept one-biased so zero means "no lane".
     uint8x16_t const cp_hi = vorrq_u8(vshlq_n_u8(b0, 2), vshrq_n_u8(b1, 4));
-    uint8x16_t const super = vsubq_u8(cp_hi, vdupq_n_u8(1));
     // (cp >> 8) & 0xFF = (b1 << 4) | (b2 >> 2).
     uint8x16_t const sub = vorrq_u8(vshlq_n_u8(b1, 4), vshrq_n_u8(b2, 2));
     // cp & 0xFF = (b2 << 6) | b3.
     uint8x16_t const low8 = vorrq_u8(vshlq_n_u8(b2, 6), b3);
 
-    // group = astral_l1[super]; super in [0, 16), so a single 16-entry cascade row addresses it.
-    uint8x16_t const group = sz_utf8_rune_cascade_stage_neon_(sz_utf8_delimiter_astral_l1_, 1, vdupq_n_u8(0), super);
-
-    // row_id = astral_l2[group*256 + sub]: read both 256-entry halves and blend by the group bit (group < 2).
-    uint8x16_t const row_group0 = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 0, sub);
-    uint8x16_t const row_group1 = sz_utf8_rune_lut256_neon_(sz_utf8_delimiter_astral_l2_ + 256, sub);
-    uint8x16_t const group_is_one = vceqq_u8(group, vdupq_n_u8(1));
-    uint8x16_t const row_id = vbslq_u8(group_is_one, row_group1, row_group0);
-
-    uint8x16_t const bitmap_byte = sz_delimiter_bitmap_byte_neon_(sz_utf8_delimiter_astral_bitmaps_, row_id, low8);
-    return sz_delimiter_test_bit_neon_(bitmap_byte, low8);
+    // The same distinct-value resolution as the BMP walk, keyed on the (cp_hi, sub) pair: only planes 1..16
+    // are addressable (`cp_hi` past 0x10 means an invalid lead - the caller's validity mask rejects it), and
+    // `cp_hi` stays biased by one so `vmaxvq_u8` can read "no lane left" as zero.
+    uint8x16_t result = vdupq_n_u8(0);
+    uint8x16_t remaining = vandq_u8(vcgeq_u8(window, vdupq_n_u8(0xF0)), vcleq_u8(cp_hi, vdupq_n_u8(0x10)));
+    for (;;) {
+        sz_u8_t const shared_hi = vmaxvq_u8(vandq_u8(cp_hi, remaining));
+        if (!shared_hi) break;
+        uint8x16_t const plane_same = vandq_u8(remaining, vceqq_u8(cp_hi, vdupq_n_u8(shared_hi)));
+        sz_u8_t const shared_sub = vmaxvq_u8(vandq_u8(sub, plane_same));
+        sz_u8_t const *row =
+            sz_utf8_delimiter_astral_bitmaps_ +
+            (sz_size_t)sz_utf8_delimiter_astral_l2_[(sz_size_t)sz_utf8_delimiter_astral_l1_[shared_hi - 1] * 256 +
+                                                    shared_sub] *
+                32;
+        uint8x16x2_t const row_pair = vld1q_u8_x2(row);
+        uint8x16_t const same = vandq_u8(plane_same, vceqq_u8(sub, vdupq_n_u8(shared_sub)));
+        uint8x16_t const row_byte = vqtbl2q_u8(row_pair, vshrq_n_u8(low8, 3));
+        result = vorrq_u8(result, vandq_u8(sz_delimiter_test_bit_neon_(row_byte, low8), same));
+        remaining = vbicq_u8(remaining, same);
+    }
+    return result;
 }
 
 /**
