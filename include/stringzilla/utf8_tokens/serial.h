@@ -127,6 +127,17 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(   //
 
 #pragma region Serial
 
+/** @brief  Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the first
+ *          2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window. Shared u64 mask
+ *          math for every windowed ISA front-end. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                            sz_u64_t four_byte_starts, sz_size_t loaded) {
+    sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                             (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                             (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
+    return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+}
+
 /**
  *  @brief Reference scan emitting every delimiter codepoint into parallel offset/length arrays.
  *
