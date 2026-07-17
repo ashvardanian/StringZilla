@@ -94,8 +94,16 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u12
     __vector unsigned char state_u8 = state_vec.vsx_u8;
     __vector unsigned char reversed = vec_perm(state_u8, state_u8, rev);
     __vector unsigned char zero = vec_splats((unsigned char)0);
-    __vector unsigned char ciphered = (__vector unsigned char)__builtin_crypto_vcipher(
-        (__vector unsigned long long)reversed, (__vector unsigned long long)zero);
+    // `__builtin_crypto_vcipher` is not in the AltiVec ABI, so the compilers typed it differently: Clang over
+    // `vector unsigned char`, GCC over `vector unsigned long long`. The blessed `vec_cipher_be` is NOT a substitute -
+    // its byte-order contract differs from the x86 `aesenc` emulation this reversal implements.
+#if defined(__clang__)
+    typedef __vector unsigned char sz_vcipher_operand_t_;
+#else
+    typedef __vector unsigned long long sz_vcipher_operand_t_;
+#endif
+    __vector unsigned char ciphered = (__vector unsigned char)__builtin_crypto_vcipher((sz_vcipher_operand_t_)reversed,
+                                                                                       (sz_vcipher_operand_t_)zero);
     __vector unsigned char restored = vec_perm(ciphered, ciphered, rev);
     sz_u128_vec_t result;
     result.vsx_u8 = restored;
