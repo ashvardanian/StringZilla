@@ -49,7 +49,6 @@ from test.utf8_helpers import (
     window_seam_lengths,
 )
 
-
 # region Unit
 
 
@@ -122,6 +121,36 @@ def test_utf8_wordbreaks_numbers():
     result = [str(w) for w in sz.utf8_wordbreaks("3.14")]
     # Numeric with MidNum should stay together (WB11-12)
     assert "3.14" in result or len(result) <= 3
+
+
+@pytest.mark.parametrize("run_length", [3, 8, 15, 31, 32, 33, 100])
+def test_utf8_wordbreaks_deferred_mid(run_length: int):
+    """WB6/7/11/12 deferred-mid goldens: a Mid* (`,` `:` `'` `\"`) whose WB4-ignorable Extend run crosses every
+    SIMD window width before the bridge completes or fails on the far side. Regression corpus for the
+    cross-window bridge-shadow carry: a failed bridge must still break at the mid, keep WB7a's
+    Hebrew x Single_Quote join, and leave the mid as the effective left context."""
+    marks = "̀" * run_length
+    he = "ה"
+    emoji = "\U0001f600"
+    zwj = "‍"
+    math_five = "\U0001d7d7"
+    goldens = [
+        (f"5,{marks}6", [f"5,{marks}6"]),  # WB11 completes
+        (f"5,{marks}{math_five}", [f"5,{marks}{math_five}"]),  # WB11 completes on an astral Numeric
+        (f"a:{marks}b", [f"a:{marks}b"]),  # WB6 completes
+        (f'{he}"{marks}{he}', [f'{he}"{marks}{he}']),  # WB7b completes
+        (f"5,{marks}a", ["5", f",{marks}", "a"]),  # WB11 fails
+        (f"a:{marks}5", ["a", f":{marks}", "5"]),  # WB6 fails
+        (f"5,{marks}", ["5", f",{marks}"]),  # fails at end-of-text
+        (f"5,{marks},5", ["5", f",{marks}", ",", "5"]),  # fails into a second mid
+        (f"{he}'{marks}x", [f"{he}'{marks}x"]),  # WB7 completes
+        (f"{he}'{marks}5", [f"{he}'{marks}", "5"]),  # WB7a keeps the quote on a failed bridge
+        (f'{he}"{marks}x', [he, f'"{marks}', "x"]),  # WB7b fails
+        (f"a:{marks}{zwj}{emoji}", ["a", f":{marks}{zwj}{emoji}"]),  # fails; WB3c joins the pictograph
+        (f"5,{emoji}", ["5", ",", emoji]),  # astral lookahead right after the mid
+    ]
+    for text, expected in goldens:
+        assert [str(w) for w in sz.utf8_wordbreaks(text)] == expected
 
 
 def test_utf8_wordbreaks_str_method():
@@ -282,9 +311,7 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
     # Up to ~100 codepoints so most cases cross the 64-byte window boundary (multi-window seam coverage). The
     # palette keeps ignorable runs short, so every run stays inside one window, the domain where the kernel must
     # match exactly. (Pathological >64-byte ignorable runs exceed any fixed window; serial-only, out of scope here.)
-    random_samples = (
-        "".join(choice(palette) for _ in range(randint(1, 100))) for _ in range(scale_iterations(2000))
-    )
+    random_samples = ("".join(choice(palette) for _ in range(randint(1, 100))) for _ in range(scale_iterations(2000)))
     for text in itertools.chain(seam_regressions, random_samples):
         sz_boundaries = boundaries(str(w) for w in sz.utf8_wordbreaks(text))
         ref_boundaries = boundaries(uniseg_wordbreak.words(text))

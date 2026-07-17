@@ -116,11 +116,74 @@ static utf8_segment_backend_t const utf8_wordbreaks_backends[] = {
 #endif
 };
 
+/** @brief Segment @p text with @p forward at @p capacity and assert the (start, length) stream tiles the input
+ *         into exactly @p expected_lengths. */
+static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_t forward, std::string const &text,
+                                           std::vector<sz_size_t> const &expected_lengths, sz_size_t capacity) {
+    utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, text.data(), text.size(), capacity);
+    sz_size_t start = 0, length = 0, position = 0;
+    for (sz_size_t const expected : expected_lengths) {
+        sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, length);
+        assert(more && label && "deferred-mid golden emitted fewer segments than expected");
+        assert(start == position && length == expected && label && "deferred-mid golden segment mismatch");
+        position += length;
+    }
+    assert(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
+}
+
+/**
+ *  @brief WB6/WB7/WB11/WB12 deferred-mid goldens: a Mid* (`,` `:` `'` `"`) whose WB4-ignorable lookahead run
+ *         crosses every SIMD window width (16/64 bytes) before the bridge completes or fails on the far side.
+ *         Regression corpus for the cross-window bridge-shadow carry: a failed bridge must still emit the break
+ *         at the mid, keep WB7a's Hebrew x Single_Quote join, and leave the mid as the effective left context.
+ */
+static void test_utf8_wordbreaks_deferred_mid_() {
+    static sz_size_t const run_lengths[] = {3, 8, 15, 31, 32, 33, 100};
+    static char const combining_grave[] = "\xCC\x80";   // U+0300, Word_Break=Extend
+    static char const hebrew_he[] = "\xD7\x94";         // U+05D4, Hebrew_Letter
+    static char const emoji[] = "\xF0\x9F\x98\x80";     // U+1F600, Extended_Pictographic
+    static char const zwj[] = "\xE2\x80\x8D";           // U+200D, ZWJ
+    static char const math_five[] = "\xF0\x9D\x9F\x97"; // U+1D7D7, astral Numeric
+
+    struct golden_t {
+        std::string text;
+        std::vector<sz_size_t> lengths;
+    };
+    std::vector<golden_t> goldens;
+    for (sz_size_t const run : run_lengths) {
+        std::string marks;
+        for (sz_size_t i = 0; i != run; ++i) marks += combining_grave;
+        sz_size_t const marks_size = marks.size();
+        goldens.push_back({"5," + marks + "6", {3 + marks_size}});                                // WB11 completes
+        goldens.push_back({"5," + marks + math_five, {6 + marks_size}});                          // WB11 astral Numeric
+        goldens.push_back({"a:" + marks + "b", {3 + marks_size}});                                // WB6 completes
+        goldens.push_back({hebrew_he + std::string("\"") + marks + hebrew_he, {5 + marks_size}}); // WB7b completes
+        goldens.push_back({"5," + marks + "a", {1, 1 + marks_size, 1}});                          // WB11 fails
+        goldens.push_back({"a:" + marks + "5", {1, 1 + marks_size, 1}});                          // WB6 fails
+        goldens.push_back({"5," + marks, {1, 1 + marks_size}});                               // fails at end-of-text
+        goldens.push_back({"5," + marks + ",5", {1, 1 + marks_size, 1, 1}});                  // fails into a 2nd mid
+        goldens.push_back({hebrew_he + std::string("'") + marks + "x", {4 + marks_size}});    // WB7 completes
+        goldens.push_back({hebrew_he + std::string("'") + marks + "5", {3 + marks_size, 1}}); // WB7a keeps the quote
+        goldens.push_back({hebrew_he + std::string("\"") + marks + "x", {2, 1 + marks_size, 1}}); // WB7b fails
+        goldens.push_back({"a:" + marks + zwj + emoji, {1, 8 + marks_size}}); // fails; WB3c joins the pictograph
+    }
+    goldens.push_back({std::string("5,") + emoji, {1, 1, 4}}); // astral lookahead right after the mid
+
+    static sz_size_t const capacities[] = {utf8_segment_batch_k, 1};
+    for (golden_t const &golden : goldens)
+        for (sz_size_t const capacity : capacities) {
+            check_utf8_wordbreaks_lengths_("serial", sz_utf8_wordbreaks_serial, golden.text, golden.lengths, capacity);
+            for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
+                check_utf8_wordbreaks_lengths_(backend.name, backend.finder, golden.text, golden.lengths, capacity);
+        }
+}
+
 /** @brief Known-answer word-break vectors through dispatched, serial, and each ISA backend + the C++ range. */
 void test_utf8_wordbreaks_unit() {
     std::printf("  - testing UTF-8 word-break known-answer vectors...\n");
 
     test_utf8_wordbreaks_classification_();
+    test_utf8_wordbreaks_deferred_mid_();
 
     check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, utf8_wordbreaks_unit_cases,
                              utf8_wordbreaks_unit_cases_count);
