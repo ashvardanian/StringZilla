@@ -111,14 +111,14 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_sentence_break_classify_chunk_sve2_(           
         svbool_t const is_astral_b8x = svand_b_z(all_b8x, plane_nonzero_b8x, plane_le16_b8x);
         svbool_t const is_overrange_b8x = svbic_b_z(all_b8x, plane_nonzero_b8x, plane_le16_b8x);
         svuint8_t const plane_off_u8x = svsub_n_u8_x(all_b8x, svsel_u8(is_astral_b8x, plane_u8x, svdup_n_u8(1)), 1);
-        svuint8_t const bmp_u8x = sz_utf8_rune_flat_lookup_sve2_(sz_utf8_sentence_break_bmp_page_lut_,
-                                                                 sz_utf8_sentence_break_flat_bmp_, high_u8x, low_u8x);
+        svuint8_t const bmp_u8x = sz_utf8_rune_flat_lookup_ascii_gated_sve2_(
+            sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_, bytes_u8x, high_u8x, low_u8x);
         svuint8_t const astral_u8x = sz_utf8_sentence_break_astral_class_sve2_(plane_off_u8x, high_u8x, low_u8x);
         svuint8_t const classed_u8x = svsel_u8(is_astral_b8x, astral_u8x, bmp_u8x);
         return svsel_u8(is_overrange_b8x, svdup_n_u8(0), classed_u8x); // cp >= 0x110000 lanes force class Other
     }
-    return sz_utf8_rune_flat_lookup_sve2_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
-                                          high_u8x, low_u8x);
+    return sz_utf8_rune_flat_lookup_ascii_gated_sve2_(sz_utf8_sentence_break_bmp_page_lut_,
+                                                      sz_utf8_sentence_break_flat_bmp_, bytes_u8x, high_u8x, low_u8x);
 }
 
 /** @brief  Build the per-class membership frame from the dense class byte stream via its four bit-planes: each

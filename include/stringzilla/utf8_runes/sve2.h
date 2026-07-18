@@ -178,6 +178,20 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count,
     return result_u8x;
 }
 
+/** @brief  ASCII-gated class lookup for a page-compressed flat table. When the WHOLE chunk is ASCII, the class
+ *          bytes come from page 0 (`flat[page_lut[0]*256 + byte]`, bit-identical to the gather at high=0,
+ *          low=byte) with a cheap `svtbl` LUT and the eight-gather cascade is skipped entirely; any non-ASCII lane
+ *          falls to the full gather unchanged (so mixed/multibyte chunks pay only one compare + `ptest`, never an
+ *          extra LUT). Requires inactive lanes of @p bytes_u8x to be zero-filled (any `svld1` with a `whilelt`
+ *          predicate is), so the whole-chunk ASCII test never trips on tail garbage. */
+SZ_HELPER_AUTO svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
+    sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t bytes_u8x, svuint8_t high_u8x, svuint8_t low_u8x) {
+    svbool_t const all_b8x = svptrue_b8();
+    if (!svptest_any(all_b8x, svcmpge_n_u8(all_b8x, bytes_u8x, 0x80)))
+        return sz_utf8_rune_lut_sve2_(flat + (sz_size_t)page_lut[0] * 256, 128, bytes_u8x);
+    return sz_utf8_rune_flat_lookup_sve2_(page_lut, flat, high_u8x, low_u8x);
+}
+
 /** @brief  Select one of `tile_count` 16-entry rows by `selector` and index it by `within` (nibble cascade tile),
  *          serving the astral cascade stages on every property. */
 SZ_HELPER_AUTO svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,

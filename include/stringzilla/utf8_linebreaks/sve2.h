@@ -320,8 +320,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //
             low_u8x = svsel_u8(four_b8x, four_low_u8x, low_u8x);
 
             sz_u64_t const chunk_lanes = sz_u64_mask_until_serial_(chunk_span);
-            svuint8_t bmp_index_u8x = sz_utf8_rune_flat_lookup_sve2_(sz_utf8_line_break_bmp_page_lut_,
-                                                                     sz_utf8_line_break_flat_bmp_, high_u8x, low_u8x);
+            svuint8_t bmp_index_u8x = sz_utf8_rune_flat_lookup_ascii_gated_sve2_(
+                sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_, bytes_u8x, high_u8x, low_u8x);
             if ((replacement >> chunk_base) & chunk_lanes) {
                 svbool_t const replacement_b8x = sz_utf8_rune_u64_to_pred_sve2_(replacement >> chunk_base,
                                                                                 lane_iota_u8x);
