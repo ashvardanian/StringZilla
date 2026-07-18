@@ -67,11 +67,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>.casefold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.4</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.4</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.4</b> GB/s
     </td>
     <td align="center">
       <code>sz.utf8_uncased_fold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.3</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1.3</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.8</b> GB/s
     </td>
   </tr>
   <!-- Unicode uncased search -->
@@ -83,11 +85,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>icu.StringSearch</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.02</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.02</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.07</b> GB/s
     </td>
     <td align="center">
       <code>utf8_uncased_find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.0</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>3.0</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
     </td>
   </tr>
   <!-- Substrings, normal order -->
@@ -98,22 +102,22 @@ __Who is this for?__
     <td align="center">
       <code>strstr</code> <sup>1</sup><br/>
       <span style="color:#ABABAB;">x86:</span> <b>7.4</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.0</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>2.9</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.6</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>4.1</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
     </td>
     <td align="center">
       <code>sz_find</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>10.6</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>7.1</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>10.9</b> GB/s
     </td>
   </tr>
   <!-- Substrings, reverse order -->
@@ -125,17 +129,17 @@ __Who is this for?__
     <td align="center">
       <code>.rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.4</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
     </td>
     <td align="center">
       <code>.rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.9</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.5</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>2.7</b> GB/s
     </td>
     <td align="center">
       <code>sz_rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>10.8</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>6.7</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>9.3</b> GB/s
     </td>
   </tr>
   <!-- Characters, normal order -->
@@ -146,22 +150,22 @@ __Who is this for?__
     <td align="center">
       <code>strcspn</code> <sup>1</sup><br/>
       <span style="color:#ABABAB;">x86:</span> <b>5.42</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.19</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>1.4</b> GB/s
     </td>
     <td align="center">
       <code>.find_first_of</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.59</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.46</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
     </td>
     <td align="center">
       <code>re.finditer</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.02</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>0.32</b> GB/s
     </td>
     <td align="center">
       <code>sz_find_byteset</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>4.08</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.22</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>4.3</b> GB/s
     </td>
   </tr>
   <!-- Characters, reverse order -->
@@ -173,13 +177,13 @@ __Who is this for?__
     <td align="center">
       <code>.find_last_of</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.25</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
     </td>
     <td align="center">⚪</td>
     <td align="center">
       <code>sz_rfind_byteset</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>4.4</b> GB/s
     </td>
   </tr>
   <!-- Random Generation -->
@@ -190,22 +194,22 @@ __Who is this for?__
     <td align="center">
       <code>rand() % n</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>18.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
+      <span style="color:#ABABAB;">arm:</span> <b>169.0</b> MB/s
     </td>
     <td align="center">
       <code>uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
+      <span style="color:#ABABAB;">arm:</span> <b>201.0</b> MB/s
     </td>
     <td align="center">
       <code>join(random.choices(x))</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>13.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>5.9</b> MB/s
+      <span style="color:#ABABAB;">arm:</span> <b>17.0</b> MB/s
     </td>
     <td align="center">
       <code>sz_fill_random</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>56.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>25.8</b> MB/s
+      <span style="color:#ABABAB;">arm:</span> <b>678.0</b> MB/s
     </td>
   </tr>
   <!-- Mapping characters with lookup table transforms -->
@@ -217,17 +221,17 @@ __Who is this for?__
     <td align="center">
       <code>std::transform</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.65</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
     </td>
     <td align="center">
       <code>str.translate</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>260.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>140.0</b> MB/s
+      <span style="color:#ABABAB;">arm:</span> <b>78.0</b> MB/s
     </td>
     <td align="center">
       <code>sz_lookup</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>21.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>8.5</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>7.9</b> GB/s
     </td>
   </tr>
   <!-- Sorting -->
@@ -238,22 +242,22 @@ __Who is this for?__
     <td align="center">
       <code>qsort_r</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>3.55</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>5.77</b> s
+      <span style="color:#ABABAB;">arm:</span> <b>4.48</b> s
     </td>
     <td align="center">
       <code>std::sort</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>2.79</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.02</b> s
+      <span style="color:#ABABAB;">arm:</span> <b>3.50</b> s
     </td>
     <td align="center">
       <code>numpy.argsort</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>7.58</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>13.00</b> s
+      <span style="color:#ABABAB;">arm:</span> <b>14.59</b> s
     </td>
     <td align="center">
       <code>sz_sequence_argsort</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1.91</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.37</b> s
+      <span style="color:#ABABAB;">arm:</span> <b>0.92</b> s
     </td>
   </tr>
   <!-- Edit Distance -->
@@ -308,7 +312,7 @@ To inspect collision resistance and distribution shapes for our hashers, see __[
 
 > Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
-> The benchmarks were performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
+> The Arm numbers were refreshed on an AWS Graviton5 `c9g` instance (Neoverse-V3); the x86 numbers are from `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
 > Variance within x86 CPUs will be larger.
 > For CUDA benchmarks, the Nvidia H100 GPUs were used.
