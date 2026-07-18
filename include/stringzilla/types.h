@@ -342,12 +342,14 @@
 #endif
 #endif
 
-/*  NEON support is optional in Armv7/AArch32, but mandatory from 8.0 onwards. */
+/*  NEON support is optional in Armv7/AArch32, but mandatory from 8.0 onwards. The `!SZ_IS_BIG_ENDIAN_` guard keeps
+ *  the SIMD stack off exotic `aarch64_be` targets: the shared byte-lane bridges (e.g. `sz_utf8_rune_pred_to_u64_*`,
+ *  `sz_utf8_vreinterpretq_u8_u4_neon_`) assume little-endian lane<->byte order and would mis-execute on big-endian. */
 #if !defined(SZ_USE_NEON)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_NEON) && !SZ_IS_BIG_ENDIAN_
 #define SZ_USE_NEON (1)
 #elif SZ_IS_64BIT_ARM_ && defined(_MSC_VER) && defined(_M_ARM64)
-#define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros
+#define SZ_USE_NEON (1) // ! MSVC doesn't expose `__ARM_NEON` macros; MSVC AArch64 is always little-endian
 #else
 #define SZ_USE_NEON (0)
 #endif
@@ -355,7 +357,7 @@
 
 /*  SVE is optional since Armv8.2-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE) && !SZ_IS_BIG_ENDIAN_
 #define SZ_USE_SVE (1)
 #else
 #define SZ_USE_SVE (0)
@@ -364,7 +366,7 @@
 
 /*  SVE2 is optional since Armv9.0-A, but never became mandatory and MSVC has no way to probe for it. */
 #if !defined(SZ_USE_SVE2)
-#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2)
+#if SZ_IS_64BIT_ARM_ && defined(__ARM_FEATURE_SVE2) && !SZ_IS_BIG_ENDIAN_
 #define SZ_USE_SVE2 (1)
 #else
 #define SZ_USE_SVE2 (0)
