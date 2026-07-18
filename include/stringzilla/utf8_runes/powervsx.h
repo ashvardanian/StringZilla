@@ -612,6 +612,112 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_powervsx_( //
         return text + want;
     }
 
+    // Clean "ASCII + 2/3-byte" fast lane: when the whole decodable window is ASCII bytes and well-formed C2..DF 2-byte
+    // pairs and/or E0..EF 3-byte triples - Latin/Cyrillic/Greek (2-byte), CJK/Hangul/Devanagari (3-byte) and mixed
+    // prose with ASCII separators - the structure is proven with a handful of shifted-mask tests (every start is ASCII
+    // or a 2-/3-byte lead, every lead owns its continuations, no continuation is an orphan, E0-overlong / ED-surrogate
+    // first-continuation bounds) and the codepoints drain through the SAME gather path the general engine uses,
+    // skipping the length / range classification that dominates its per-window cost. Gated to windows with no 4-byte-
+    // or-invalid lead (>= 0xF0); anything irregular (an orphan, a truncation, a bad lead) declines to the general path
+    // below at the same cursor. The VSX twin of the NEON clean lane and the three SVE2 "clean lanes", fused: the E0/ED
+    // bounds masks are built only when a 3-byte lead is present.
+    {
+        __vector unsigned char four_or_mask_u8x16[4];
+        __vector unsigned char const byte_f0_gate_u8x16 = vec_splats((unsigned char)0xF0);
+        for (int reg = 0; reg < 4; ++reg)
+            four_or_mask_u8x16[reg] = (__vector unsigned char)vec_cmpge(input_register_u8x16[reg], byte_f0_gate_u8x16);
+        sz_u64_t const four_or_bits = sz_utf8_mask_combine_powervsx_(four_or_mask_u8x16) & loaded_mask;
+        if (four_or_bits == 0) {
+            __vector unsigned char continuation_clean_u8x16[4], ascii_clean_u8x16[4], lead2_clean_u8x16[4],
+                lead3_clean_u8x16[4];
+            __vector unsigned char const continuation_mask_u8x16 = vec_splats((unsigned char)0xC0);
+            __vector unsigned char const continuation_pattern_u8x16 = vec_splats((unsigned char)0x80);
+            __vector unsigned char const byte_c2_u8x16 = vec_splats((unsigned char)0xC2);
+            __vector unsigned char const byte_e0_u8x16 = vec_splats((unsigned char)0xE0);
+            __vector unsigned char const byte_f0_u8x16 = vec_splats((unsigned char)0xF0);
+            for (int reg = 0; reg < 4; ++reg) {
+                __vector unsigned char const register_value_u8x16 = input_register_u8x16[reg];
+                continuation_clean_u8x16[reg] = (__vector unsigned char)vec_cmpeq(
+                    vec_and(register_value_u8x16, continuation_mask_u8x16), continuation_pattern_u8x16);
+                ascii_clean_u8x16[reg] = (__vector unsigned char)vec_cmplt(register_value_u8x16,
+                                                                           continuation_pattern_u8x16);
+                lead2_clean_u8x16[reg] = vec_and(
+                    (__vector unsigned char)vec_cmpge(register_value_u8x16, byte_c2_u8x16),
+                    (__vector unsigned char)vec_cmplt(register_value_u8x16, byte_e0_u8x16));
+                lead3_clean_u8x16[reg] = (__vector unsigned char)vec_cmpeq(vec_and(register_value_u8x16, byte_f0_u8x16),
+                                                                           byte_e0_u8x16);
+            }
+            sz_u64_t const continuation_clean_bits = sz_utf8_mask_combine_powervsx_(continuation_clean_u8x16) &
+                                                     loaded_mask;
+            sz_u64_t const ascii_clean_bits = sz_utf8_mask_combine_powervsx_(ascii_clean_u8x16) & loaded_mask;
+            sz_u64_t const lead2_clean_bits = sz_utf8_mask_combine_powervsx_(lead2_clean_u8x16) & loaded_mask;
+            sz_u64_t const lead3_clean_bits = sz_utf8_mask_combine_powervsx_(lead3_clean_u8x16) & loaded_mask;
+            sz_u64_t const starts_clean_bits = loaded_mask & ~continuation_clean_bits;
+            sz_u64_t const owe1_clean_bits = lead2_clean_bits | lead3_clean_bits; // every lead owes a +1 continuation
+            // Defer any start whose sequence crosses the window edge (the two cases are exclusive on a clean window): a
+            // 2-/3-byte lead in the last lane, or a 3-byte lead in the second-to-last lane (its 2nd continuation lands
+            // past the window). Matches the general path's first-overrunning-start truncation on well-formed prefixes.
+            sz_size_t decodable_end_clean = chunk;
+            if (chunk && ((owe1_clean_bits >> (chunk - 1)) & 1u)) decodable_end_clean = chunk - 1;
+            else if (chunk >= 2 && ((lead3_clean_bits >> (chunk - 2)) & 1u)) decodable_end_clean = chunk - 2;
+            sz_u64_t const decodable_clean = sz_u64_mask_until_serial_(decodable_end_clean);
+            sz_u64_t const starts_decodable_clean = starts_clean_bits & decodable_clean;
+            sz_u64_t const continuation_decodable_clean = continuation_clean_bits & decodable_clean;
+            sz_u64_t const owe1_decodable_clean = owe1_clean_bits & decodable_clean;
+            sz_u64_t const lead3_decodable_clean = lead3_clean_bits & decodable_clean;
+            sz_u64_t const covered_clean_bits = (owe1_clean_bits << 1) | (lead3_clean_bits << 2); // owned cont. slots
+            // First-continuation bounds (E0 overlong / ED surrogate) only bite for 3-byte leads; build them lazily so
+            // pure 2-byte scripts pay four masks, not eight.
+            int const has_three_clean = lead3_clean_bits != 0;
+            sz_u64_t bounds_bad_clean = 0;
+            if (has_three_clean) {
+                __vector unsigned char e0_mask_u8x16[4], ed_mask_u8x16[4], n1_lt_a0_mask_u8x16[4],
+                    n1_ge_a0_mask_u8x16[4];
+                __vector unsigned char const byte_ed_u8x16 = vec_splats((unsigned char)0xED);
+                __vector unsigned char const byte_a0_u8x16 = vec_splats((unsigned char)0xA0);
+                for (int reg = 0; reg < 4; ++reg) {
+                    __vector unsigned char const register_value_u8x16 = input_register_u8x16[reg];
+                    e0_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_e0_u8x16);
+                    ed_mask_u8x16[reg] = (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_ed_u8x16);
+                    n1_lt_a0_mask_u8x16[reg] = (__vector unsigned char)vec_cmplt(register_value_u8x16, byte_a0_u8x16);
+                    n1_ge_a0_mask_u8x16[reg] = (__vector unsigned char)vec_cmpge(register_value_u8x16, byte_a0_u8x16);
+                }
+                sz_u64_t const e0_bits = sz_utf8_mask_combine_powervsx_(e0_mask_u8x16);
+                sz_u64_t const ed_bits = sz_utf8_mask_combine_powervsx_(ed_mask_u8x16);
+                sz_u64_t const n1_lt_a0_bits = sz_utf8_mask_combine_powervsx_(n1_lt_a0_mask_u8x16);
+                sz_u64_t const n1_ge_a0_bits = sz_utf8_mask_combine_powervsx_(n1_ge_a0_mask_u8x16);
+                bounds_bad_clean = ((e0_bits & (n1_lt_a0_bits >> 1)) | (ed_bits & (n1_ge_a0_bits >> 1))) &
+                                   decodable_clean;
+            }
+            // Every decodable start is ASCII or a 2-/3-byte lead; every lead's declared continuation slots hold real
+            // continuations; every decodable continuation is owned by exactly one lead; no bounds violation.
+            int const clean_window =
+                ((starts_decodable_clean & ~(ascii_clean_bits | lead2_clean_bits | lead3_clean_bits)) == 0) &&
+                ((owe1_decodable_clean & ~(continuation_clean_bits >> 1)) == 0) &&
+                ((lead3_decodable_clean & ~(continuation_clean_bits >> 2)) == 0) &&
+                ((continuation_decodable_clean & ~covered_clean_bits) == 0) && (bounds_bad_clean == 0);
+            if (clean_window && starts_decodable_clean) {
+                // Per-lane maximal-subpart length (well-formed here): 1 + (2-byte lead) + 2 * (3-byte lead).
+                sz_u512_vec_t consumed_length_clean_vec;
+                for (int lane = 0; lane < 64; ++lane) {
+                    sz_u8_t length_here = 1;
+                    length_here = (sz_u8_t)(length_here + (sz_u8_t)((lead2_clean_bits >> lane) & 1));
+                    length_here = (sz_u8_t)(length_here + (sz_u8_t)(((lead3_clean_bits >> lane) & 1) << 1));
+                    consumed_length_clean_vec.u8s[lane] = length_here;
+                }
+                // Count emitted starts with the native lane popcount (vpopcntd), not a scalar bit-op helper.
+                __vector unsigned long long const starts_word_u64x2 = {starts_decodable_clean, 0ull};
+                sz_size_t const emit_count_clean = (sz_size_t)vec_extract(vec_popcnt(starts_word_u64x2), 0);
+                sz_size_t consumed_clean = 0;
+                sz_size_t const produced_clean = sz_utf8_rune_drain_powervsx_(
+                    input_register_u8x16, starts_decodable_clean, 0, consumed_length_clean_vec.u8s, has_three_clean, 0,
+                    emit_count_clean, runes, runes_capacity, &consumed_clean);
+                *runes_unpacked = produced_clean;
+                return text + consumed_clean;
+            }
+        }
+    }
+
     // Single-source classification via the high-nibble length LUT (the SAME table the serial reference uses), so a
     // lead and its declared length can never disagree. The per-register movemasks assemble the 64-bit lane masks.
     __vector unsigned char const length_lookup_table_u8x16 = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
