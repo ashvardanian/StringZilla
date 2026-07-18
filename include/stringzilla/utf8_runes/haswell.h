@@ -888,13 +888,95 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_haswell_( //
         return text + runes_to_unpack;
     }
 
+    // Character-start and continuation lane masks: the cheap substrate the clean fast lane and the general
+    // classification both consume. Starts are the loaded non-continuation lanes (signed `> -65`).
+    sz_u32_t const starts_bits =
+        (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(window_u8x32, _mm256_set1_epi8((char)-65))) & load_mask;
+    sz_u32_t const continuation_bits = load_mask & ~starts_bits;
+
+    // Clean "ASCII + 2/3-byte" fast lane: when the whole decodable window is ASCII bytes and well-formed C2..DF 2-byte
+    // pairs and/or E0..EF 3-byte triples - Latin/Cyrillic/Greek/Hebrew/Arabic (2-byte), CJK/Hangul/Devanagari/Thai
+    // (3-byte), Vietnamese (both) prose with ASCII separators - the structure is proven with a handful of shifted-mask
+    // tests (every start is ASCII or a 2-/3-byte lead, every lead owns its continuations, no continuation is an orphan,
+    // E0-overlong / ED-surrogate first-continuation bounds hold) and the codepoints drain through the same gather path
+    // the general engine uses, skipping the per-lane length / range classification that dominates its cost. Gated to
+    // windows with no 4-byte-or-invalid lead (>= 0xF0); anything irregular (an orphan, a truncation, a bad lead)
+    // declines to the general path below at the same cursor. The AVX2 twin of the NEON / SVE2 clean lanes.
+    {
+        __m256i const signed_bias_u8x32 = _mm256_set1_epi8((char)0x80);
+        __m256i const window_biased_u8x32 = _mm256_add_epi8(window_u8x32, signed_bias_u8x32);
+        sz_u32_t const four_or_invalid_bits = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(
+                                                  window_biased_u8x32,
+                                                  _mm256_add_epi8(_mm256_set1_epi8((char)0xEF), signed_bias_u8x32))) &
+                                              load_mask;
+        if (four_or_invalid_bits == 0) {
+            sz_u32_t const high_bit_bits = (sz_u32_t)_mm256_movemask_epi8(window_u8x32) & load_mask;
+            sz_u32_t const ascii_bits = load_mask & ~high_bit_bits;
+            // Well-formed 2-byte lead C2..DF (excludes the C0/C1 overlongs) and 3-byte lead E0..EF `(byte & 0xF0)==0xE0`.
+            sz_u32_t const lead2_bits =
+                (sz_u32_t)_mm256_movemask_epi8(_mm256_and_si256(
+                    _mm256_cmpgt_epi8(window_biased_u8x32,
+                                      _mm256_add_epi8(_mm256_set1_epi8((char)0xC1), signed_bias_u8x32)),
+                    _mm256_cmpgt_epi8(_mm256_add_epi8(_mm256_set1_epi8((char)0xE0), signed_bias_u8x32),
+                                      window_biased_u8x32))) &
+                load_mask;
+            sz_u32_t const lead3_bits = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(
+                                            _mm256_and_si256(window_u8x32, _mm256_set1_epi8((char)0xF0)),
+                                            _mm256_set1_epi8((char)0xE0))) &
+                                        load_mask;
+            sz_u32_t const owe1_bits = lead2_bits | lead3_bits; // every 2-/3-byte lead owes a continuation +1 lane up
+
+            // Defer any start whose sequence crosses the window edge: a 2-/3-byte lead in the last lane, or a 3-byte
+            // lead in the second-to-last lane (its second continuation lands past the window). The cases are exclusive.
+            sz_size_t decodable_end = chunk;
+            if (chunk && ((owe1_bits >> (chunk - 1)) & 1u)) { decodable_end = chunk - 1; }
+            else if (chunk >= 2 && ((lead3_bits >> (chunk - 2)) & 1u)) { decodable_end = chunk - 2; }
+            sz_u32_t const decodable = sz_u32_mask_until_serial_(decodable_end);
+            sz_u32_t const starts_decodable = starts_bits & decodable;
+            sz_u32_t const cont_decodable = continuation_bits & decodable;
+            sz_u32_t const owe1_decodable = owe1_bits & decodable;
+            sz_u32_t const lead3_decodable = lead3_bits & decodable;
+            sz_u32_t const covered_bits = (owe1_bits << 1) | (lead3_bits << 2);
+
+            // First-continuation bounds (E0 overlong / ED surrogate) only bite for 3-byte leads; build them lazily so
+            // pure 2-byte scripts pay the four masks above, not eight.
+            int const clean_has_three = lead3_bits != 0;
+            sz_u32_t bounds_bad = 0;
+            if (clean_has_three) {
+                sz_u32_t const e0_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xE0)));
+                sz_u32_t const ed_bits = (sz_u32_t)_mm256_movemask_epi8(
+                    _mm256_cmpeq_epi8(window_u8x32, _mm256_set1_epi8((char)0xED)));
+                sz_u32_t const next_lt_0xa0_bits = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(
+                    _mm256_add_epi8(_mm256_set1_epi8((char)0xA0), signed_bias_u8x32), window_biased_u8x32));
+                sz_u32_t const next_ge_0xa0_bits = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(
+                    window_biased_u8x32, _mm256_add_epi8(_mm256_set1_epi8((char)0x9F), signed_bias_u8x32)));
+                bounds_bad = ((e0_bits & (next_lt_0xa0_bits >> 1)) | (ed_bits & (next_ge_0xa0_bits >> 1))) & decodable;
+            }
+
+            int const clean = ((starts_decodable & ~(ascii_bits | lead2_bits | lead3_bits)) == 0) &&
+                              ((owe1_decodable & ~(continuation_bits >> 1)) == 0) &&
+                              ((lead3_decodable & ~(continuation_bits >> 2)) == 0) &&
+                              ((cont_decodable & ~covered_bits) == 0) && (bounds_bad == 0);
+            if (clean && starts_decodable) {
+                sz_size_t const emit_count = (sz_size_t)_mm_popcnt_u32(starts_decodable);
+                sz_u8_t last_off = 0;
+                sz_size_t const produced = sz_utf8_rune_drain_haswell_(window_u8x32, _mm256_setzero_si256(),
+                                                                       starts_decodable, clean_has_three, 0, 0,
+                                                                       emit_count, runes, runes_capacity, &last_off);
+                // Clean leads are well-formed, so the last emitted lane's consumed length is its full 1/2/3-byte form.
+                sz_size_t const last_length = (sz_size_t)1 + ((lead2_bits >> last_off) & 1u) +
+                                              (((lead3_bits >> last_off) & 1u) << 1);
+                *runes_unpacked = produced;
+                return text + (sz_size_t)last_off + last_length;
+            }
+        }
+    }
+
     // Single-source classification: a high-nibble LUT gives the per-lane byte length, and both the validity gate and
     // the width-blend derive from it - so a lead and its length can never disagree (the class-of-malformed bug).
     __m256i const length_lut_u8x32 = _mm256_broadcastsi128_si256(
         _mm_setr_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4));
-    sz_u32_t const starts_bits =
-        (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi8(window_u8x32, _mm256_set1_epi8((char)-65))) & load_mask;
-    sz_u32_t const continuation_bits = load_mask & ~starts_bits;
     __m256i const byte_high_nibble_u8x32 = _mm256_and_si256(_mm256_srli_epi16(window_u8x32, 4), _mm256_set1_epi8(0x0F));
     __m256i const sequence_lengths_u8x32 = _mm256_shuffle_epi8(length_lut_u8x32, byte_high_nibble_u8x32);
     sz_u32_t const len_ge_two =
