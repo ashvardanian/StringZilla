@@ -534,6 +534,84 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_lasx_( //
     sz_u32_t const continuation_bits = sz_xvmovemask_b_utf8_lasx_(continuation_mask_u8x32) & loaded_mask;
     sz_u32_t const starts_bits = (~continuation_bits) & loaded_mask;
 
+    // Clean "ASCII + 2/3-byte" fast lane: when the whole decodable window is ASCII bytes and well-formed C2..DF 2-byte
+    // pairs and/or E0..EF 3-byte triples - Latin/Cyrillic/Greek (2-byte), CJK/Hangul/Thai (3-byte) prose with ASCII
+    // separators - the structure is proven with a handful of shifted-mask tests (every start is ASCII or a 2-/3-byte
+    // lead, every lead owns its continuations, no continuation is an orphan, E0-overlong / ED-surrogate first-
+    // continuation bounds) and the codepoints drain through the same gather path, skipping the per-lane length / range
+    // classification that dominates the general path below. Gated to windows with no 4-byte-or-invalid lead (>= 0xF0);
+    // anything irregular (an orphan, a truncation, a bad lead) declines to the general path at the same cursor. The
+    // LASX sibling of the NEON/SVE2 clean lanes, ported as integer `sz_u32_t` lane-mask algebra over the reused
+    // `starts_bits` / `continuation_bits` substrate - no deinterleave tile (LASX has no cheap segmented load).
+    {
+        sz_u32_t const four_bits =
+            sz_xvmovemask_b_utf8_lasx_(__lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0xF0), window_u8x32)) & loaded_mask;
+        if (four_bits == 0) {
+            // 2-byte lead is [C2,E0); 3-byte lead is any (b & 0xF0) == 0xE0. Keep the vector forms for the length build.
+            __m256i const lead2_vec_u8x32 = __lasx_xvandn_v(
+                __lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0xE0), window_u8x32),
+                __lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0xC2), window_u8x32));
+            __m256i const lead3_vec_u8x32 = __lasx_xvseq_b(
+                __lasx_xvand_v(window_u8x32, __lasx_xvreplgr2vr_b((char)0xF0)), __lasx_xvreplgr2vr_b((char)0xE0));
+            sz_u32_t const ascii_bits = (~high_bits) & loaded_mask;
+            sz_u32_t const lead2_bits = sz_xvmovemask_b_utf8_lasx_(lead2_vec_u8x32) & loaded_mask;
+            sz_u32_t const lead3_bits = sz_xvmovemask_b_utf8_lasx_(lead3_vec_u8x32) & loaded_mask;
+            sz_u32_t const owe1_bits = lead2_bits | lead3_bits; // every 2-/3-byte lead owes a continuation +1 lane up
+
+            // Defer any start whose sequence crosses the window edge: a 2-/3-byte lead in the last lane, or a 3-byte
+            // lead in the second-to-last lane (its 2nd continuation lands past the window). The two cases are exclusive.
+            sz_size_t decodable_end_clean = chunk;
+            if (chunk && ((owe1_bits >> (chunk - 1)) & 1u)) decodable_end_clean = chunk - 1;
+            else if (chunk >= 2 && ((lead3_bits >> (chunk - 2)) & 1u)) decodable_end_clean = chunk - 2;
+            sz_u32_t const decodable_clean = decodable_end_clean >= 32 ? 0xFFFFFFFFu
+                                                                       : (((sz_u32_t)1 << decodable_end_clean) - 1u);
+            sz_u32_t const starts_decodable_clean = starts_bits & decodable_clean;
+            sz_u32_t const cont_decodable_clean = continuation_bits & decodable_clean;
+            sz_u32_t const owe1_decodable_clean = owe1_bits & decodable_clean;
+            sz_u32_t const lead3_decodable_clean = lead3_bits & decodable_clean;
+            sz_u32_t const covered_bits = (owe1_bits << 1) | (lead3_bits << 2);
+
+            // First-continuation bounds (E0 overlong / ED surrogate) only bite for 3-byte leads; built lazily so pure
+            // 2-byte scripts skip the extra masks. `sz_utf8_next1_lasx_` pre-aligns byte i+1 into lane i.
+            int const has_three_clean = lead3_bits != 0;
+            sz_u32_t bounds_bad_clean = 0;
+            if (has_three_clean) {
+                __m256i const next_byte_u8x32 = sz_utf8_next1_lasx_(window_u8x32);
+                sz_u32_t const is_e0 = sz_xvmovemask_b_utf8_lasx_(
+                    __lasx_xvseq_b(window_u8x32, __lasx_xvreplgr2vr_b((char)0xE0)));
+                sz_u32_t const is_ed = sz_xvmovemask_b_utf8_lasx_(
+                    __lasx_xvseq_b(window_u8x32, __lasx_xvreplgr2vr_b((char)0xED)));
+                sz_u32_t const n1_lt_a0 = sz_xvmovemask_b_utf8_lasx_(
+                    __lasx_xvslt_bu(next_byte_u8x32, __lasx_xvreplgr2vr_b((char)0xA0)));
+                bounds_bad_clean = ((is_e0 & n1_lt_a0) | (is_ed & ~n1_lt_a0)) & decodable_clean;
+            }
+
+            int const clean = ((starts_decodable_clean & ~(ascii_bits | lead2_bits | lead3_bits)) == 0) &&
+                              ((owe1_decodable_clean & ~(continuation_bits >> 1)) == 0) &&
+                              ((lead3_decodable_clean & ~(continuation_bits >> 2)) == 0) &&
+                              ((cont_decodable_clean & ~covered_bits) == 0) && (bounds_bad_clean == 0);
+            if (clean && starts_decodable_clean) {
+                // Per-lane maximal-subpart length = 1 + (2-byte lead) + 2*(3-byte lead); every start is well-formed
+                // here, so this equals the declared length and feeds the drain's resume cursor with no classify.
+                __m256i const one_u8x32 = __lasx_xvreplgr2vr_b(1);
+                __m256i consumed_length_clean_u8x32 = __lasx_xvadd_b(one_u8x32,
+                                                                     __lasx_xvand_v(lead2_vec_u8x32, one_u8x32));
+                consumed_length_clean_u8x32 = __lasx_xvadd_b(consumed_length_clean_u8x32,
+                                                             __lasx_xvand_v(lead3_vec_u8x32, __lasx_xvreplgr2vr_b(2)));
+                // Native popcount-on-mask: broadcast the start bitmask into a word lane and `xvpcnt.w` it, avoiding a
+                // scalar bit-op round-trip.
+                sz_size_t const emit_count_clean = (sz_size_t)__lasx_xvpickve2gr_wu(
+                    __lasx_xvpcnt_w(__lasx_xvreplgr2vr_w((int)starts_decodable_clean)), 0);
+                sz_size_t consumed_clean = 0;
+                sz_size_t const produced_clean = sz_utf8_rune_drain_lasx_(
+                    window_u8x32, starts_decodable_clean, 0u, consumed_length_clean_u8x32, has_three_clean, 0,
+                    emit_count_clean, runes, runes_capacity, &consumed_clean);
+                *runes_unpacked = produced_clean;
+                return text + consumed_clean;
+            }
+        }
+    }
+
     // Defer every start whose declared sequence would reach past the window; the FIRST overrunning start bounds the
     // decodable prefix (well-formed text has only the trailing truncation, but a malformed `E0 C0` overruns earlier).
     sz_u8_t const lane_identity_raw[32] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
