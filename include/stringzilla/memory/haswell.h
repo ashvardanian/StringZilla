@@ -141,7 +141,7 @@ SZ_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_
         }
         // When the buffer is huge, we can traverse it in 2 directions.
         else {
-            size_t tails_bytes_skipped = 0;
+            sz_size_t tails_bytes_skipped = 0;
             for (; body_length >= 64; target += 32, source += 32, body_length -= 64, tails_bytes_skipped += 32) {
                 _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
                 _mm256_store_si256((__m256i *)(target + body_length - 32),
