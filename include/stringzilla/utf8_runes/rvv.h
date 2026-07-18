@@ -100,6 +100,79 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_decode_two_byte_run_rvv_( //
 }
 
 /**
+ *  @brief  Decode a maximal run of well-formed 3-byte sequences (CJK, Hangul, Devanagari, Thai ranges) with ZERO
+ *          gather, the 3-byte sibling of @ref sz_utf8_decode_two_byte_run_rvv_ and the RVV analogue of the Arm
+ *          `svld3`/`vld3` decode tiles.
+ *
+ *  `vlseg3e8` deinterleaves the byte stream into a lead lane and two continuation lanes in three registers; each
+ *  triple is validated entirely in-register (lead in `[0xE0, 0xEF]`, both continuations in `[0x80, 0xBF]`, and the
+ *  first-continuation range tightened for the `E0` overlong and `ED` surrogate leads) and a `vfirst` over the fault
+ *  mask bounds the maximal good prefix. The kept prefix decodes by `((lead&0x0F)<<12)|((c1&0x3F)<<6)|(c2&0x3F)`,
+ *  widens to `u32`, and stores densely; whatever follows is handed back to the general window path. Reads only whole
+ *  triples, so it never over-reads the input.
+ *
+ *  @param  consumed_bytes  Set to `3 * runes_emitted` (the byte span of the decoded prefix).
+ *  @return Number of runes emitted (0 if the very first triple is not a well-formed 3-byte sequence).
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_decode_three_byte_run_rvv_( //
+    sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
+
+    sz_u8_t const *bytes = (sz_u8_t const *)text;
+    sz_size_t const triples_in_input = length / 3; // Whole [lead, cont, cont] triples available.
+    sz_size_t const triples_wanted = triples_in_input < capacity ? triples_in_input : capacity;
+    sz_size_t emitted = 0;
+
+    while (emitted < triples_wanted) {
+        sz_size_t const vector_length = __riscv_vsetvl_e8m2(triples_wanted - emitted);
+        vuint8m2x3_t const deinterleaved = __riscv_vlseg3e8_v_u8m2x3(bytes + emitted * 3, vector_length);
+        vuint8m2_t const lead = __riscv_vget_v_u8m2x3_u8m2(deinterleaved, 0);
+        vuint8m2_t const cont1 = __riscv_vget_v_u8m2x3_u8m2(deinterleaved, 1);
+        vuint8m2_t const cont2 = __riscv_vget_v_u8m2x3_u8m2(deinterleaved, 2);
+
+        // A lane is a well-formed 3-byte sequence iff its lead is in `[0xE0, 0xEF]`, both continuations are in
+        // `[0x80, 0xBF]`, and the first continuation avoids the `E0` overlong (`< 0xA0`) and `ED` surrogate
+        // (`>= 0xA0`) ranges; the first fault bounds the run.
+        vbool4_t const lead_bad = __riscv_vmor_mm_b4(__riscv_vmsltu_vx_u8m2_b4(lead, 0xE0, vector_length),
+                                                     __riscv_vmsgtu_vx_u8m2_b4(lead, 0xEF, vector_length),
+                                                     vector_length);
+        vbool4_t const cont1_bad = __riscv_vmsne_vx_u8m2_b4(__riscv_vand_vx_u8m2(cont1, 0xC0, vector_length), 0x80,
+                                                            vector_length);
+        vbool4_t const cont2_bad = __riscv_vmsne_vx_u8m2_b4(__riscv_vand_vx_u8m2(cont2, 0xC0, vector_length), 0x80,
+                                                            vector_length);
+        vbool4_t const e0_overlong = __riscv_vmand_mm_b4(__riscv_vmseq_vx_u8m2_b4(lead, 0xE0, vector_length),
+                                                         __riscv_vmsltu_vx_u8m2_b4(cont1, 0xA0, vector_length),
+                                                         vector_length);
+        vbool4_t const ed_surrogate = __riscv_vmand_mm_b4(__riscv_vmseq_vx_u8m2_b4(lead, 0xED, vector_length),
+                                                          __riscv_vmsgeu_vx_u8m2_b4(cont1, 0xA0, vector_length),
+                                                          vector_length);
+        vbool4_t triple_bad = __riscv_vmor_mm_b4(lead_bad, cont1_bad, vector_length);
+        triple_bad = __riscv_vmor_mm_b4(triple_bad, cont2_bad, vector_length);
+        triple_bad = __riscv_vmor_mm_b4(triple_bad, e0_overlong, vector_length);
+        triple_bad = __riscv_vmor_mm_b4(triple_bad, ed_surrogate, vector_length);
+        long const first_bad = __riscv_vfirst_m_b4(triple_bad, vector_length);
+        sz_size_t const take = first_bad < 0 ? vector_length : (sz_size_t)first_bad;
+
+        if (take) {
+            // 3-byte codepoints span U+0800..U+FFFF, so the assembly fits in `u16` before the widening store.
+            vuint16m4_t const lead_wide = __riscv_vwcvtu_x_x_v_u16m4(lead, take);
+            vuint16m4_t const cont1_wide = __riscv_vwcvtu_x_x_v_u16m4(cont1, take);
+            vuint16m4_t const cont2_wide = __riscv_vwcvtu_x_x_v_u16m4(cont2, take);
+            vuint16m4_t const codepoints = __riscv_vor_vv_u16m4(
+                __riscv_vor_vv_u16m4(__riscv_vsll_vx_u16m4(__riscv_vand_vx_u16m4(lead_wide, 0x0F, take), 12, take),
+                                     __riscv_vsll_vx_u16m4(__riscv_vand_vx_u16m4(cont1_wide, 0x3F, take), 6, take),
+                                     take),
+                __riscv_vand_vx_u16m4(cont2_wide, 0x3F, take), take);
+            __riscv_vse32_v_u32m8(runes + emitted, __riscv_vwcvtu_x_x_v_u32m8(codepoints, take), take);
+        }
+        emitted += take;
+        if (first_bad >= 0) break; // The run ended at a non-3-byte / malformed triple.
+    }
+
+    *consumed_bytes = emitted * 3;
+    return emitted;
+}
+
+/**
  *  @brief  Decode the dense set of EMITTED-start lanes of one classified window into sequential UTF-32 runes,
  *          the RVV sibling of @ref sz_utf8_rune_drain_icelake_.
  *
@@ -431,6 +504,21 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_rvv(   //
             if (two_byte_runes) {
                 runes_written += two_byte_runes;
                 text_cursor += two_byte_consumed;
+                continue;
+            }
+        }
+
+        // 3-byte fast lane: when the next lead opens a 3-byte sequence (`0xE0..0xEF`) - the steady state of CJK,
+        // Hangul, Devanagari, and Thai prose - `vlseg3e8` deinterleaves the lead and two continuation streams and
+        // decodes the maximal well-formed run with zero gather. Whatever ends the run defers to the window path.
+        if (*text_cursor >= 0xE0 && *text_cursor <= 0xEF) {
+            sz_size_t three_byte_consumed = 0;
+            sz_size_t three_byte_runes = sz_utf8_decode_three_byte_run_rvv_(
+                (sz_cptr_t)text_cursor, (sz_size_t)(text_end - text_cursor), runes + runes_written,
+                runes_capacity - runes_written, &three_byte_consumed);
+            if (three_byte_runes) {
+                runes_written += three_byte_runes;
+                text_cursor += three_byte_consumed;
                 continue;
             }
         }
