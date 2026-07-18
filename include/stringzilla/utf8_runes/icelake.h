@@ -586,6 +586,71 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     sz_size_t const decodable_end = overruns_bits ? (sz_size_t)_tzcnt_u64(overruns_bits) : chunk;
     sz_u64_t const decodable_mask = _cvtmask64_u64(sz_u64_mask_until_(decodable_end));
 
+    // Clean "ASCII + 2/3-byte" fast lane, the AVX-512 twin of the NEON / Haswell clean lanes: when the whole
+    // decodable window is ASCII and well-formed C2..DF 2-byte pairs and/or E0..EF 3-byte triples, a handful of
+    // shifted-mask tests prove the structure (every start is ASCII or a 2-/3-byte lead, every lead owns its
+    // continuations, no continuation is orphaned, E0-overlong / ED-surrogate first-continuation bounds hold) and
+    // the codepoints drain through the same path the general engine uses, skipping the per-lane validity, orphan,
+    // and maximal-subpart machinery. Gated to windows with no 4-byte-or-invalid lead; anything irregular declines
+    // to the general path below at the same cursor. Bit-exact because a genuinely clean window makes the general
+    // path build the identical `emit_starts` / zero `ill_formed` / declared `consumed_length` this feeds the drain.
+    if (_cvtmask64_u64(_kand_mask64(_mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF0)), load_mask)) ==
+        0) {
+        sz_u64_t const clean_ascii_bits = _cvtmask64_u64(
+                                              _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0x80))) &
+                                          _cvtmask64_u64(load_mask);
+        sz_u64_t const clean_lead2_bits = _cvtmask64_u64(_kand_mask64(
+                                              _mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xC2)),
+                                              _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0)))) &
+                                          _cvtmask64_u64(load_mask);
+        sz_u64_t const clean_lead3_bits = _cvtmask64_u64(_mm512_cmpeq_epu8_mask(
+                                              _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF0)),
+                                              _mm512_set1_epi8((char)0xE0))) &
+                                          _cvtmask64_u64(load_mask);
+        sz_u64_t const clean_owe1_bits = clean_lead2_bits | clean_lead3_bits;
+
+        // Defer any lead whose sequence crosses the window edge: a 2-/3-byte lead in the last lane, or a 3-byte
+        // lead in the second-to-last lane (its second continuation lands past the window). Cases are exclusive.
+        sz_size_t clean_end = chunk;
+        if (chunk && ((clean_owe1_bits >> (chunk - 1)) & 1u)) { clean_end = chunk - 1; }
+        else if (chunk >= 2 && ((clean_lead3_bits >> (chunk - 2)) & 1u)) { clean_end = chunk - 2; }
+        sz_u64_t const clean_decodable = _cvtmask64_u64(sz_u64_mask_until_(clean_end));
+        sz_u64_t const clean_continuation_bits = _cvtmask64_u64(continuations);
+        sz_u64_t const clean_covered = (clean_owe1_bits << 1) | (clean_lead3_bits << 2);
+
+        int const clean_has_three = clean_lead3_bits != 0;
+        sz_u64_t clean_bounds_bad = 0;
+        if (clean_has_three) {
+            sz_u64_t const e0_bits = _cvtmask64_u64(_mm512_cmpeq_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0)));
+            sz_u64_t const ed_bits = _cvtmask64_u64(_mm512_cmpeq_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xED)));
+            sz_u64_t const next_lt_a0 = _cvtmask64_u64(
+                _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xA0)));
+            sz_u64_t const next_ge_a0 = _cvtmask64_u64(
+                _mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xA0)));
+            clean_bounds_bad = ((e0_bits & (next_lt_a0 >> 1)) | (ed_bits & (next_ge_a0 >> 1))) & clean_decodable;
+        }
+
+        sz_u64_t const clean_starts = starts_bits & clean_decodable;
+        int const clean = ((clean_starts & ~(clean_ascii_bits | clean_lead2_bits | clean_lead3_bits)) == 0) &&
+                          (((clean_owe1_bits & clean_decodable) & ~(clean_continuation_bits >> 1)) == 0) &&
+                          (((clean_lead3_bits & clean_decodable) & ~(clean_continuation_bits >> 2)) == 0) &&
+                          (((clean_continuation_bits & clean_decodable) & ~clean_covered) == 0) &&
+                          (clean_bounds_bad == 0);
+        if (clean && clean_starts) {
+            __m512i clean_length_u8x64 = _mm512_set1_epi8(1);
+            clean_length_u8x64 = _mm512_mask_add_epi8(clean_length_u8x64, _cvtu64_mask64(clean_owe1_bits),
+                                                      clean_length_u8x64, _mm512_set1_epi8(1));
+            clean_length_u8x64 = _mm512_mask_add_epi8(clean_length_u8x64, _cvtu64_mask64(clean_lead3_bits),
+                                                      clean_length_u8x64, _mm512_set1_epi8(1));
+            sz_size_t clean_consumed = 0;
+            sz_size_t const clean_produced = sz_utf8_rune_drain_icelake_(
+                window_u8x64, _cvtu64_mask64(clean_starts), _cvtu64_mask64(0), clean_length_u8x64, lane_identity_u8x64,
+                clean_has_three, 0, (sz_size_t)_mm_popcnt_u64(clean_starts), runes, runes_capacity, &clean_consumed);
+            *runes_unpacked = clean_produced;
+            return text + clean_consumed;
+        }
+    }
+
     // Per-lane validity, classifying every lane uniformly (no per-lane loop, no decline). The window is decoded TOTAL:
     // well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain, overlong /
     // surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one U+FFFD over the
