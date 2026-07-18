@@ -65,7 +65,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t lengt
 SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
-    __vector unsigned long long const gathered_mask_u64x2 = vec_vbpermq(compared, gather_indices_u8x16);
+    __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
+        compared, gather_indices_u8x16);
 #if SZ_IS_BIG_ENDIAN_
     return (sz_u32_t)(gathered_mask_u64x2[0] & 0xFFFFull);
 #else
@@ -380,7 +381,8 @@ static sz_u8_t const sz_utf8_compress8_powervsx_[256][8] = {{255, 255, 255, 255,
 SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char compared) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
-    __vector unsigned long long const gathered_mask_u64x2 = vec_vbpermq(compared, gather_indices_u8x16);
+    __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
+        compared, gather_indices_u8x16);
     return (sz_u32_t)(gathered_mask_u64x2[1] & 0xFFFFull);
 }
 

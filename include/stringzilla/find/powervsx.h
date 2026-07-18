@@ -36,7 +36,7 @@ extern "C" {
  */
 SZ_HELPER_INLINE sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16) {
     __vector unsigned char const indices = {120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
-    __vector unsigned long long const gathered = vec_vbpermq(cmp_u8x16, indices);
+    __vector unsigned long long const gathered = (__vector unsigned long long)vec_vbpermq(cmp_u8x16, indices);
 #if SZ_IS_BIG_ENDIAN_
     return (sz_u64_t)gathered[0] & 0xFFFFull;
 #else
