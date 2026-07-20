@@ -209,8 +209,9 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  build_wheels_stringzilla_windows:
-    name: Build StringZilla ${{ matrix.python-version }} for Windows
+  # Native AMD64 + 32-bit x86 on an Intel runner.
+  build_wheels_stringzilla_windows_x86:
+    name: Build StringZilla ${{ matrix.python-version }} for Windows x86
     runs-on: windows-2022
     needs: versioning
     strategy:
@@ -222,7 +223,6 @@ jobs:
         with:
           ref: "main"
           submodules: recursive
-
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -233,11 +233,46 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: AMD64 x86
           SZ_TARGET: stringzilla
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-stringzilla-windows-2022-${{ strategy.job-index }}
+          name: cibw-wheels-stringzilla-windows-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  # Native ARM64 on a Windows-on-Arm runner - built and tested natively, not cross-compiled.
+  # Windows ARM64 CPython is official from 3.11, so 3.10 is omitted here.
+  build_wheels_stringzilla_windows_arm:
+    name: Build StringZilla ${{ matrix.python-version }} for Windows ARM
+    runs-on: windows-11-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["311", "312", "313", "314"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: ARM64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-windows-arm-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -343,8 +378,9 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  build_wheels_stringzillas_cpus_windows:
-    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows
+  # Native AMD64 on an Intel runner.
+  build_wheels_stringzillas_cpus_windows_x86:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows x86
     runs-on: windows-2022
     needs: versioning
     strategy:
@@ -356,7 +392,6 @@ jobs:
         with:
           ref: "main"
           submodules: recursive
-
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -367,12 +402,46 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: AMD64
           SZ_TARGET: stringzillas-cpus
-          CIBW_ARCHS_WINDOWS: AMD64 ARM64
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-stringzillas-cpus-windows-2022-${{ strategy.job-index }}
+          name: cibw-wheels-stringzillas-cpus-windows-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  # Native ARM64 on a Windows-on-Arm runner - built and tested natively, not cross-compiled.
+  # Windows ARM64 CPython is official from 3.11, so 3.10 is omitted here.
+  build_wheels_stringzillas_cpus_windows_arm:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows ARM
+    runs-on: windows-11-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["311", "312", "313", "314"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: ARM64
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-windows-arm-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -510,7 +579,8 @@ jobs:
         build_wheels_stringzilla_linux_arm,
         build_wheels_stringzilla_linux_emulated,
         build_wheels_stringzilla_macos,
-        build_wheels_stringzilla_windows,
+        build_wheels_stringzilla_windows_x86,
+        build_wheels_stringzilla_windows_arm,
         build_sdist_stringzilla,
       ]
     if: ${{ always() }}
@@ -554,7 +624,8 @@ jobs:
         build_wheels_stringzillas_cpus_linux_x86,
         build_wheels_stringzillas_cpus_linux_arm,
         build_wheels_stringzillas_cpus_macos,
-        build_wheels_stringzillas_cpus_windows,
+        build_wheels_stringzillas_cpus_windows_x86,
+        build_wheels_stringzillas_cpus_windows_arm,
         build_sdist_stringzillas_cpus,
       ]
     if: ${{ always() }}
@@ -883,8 +954,10 @@ jobs:
   status_windows:
     name: Windows CI
     needs:
-      - build_wheels_stringzilla_windows
-      - build_wheels_stringzillas_cpus_windows
+      - build_wheels_stringzilla_windows_x86
+      - build_wheels_stringzilla_windows_arm
+      - build_wheels_stringzillas_cpus_windows_x86
+      - build_wheels_stringzillas_cpus_windows_arm
       - create_windows_dll_library
     if: ${{ always() }}
     runs-on: ubuntu-24.04
@@ -892,11 +965,15 @@ jobs:
       - name: Aggregate Windows status
         run: |
           echo "Windows job results:"
-          echo "build_wheels_stringzilla_windows: ${{ needs.build_wheels_stringzilla_windows.result }}"
-          echo "build_wheels_stringzillas_cpus_windows: ${{ needs.build_wheels_stringzillas_cpus_windows.result }}"
+          echo "build_wheels_stringzilla_windows_x86: ${{ needs.build_wheels_stringzilla_windows_x86.result }}"
+          echo "build_wheels_stringzilla_windows_arm: ${{ needs.build_wheels_stringzilla_windows_arm.result }}"
+          echo "build_wheels_stringzillas_cpus_windows_x86: ${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}"
+          echo "build_wheels_stringzillas_cpus_windows_arm: ${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}"
           echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
-          if [ "${{ needs.build_wheels_stringzilla_windows.result }}" != "success" ] || \
-             [ "${{ needs.build_wheels_stringzillas_cpus_windows.result }}" != "success" ] || \
+          if [ "${{ needs.build_wheels_stringzilla_windows_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}" != "success" ] || \
              [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
             echo "One or more Windows dependencies failed.";
             exit 1;

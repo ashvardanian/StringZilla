@@ -1089,7 +1089,8 @@ jobs:
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
 
-    # Native wheels - Linux pinned to x86_64; emulated arches build in `build_wheels_emulated`.
+    # Native wheels - each runner's native arch (Linux pinned to x86_64; emulated arches in `build_wheels_emulated`).
+    # windows-11-arm validates the Windows ARM64 wheel that release ships; ARM64 CPython is official from 3.11.
     build_wheels_native:
         name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
@@ -1104,8 +1105,11 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                os: [ubuntu-24.04, macos-15, windows-2022]
+                os: [ubuntu-24.04, macos-15, windows-2022, windows-11-arm]
                 python-version: ["310", "311", "312", "313", "314"]
+                exclude:
+                    - os: windows-11-arm
+                      python-version: "310"
         steps:
             - uses: actions/checkout@v7
               with:
