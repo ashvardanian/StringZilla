@@ -64,6 +64,15 @@ pub enum AnyCharsTape<'a> {
     View64(CharsTapeView<'a, u64>),
 }
 
+impl<'a> AnyCharsTape<'a> {
+    /// Copy string sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
+    /// automatically from the input size. Use this to feed the engines' `compute_into` methods
+    /// without depending on the `stringtape` crate directly.
+    pub fn from_sequences<T: AsRef<str>>(sequences: &[T]) -> Result<Self, Error> {
+        copy_chars_into_tape(sequences, false)
+    }
+}
+
 /// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
 pub enum AnyBytesTape<'a> {
     Tape32(BytesTape<u32, UnifiedAlloc>),
@@ -71,6 +80,15 @@ pub enum AnyBytesTape<'a> {
     // Zero-copy FFI views (bytes)
     View32(BytesTapeView<'a, u32>),
     View64(BytesTapeView<'a, u64>),
+}
+
+impl<'a> AnyBytesTape<'a> {
+    /// Copy byte sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
+    /// automatically from the input size. Use this to feed the engines' `compute_into` methods
+    /// without depending on the `stringtape` crate directly.
+    pub fn from_sequences<T: AsRef<[u8]>>(sequences: &[T]) -> Result<Self, Error> {
+        copy_bytes_into_tape(sequences, false)
+    }
 }
 
 /// Manages execution context and hardware resource allocation.
@@ -916,7 +934,7 @@ where
     ///
     /// The row stride equals `candidates_count`, so rows are stored back-to-back with no padding. The buffer
     /// is suitable for direct GPU consumption.
-    fn try_allocate(queries_count: usize, candidates_count: usize) -> Result<Self, Error> {
+    pub fn try_allocate(queries_count: usize, candidates_count: usize) -> Result<Self, Error> {
         let element_count = queries_count.saturating_mul(candidates_count);
         let mut data = allocator_api2::vec::Vec::new_in(UnifiedAlloc);
         data.try_reserve_exact(element_count)
