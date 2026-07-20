@@ -3,9 +3,12 @@
  *  @brief Generated unified Unicode normalization tables for the single-pass `utf8_norm` engine.
  *  @author Ash Vardanian
  *
- *  Auto-generated from Unicode 17.0.0; do NOT edit by hand. One record per code-point
- *  drives both APIs; composition is partner-indexed (#3); Hangul is algorithmic and absent here.
- *  The tables are derived from the UCD by the following recipe (Python 3, stdlib only):
+ *  Only the @b array @b contents below are generated - the `sz_utf8_norm_*_[]` initializer lists are
+ *  derived from Unicode 17.0.0 and must not be hand-edited; regenerate them instead. The rest of the
+ *  file is ordinary hand-written code - include guards, the `sz_utf8_norm_props_t` declaration, and
+ *  every comment - and may be edited freely. One record per code-point drives both APIs; composition
+ *  is partner-indexed (#3); Hangul is algorithmic and absent here. The recipe below (Python 3, stdlib
+ *  only) derives those array contents from the UCD; it emits table data, never this file:
  *
  *  @code{.py}
  *  import urllib.request
@@ -50,28 +53,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define SZ_UTF8_NORM_TABLE_MAX_ 0x30000u
-#define SZ_UTF8_NORM_LOW_BITS_ 3u
-#define SZ_UTF8_NORM_MID_BITS_ 5u
-#define SZ_UTF8_NORM_LOW_ 8u
-#define SZ_UTF8_NORM_MID_ 32u
-#define SZ_UTF8_NORM_LOW_MASK_ 7u
-#define SZ_UTF8_NORM_MID_MASK_ 31u
-#define SZ_UTF8_NORM_SCAN_LOW_BITS_ 4u
-#define SZ_UTF8_NORM_SCAN_MID_BITS_ 4u
-#define SZ_UTF8_NORM_SCAN_LOW_ 16u
-#define SZ_UTF8_NORM_SCAN_MID_ 16u
-#define SZ_UTF8_NORM_SCAN_LOW_MASK_ 15u
-#define SZ_UTF8_NORM_SCAN_MID_MASK_ 15u
-#define SZ_UTF8_NORM_POOL_ASTRAL_ 0xD800u // pool values >= this index sz_utf8_norm_pool_astral_
-#define SZ_UTF8_NORM_HANGUL_S_BASE_ 0xAC00u
-#define SZ_UTF8_NORM_HANGUL_S_COUNT_ 11172u
-#define SZ_UTF8_NORM_PARTNER_COUNT_ 72u
-#define SZ_UTF8_NORM_QUICK_CHECK_NFC_ 1u
-#define SZ_UTF8_NORM_QUICK_CHECK_NFKC_ 2u
-#define SZ_UTF8_NORM_QUICK_CHECK_NFD_ 4u
-#define SZ_UTF8_NORM_QUICK_CHECK_NFKD_ 8u
 
 /** @brief Per-codepoint normalization properties (one entry per distinct combination). */
 typedef struct sz_utf8_norm_props_t {
@@ -3481,7 +3462,7 @@ static sz_rune_t const sz_utf8_norm_compose_value_[961] = {
     0x1134C, 0x11383, 0x11385, 0x1138E, 0x11391, 0x113C7, 0x113C5, 0x113C8, 0x114BC, 0x114BB, 0x114BE, 0x115BA, 0x115BB,
     0x11938, 0x16121, 0x16123, 0x16125, 0x16122, 0x16126, 0x16128, 0x16127, 0x16124, 0x16D69, 0x16D68, 0x16D6A};
 
-/* Hot-path lead classifier; index = lead_byte & 0x3F, bits = SZ_UTF8_NORM_QUICK_CHECK_* possibly present. */
+/* Hot-path lead classifier; index = lead_byte & 0x3F, bits = `sz_utf8_norm_quick_check_*_k` possibly present. */
 static sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
     0x0, 0x0, 0xA, 0xC, 0xE, 0xE, 0xC, 0xE, 0xC, 0x0, 0xA, 0xA, 0xF, 0xF, 0xF, 0xE, 0xC, 0xC, 0xF, 0xC, 0x0, 0x0,
     0xF, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0xF, 0xF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xF, 0xC,

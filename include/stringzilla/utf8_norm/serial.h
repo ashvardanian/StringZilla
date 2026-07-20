@@ -13,7 +13,7 @@
  *  Work is streamed one combining segment at a time - a starter followed by its trailing
  *  non-starters - so no whole-string buffer is needed. Real-world non-starter runs are 1-2 long
  *  (Stream-Safe Text caps them at 30); the buffer falls back to a flush if a pathological run
- *  exceeds @b SZ_UTF8_NORM_SEG_CAP_.
+ *  exceeds @b sz_utf8_norm_seg_cap_k.
  *
  *  The engine reads the unified `utf8_norm/tables.h` record set and exposes two public entry points -
  *  a normalizer and a violation finder - that share a single scan primitive
@@ -32,23 +32,71 @@
 extern "C" {
 #endif
 
-#define SZ_UTF8_NORM_SEG_CAP_ 256u   /**< Max runes buffered per combining segment. */
-#define SZ_UTF8_NORM_DECOMP_MAX_ 18u /**< Longest single-codepoint decomposition in the UCD. */
-#define SZ_UTF8_NORM_HANGUL_L_BASE_ 0x1100u
-#define SZ_UTF8_NORM_HANGUL_V_BASE_ 0x1161u
-#define SZ_UTF8_NORM_HANGUL_T_BASE_ 0x11A7u
-#define SZ_UTF8_NORM_HANGUL_L_COUNT_ 19u
-#define SZ_UTF8_NORM_HANGUL_V_COUNT_ 21u
-#define SZ_UTF8_NORM_HANGUL_T_COUNT_ 28u
-#define SZ_UTF8_NORM_HANGUL_N_COUNT_ 588u // V_COUNT * T_COUNT
+/**
+ *  Geometry of the 3-stage props trie in `tables.h`. The stage widths are the only free parameters;
+ *  the block sizes and index masks below are derived from them, so retuning the trie means editing
+ *  one number per stage instead of keeping three hand-computed values in sync.
+ */
+enum {
+    sz_utf8_norm_table_max_k = 0x30000,                // Codepoints covered by the tables
+    sz_utf8_norm_low_bits_k = 3,                       // Stage-3 index width
+    sz_utf8_norm_low_k = 1 << sz_utf8_norm_low_bits_k, // Stage-3 block size
+    sz_utf8_norm_low_mask_k = sz_utf8_norm_low_k - 1,  // Stage-3 index mask
+    sz_utf8_norm_mid_bits_k = 5,                       // Stage-2 index width
+    sz_utf8_norm_mid_k = 1 << sz_utf8_norm_mid_bits_k, // Stage-2 block size
+    sz_utf8_norm_mid_mask_k = sz_utf8_norm_mid_k - 1,  // Stage-2 index mask
+    sz_utf8_norm_pool_astral_k = 0xD800,               // Pool values at or above this are astral
+    sz_utf8_norm_partner_count_k = 72,                 // Dense composition-partner ids
+};
+
+/** Geometry of the separate u8-palette scan trie, derived the same way. */
+enum {
+    sz_utf8_norm_scan_low_bits_k = 4,
+    sz_utf8_norm_scan_low_k = 1 << sz_utf8_norm_scan_low_bits_k,
+    sz_utf8_norm_scan_low_mask_k = sz_utf8_norm_scan_low_k - 1,
+    sz_utf8_norm_scan_mid_bits_k = 4,
+    sz_utf8_norm_scan_mid_k = 1 << sz_utf8_norm_scan_mid_bits_k,
+    sz_utf8_norm_scan_mid_mask_k = sz_utf8_norm_scan_mid_k - 1,
+};
+
+/** Working-buffer capacities for the single-pass engine. */
+enum {
+    sz_utf8_norm_seg_cap_k = 256,  /**< Max runes buffered per combining segment. */
+    sz_utf8_norm_decomp_max_k = 18 /**< Longest single-codepoint decomposition in the UCD. */
+};
+
+/**
+ *  Hangul is algorithmic and absent from the tables, so the syllable block is described by the
+ *  standard's own constants (UAX #15, "Hangul Syllable Decomposition"). The two counts are products
+ *  of the jamo counts rather than the literals 588 and 11172, so the identities stay self-evident.
+ */
+enum {
+    sz_utf8_norm_hangul_s_base_k = 0xAC00, // First precomposed syllable
+    sz_utf8_norm_hangul_l_base_k = 0x1100, // First leading jamo
+    sz_utf8_norm_hangul_v_base_k = 0x1161, // First vowel jamo
+    sz_utf8_norm_hangul_t_base_k = 0x11A7, // Trailing jamo origin (index 0 means "no trailer")
+    sz_utf8_norm_hangul_l_count_k = 19,
+    sz_utf8_norm_hangul_v_count_k = 21,
+    sz_utf8_norm_hangul_t_count_k = 28,
+    sz_utf8_norm_hangul_n_count_k = sz_utf8_norm_hangul_v_count_k * sz_utf8_norm_hangul_t_count_k,
+    sz_utf8_norm_hangul_s_count_k = sz_utf8_norm_hangul_l_count_k * sz_utf8_norm_hangul_n_count_k,
+};
+
+/** @brief NFC/NFKC Quick_Check bits packed into `sz_utf8_norm_props_t::quick_check`. */
+enum sz_utf8_norm_quick_check_t {
+    sz_utf8_norm_quick_check_nfc_k = 1 << 0,
+    sz_utf8_norm_quick_check_nfkc_k = 1 << 1,
+    sz_utf8_norm_quick_check_nfd_k = 1 << 2,
+    sz_utf8_norm_quick_check_nfkd_k = 1 << 3,
+};
 
 /** @brief 3-stage trie index for @p codepoint (0 for out-of-range / default). Shared by the props and scan lookups. */
 SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
-    if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
-    sz_size_t leaf = codepoint >> SZ_UTF8_NORM_LOW_BITS_;
-    sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> SZ_UTF8_NORM_MID_BITS_];
-    sz_u16_t block = sz_utf8_norm_stage2_[(sz_size_t)mid * SZ_UTF8_NORM_MID_ + (leaf & SZ_UTF8_NORM_MID_MASK_)];
-    return sz_utf8_norm_stage3_[(sz_size_t)block * SZ_UTF8_NORM_LOW_ + (codepoint & SZ_UTF8_NORM_LOW_MASK_)];
+    if (codepoint >= sz_utf8_norm_table_max_k) return 0;
+    sz_size_t leaf = codepoint >> sz_utf8_norm_low_bits_k;
+    sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
+    sz_u16_t block = sz_utf8_norm_stage2_[(sz_size_t)mid * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
+    return sz_utf8_norm_stage3_[(sz_size_t)block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
 }
 
 /** @brief Look up the per-codepoint normalization properties (canonical combining class, quick-check, decomposition, compose). */
@@ -65,13 +113,13 @@ SZ_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) 
  *  test is needed here.
  */
 SZ_HELPER_INLINE sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
-    if (codepoint >= SZ_UTF8_NORM_TABLE_MAX_) return 0;
-    sz_size_t leaf = codepoint >> SZ_UTF8_NORM_SCAN_LOW_BITS_;
-    sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> SZ_UTF8_NORM_SCAN_MID_BITS_];
+    if (codepoint >= sz_utf8_norm_table_max_k) return 0;
+    sz_size_t leaf = codepoint >> sz_utf8_norm_scan_low_bits_k;
+    sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> sz_utf8_norm_scan_mid_bits_k];
     sz_u16_t block =
-        sz_utf8_norm_scan_stage2_[(sz_size_t)mid * SZ_UTF8_NORM_SCAN_MID_ + (leaf & SZ_UTF8_NORM_SCAN_MID_MASK_)];
-    sz_u8_t palette_index = sz_utf8_norm_scan_stage3_[(sz_size_t)block * SZ_UTF8_NORM_SCAN_LOW_ +
-                                                      (codepoint & SZ_UTF8_NORM_SCAN_LOW_MASK_)];
+        sz_utf8_norm_scan_stage2_[(sz_size_t)mid * sz_utf8_norm_scan_mid_k + (leaf & sz_utf8_norm_scan_mid_mask_k)];
+    sz_u8_t palette_index = sz_utf8_norm_scan_stage3_[(sz_size_t)block * sz_utf8_norm_scan_low_k +
+                                                      (codepoint & sz_utf8_norm_scan_low_mask_k)];
     return sz_utf8_norm_scan_palette_[palette_index];
 }
 
@@ -90,16 +138,17 @@ SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
 SZ_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
                                                       sz_u8_t *out_canonical_combining_class) {
     // Hangul syllables decompose algorithmically - they are absent from the tables; jamo are starters.
-    if (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
-        codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_) {
-        sz_u32_t syllable = codepoint - SZ_UTF8_NORM_HANGUL_S_BASE_;
-        out[0] = SZ_UTF8_NORM_HANGUL_L_BASE_ + syllable / SZ_UTF8_NORM_HANGUL_N_COUNT_,
+    if (codepoint >= sz_utf8_norm_hangul_s_base_k &&
+        codepoint < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k) {
+        sz_u32_t syllable = codepoint - sz_utf8_norm_hangul_s_base_k;
+        out[0] = sz_utf8_norm_hangul_l_base_k + syllable / sz_utf8_norm_hangul_n_count_k,
         out_canonical_combining_class[0] = 0;
-        out[1] = SZ_UTF8_NORM_HANGUL_V_BASE_ + (syllable % SZ_UTF8_NORM_HANGUL_N_COUNT_) / SZ_UTF8_NORM_HANGUL_T_COUNT_,
+        out[1] = sz_utf8_norm_hangul_v_base_k +
+                 (syllable % sz_utf8_norm_hangul_n_count_k) / sz_utf8_norm_hangul_t_count_k,
         out_canonical_combining_class[1] = 0;
-        sz_u32_t trailing = syllable % SZ_UTF8_NORM_HANGUL_T_COUNT_;
+        sz_u32_t trailing = syllable % sz_utf8_norm_hangul_t_count_k;
         if (trailing) {
-            out[2] = SZ_UTF8_NORM_HANGUL_T_BASE_ + trailing, out_canonical_combining_class[2] = 0;
+            out[2] = sz_utf8_norm_hangul_t_base_k + trailing, out_canonical_combining_class[2] = 0;
             return 3;
         }
         return 2;
@@ -113,9 +162,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bo
     sz_utf8_norm_decomp_t decomposition = sz_utf8_norm_decomp_[index];
     for (sz_size_t i = 0; i != decomposition.length; ++i) {
         sz_u16_t value = sz_utf8_norm_pool_[decomposition.offset + i];
-        sz_rune_t rune = value < SZ_UTF8_NORM_POOL_ASTRAL_
+        sz_rune_t rune = value < sz_utf8_norm_pool_astral_k
                              ? (sz_rune_t)value
-                             : sz_utf8_norm_pool_astral_[value - SZ_UTF8_NORM_POOL_ASTRAL_];
+                             : sz_utf8_norm_pool_astral_[value - sz_utf8_norm_pool_astral_k];
         out[i] = rune,
         out_canonical_combining_class[i] = sz_utf8_norm_ccc_(
             rune); // decomposed runes are atomic; their class is a real lookup
@@ -129,17 +178,17 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bo
  */
 SZ_HELPER_AUTO sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     // Hangul: leading + vowel jamo → LV syllable.
-    if (a >= SZ_UTF8_NORM_HANGUL_L_BASE_ && a < SZ_UTF8_NORM_HANGUL_L_BASE_ + SZ_UTF8_NORM_HANGUL_L_COUNT_ && //
-        b >= SZ_UTF8_NORM_HANGUL_V_BASE_ && b < SZ_UTF8_NORM_HANGUL_V_BASE_ + SZ_UTF8_NORM_HANGUL_V_COUNT_) {
-        sz_u32_t leading = a - SZ_UTF8_NORM_HANGUL_L_BASE_, vowel = b - SZ_UTF8_NORM_HANGUL_V_BASE_;
-        return SZ_UTF8_NORM_HANGUL_S_BASE_ +
-               (leading * SZ_UTF8_NORM_HANGUL_V_COUNT_ + vowel) * SZ_UTF8_NORM_HANGUL_T_COUNT_;
+    if (a >= sz_utf8_norm_hangul_l_base_k && a < sz_utf8_norm_hangul_l_base_k + sz_utf8_norm_hangul_l_count_k && //
+        b >= sz_utf8_norm_hangul_v_base_k && b < sz_utf8_norm_hangul_v_base_k + sz_utf8_norm_hangul_v_count_k) {
+        sz_u32_t leading = a - sz_utf8_norm_hangul_l_base_k, vowel = b - sz_utf8_norm_hangul_v_base_k;
+        return sz_utf8_norm_hangul_s_base_k +
+               (leading * sz_utf8_norm_hangul_v_count_k + vowel) * sz_utf8_norm_hangul_t_count_k;
     }
     // Hangul: LV syllable + trailing jamo → LVT syllable.
-    if (a >= SZ_UTF8_NORM_HANGUL_S_BASE_ && a < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_ && //
-        (a - SZ_UTF8_NORM_HANGUL_S_BASE_) % SZ_UTF8_NORM_HANGUL_T_COUNT_ == 0 &&                              //
-        b > SZ_UTF8_NORM_HANGUL_T_BASE_ && b < SZ_UTF8_NORM_HANGUL_T_BASE_ + SZ_UTF8_NORM_HANGUL_T_COUNT_)
-        return a + (b - SZ_UTF8_NORM_HANGUL_T_BASE_);
+    if (a >= sz_utf8_norm_hangul_s_base_k && a < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k && //
+        (a - sz_utf8_norm_hangul_s_base_k) % sz_utf8_norm_hangul_t_count_k == 0 &&                               //
+        b > sz_utf8_norm_hangul_t_base_k && b < sz_utf8_norm_hangul_t_base_k + sz_utf8_norm_hangul_t_count_k)
+        return a + (b - sz_utf8_norm_hangul_t_base_k);
 
     // Primary-composite table (#3): the starter exposes a dense slice of partner ids; the combiner
     // carries its own dense partner id. A small range search keyed on the partner replaces the old
@@ -260,12 +309,12 @@ SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length,
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
 
-    sz_rune_t segment[SZ_UTF8_NORM_SEG_CAP_];
-    sz_u8_t segment_canonical_combining_classes[SZ_UTF8_NORM_SEG_CAP_];
+    sz_rune_t segment[sz_utf8_norm_seg_cap_k];
+    sz_u8_t segment_canonical_combining_classes[sz_utf8_norm_seg_cap_k];
     sz_size_t segment_length = 0;
 
-    sz_rune_t decomposed[SZ_UTF8_NORM_DECOMP_MAX_];
-    sz_u8_t decomposed_canonical_combining_classes[SZ_UTF8_NORM_DECOMP_MAX_];
+    sz_rune_t decomposed[sz_utf8_norm_decomp_max_k];
+    sz_u8_t decomposed_canonical_combining_classes[sz_utf8_norm_decomp_max_k];
     while (source_ptr < source_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
@@ -298,7 +347,7 @@ SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length,
                 segment[0] = rune_part, segment_canonical_combining_classes[0] = 0, segment_length = 1;
             }
             else {
-                if (segment_length >= SZ_UTF8_NORM_SEG_CAP_) { // pathological overflow: flush and restart
+                if (segment_length >= sz_utf8_norm_seg_cap_k) { // pathological overflow: flush and restart
                     sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
                     segment_length = 0;
                 }
@@ -319,8 +368,8 @@ SZ_HELPER_AUTO void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length,
  *  separated mid-composition.
  */
 SZ_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
-    sz_bool_t hangul = (codepoint >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
-                        codepoint < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
+    sz_bool_t hangul = (codepoint >= sz_utf8_norm_hangul_s_base_k &&
+                        codepoint < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k)
                            ? sz_true_k
                            : sz_false_k;
     sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(codepoint);
@@ -353,8 +402,8 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_si
             continue;
         } // malformed byte: inert, passed through
 
-        sz_bool_t hangul = (rune >= SZ_UTF8_NORM_HANGUL_S_BASE_ &&
-                            rune < SZ_UTF8_NORM_HANGUL_S_BASE_ + SZ_UTF8_NORM_HANGUL_S_COUNT_)
+        sz_bool_t hangul = (rune >= sz_utf8_norm_hangul_s_base_k &&
+                            rune < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k)
                                ? sz_true_k
                                : sz_false_k;
         sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(rune);
@@ -377,13 +426,13 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_si
     return SZ_NULL_CHAR;
 }
 
-/** @brief Map a normalization form to its hot-path `SZ_UTF8_NORM_QUICK_CHECK_*` flag bit. */
+/** @brief Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
 SZ_HELPER_INLINE sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
-    case sz_normal_form_nfc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFC_;
-    case sz_normal_form_nfkc_k: return SZ_UTF8_NORM_QUICK_CHECK_NFKC_;
-    case sz_normal_form_nfd_k: return SZ_UTF8_NORM_QUICK_CHECK_NFD_;
-    default: return SZ_UTF8_NORM_QUICK_CHECK_NFKD_;
+    case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
+    case sz_normal_form_nfkc_k: return sz_utf8_norm_quick_check_nfkc_k;
+    case sz_normal_form_nfd_k: return sz_utf8_norm_quick_check_nfd_k;
+    default: return sz_utf8_norm_quick_check_nfkd_k;
     }
 }
 

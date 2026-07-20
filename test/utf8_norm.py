@@ -6,7 +6,8 @@ Mirrors the C++ test/utf8_norm.cpp translation unit.
 Covers: NFC/NFD/NFKC/NFKD normalization and denormalization-violation offsets on Str and bytes
 input, ligature and combining-mark expansions, idempotence, and cross-backend agreement over
 precomposed/decomposed text, malformed UTF-8, and random ASCII corpora.
-Compares against: CPython's unicodedata.normalize, ICU's Normalizer2 for an exhaustive
+Compares against: CPython's unicodedata.normalize, including an exhaustive sweep of the algorithmic
+Hangul syllable block, ICU's Normalizer2 for an exhaustive
 all-codepoints sweep and random multi-codepoint sequences, the official UCD NormalizationTest.txt
 vectors, a canonical-combining-class ordering invariant checked directly against the CCC table, and
 cross-backend self-consistency.
@@ -230,6 +231,32 @@ def test_utf8_norm_all_codepoints_icu(form: str):
 
     assert not mismatches, "{} codepoints differ from ICU {} (icu unicode {}). First 10: {}".format(
         len(mismatches), form, icu.UNICODE_VERSION, mismatches[:10]
+    )
+
+
+@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
+def test_utf8_norm_hangul_syllables(form: str):
+    """Exhaustive sweep over the Hangul syllable block, precomposed and decomposed, vs
+    `unicodedata.normalize`.
+
+    Hangul is algorithmic and absent from the generated tables, so the whole block is reconstructed from the
+    UAX #15 jamo constants alone - a path neither the table-driven sweeps nor `NormalizationTest.txt` pin
+    down. Feeding each syllable's NFD form back in exercises composition as well as decomposition. The block
+    has been frozen since Unicode 2.0, so the host Python's `unicodedata` is a version-independent oracle
+    here, and unlike the ICU sweep this needs no optional dependency. The range overruns the block on both
+    sides, so an off-by-one in the syllable count shows up as an unassigned codepoint being decomposed.
+    """
+    mismatches = []
+    for codepoint in range(0xABFF, 0xD7B0):
+        syllable = chr(codepoint)
+        for source in (syllable, unicodedata.normalize("NFD", syllable)):
+            expected = unicodedata.normalize(form, source).encode("utf-8")
+            got = sz.utf8_norm(source, form)
+            if got != expected:
+                mismatches.append((f"U+{codepoint:04X}", expected.hex(), got.hex()))
+
+    assert not mismatches, "{} Hangul codepoints differ from unicodedata {}. First 10: {}".format(
+        len(mismatches), form, mismatches[:10]
     )
 
 
