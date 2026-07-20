@@ -30,20 +30,21 @@ SZ_HELPER_AUTO sz_u8_t sz_ascii_fold_(sz_u8_t c) { return c + (((sz_u8_t)(c - 'A
 SZ_HELPER_INLINE sz_rune_t sz_rune_malformed_byte_(sz_u8_t byte) { return 0x80000000u | (sz_rune_t)byte; }
 
 /**
- *  Bit flags describing which UTF-8 lead-byte families occur in a chunk - the same values and
- *  semantics as the Ice Lake `sz_utf8_fold_lead_family_t_`, shared by the NEON and SVE2 back-ends. Each family shares one folding strategy,
- *  so the union of flags picks the chunk handler in a single dispatch - instead of sequentially
- *  probing per-script fast paths, which degrades on mixed-script text.
+ *  Bit flags describing which UTF-8 lead-byte families occur in a chunk, shared by every back-end.
+ *  Each family shares one folding strategy, so the union of flags picks the chunk handler in a
+ *  single dispatch - instead of sequentially probing per-script fast paths, which degrades on
+ *  mixed-script text. The flags themselves are ISA-neutral; only the way a back-end derives them
+ *  differs - a `VPERMB` lookup on Ice Lake, `vqtbl4q_u8` on NEON, a compare tree on Haswell.
  */
-enum sz_utf8_fold_lead_family_t_ {
-    sz_utf8_fold_lead_caseless_flag_ = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
-    sz_utf8_fold_lead_latin_flag_ = 1 << 1,          // C2-C3: Latin-1 Supplement
-    sz_utf8_fold_lead_latin_extended_flag_ = 1 << 2, // C4-C6: Latin Extended-A and the Ext-B +1 pairs
-    sz_utf8_fold_lead_cyrillic_flag_ = 1 << 3,       // D0-D1: basic Cyrillic
-    sz_utf8_fold_lead_greek_flag_ = 1 << 4,          // CE-CF: basic Greek
-    sz_utf8_fold_lead_e1_flag_ = 1 << 5,             // E1: Latin Ext Additional, Georgian, Greek Extended
-    sz_utf8_fold_lead_guarded_flag_ = 1 << 6,        // E2, EA, EF: case-awareness depends on the second byte
-    sz_utf8_fold_lead_complex_flag_ = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
+enum sz_utf8_fold_lead_family_t {
+    sz_utf8_fold_lead_caseless_flag_k = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
+    sz_utf8_fold_lead_latin_flag_k = 1 << 1,          // C2-C3: Latin-1 Supplement
+    sz_utf8_fold_lead_latin_extended_flag_k = 1 << 2, // C4-C6: Latin Extended-A and the Ext-B +1 pairs
+    sz_utf8_fold_lead_cyrillic_flag_k = 1 << 3,       // D0-D1: basic Cyrillic
+    sz_utf8_fold_lead_greek_flag_k = 1 << 4,          // CE-CF: basic Greek
+    sz_utf8_fold_lead_e1_flag_k = 1 << 5,             // E1: Latin Ext Additional, Georgian, Greek Extended
+    sz_utf8_fold_lead_guarded_flag_k = 1 << 6,        // E2, EA, EF: case-awareness depends on the second byte
+    sz_utf8_fold_lead_complex_flag_k = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
 };
 
 /**

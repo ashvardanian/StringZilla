@@ -826,7 +826,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
                      sz_utf8_fold_neon_classify_(source_u8x16x4.val[3], lead_families_lut_u8x16x4)));
         sz_u8_t lead_families = sz_utf8_fold_neon_reduce_or_u8_(lead_families_u8x16);
 
-        if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_)) {
+        if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_k)) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_caseless_chunk_(source_u8x16x4, target);
             target += handled, source += handled, source_length -= handled;
             continue;
@@ -836,8 +836,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
         // subset dispatch, because quotes and dashes no longer poison whole superchunks into
         // one-rune serial steps). A handler that cannot fold the first character returns zero
         // and the chunk falls through to the next family - or to the serial rune below.
-        if (lead_families & (sz_utf8_fold_lead_latin_flag_ | sz_utf8_fold_lead_latin_extended_flag_ |
-                             sz_utf8_fold_lead_e1_flag_)) {
+        if (lead_families &
+            (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k | sz_utf8_fold_lead_e1_flag_k)) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_latin_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
@@ -846,28 +846,28 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
         }
         // Georgian shares the E1 lead with Latin Extended Additional, so it runs second: the Latin
         // handler folds E1 B8-BB and returns zero on a leading E1 82/83, and this picks those up.
-        if (lead_families & sz_utf8_fold_lead_e1_flag_) {
+        if (lead_families & sz_utf8_fold_lead_e1_flag_k) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_georgian_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_cyrillic_flag_) {
+        if (lead_families & sz_utf8_fold_lead_cyrillic_flag_k) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_greek_flag_) {
+        if (lead_families & sz_utf8_fold_lead_greek_flag_k) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_greek_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_guarded_flag_) {
+        if (lead_families & sz_utf8_fold_lead_guarded_flag_k) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_guarded_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
@@ -876,7 +876,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_neon(sz_cptr_t source, sz_size_t 
         }
         // Armenian (D4-D6) plus the Cyrillic Supplement that shares the D4 lead both fall in the
         // complex family; this handler folds them and truncates at any non-Armenian complex lead.
-        if (lead_families & sz_utf8_fold_lead_complex_flag_) {
+        if (lead_families & sz_utf8_fold_lead_complex_flag_k) {
             sz_size_t handled = sz_utf8_uncased_fold_neon_armenian_chunk_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;

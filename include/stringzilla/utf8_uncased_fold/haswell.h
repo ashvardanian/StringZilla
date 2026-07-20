@@ -22,26 +22,6 @@ extern "C" {
 #endif
 
 /**
- *  Bit flags describing which UTF-8 lead-byte families occur in a chunk, mirroring the Ice Lake
- *  `sz_utf8_fold_lead_family_t_` semantics. Each family shares one folding strategy, so the union
- *  of flags picks the chunk handler in a single dispatch - instead of sequentially probing
- *  per-script fast paths, which degrades on mixed-script text. Without `VPERMB`, the flags are
- *  produced by a compare tree: one unsigned range compare per family, reduced to a 32-bit
- *  `VPMOVMSKB` integer - `movemask` is single-uop on port 0, so eight of them beat any
- *  multi-shuffle emulation of a 64-entry byte LUT.
- */
-enum sz_utf8_fold_haswell_lead_family_t_ {
-    sz_utf8_fold_haswell_lead_caseless_flag_ = 1 << 0,       // D7-DF, E0, E3-E9, EB-EE: scripts with no case
-    sz_utf8_fold_haswell_lead_latin_flag_ = 1 << 1,          // C2-C3: Latin-1 Supplement
-    sz_utf8_fold_haswell_lead_latin_extended_flag_ = 1 << 2, // C4-C6: Latin Extended-A and Ext-B with +1 pairs
-    sz_utf8_fold_haswell_lead_cyrillic_flag_ = 1 << 3,       // D0-D1: basic Cyrillic
-    sz_utf8_fold_haswell_lead_greek_flag_ = 1 << 4,          // CE-CF: basic Greek
-    sz_utf8_fold_haswell_lead_e1_flag_ = 1 << 5,             // E1: Latin Ext Additional, Georgian, Greek Extended
-    sz_utf8_fold_haswell_lead_guarded_flag_ = 1 << 6,        // E2, EA, EF: case-awareness depends on the second byte
-    sz_utf8_fold_haswell_lead_complex_flag_ = 1 << 7,        // C0-C1, C7-CD, D2-D6, F0-FF: decode or serial paths
-};
-
-/**
  *  @brief Detects bytes in the unsigned range [range_start, range_start + range_length).
  *      AVX2 has no unsigned byte compares, so `(x − start) ≤ limit` is realized as
  *      `min_epu8(x − start, limit) == x − start`: the wrap-around subtraction maps the range
@@ -702,7 +682,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
  *      per-width lead mask the handler dispatch consumes, kept in one struct so the entrypoint loop
  *      reads as a single classify-then-dispatch step instead of an inlined compare tree.
  */
-typedef struct sz_utf8_uncased_fold_haswell_leads_t_ {
+typedef struct sz_utf8_uncased_fold_haswell_leads_t {
     sz_u8_t lead_families;
     sz_u32_t is_lead_mask;
     sz_u32_t is_continuation_mask;
@@ -719,7 +699,7 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t_ {
     sz_u32_t is_complex_lead_mask;
     sz_u32_t well_formed_lead_mask;
     sz_u32_t malformed_lead_mask;
-} sz_utf8_uncased_fold_haswell_leads_t_;
+} sz_utf8_uncased_fold_haswell_leads_t;
 
 /**
  *  @brief Classifies the lead bytes of a non-ASCII 32-byte chunk into folding families.
@@ -727,9 +707,9 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t_ {
  *      flag byte the Ice Lake `VPERMB` LUT produces. The caseless family merges D7-DF and E0 into
  *      one contiguous D7-E0 span.
  */
-SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswell_classify_leads_(
+SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
     __m256i source_ymm, sz_u32_t is_non_ascii_mask) {
-    sz_utf8_uncased_fold_haswell_leads_t_ leads;
+    sz_utf8_uncased_fold_haswell_leads_t leads;
 
     // Lead bytes are non-ASCII bytes outside the continuation range 10xxxxxx (80-BF).
     // Every family range starts at 0xC2 or above, so the range compares below cannot
@@ -758,6 +738,9 @@ SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswel
                                  ~(leads.is_caseless_lead_mask | leads.is_latin_lead_mask |
                                    leads.is_latin_extended_lead_mask | leads.is_cyrillic_lead_mask |
                                    leads.is_greek_lead_mask | leads.is_e1_lead_mask | leads.is_guarded_lead_mask);
+    // Without `VPERMB` there is no 64-entry byte LUT, so the `sz_utf8_fold_lead_family_t` flags come from a
+    // compare tree: one unsigned range compare per family, reduced to a 32-bit `VPMOVMSKB` integer -
+    // `movemask` is single-uop on port 0, so eight of them beat any multi-shuffle emulation of the LUT.
     leads.lead_families = (sz_u8_t)( //
         ((leads.is_caseless_lead_mask != 0) << 0) | ((leads.is_latin_lead_mask != 0) << 1) |
         ((leads.is_latin_extended_lead_mask != 0) << 2) | ((leads.is_cyrillic_lead_mask != 0) << 3) |
@@ -810,8 +793,9 @@ SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t_ sz_utf8_uncased_fold_haswel
  *      next family.
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
-    __m256i source_ymm, sz_utf8_uncased_fold_haswell_leads_t_ const *leads, sz_ptr_t target) {
+SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i source_ymm,
+                                                                      sz_utf8_uncased_fold_haswell_leads_t const *leads,
+                                                                      sz_ptr_t target) {
 
     // Malformed leads (overlong, surrogate, truncated, out-of-range, C0/C1, F5..FF) are foreign to
     // every family: ORing them into each handler's foreign/stop mask truncates the fold before them
@@ -819,15 +803,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
     // text `malformed_lead_mask == 0`, so every handler behaves exactly as before.
     sz_u32_t malformed = leads->malformed_lead_mask;
     sz_size_t handled = 0;
-    if (leads->lead_families & sz_utf8_fold_haswell_lead_caseless_flag_)
+    if (leads->lead_families & sz_utf8_fold_lead_caseless_flag_k)
         handled = sz_utf8_uncased_fold_haswell_caseless_chunk_(
             source_ymm, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask & ~leads->is_caseless_lead_mask) | malformed, target);
     // Unlike Ice Lake, pure Latin-1 chunks (German, French) take this handler too: it covers
     // their C2/C3 folds exactly, and there is no separate Latin-1 cascade to fall back onto
-    if (!handled &&
-        (leads->lead_families & (sz_utf8_fold_haswell_lead_latin_flag_ |
-                                 sz_utf8_fold_haswell_lead_latin_extended_flag_ | sz_utf8_fold_haswell_lead_e1_flag_)))
+    if (!handled && (leads->lead_families & (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k |
+                                             sz_utf8_fold_lead_e1_flag_k)))
         handled = sz_utf8_uncased_fold_haswell_latin_chunk_(
             source_ymm, leads->is_continuation_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask &
@@ -836,31 +819,31 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
             target);
     // Georgian (E1 82/83) - runs after Latin, which already took E1 B8-BB; this handler folds
     // Georgian uppercase and truncates at E1 BC-BF Greek Extended and other E1 sub-families
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_e1_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_e1_flag_k))
         handled = sz_utf8_uncased_fold_haswell_georgian_chunk_(
             source_ymm, leads->is_three_byte_lead_mask, (leads->is_lead_mask & ~leads->is_e1_lead_mask) | malformed,
             target);
     // Basic Cyrillic + ASCII - the common case for Russian, Ukrainian, and Bulgarian
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_cyrillic_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_cyrillic_flag_k))
         handled = sz_utf8_uncased_fold_haswell_cyrillic_chunk_(
             source_ymm, (leads->is_lead_mask & ~leads->is_cyrillic_lead_mask) | malformed, target);
     // Basic Greek + ASCII
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_greek_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_greek_flag_k))
         handled = sz_utf8_uncased_fold_haswell_greek_chunk_(
             source_ymm, (leads->is_lead_mask & ~leads->is_greek_lead_mask) | malformed, target);
     // Guarded 3-byte leads mixed with caseless scripts - CJK or Hangul with E2 punctuation;
     // the handler verifies the guarded seconds and truncates at the first folding sequence
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_guarded_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_guarded_flag_k))
         handled = sz_utf8_uncased_fold_haswell_guarded_chunk_(
             source_ymm, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask & ~(leads->is_caseless_lead_mask | leads->is_guarded_lead_mask)) | malformed, target);
     // Armenian (D4-D6) + the Cyrillic Supplement that shares the D4 lead - both fall in the
     // complex family; this handler folds them and truncates at any non-Armenian complex lead
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_complex_flag_k))
         handled = sz_utf8_uncased_fold_haswell_armenian_chunk_(source_ymm, leads->is_lead_mask, malformed, target);
     // Complex chunks are usually emoji runs: 4-byte sequences with caseless second bytes
     // copy through; anything else in the family truncates to the serial path
-    if (!handled && (leads->lead_families & sz_utf8_fold_haswell_lead_complex_flag_))
+    if (!handled && (leads->lead_families & sz_utf8_fold_lead_complex_flag_k))
         handled = sz_utf8_uncased_fold_haswell_supplementary_chunk_(
             source_ymm, leads->is_complex_lead_mask, leads->is_four_byte_lead_mask,
             (leads->is_lead_mask & ~leads->is_complex_lead_mask) | malformed, target);
@@ -919,8 +902,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size
         }
 
         // Classify lead bytes once, then route through the family handlers in priority order
-        sz_utf8_uncased_fold_haswell_leads_t_ leads = sz_utf8_uncased_fold_haswell_classify_leads_(source_ymm,
-                                                                                                   is_non_ascii_mask);
+        sz_utf8_uncased_fold_haswell_leads_t leads = sz_utf8_uncased_fold_haswell_classify_leads_(source_ymm,
+                                                                                                  is_non_ascii_mask);
         sz_size_t handled = sz_utf8_uncased_fold_haswell_dispatch_chunk_(source_ymm, &leads, target);
         if (handled) {
             target += handled, source += handled, source_length -= handled;

@@ -621,48 +621,48 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, sz_size_t 
             lead_families |= (sz_u8_t)svorv_u8(loaded_b8x, families_u8x);
         }
 
-        if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_)) {
+        if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_k)) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_caseless_chunk_(source, target);
             target += handled, source += handled, source_length -= handled;
             continue;
         }
         if (lead_families &
-            (sz_utf8_fold_lead_latin_flag_ | sz_utf8_fold_lead_latin_extended_flag_ | sz_utf8_fold_lead_e1_flag_)) {
+            (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k | sz_utf8_fold_lead_e1_flag_k)) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_latin_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_e1_flag_) {
+        if (lead_families & sz_utf8_fold_lead_e1_flag_k) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_georgian_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_cyrillic_flag_) {
+        if (lead_families & sz_utf8_fold_lead_cyrillic_flag_k) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_cyrillic_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_greek_flag_) {
+        if (lead_families & sz_utf8_fold_lead_greek_flag_k) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_greek_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_guarded_flag_) {
+        if (lead_families & sz_utf8_fold_lead_guarded_flag_k) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_guarded_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
-        if (lead_families & sz_utf8_fold_lead_complex_flag_) {
+        if (lead_families & sz_utf8_fold_lead_complex_flag_k) {
             sz_size_t const handled = sz_utf8_uncased_fold_sve2_armenian_chunk_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
