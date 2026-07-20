@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -55,7 +55,7 @@ jobs:
     needs: versioning
     steps:
       - name: Checkout the latest code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive
@@ -74,8 +74,9 @@ jobs:
           unprotect_reviews: True
           force: True
 
-  build_wheels_stringzilla_linux:
-    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu
+  # Native x86_64 - full SIMD, full test depth, single image.
+  build_wheels_stringzilla_linux_x86:
+    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu x86
     runs-on: ubuntu-24.04
     needs: versioning
     strategy:
@@ -83,13 +84,78 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
-
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: x86_64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-linux-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  # Native aarch64 on an ARM runner - no QEMU, mirrors the CUDA job's approach.
+  build_wheels_stringzilla_linux_arm:
+    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu ARM
+    runs-on: ubuntu-24.04-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: aarch64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-linux-arm-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  # Emulated arches - one image per runner, all Pythons per arch, fuzz depth thinned under QEMU.
+  build_wheels_stringzilla_linux_emulated:
+    name: Build StringZilla wheels for ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ppc64le, s390x, i686, armv7l, riscv64]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Setup QEMU
@@ -99,13 +165,14 @@ jobs:
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05 SZ_TARGET=stringzilla
           SZ_TARGET: stringzilla
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-stringzilla-ubuntu-24.04-${{ strategy.job-index }}
+          name: cibw-wheels-stringzilla-linux-emulated-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -118,13 +185,13 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
@@ -151,13 +218,13 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
@@ -174,8 +241,9 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
-  build_wheels_stringzillas_cpus_linux:
-    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu
+  # Native x86_64 - full SIMD, single image.
+  build_wheels_stringzillas_cpus_linux_x86:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu x86
     runs-on: ubuntu-24.04
     needs: versioning
     strategy:
@@ -183,30 +251,61 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
-
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TARGET=stringzillas-cpus # When emulating this will disable some tricky SIMD instructions
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
           SZ_TARGET: stringzillas-cpus
-          CIBW_ARCHS_LINUX: x86_64 aarch64 # Limit to 64-bit architectures only
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-stringzillas-cpus-ubuntu-24.04-${{ strategy.job-index }}
+          name: cibw-wheels-stringzillas-cpus-linux-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
+  # Native aarch64 on an ARM runner - no QEMU.
+  build_wheels_stringzillas_cpus_linux_arm:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu ARM
+    runs-on: ubuntu-24.04-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: aarch64
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-linux-arm-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -219,13 +318,13 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
@@ -253,13 +352,13 @@ jobs:
       matrix:
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
@@ -287,13 +386,13 @@ jobs:
         os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
         python-version: ["310", "311", "312", "313", "314"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
 
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Install cibuildwheel
@@ -333,12 +432,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -358,12 +457,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -383,12 +482,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
       - name: Set up Python
-        uses: actions/setup-python@v6.2.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: 3.x
       - name: Build source distribution
@@ -407,7 +506,9 @@ jobs:
     name: Publish StringZilla to PyPI
     needs:
       [
-        build_wheels_stringzilla_linux,
+        build_wheels_stringzilla_linux_x86,
+        build_wheels_stringzilla_linux_arm,
+        build_wheels_stringzilla_linux_emulated,
         build_wheels_stringzilla_macos,
         build_wheels_stringzilla_windows,
         build_sdist_stringzilla,
@@ -450,7 +551,8 @@ jobs:
     name: Publish StringZillas-CPUs to PyPI
     needs:
       [
-        build_wheels_stringzillas_cpus_linux,
+        build_wheels_stringzillas_cpus_linux_x86,
+        build_wheels_stringzillas_cpus_linux_arm,
         build_wheels_stringzillas_cpus_macos,
         build_wheels_stringzillas_cpus_windows,
         build_sdist_stringzillas_cpus,
@@ -533,7 +635,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: versioning
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: "main"
           submodules: recursive
@@ -563,7 +665,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: "main"
       - name: Initialize submodules
@@ -603,7 +705,7 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: "main"
@@ -676,7 +778,7 @@ jobs:
           - arch: x64
             target: x64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: "main"
@@ -717,7 +819,7 @@ jobs:
       matrix:
         arch: [arm64] # Only Apple Silicon for now
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           ref: "main"
@@ -747,8 +849,11 @@ jobs:
   status_linux:
     name: Linux CI
     needs:
-      - build_wheels_stringzilla_linux
-      - build_wheels_stringzillas_cpus_linux
+      - build_wheels_stringzilla_linux_x86
+      - build_wheels_stringzilla_linux_arm
+      - build_wheels_stringzilla_linux_emulated
+      - build_wheels_stringzillas_cpus_linux_x86
+      - build_wheels_stringzillas_cpus_linux_arm
       - build_wheels_stringzillas_cuda_linux
       - create_linux_deb_package
     if: ${{ always() }}
@@ -757,12 +862,18 @@ jobs:
       - name: Aggregate Linux status
         run: |
           echo "Linux job results:"
-          echo "build_wheels_stringzilla_linux: ${{ needs.build_wheels_stringzilla_linux.result }}"
-          echo "build_wheels_stringzillas_cpus_linux: ${{ needs.build_wheels_stringzillas_cpus_linux.result }}"
+          echo "build_wheels_stringzilla_linux_x86: ${{ needs.build_wheels_stringzilla_linux_x86.result }}"
+          echo "build_wheels_stringzilla_linux_arm: ${{ needs.build_wheels_stringzilla_linux_arm.result }}"
+          echo "build_wheels_stringzilla_linux_emulated: ${{ needs.build_wheels_stringzilla_linux_emulated.result }}"
+          echo "build_wheels_stringzillas_cpus_linux_x86: ${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}"
+          echo "build_wheels_stringzillas_cpus_linux_arm: ${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}"
           echo "build_wheels_stringzillas_cuda_linux: ${{ needs.build_wheels_stringzillas_cuda_linux.result }}"
           echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
-          if [ "${{ needs.build_wheels_stringzilla_linux.result }}" != "success" ] || \
-             [ "${{ needs.build_wheels_stringzillas_cpus_linux.result }}" != "success" ] || \
+          if [ "${{ needs.build_wheels_stringzilla_linux_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_linux_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_linux_emulated.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}" != "success" ] || \
              [ "${{ needs.build_wheels_stringzillas_cuda_linux.result }}" != "success" ] || \
              [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
             echo "One or more Linux dependencies failed.";

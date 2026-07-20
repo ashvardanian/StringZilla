@@ -30,7 +30,7 @@ jobs:
         runs-on: ubuntu-24.04
         steps:
             - name: Checkout
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
                   fetch-tags: true
@@ -64,7 +64,7 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -149,7 +149,7 @@ jobs:
 
               # Python
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
             - name: Build Python
@@ -197,7 +197,7 @@ jobs:
             CXX: clang++-16
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -273,7 +273,7 @@ jobs:
 
               # Python
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
             - name: Build Python
@@ -320,7 +320,7 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -367,7 +367,7 @@ jobs:
 
               # Python StringZillas-CPUs
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
               # Ensure modern build backend is available for editable installs
@@ -400,7 +400,7 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -462,7 +462,7 @@ jobs:
 
               # Python StringZillas-CUDA
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
               # Ensure modern build backend is available for editable installs
@@ -494,7 +494,7 @@ jobs:
         runs-on: ubuntu-22.04
         container: swift:latest
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -516,7 +516,7 @@ jobs:
         name: C# on Linux
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -554,7 +554,7 @@ jobs:
         name: Java on Linux
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -648,7 +648,7 @@ jobs:
             RANLIB: llvm-ranlib-20
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -702,7 +702,7 @@ jobs:
                   echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
             - name: Upload ${{ matrix.target_arch }} test binaries
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: cross-tests-${{ matrix.target_arch }}
                   path: build_artifacts/stringzilla*_test_*
@@ -772,7 +772,7 @@ jobs:
                   sudo apt-get install -y qemu-user-static
 
             - name: Download ${{ matrix.target_arch }} test binaries
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v8
               with:
                   name: cross-tests-${{ matrix.target_arch }}
                   path: tests
@@ -797,7 +797,7 @@ jobs:
         name: WebAssembly wasm32-wasip1
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -871,7 +871,7 @@ jobs:
         runs-on: macos-15
 
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -915,7 +915,7 @@ jobs:
 
               # Python
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
             - name: Build Python
@@ -958,7 +958,7 @@ jobs:
                     - os: windows-11-arm
                       arch: arm64
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
             - uses: ilammy/msvc-dev-cmd@v1
@@ -1009,7 +1009,7 @@ jobs:
 
               # Python
             - name: Set up Python ${{ env.PYTHON_VERSION }}
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: ${{ env.PYTHON_VERSION }}
             - name: Build Python
@@ -1044,7 +1044,7 @@ jobs:
               run: |
                   echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
                   git --version || echo "git not installed"
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -1089,7 +1089,8 @@ jobs:
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
 
-    build_wheels:
+    # Native wheels - Linux pinned to x86_64; emulated arches build in `build_wheels_emulated`.
+    build_wheels_native:
         name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
         needs:
@@ -1106,22 +1107,53 @@ jobs:
                 os: [ubuntu-24.04, macos-15, windows-2022]
                 python-version: ["310", "311", "312", "313", "314"]
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
               with:
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v6.2.0
+              uses: actions/setup-python@v7.0.0
               with:
                   python-version: 3.x
-
-              # We only need QEMU for Linux builds
-            - name: Setup QEMU
-              if: matrix.os == 'ubuntu-24.04'
-              uses: docker/setup-qemu-action@v4
             - name: Install cibuildwheel
               run: python -m pip install cibuildwheel==3.4.1
             - name: Build wheels
               run: cibuildwheel --output-dir wheelhouse
               env:
                   CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+                  CIBW_ARCHS_LINUX: x86_64
+
+    # Emulated Linux wheels - one arch per runner so no runner pulls every image; fuzz depth thinned under QEMU.
+    build_wheels_emulated:
+        name: Build Python wheels for ${{ matrix.arch }}
+        runs-on: ubuntu-24.04
+        needs:
+            [
+                test_ubuntu_gcc,
+                test_ubuntu_clang,
+                test_macos,
+                test_windows,
+                test_cross_linux,
+            ]
+        strategy:
+            fail-fast: false
+            matrix:
+                arch: [aarch64, ppc64le, s390x, i686, armv7l, riscv64]
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+            - name: Set up Python
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: 3.x
+            - name: Setup QEMU
+              uses: docker/setup-qemu-action@v4
+            - name: Install cibuildwheel
+              run: python -m pip install cibuildwheel==3.4.1
+            - name: Build wheels
+              run: cibuildwheel --output-dir wheelhouse
+              env:
+                  CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+                  CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+                  # SZ_IS_QEMU_ disables tricky SIMD; SZ_TESTS_MULTIPLIER matches `test_cross_qemu`.
+                  CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05
