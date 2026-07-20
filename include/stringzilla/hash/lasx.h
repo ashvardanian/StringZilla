@@ -339,14 +339,14 @@ SZ_HELPER_INLINE __m128i sz_lsx_load128_(void const *pointer) { return __lsx_vld
 /** @brief  Store an LSX register into a 16-byte buffer. */
 SZ_HELPER_INLINE void sz_lsx_store128_(void *pointer, __m128i value_u8x16) { __lsx_vst(value_u8x16, pointer, 0); }
 
-SZ_HELPER_AUTO void sz_hash_state_short_init_lasx_(sz_hash_state_aligned_for_short_t_ *state, sz_u64_t seed) {
+SZ_HELPER_AUTO void sz_hash_state_short_init_lasx_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
     state->key.u64s[0] = seed, state->key.u64s[1] = seed;
     sz_u64_t const *pi = sz_hash_pi_constants_();
     state->aes.u64s[0] = seed ^ pi[0], state->aes.u64s[1] = seed ^ pi[1];
     state->sum.u64s[0] = seed ^ pi[8], state->sum.u64s[1] = seed ^ pi[9];
 }
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_lasx_(sz_hash_state_aligned_for_short_t_ *state, sz_u128_vec_t block) {
+SZ_HELPER_AUTO void sz_hash_state_short_update_lasx_(sz_hash_state_aligned_for_short_t *state, sz_u128_vec_t block) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     __m128i aes = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state->aes), sz_lsx_load128_(&block));
     sz_lsx_store128_(&state->aes, aes);
@@ -354,7 +354,7 @@ SZ_HELPER_AUTO void sz_hash_state_short_update_lasx_(sz_hash_state_aligned_for_s
     state->sum.u64s[0] += block.u64s[0], state->sum.u64s[1] += block.u64s[1];
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_lasx_(sz_hash_state_aligned_for_short_t_ const *state,
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_lasx_(sz_hash_state_aligned_for_short_t const *state,
                                                            sz_size_t length) {
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
@@ -367,14 +367,14 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_lasx_(sz_hash_state_aligned
 }
 
 SZ_API_COMPTIME void sz_hash_state_init_lasx(sz_hash_state_t *state, sz_u64_t seed);
-SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_lasx_(sz_hash_state_t const *packed);
-SZ_HELPER_AUTO void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state);
-SZ_HELPER_AUTO void sz_hash_state_update_lasx_(sz_hash_state_aligned_t_ *state);
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t_ state);
+SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_t const *packed);
+SZ_HELPER_AUTO void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state);
+SZ_HELPER_AUTO void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state);
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t state);
 
 SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_lasx_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
@@ -383,7 +383,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_
         return sz_hash_state_short_finalize_lasx_(&state, length);
     }
     else if (length <= 32) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
@@ -394,7 +394,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_
         return sz_hash_state_short_finalize_lasx_(&state, length);
     }
     else if (length <= 48) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
@@ -407,7 +407,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_
         return sz_hash_state_short_finalize_lasx_(&state, length);
     }
     else if (length <= 64) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_lasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
@@ -423,8 +423,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_
     }
     else {
         // The aligned twin lets the kernels use clean aligned lane access; one-shot never touches the packed type
-        // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t_`).
-        sz_align_(64) sz_hash_state_aligned_t_ state;
+        // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
+        sz_align_(64) sz_hash_state_aligned_t state;
         sz_hash_state_init_lasx((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block EXCEPT the last; the final block (a full 64 or a partial tail) stays
@@ -452,8 +452,8 @@ SZ_API_COMPTIME void sz_hash_state_init_lasx(sz_hash_state_t *state, sz_u64_t se
 /**
  *  @brief Loads the packed public state into the aligned internal twin (LASX: 2x `__lasx_xvld` per 64-byte field).
  */
-SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_lasx_(sz_hash_state_t const *packed) {
-    sz_hash_state_aligned_t_ state;
+SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t state;
     __lasx_xvst(__lasx_xvld(packed->aes, 0), state.aes.u8s, 0);
     __lasx_xvst(__lasx_xvld(packed->aes + 32, 0), state.aes.u8s + 32, 0);
     __lasx_xvst(__lasx_xvld(packed->sum, 0), state.sum.u8s, 0);
@@ -466,7 +466,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_lasx_(sz_hash_state_t
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state. */
-SZ_HELPER_AUTO void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     __lasx_xvst(__lasx_xvld(state->aes.u8s, 0), packed->aes, 0);
     __lasx_xvst(__lasx_xvld(state->aes.u8s + 32, 0), packed->aes + 32, 0);
     __lasx_xvst(__lasx_xvld(state->sum.u8s, 0), packed->sum, 0);
@@ -481,7 +481,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_s
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
  */
-SZ_HELPER_AUTO void sz_hash_state_update_lasx_(sz_hash_state_aligned_t_ *state) {
+SZ_HELPER_AUTO void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_u128_vec_t *aes = &state->aes.u128s[lane_index];
@@ -498,7 +498,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_lasx_(sz_hash_state_aligned_t_ *state) 
  *  @param state The hash state, taken by value.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t_ state) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -536,7 +536,7 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t_ st
 
 SZ_API_COMPTIME void sz_hash_state_update_lasx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
-    sz_hash_state_aligned_t_ state = sz_hash_state_load_lasx_(packed);
+    sz_hash_state_aligned_t state = sz_hash_state_load_lasx_(packed);
     __m256i const zero_vec = __lasx_xvreplgr2vr_b(0);
     while (length) {
         sz_size_t progress_in_block = state.ins_length % 64;
@@ -558,14 +558,14 @@ SZ_API_COMPTIME void sz_hash_state_update_lasx(sz_hash_state_t *packed, sz_cptr_
 }
 
 SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_lasx(sz_hash_state_t const *packed) {
-    sz_hash_state_aligned_t_ state = sz_hash_state_load_lasx_(packed);
+    sz_hash_state_aligned_t state = sz_hash_state_load_lasx_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
     // buffered in `ins`, and `sz_hash_state_finalize_lasx_` folds it - reproducing one-shot `sz_hash` exactly.
     if (length > 64) return sz_hash_state_finalize_lasx_(state);
 
     // Switch back to a smaller "short" state for small inputs; the aligned twin lanes are read directly.
-    sz_hash_state_aligned_for_short_t_ minimal_state;
+    sz_hash_state_aligned_for_short_t minimal_state;
     minimal_state.key = state.key;
     minimal_state.aes = state.aes.u128s[0];
     minimal_state.sum = state.sum.u128s[0];

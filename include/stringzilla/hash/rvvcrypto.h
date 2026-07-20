@@ -61,7 +61,7 @@ SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_
  *  for the AES round. Every non-AES step reuses the shared serial helpers, so the digests are
  *  guaranteed value-identical to `sz_hash_serial`. */
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t_ *state,
+SZ_HELPER_AUTO void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
                                                           sz_u128_vec_t block) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_rvvcrypto_(state->aes, block);
@@ -69,7 +69,7 @@ SZ_HELPER_AUTO void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_
     state->sum.u64s[0] += block.u64s[0], state->sum.u64s[1] += block.u64s[1];
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_aligned_for_short_t_ const *state,
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_aligned_for_short_t const *state,
                                                                 sz_size_t length) {
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
@@ -79,7 +79,7 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_al
     return mixed_in_register.u64s[0];
 }
 
-SZ_HELPER_AUTO void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t_ *state) {
+SZ_HELPER_AUTO void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_emulate_aesenc_rvvcrypto_(state->aes.u128s[lane_index],
@@ -90,7 +90,7 @@ SZ_HELPER_AUTO void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t_ *st
     }
 }
 
-SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t_ state) {
+SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length;
     key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -143,8 +143,8 @@ SZ_HELPER_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_ve
 /**
  *  @brief Loads the packed public state into the aligned internal twin (one `vle8` block per 16-byte lane).
  */
-SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
-    sz_hash_state_aligned_t_ state;
+SZ_HELPER_AUTO sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         sz_hash_load_block_rvvcrypto_(&state.aes.u128s[lane_index], (sz_cptr_t)(packed->aes + offset));
@@ -157,7 +157,7 @@ SZ_HELPER_AUTO sz_hash_state_aligned_t_ sz_hash_state_load_rvvcrypto_(sz_hash_st
 }
 
 /** @brief Stores the aligned internal twin back into the packed public state (one `vse8` block per 16-byte lane). */
-SZ_HELPER_AUTO void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t_ const *state) {
+SZ_HELPER_AUTO void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         sz_hash_store_block_rvvcrypto_((sz_ptr_t)(packed->aes + offset), state->aes.u128s[lane_index]);
@@ -171,7 +171,7 @@ SZ_HELPER_AUTO void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_h
 SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     sz_size_t const block = sizeof(sz_u128_vec_t); // one AES block
     if (length <= block) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
@@ -182,7 +182,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start
         return sz_hash_state_short_finalize_rvvcrypto_(&state, length);
     }
     else if (length <= 2 * block) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
         sz_hash_load_block_rvvcrypto_(&data0_vec, start);
@@ -193,7 +193,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start
         return sz_hash_state_short_finalize_rvvcrypto_(&state, length);
     }
     else if (length <= 3 * block) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
         sz_hash_load_block_rvvcrypto_(&data0_vec, start);
@@ -206,7 +206,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start
         return sz_hash_state_short_finalize_rvvcrypto_(&state, length);
     }
     else if (length <= 4 * block) {
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
         sz_hash_load_block_rvvcrypto_(&data0_vec, start);
@@ -222,8 +222,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start
     }
     else {
         // The aligned twin lets the kernels use clean aligned lane access; one-shot never touches the packed type
-        // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t_`).
-        sz_align_(64) sz_hash_state_aligned_t_ state;
+        // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
+        sz_align_(64) sz_hash_state_aligned_t state;
         sz_size_t const window = sizeof(state.ins.u8s); // the 64-byte hashing window
         sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
 
@@ -259,7 +259,7 @@ SZ_API_COMPTIME void sz_hash_state_update_rvvcrypto(sz_hash_state_t *packed, sz_
     // deferred trailing block reads back as `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered ==
     // 64`. The append uses `vl` as the mask, touching only `[buffered, buffered+take)`, and we re-zero `ins` after
     // each absorb so the high lanes stay zero-padded for `finalize` to fold a clean trailing block.
-    sz_hash_state_aligned_t_ state = sz_hash_state_load_rvvcrypto_(packed);
+    sz_hash_state_aligned_t state = sz_hash_state_load_rvvcrypto_(packed);
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {
@@ -278,7 +278,7 @@ SZ_API_COMPTIME void sz_hash_state_update_rvvcrypto(sz_hash_state_t *packed, sz_
 }
 
 SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *packed) {
-    sz_hash_state_aligned_t_ state = sz_hash_state_load_rvvcrypto_(packed);
+    sz_hash_state_aligned_t state = sz_hash_state_load_rvvcrypto_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
     // in `ins` is folded by `sz_hash_state_finalize_rvvcrypto_`. A length of exactly 64 uses the minimal (<=64)
@@ -286,7 +286,7 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *p
     if (length > 64) return sz_hash_state_finalize_rvvcrypto_(state);
 
     // Switch back to a smaller "short" state for small inputs; the aligned twin lanes are read directly.
-    sz_hash_state_aligned_for_short_t_ minimal_state;
+    sz_hash_state_aligned_for_short_t minimal_state;
     minimal_state.key = state.key;
     minimal_state.aes = state.aes.u128s[0];
     minimal_state.sum = state.sum.u128s[0];

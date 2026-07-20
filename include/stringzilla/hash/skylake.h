@@ -149,7 +149,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
@@ -163,7 +163,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
@@ -179,7 +179,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
@@ -197,7 +197,7 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
-        sz_align_(16) sz_hash_state_aligned_for_short_t_ state;
+        sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_westmere_aligned_(&state, seed);
 
         // Load the data and update the state
@@ -230,7 +230,7 @@ SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz
     // low `buffered` lanes alias the bytes before `text` and are never accessed; the set lanes
     // [buffered, buffered + to_copy) read exactly [text, text + to_copy). One `vpblendmb` drops them into `ins`;
     // bit-identical digest to the per-byte copy.
-    sz_hash_state_aligned_t_ state = sz_hash_state_load_westmere_(state_ptr);
+    sz_hash_state_aligned_t state = sz_hash_state_load_westmere_(state_ptr);
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {

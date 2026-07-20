@@ -51,11 +51,11 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length
  *  (pointer AND `*matched_length`) is therefore byte-identical to `sz_utf8_uncased_search_serial`. */
 
 /** @brief Folds a length-preserving strip of haystack bytes in place using script-specific rules. */
-typedef void (*sz_utf8_uncased_fold_strip_rvv_t_)(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                  sz_u8_t *destination_ptr);
+typedef void (*sz_utf8_uncased_fold_strip_rvv_t)(sz_u8_t const *source_ptr, sz_size_t vector_length,
+                                                 sz_u8_t *destination_ptr);
 
 /** @brief Scans a strip for length-changing fold characters; returns the offset of the first, or -1. */
-typedef long (*sz_utf8_uncased_alarm_strip_rvv_t_)(sz_u8_t const *source_ptr, sz_size_t vector_length);
+typedef long (*sz_utf8_uncased_alarm_strip_rvv_t)(sz_u8_t const *source_ptr, sz_size_t vector_length);
 
 #pragma region Per Script Fold Strips
 
@@ -672,8 +672,8 @@ SZ_HELPER_AUTO sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t source,
  *  danger-zone handler; clean strips are folded and probe-filtered, with each survivor re-folded, byte-
  *  compared against the needle window, and verified by `sz_utf8_uncased_verify_match_`. */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
-    sz_utf8_uncased_fold_strip_rvv_t_ fold,                      //
-    sz_utf8_uncased_alarm_strip_rvv_t_ alarm,                    //
+    sz_utf8_uncased_fold_strip_rvv_t fold,                       //
+    sz_utf8_uncased_alarm_strip_rvv_t alarm,                     //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
     sz_cptr_t needle, sz_size_t needle_length,                   //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata,    //
@@ -820,7 +820,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
     sz_cptr_t needle, sz_size_t needle_length,              //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
     return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
-                                                (sz_utf8_uncased_alarm_strip_rvv_t_)SZ_NULL, haystack, haystack_length,
+                                                (sz_utf8_uncased_alarm_strip_rvv_t)SZ_NULL, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, matched_length);
 }
 

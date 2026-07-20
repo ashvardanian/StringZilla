@@ -66,12 +66,12 @@ SZ_HELPER_NOINLINE svuint8_t sz_utf8_uncased_search_sve2_ascii_fold_views_(svuin
 
 /** @brief Folds one sub-vector of haystack text using script-specific rules; the driver supplies the
  *         previous-byte, previous-previous-byte, and next-byte views with cross-sub-vector carries. */
-typedef svuint8_t (*sz_utf8_uncased_fold_sve2_t_)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t previous2_u8x,
-                                                  svuint8_t next_u8x);
+typedef svuint8_t (*sz_utf8_uncased_fold_sve2_t)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t previous2_u8x,
+                                                 svuint8_t next_u8x);
 
 /** @brief Non-zero when the sub-vector holds "danger" characters that fold to a different byte width. */
-typedef int (*sz_utf8_uncased_alarm_sve2_t_)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t next_u8x,
-                                             svbool_t loaded_b8x);
+typedef int (*sz_utf8_uncased_alarm_sve2_t)(svuint8_t text_u8x, svuint8_t previous_u8x, svuint8_t next_u8x,
+                                            svbool_t loaded_b8x);
 
 /**
  *  @brief  Shared scan loop behind all script-specific uncased searches - the SVE2 twin of
@@ -79,8 +79,8 @@ typedef int (*sz_utf8_uncased_alarm_sve2_t_)(svuint8_t text_u8x, svuint8_t previ
  *          each thin per-script wrapper, so the callbacks resolve to direct calls.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_sve2_scripted_( //
-    sz_utf8_uncased_fold_sve2_t_ fold,                            //
-    sz_utf8_uncased_alarm_sve2_t_ alarm,                          //
+    sz_utf8_uncased_fold_sve2_t fold,                             //
+    sz_utf8_uncased_alarm_sve2_t alarm,                           //
     sz_cptr_t haystack, sz_size_t haystack_length,                //
     sz_cptr_t needle, sz_size_t needle_length,                    //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
@@ -704,7 +704,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_sve2( //
             return sz_utf8_uncased_search_sve2_ascii_3probe_( //
                 haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
         return sz_utf8_uncased_search_sve2_scripted_( //
-            sz_utf8_uncased_search_sve2_ascii_fold_views_, (sz_utf8_uncased_alarm_sve2_t_)SZ_NULL, haystack,
+            sz_utf8_uncased_search_sve2_ascii_fold_views_, (sz_utf8_uncased_alarm_sve2_t)SZ_NULL, haystack,
             haystack_length, needle, needle_length, needle_metadata, matched_length);
     }
     if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_western_europe_k)

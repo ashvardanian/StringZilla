@@ -708,7 +708,7 @@ typedef enum {
 
     sz_utf8_uncased_rune_invariant_k = 9,
     sz_utf8_uncased_rune_fallback_serial_k = 255,
-} sz_utf8_uncased_rune_safety_profile_t_;
+} sz_utf8_uncased_rune_safety_profile_t;
 
 #pragma region Core API
 

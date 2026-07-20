@@ -179,13 +179,13 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
 #pragma region Scripted Uncased Find
 
 /** @brief Folds one YMM register of haystack text using script-specific rules. */
-typedef __m256i (*sz_utf8_uncased_fold_ymm_t_)(__m256i text_ymm);
+typedef __m256i (*sz_utf8_uncased_fold_ymm_t)(__m256i text_ymm);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
  *  @param load_mask Bitmask of the bytes actually loaded from the haystack, for tail-safe range checks.
  */
-typedef sz_u32_t (*sz_utf8_uncased_alarm_ymm_t_)(__m256i text_ymm, sz_u32_t load_mask);
+typedef sz_u32_t (*sz_utf8_uncased_alarm_ymm_t)(__m256i text_ymm, sz_u32_t load_mask);
 
 /**
  *  @brief Shared scan loop behind all script-specific uncased searches.
@@ -210,8 +210,8 @@ typedef sz_u32_t (*sz_utf8_uncased_alarm_ymm_t_)(__m256i text_ymm, sz_u32_t load
  *      danger characters: the danger branch disappears and the full step is used.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
-    sz_utf8_uncased_fold_ymm_t_ fold,                                //
-    sz_utf8_uncased_alarm_ymm_t_ alarm,                              //
+    sz_utf8_uncased_fold_ymm_t fold,                                 //
+    sz_utf8_uncased_alarm_ymm_t alarm,                               //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length,                       //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
@@ -350,7 +350,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_ascii_4probe_( //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_haswell_scripted_( //
         sz_utf8_uncased_search_haswell_ascii_fold_ymm_,
-        (sz_utf8_uncased_alarm_ymm_t_)SZ_NULL, //
+        (sz_utf8_uncased_alarm_ymm_t)SZ_NULL, //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
@@ -410,7 +410,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_western_europe_fold_ym
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_western_europe_alarm_ymm_(__m256i text_ymm,
                                                                                      sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
     sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
@@ -523,7 +523,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_central_europe_fold_ym
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_central_europe_alarm_ymm_(__m256i text_ymm,
                                                                                      sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
     sz_u32_t is_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE2)));
@@ -616,7 +616,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_cyrillic_fold_ymm_(__m
  *  a branch and the hot path is two compares.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_cyrillic_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
     sz_u32_t is_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xE1)));
     sz_u32_t is_b2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xB2)));
     sz_u32_t danger_mask = (is_e1_mask << 1) & is_b2_mask;
@@ -698,7 +698,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_armenian_fold_ymm_(__m
  *  never appear inside Armenian haystacks, so the coarser test costs nothing in practice.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_armenian_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (2 CMPEQ + movemask)
     sz_u32_t is_d6_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xD6)));
@@ -817,7 +817,7 @@ SZ_HELPER_NOINLINE __m256i sz_utf8_uncased_search_haswell_greek_fold_ymm_(__m256
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_haswell_greek_alarm_ymm_(__m256i text_ymm, sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_ymm_t` signature
 
     // Lead bytes (5 CMPEQ + movemask)
     sz_u32_t is_ce_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(text_ymm, _mm256_set1_epi8((char)0xCE)));

@@ -123,7 +123,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
     //
     // For larger entries, we will use a separate loop afterwards to decrease the likelihood of collisions
     // on the shorter entries, that can benefit from vectorized processing.
-    sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states_initial;
+    sz_hash_state_aligned_for_short_x4_t batch_hashes_states_initial;
     sz_hash_state_short_x4_init_icelake_(&batch_hashes_states_initial, seed);
     sz_size_t count_longer = 0;
     for (sz_size_t small_position = 0; small_position < small_sequence->count;) {
@@ -172,7 +172,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                 batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start), 3);
 
             // Reuse the already computed state for hashes
-            sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_state_aligned_for_short_x4_t batch_hashes_states = batch_hashes_states_initial;
             sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
             batch_hashes.ymm = sz_hash_state_short_x4_finalize_icelake_(
                 &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);
@@ -283,7 +283,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                      
                 batch_prefixes.zmm, _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start), 3);
 
             // Reuse the already computed state for hashes
-            sz_hash_state_aligned_for_short_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_state_aligned_for_short_x4_t batch_hashes_states = batch_hashes_states_initial;
             sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes.zmm);
             batch_hashes.ymm = sz_hash_state_short_x4_finalize_icelake_(
                 &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);

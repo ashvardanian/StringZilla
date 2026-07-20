@@ -312,13 +312,13 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
 #pragma region Scripted Uncased Find
 
 /** @brief Folds one ZMM register of haystack text using script-specific rules. */
-typedef __m512i (*sz_utf8_uncased_fold_zmm_t_)(__m512i text_zmm);
+typedef __m512i (*sz_utf8_uncased_fold_zmm_t)(__m512i text_zmm);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
  *  @param load_mask Bitmask of the bytes actually loaded from the haystack, for tail-safe range checks.
  */
-typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t_)(__m512i text_zmm, __mmask64 load_mask);
+typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t)(__m512i text_zmm, __mmask64 load_mask);
 
 /**
  *  @brief Shared scan loop behind all script-specific uncased searches.
@@ -343,8 +343,8 @@ typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t_)(__m512i text_zmm, __mmask64 lo
  *  @return Pointer to match start or SZ_NULL_CHAR if not found.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
-    sz_utf8_uncased_fold_zmm_t_ fold,                                //
-    sz_utf8_uncased_alarm_zmm_t_ alarm,                              //
+    sz_utf8_uncased_fold_zmm_t fold,                                 //
+    sz_utf8_uncased_alarm_zmm_t alarm,                               //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length,                       //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata,        //
@@ -631,7 +631,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_nai
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_efficiently_zmm_(__m512i text_zmm,
                                                                                                   __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices = _mm512_set_epi8( //
@@ -980,7 +980,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_nai
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_efficiently_zmm_(__m512i text_zmm,
                                                                                                   __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices = _mm512_set_epi8( //
@@ -1201,7 +1201,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_naively_z
  *  refinement hides behind a branch and the hot path is two compares.
  *
  *  @param text_zmm The haystack ZMM register.
- *  @param load_mask Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature.
+ *  @param load_mask Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature.
  *  @return Bitmask of positions where danger characters are detected.
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_efficiently_zmm_(__m512i text_zmm,
@@ -1431,7 +1431,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_naively_z
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_efficiently_zmm_(__m512i text_zmm,
                                                                                             __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // Only 4 CMPEQ operations - optimization overhead likely not worth it
     return sz_utf8_uncased_search_icelake_armenian_alarm_naively_zmm_(text_zmm);
@@ -1745,7 +1745,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_naively_zmm_
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_efficiently_zmm_(__m512i text_zmm,
                                                                                          __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // The naive reference burns 13 CMPEQs - all bound to port 5. The danger second bytes pair up
     // across the 9x and Bx columns (90/B0, 91/B1, 95/B5), so clearing bit 5 with one VPANDD (a
@@ -2223,7 +2223,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
  *  All Georgian scripts use 3-byte UTF-8, so no length changes during folding.
  */
 SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_zmm_(__m512i text_zmm, __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // Lead byte detection
     __mmask64 is_e1_mask = _mm512_cmpeq_epi8_mask(text_zmm, _mm512_set1_epi8((char)0xE1));
@@ -2267,7 +2267,7 @@ SZ_HELPER_AUTO __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_zmm_(__m5
  */
 SZ_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_efficiently_zmm_(__m512i text_zmm,
                                                                                             __mmask64 load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices = _mm512_set_epi8( //

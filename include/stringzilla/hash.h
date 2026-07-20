@@ -217,7 +217,7 @@ SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t non
  *
  *  @note Uses `packed` attribute to allow placement at arbitrary addresses without UBSAN warnings.
  *        This struct uses plain byte arrays to avoid implicit alignment requirements from SIMD types.
- *        The layout matches sz_hash_state_aligned_t_ for safe casting between them.
+ *        The layout matches sz_hash_state_aligned_t for safe casting between them.
  */
 #if defined(_MSC_VER)
 #pragma pack(push, 1)

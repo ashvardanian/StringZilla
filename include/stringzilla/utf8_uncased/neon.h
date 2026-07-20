@@ -221,13 +221,13 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_ascii_3probe_( //
 #pragma region Scripted Uncased Find
 
 /** @brief Folds one 32-byte chunk of haystack text using script-specific rules. */
-typedef uint8x16x2_t (*sz_utf8_uncased_fold_u8x16x2_t_)(uint8x16x2_t text_u8x16x2);
+typedef uint8x16x2_t (*sz_utf8_uncased_fold_u8x16x2_t)(uint8x16x2_t text_u8x16x2);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
  *  @param load_mask Bitmask of the bytes actually loaded from the haystack, for tail-safe range checks.
  */
-typedef sz_u32_t (*sz_utf8_uncased_alarm_u8x16x2_t_)(uint8x16x2_t text_u8x16x2, sz_u32_t load_mask);
+typedef sz_u32_t (*sz_utf8_uncased_alarm_u8x16x2_t)(uint8x16x2_t text_u8x16x2, sz_u32_t load_mask);
 
 /**
  *  @brief Shared scan loop behind all script-specific uncased searches.
@@ -252,8 +252,8 @@ typedef sz_u32_t (*sz_utf8_uncased_alarm_u8x16x2_t_)(uint8x16x2_t text_u8x16x2, 
  *      danger characters: the danger branch disappears and the full step is used.
  */
 SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
-    sz_utf8_uncased_fold_u8x16x2_t_ fold,                         //
-    sz_utf8_uncased_alarm_u8x16x2_t_ alarm,                       //
+    sz_utf8_uncased_fold_u8x16x2_t fold,                          //
+    sz_utf8_uncased_alarm_u8x16x2_t alarm,                        //
     sz_cptr_t haystack, sz_size_t haystack_length,                //
     sz_cptr_t needle, sz_size_t needle_length,                    //
     sz_utf8_uncased_needle_metadata_t const *needle_metadata,     //
@@ -405,7 +405,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
     sz_size_t *matched_length) {
     return sz_utf8_uncased_search_neon_scripted_( //
         sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_,
-        (sz_utf8_uncased_alarm_u8x16x2_t_)SZ_NULL, //
+        (sz_utf8_uncased_alarm_u8x16x2_t)SZ_NULL, //
         haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
 }
 
@@ -476,7 +476,7 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fold_
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                       sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t` signature
 
     // The driver only tests the danger mask for non-emptiness, so the whole alarm stays in the
     // byte-mask domain: every pattern is anchored at its SECOND byte, with the lead read from the
@@ -594,7 +594,7 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                       sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t` signature
 
     // Byte-mask danger detection anchored at the second byte; the lead comes from the `previous`
     // view. All pairs are two-byte, so no `next` lookup is needed, and one `vmaxvq_u8` gates the
@@ -701,7 +701,7 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t` signature
 
     // E1 B2 is dangerous only when the third (next) byte folds, i.e. lands in 80-88. Anchored at the
     // B2 second byte: lead from `previous`, third from `next`, gated by one `vmaxvq_u8`.
@@ -802,7 +802,7 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x16x
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t` signature
 
     // Two two-byte pairs anchored at their second byte; lead from `previous`, gated by `vmaxvq_u8`.
     uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
@@ -929,7 +929,7 @@ SZ_HELPER_NOINLINE uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(
  */
 SZ_HELPER_NOINLINE sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
                                                                              sz_u32_t load_mask) {
-    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
+    sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t` signature
 
     // Pair danger anchored at the second byte (lead from `previous`); the polytonic & archaic leads
     // E1/CD are blanket hazards flagged at their own lane. One `vmaxvq_u8` gates the danger branch.

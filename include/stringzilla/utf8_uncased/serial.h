@@ -26,10 +26,10 @@ typedef struct {
     sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions
     sz_size_t pending_count; // Number of pending folded runes
     sz_size_t pending_idx;   // Current index into pending buffer
-} sz_utf8_folded_iter_t_;
+} sz_utf8_folded_iter_t;
 
 /** @brief Initialize a folded rune iterator. */
-SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *iterator, sz_cptr_t string, sz_size_t length) {
+SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iterator, sz_cptr_t string, sz_size_t length) {
     iterator->ptr = string;
     iterator->end = string + length;
     iterator->pending_count = 0;
@@ -42,7 +42,7 @@ SZ_HELPER_AUTO void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t_ *iterator, 
  *  single literal byte (tagged so it compares byte-for-byte and never collides with a real folded codepoint) and
  *  the iterator resyncs by one byte, never reading past `end`.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t_ *it, sz_rune_t *out_rune) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
     if (it->pending_idx >= it->pending_count) {
         if (it->ptr >= it->end) return sz_false_k;
@@ -98,10 +98,10 @@ typedef struct {
     sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions (in reverse order)
     sz_size_t pending_count; // Number of pending folded runes
     sz_size_t pending_idx;   // Current index into pending buffer
-} sz_utf8_folded_reverse_iter_t_;
+} sz_utf8_folded_reverse_iter_t;
 
 /** @brief Initialize a reverse folded rune iterator. Iterates from end towards start. */
-SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t_ *it, sz_cptr_t start,
+SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_iter_t *it, sz_cptr_t start,
                                                       sz_cptr_t end) {
     it->ptr = end;
     it->start = start;
@@ -116,7 +116,7 @@ SZ_HELPER_AUTO void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reverse_ite
  * iterator: a byte that does not begin/end a well-formed codepoint is emitted as a single tagged literal byte and
  * the iterator resyncs by one byte, so the backward rune stream is exactly the reverse of the forward stream.
  */
-SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t_ *it, sz_rune_t *out_rune) {
+SZ_HELPER_AUTO sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it, sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
     if (it->pending_idx < it->pending_count) {
         *out_rune = it->pending[it->pending_count - 1 - it->pending_idx];
@@ -315,7 +315,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_serial(sz_cptr_t str, sz_size_t len
 
 SZ_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                            sz_size_t b_length) {
-    sz_utf8_folded_iter_t_ a_iterator, b_iterator;
+    sz_utf8_folded_iter_t a_iterator, b_iterator;
     sz_utf8_folded_iter_init_(&a_iterator, a, a_length);
     sz_utf8_folded_iter_init_(&b_iterator, b, b_length);
 
@@ -416,7 +416,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_head_(sz_cptr_t needle_start, sz
         return sz_true_k;
     }
 
-    sz_utf8_folded_reverse_iter_t_ needle_riter, haystack_riter;
+    sz_utf8_folded_reverse_iter_t needle_riter, haystack_riter;
     sz_utf8_folded_reverse_iter_init_(&needle_riter, needle_start, needle_end);
     sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack_start, haystack_end);
 
@@ -460,7 +460,7 @@ SZ_HELPER_AUTO sz_bool_t sz_utf8_uncased_verify_tail_(sz_cptr_t needle_start, sz
         return sz_true_k;
     }
 
-    sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
+    sz_utf8_folded_iter_t needle_iter, haystack_iter;
     sz_utf8_folded_iter_init_(&needle_iter, needle_start, needle_length);
     sz_utf8_folded_iter_init_(&haystack_iter, haystack_start, (sz_size_t)(haystack_end - haystack_start));
 
@@ -668,7 +668,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
 
             // Check if the previous characters in the needle match the haystack before the danger zone began
             sz_rune_t needle_riter_rune = 0, haystack_riter_rune = 0;
-            sz_utf8_folded_reverse_iter_t_ needle_riter, haystack_riter;
+            sz_utf8_folded_reverse_iter_t needle_riter, haystack_riter;
             sz_utf8_folded_reverse_iter_init_(&needle_riter, needle, needle + needle_first_safe_folded_rune_offset);
             sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack, danger_cursor);
 
@@ -696,7 +696,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
 
             // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
-            sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
+            sz_utf8_folded_iter_t needle_iter, haystack_iter;
             sz_utf8_folded_iter_init_(&needle_iter, needle + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
             sz_utf8_folded_iter_init_(&haystack_iter, danger_cursor + haystack_rune_length,
@@ -745,7 +745,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
 
             // Check if the previous characters in the needle match the haystack before the danger zone began
             sz_rune_t needle_riter_rune = 0, haystack_riter_rune = 0;
-            sz_utf8_folded_reverse_iter_t_ needle_riter, haystack_riter;
+            sz_utf8_folded_reverse_iter_t needle_riter, haystack_riter;
             sz_utf8_folded_reverse_iter_init_(&needle_riter, needle, needle + needle_first_safe_folded_rune_offset);
             sz_utf8_folded_reverse_iter_init_(&haystack_riter, haystack, danger_cursor);
 
@@ -776,7 +776,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_in_danger_zone_( //
 
             // First match the tail (from safe window start forward)
             sz_rune_t needle_iter_rune = 0, haystack_iter_rune = 0;
-            sz_utf8_folded_iter_t_ needle_iter, haystack_iter;
+            sz_utf8_folded_iter_t needle_iter, haystack_iter;
             sz_utf8_folded_iter_init_(&needle_iter, needle + needle_first_safe_folded_rune_offset,
                                       needle_length - needle_first_safe_folded_rune_offset);
             sz_utf8_folded_iter_init_(&haystack_iter, danger_cursor + haystack_rune_length,
@@ -1038,7 +1038,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     if (needle_length <= 12) {
         sz_rune_t folded_runes[4]; // 4th slot accessed before loop exit
         sz_size_t folded_count = 0;
-        sz_utf8_folded_iter_t_ iter;
+        sz_utf8_folded_iter_t iter;
         sz_utf8_folded_iter_init_(&iter, needle, needle_length);
         sz_rune_t rune;
         while (folded_count < 4 && sz_utf8_folded_iter_next_(&iter, &rune)) folded_runes[folded_count++] = rune;
@@ -1066,7 +1066,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     sz_size_t needle_prefix_count = 0, needle_total_count = 0;
     sz_u64_t needle_hash = 0;
     {
-        sz_utf8_folded_iter_t_ needle_iter;
+        sz_utf8_folded_iter_t needle_iter;
         sz_utf8_folded_iter_init_(&needle_iter, needle, needle_length);
         sz_rune_t rune;
         while (needle_prefix_count < ring_capacity && sz_utf8_folded_iter_next_(&needle_iter, &rune)) {
@@ -1090,7 +1090,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     sz_size_t window_skip_counts[32]; // Runes to skip from first character's expansion
     sz_size_t ring_head = 0;
     sz_u64_t window_hash = 0;
-    sz_utf8_folded_iter_t_ haystack_iter;
+    sz_utf8_folded_iter_t haystack_iter;
     sz_utf8_folded_iter_init_(&haystack_iter, haystack, haystack_length);
 
     sz_cptr_t window_start = haystack;
@@ -1145,7 +1145,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
                 }
                 // Long needle: verify FULL needle from window_start, skipping runes if match
                 // starts mid-expansion. Example: ẚ→"aʾ", needle starting with "ʾ" must skip "a".
-                sz_utf8_folded_iter_t_ verify_haystack_iter;
+                sz_utf8_folded_iter_t verify_haystack_iter;
                 sz_utf8_folded_iter_init_(&verify_haystack_iter, window_start,
                                           (sz_size_t)(haystack + haystack_length - window_start));
                 // Skip runes within first character's expansion
@@ -1153,7 +1153,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
                 for (sz_size_t skip_index = 0; skip_index < skip_runes; ++skip_index)
                     sz_utf8_folded_iter_next_(&verify_haystack_iter, &skip_rune);
                 // Now verify full needle against remaining haystack
-                sz_utf8_folded_iter_t_ verify_needle_iter;
+                sz_utf8_folded_iter_t verify_needle_iter;
                 sz_utf8_folded_iter_init_(&verify_needle_iter, needle, needle_length);
                 sz_rune_t needle_rune_v, haystack_rune_v;
                 sz_bool_t match_ok = sz_true_k;
@@ -1237,10 +1237,10 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
  *        position-N-2 detection for the 's' rule: if prev_prev==0 && prev!=0, we're at
  *        position 1; if next_next==0 && next!=0, we're at position N-2.
  */
-SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t_ sz_utf8_uncased_rune_safety_profile_( //
-    sz_rune_t rune, sz_size_t rune_bytes,                                                   //
-    sz_rune_t prev_rune, sz_rune_t next_rune,                                               //
-    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                                     //
+SZ_HELPER_AUTO sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune_safety_profile_( //
+    sz_rune_t rune, sz_size_t rune_bytes,                                                  //
+    sz_rune_t prev_rune, sz_rune_t next_rune,                                              //
+    sz_rune_t prev_prev_rune, sz_rune_t next_next_rune,                                    //
     unsigned int *safety_profiles) {
 
     unsigned safety = 0;
@@ -1838,7 +1838,7 @@ SZ_HELPER_AUTO void sz_utf8_uncased_needle_metadata_(sz_cptr_t needle, sz_size_t
 
             // Get safety mask and primary script for this rune
             unsigned safety_mask = 0;
-            sz_utf8_uncased_rune_safety_profile_t_ primary_script = sz_utf8_uncased_rune_safety_profile_( //
+            sz_utf8_uncased_rune_safety_profile_t primary_script = sz_utf8_uncased_rune_safety_profile_( //
                 rune, rune_bytes, prev_rune, next_rune, prev_prev_rune, next_next_rune, &safety_mask);
 
             // Fold this rune
