@@ -2,9 +2,16 @@ name: "Pre-Release"
 
 on:
     push:
-        branches: ["main*"]
+        branches: ["main"]
     pull_request:
         branches: ["main*"]
+
+# One group per source branch, so a `main*` branch with an open PR is not built twice - `push` no longer
+# matches it, and `head_ref` folds any number of PRs from that branch into the same group. Superseded PR
+# runs are cancelled; `main` runs are not, so a build feeding the release pipeline is never killed midway.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
     BUILD_TYPE: Release
