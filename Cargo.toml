@@ -24,7 +24,7 @@ license = "Apache-2.0"
 name = "stringzilla"
 publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
-version = "5.0.0"
+version = "5.0.1"
 
 [lib]
 name = "stringzilla"
