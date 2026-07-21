@@ -3,7 +3,7 @@ title: "StringZilla: Fast SIMD, SWAR, and GPGPU String Processing"
 message: "If you use this software, please cite it as below."
 type: software
 license: Apache-2.0
-version: 5.0.2
+version: 5.0.3
 repository-code: https://github.com/ashvardanian/StringZilla
 url: https://ashvardanian.com/posts/stringzilla/
 doi: 10.5281/zenodo.21472333
