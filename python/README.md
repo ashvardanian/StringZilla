@@ -66,7 +66,7 @@ It is produced by the splitting and sorting methods, and can also be built direc
 With `view=True` it references the original data instead of copying it.
 
 
-`Strs` keeps its parts on a single contiguous "tape" with an offsets array, so `sorted`, `argsort`, `sample`, and `shuffled` reorder offsets rather than bytes.
+`Strs` keeps its parts on a single contiguous "tape" with an offsets array, so `sorted`, `argsort`, `intersect`, `sample`, and `shuffled` reorder offsets rather than bytes.
 This layout is also dramatically more memory-efficient than a Python `list` of `str`.
 Every part lives on one shared byte tape alongside a compact offsets array, so N substrings cost roughly one allocation, whereas a `list` of `str` holds N separately heap-allocated objects, each carrying a PyObject header, a hash cache, and per-object allocator overhead.
 Splitting a large document into millions of tokens therefore stays compact and cache-friendly instead of fragmenting the heap.
@@ -351,9 +351,9 @@ a = sz.Sha256().update(b"ab")
 assert a.copy().update(b"c").hexdigest() == sz.Sha256().update(b"abc").hexdigest()
 ```
 
-## Sorting, Sampling, and Shuffling
+## Sorting, Intersecting, and Sampling
 
-These operate on a `Strs` collection and return new collections, leaving the original unchanged.
+These operate on a `Strs` collection and return new collections or index tuples, leaving the original unchanged.
 
 ### Sorting
 
@@ -368,6 +368,18 @@ assert [str(x) for x in names.sorted()] == ["apple", "banana", "cherry"]
 assert [str(x) for x in names.sorted(reverse=True)] == ["cherry", "banana", "apple"]
 assert [str(x) for x in names.sorted(top=2)] == ["apple", "banana"]
 assert names.argsort() == (1, 0, 2)
+```
+
+### Intersection
+
+- `intersect(other, seed=0)` — return the positions of strings present in both collections, as a pair of parallel index tuples: `result[0][i]` in this collection and `result[1][i]` in `other` point to equal strings. Each distinct shared value is matched exactly once, even if either side holds duplicates; `seed` reshuffles the underlying hash table to resist adversarial inputs.
+
+```python
+import stringzilla as sz
+
+ours, theirs = sz.Strs(["banana", "apple", "cherry"]).intersect(sz.Strs(["cherry", "orange", "banana"]))
+assert sorted(ours) == [0, 2]                 # "banana" and "cherry" on our side
+assert len(ours) == len(theirs) == 2
 ```
 
 ### Sampling and Shuffling

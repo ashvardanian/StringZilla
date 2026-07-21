@@ -151,3 +151,34 @@ Construct it with the needle buffer and an optional `validate` flag, then call `
 const needle = new sz.Utf8UncasedNeedle(Buffer.from("wörld"));
 needle.findIn(Buffer.from("Hello WÖRLD")); // => { index, length }
 ```
+
+## Unicode Normalization
+
+`utf8Norm` converts a UTF-8 buffer into one of the four Unicode normal forms, passed as a `Utf8NormalForm` constant: `NFD`, `NFC`, `NFKD`, or `NFKC`.
+It returns a new `Buffer` and accepts the same optional trailing `validate` boolean as the case-folding functions.
+
+```js
+const decomposed = Buffer.from("café"); // "e" followed by a combining acute
+assert.strictEqual(sz.utf8Norm(decomposed, sz.Utf8NormalForm.NFC).toString(), "café");
+```
+
+`utf8FindDenormalized` checks a buffer against a normal form without rewriting it.
+It returns the byte offset of the first violation as a `BigInt`, or `-1n` when the input is already normalized.
+
+```js
+assert.strictEqual(sz.utf8FindDenormalized(Buffer.from("café"), sz.Utf8NormalForm.NFC), -1n);
+assert.strictEqual(sz.utf8FindDenormalized(decomposed, sz.Utf8NormalForm.NFC), 3n);
+```
+
+## Unicode Segmentation
+
+Four iterable classes lazily split a UTF-8 buffer into TR29 and UAX14 segments: `Utf8Wordbreaks` for words, `Utf8Graphemes` for grapheme clusters, `Utf8Sentences` for sentences, and `Utf8Linebreaks` for line-break opportunities.
+Each is constructed with the source buffer and an optional `validate` flag, and yields zero-copy `subarray` views into it, so the buffer must outlive the iteration.
+
+```js
+const words = [...new sz.Utf8Wordbreaks(Buffer.from("Hello world!"))].map((b) => b.toString());
+assert.deepStrictEqual(words, ["Hello", " ", "world", "!"]);
+
+const graphemes = [...new sz.Utf8Graphemes(Buffer.from("a👩‍👩‍👧‍👦b"))].map((b) => b.toString());
+assert.deepStrictEqual(graphemes, ["a", "👩‍👩‍👧‍👦", "b"]); // the ZWJ family is one cluster
+```

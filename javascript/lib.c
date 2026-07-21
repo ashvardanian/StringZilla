@@ -257,6 +257,207 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)matched_length);
 }
 
+napi_value utf8NormAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    if (argc < 2) {
+        napi_throw_error(env, NULL, "utf8Norm(buffer, form, validate?) expects at least 2 arguments");
+        return NULL;
+    }
+
+    void *source_data;
+    size_t source_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &source_data, &source_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    double form_double;
+    status = napi_get_value_double(env, args[1], &form_double);
+    if (status != napi_ok || form_double < 0 || form_double > 3) {
+        napi_throw_error(env, NULL, "Second argument must be a Utf8NormalForm value (NFD, NFC, NFKD, or NFKC)");
+        return NULL;
+    }
+    sz_normal_form_t form = (sz_normal_form_t)form_double;
+
+    bool validate = false;
+    if (argc > 2) { napi_get_value_bool(env, args[2], &validate); }
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)source_data, source_length) != SZ_NULL_CHAR) {
+        napi_throw_error(env, NULL, "Input is not valid UTF-8");
+        return NULL;
+    }
+
+    // Worst-case expansion is 18x for a single-codepoint compatibility decomposition. See `sz_utf8_norm` docs.
+    size_t capacity = source_length * 18;
+    void *destination = capacity ? malloc(capacity) : NULL;
+    if (capacity && !destination) {
+        napi_throw_error(env, NULL, "Memory allocation failed");
+        return NULL;
+    }
+
+    sz_size_t out_length = 0;
+    if (source_length) out_length = sz_utf8_norm((sz_cptr_t)source_data, source_length, form, (sz_ptr_t)destination);
+
+    if (out_length == 0) {
+        if (destination) free(destination);
+        napi_value js_empty;
+        void *unused;
+        napi_create_buffer(env, 0, &unused, &js_empty);
+        return js_empty;
+    }
+
+    // Shrink to the actual size without a second pass or a copy.
+    void *shrunk = realloc(destination, (size_t)out_length);
+    if (shrunk) destination = shrunk;
+
+    napi_value js_result;
+    napi_create_external_buffer(env, (size_t)out_length, destination, external_buffer_cleanup, NULL, &js_result);
+    return js_result;
+}
+
+napi_value utf8FindDenormalizedAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    if (argc < 2) {
+        napi_throw_error(env, NULL, "utf8FindDenormalized(buffer, form) expects 2 arguments");
+        return NULL;
+    }
+
+    void *source_data;
+    size_t source_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &source_data, &source_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    double form_double;
+    status = napi_get_value_double(env, args[1], &form_double);
+    if (status != napi_ok || form_double < 0 || form_double > 3) {
+        napi_throw_error(env, NULL, "Second argument must be a Utf8NormalForm value (NFD, NFC, NFKD, or NFKC)");
+        return NULL;
+    }
+    sz_normal_form_t form = (sz_normal_form_t)form_double;
+
+    sz_cptr_t violation = sz_utf8_find_denormalized((sz_cptr_t)source_data, source_length, form);
+
+    napi_value js_result;
+    if (violation == SZ_NULL_CHAR) { napi_create_bigint_int64(env, -1, &js_result); }
+    else { napi_create_bigint_uint64(env, violation - (sz_cptr_t)source_data, &js_result); }
+    return js_result;
+}
+
+typedef struct {
+    napi_ref text_ref; // Keeps the source Buffer alive while the iterator holds pointers into it
+    sz_cptr_t text_data;
+    sz_size_t text_length;
+    sz_size_t cursor;
+    sz_utf8_segmenter_t kernel;
+    sz_size_t batch_starts[sz_iterators_default_steps_k];
+    sz_size_t batch_lengths[sz_iterators_default_steps_k];
+    sz_size_t batch_count;
+    sz_size_t batch_index;
+} utf8_segments_t;
+
+static void utf8_segments_cleanup(napi_env env, void *data, void *hint) {
+    utf8_segments_t *segments = (utf8_segments_t *)data;
+    if (!segments) return;
+    if (segments->text_ref) napi_delete_reference(env, segments->text_ref);
+    free(segments);
+}
+
+napi_value utf8SegmentsConstructor(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_value js_this;
+    void *kernel;
+    napi_get_cb_info(env, info, &argc, args, &js_this, &kernel);
+
+    if (argc < 1) {
+        napi_throw_error(env, NULL, "Segmenter(buffer, validate?) expects at least 1 argument");
+        return NULL;
+    }
+
+    void *text_data;
+    size_t text_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &text_data, &text_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    bool validate = false;
+    if (argc > 1) { napi_get_value_bool(env, args[1], &validate); }
+    if (validate && sz_utf8_find_malformed((sz_cptr_t)text_data, text_length) != SZ_NULL_CHAR) {
+        napi_throw_error(env, NULL, "Input is not valid UTF-8");
+        return NULL;
+    }
+
+    utf8_segments_t *segments = (utf8_segments_t *)malloc(sizeof(*segments));
+    if (!segments) {
+        napi_throw_error(env, NULL, "Memory allocation failed");
+        return NULL;
+    }
+    segments->text_data = (sz_cptr_t)text_data;
+    segments->text_length = (sz_size_t)text_length;
+    segments->cursor = 0;
+    segments->kernel = (sz_utf8_segmenter_t)kernel;
+    segments->batch_count = 0;
+    segments->batch_index = 0;
+    segments->text_ref = NULL;
+    napi_create_reference(env, args[0], 1, &segments->text_ref);
+
+    napi_wrap(env, js_this, segments, utf8_segments_cleanup, NULL, NULL);
+    return js_this;
+}
+
+napi_value utf8SegmentsNext(napi_env env, napi_callback_info info) {
+    napi_value js_this;
+    napi_get_cb_info(env, info, NULL, NULL, &js_this, NULL);
+
+    utf8_segments_t *segments;
+    napi_unwrap(env, js_this, (void **)&segments);
+    if (!segments) {
+        napi_throw_error(env, NULL, "Internal error: missing segmenter state");
+        return NULL;
+    }
+
+    if (segments->batch_index >= segments->batch_count) {
+        // Resume from the end of the last buffered segment - a guaranteed break boundary.
+        if (segments->batch_count) {
+            sz_size_t const last = segments->batch_count - 1;
+            segments->cursor += segments->batch_starts[last] + segments->batch_lengths[last];
+        }
+        napi_value js_null;
+        napi_get_null(env, &js_null);
+        if (segments->cursor >= segments->text_length) return js_null;
+        sz_size_t consumed = 0;
+        segments->batch_count = segments->kernel(segments->text_data + segments->cursor,
+                                                 segments->text_length - segments->cursor, segments->batch_starts,
+                                                 segments->batch_lengths, sz_iterators_default_steps_k, &consumed);
+        segments->batch_index = 0;
+        if (segments->batch_count == 0) {
+            // Trailing bytes without a single segment (e.g. closing whitespace) - the iteration is over.
+            segments->cursor = segments->text_length;
+            return js_null;
+        }
+    }
+
+    sz_size_t const i = segments->batch_index++;
+    napi_value js_obj, js_start, js_length;
+    napi_create_object(env, &js_obj);
+    napi_create_bigint_uint64(env, (uint64_t)(segments->cursor + segments->batch_starts[i]), &js_start);
+    napi_create_bigint_uint64(env, (uint64_t)segments->batch_lengths[i], &js_length);
+    napi_set_named_property(env, js_obj, "start", js_start);
+    napi_set_named_property(env, js_obj, "length", js_length);
+    return js_obj;
+}
+
 napi_value countAPI(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
@@ -842,6 +1043,20 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_define_class(env, "Utf8UncasedNeedle", NAPI_AUTO_LENGTH, utf8UncasedNeedleConstructor, NULL,
                       sizeof(utf8NeedleProps) / sizeof(utf8NeedleProps[0]), utf8NeedleProps, &utf8NeedleClass);
 
+    // Create the four TR29/UAX14 segmenter classes sharing one implementation, parameterized by kernel
+    napi_property_descriptor segmenterProps[] = {
+        {"next", 0, utf8SegmentsNext, 0, 0, 0, napi_default, 0},
+    };
+    napi_value utf8WordbreaksClass, utf8GraphemesClass, utf8SentencesClass, utf8LinebreaksClass;
+    napi_define_class(env, "Utf8Wordbreaks", NAPI_AUTO_LENGTH, utf8SegmentsConstructor, (void *)&sz_utf8_wordbreaks,
+                      sizeof(segmenterProps) / sizeof(segmenterProps[0]), segmenterProps, &utf8WordbreaksClass);
+    napi_define_class(env, "Utf8Graphemes", NAPI_AUTO_LENGTH, utf8SegmentsConstructor, (void *)&sz_utf8_graphemes,
+                      sizeof(segmenterProps) / sizeof(segmenterProps[0]), segmenterProps, &utf8GraphemesClass);
+    napi_define_class(env, "Utf8Sentences", NAPI_AUTO_LENGTH, utf8SegmentsConstructor, (void *)&sz_utf8_sentences,
+                      sizeof(segmenterProps) / sizeof(segmenterProps[0]), segmenterProps, &utf8SentencesClass);
+    napi_define_class(env, "Utf8Linebreaks", NAPI_AUTO_LENGTH, utf8SegmentsConstructor, (void *)&sz_utf8_linebreaks,
+                      sizeof(segmenterProps) / sizeof(segmenterProps[0]), segmenterProps, &utf8LinebreaksClass);
+
     // Define function exports
     napi_property_descriptor findDesc = {"indexOf", 0, indexOfAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor findLastDesc = {"lastIndexOf", 0, findLastAPI, 0, 0, 0, napi_default, 0};
@@ -858,6 +1073,13 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor byteSumDesc = {"byteSum", 0, byteSumAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8UncasedFoldDesc = {"utf8UncasedFold", 0, utf8UncasedFoldAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8UncasedFindDesc = {"utf8UncasedFind", 0, utf8UncasedFindAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8NormDesc = {"utf8Norm", 0, utf8NormAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8FindDenormalizedDesc = {"utf8FindDenormalized", 0, utf8FindDenormalizedAPI, 0, 0, 0,
+                                                         napi_default,           0};
+    napi_property_descriptor utf8WordsDesc = {"Utf8Wordbreaks", 0, 0, 0, 0, utf8WordbreaksClass, napi_default, 0};
+    napi_property_descriptor utf8GraphemesDesc = {"Utf8Graphemes", 0, 0, 0, 0, utf8GraphemesClass, napi_default, 0};
+    napi_property_descriptor utf8SentencesDesc = {"Utf8Sentences", 0, 0, 0, 0, utf8SentencesClass, napi_default, 0};
+    napi_property_descriptor utf8LinebreaksDesc = {"Utf8Linebreaks", 0, 0, 0, 0, utf8LinebreaksClass, napi_default, 0};
     napi_property_descriptor hasherDesc = {"Hasher", 0, 0, 0, 0, hasherClass, napi_default, 0};
     napi_property_descriptor sha256HasherDesc = {"Sha256", 0, 0, 0, 0, sha256HasherClass, napi_default, 0};
     napi_property_descriptor utf8NeedleDesc = {"Utf8UncasedNeedle", 0, 0, 0, 0, utf8NeedleClass, napi_default, 0};
@@ -883,6 +1105,12 @@ napi_value Init(napi_env env, napi_value exports) {
         byteSumDesc,
         utf8UncasedFoldDesc,
         utf8UncasedFindDesc,
+        utf8NormDesc,
+        utf8FindDenormalizedDesc,
+        utf8WordsDesc,
+        utf8GraphemesDesc,
+        utf8SentencesDesc,
+        utf8LinebreaksDesc,
         hasherDesc,
         sha256HasherDesc,
         utf8NeedleDesc,

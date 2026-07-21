@@ -6,11 +6,13 @@ const require = createRequire(import.meta.url);
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function loadNativeAddon() {
-    try {
-        return require(`@stringzilla/${process.platform}-${process.arch}`);
-    } catch { }
+    // A locally built addon only exists in development checkouts and must win over the
+    // prebuilt platform package, so fresh native code is what gets exercised by tests.
     try {
         return require("node-gyp-build")(packageRoot);
+    } catch { }
+    try {
+        return require(`@stringzilla/${process.platform}-${process.arch}`);
     } catch { }
     throw new Error(
         "StringZilla native addon not found. Install `stringzilla` on a supported platform, or build it from source with a C toolchain."
@@ -18,6 +20,42 @@ function loadNativeAddon() {
 }
 
 const compiled = loadNativeAddon();
+
+/**
+ *  Wraps a native segmenter class into a JS iterable, yielding zero-copy `subarray` views
+ *  of the source Buffer, one per TR29/UAX14 segment.
+ */
+function makeSegmenterIterable(NativeSegmenter, name) {
+    const cls = class {
+        /**
+         *  @param {Buffer} buffer - UTF-8 encoded input, kept alive for the iterator's lifetime
+         *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
+         */
+        constructor(buffer, validate = false) {
+            this._native = new NativeSegmenter(buffer, validate);
+            this._buffer = buffer;
+        }
+        next() {
+            const span = this._native.next();
+            if (span === null) return { done: true, value: undefined };
+            return { done: false, value: this._buffer.subarray(Number(span.start), Number(span.start + span.length)) };
+        }
+        [Symbol.iterator]() {
+            return this;
+        }
+    };
+    Object.defineProperty(cls, "name", { value: name });
+    return cls;
+}
+
+/** Lazily yields TR29 word segments of a UTF-8 buffer as zero-copy subarrays. */
+const Utf8Wordbreaks = makeSegmenterIterable(compiled.Utf8Wordbreaks, "Utf8Wordbreaks");
+/** Lazily yields TR29 grapheme clusters of a UTF-8 buffer as zero-copy subarrays. */
+const Utf8Graphemes = makeSegmenterIterable(compiled.Utf8Graphemes, "Utf8Graphemes");
+/** Lazily yields TR29 sentence segments of a UTF-8 buffer as zero-copy subarrays. */
+const Utf8Sentences = makeSegmenterIterable(compiled.Utf8Sentences, "Utf8Sentences");
+/** Lazily yields UAX14 line-break segments of a UTF-8 buffer as zero-copy subarrays. */
+const Utf8Linebreaks = makeSegmenterIterable(compiled.Utf8Linebreaks, "Utf8Linebreaks");
 
 export default {
     /**
@@ -171,4 +209,48 @@ export default {
      *  Construct with `new`, then call `findIn(haystack, validate?)`.
      */
     Utf8UncasedNeedle: compiled.Utf8UncasedNeedle,
+
+    /**
+     *  Unicode normalization form constants for `utf8Norm` and `utf8FindDenormalized`.
+     */
+    Utf8NormalForm: { NFD: 0, NFC: 1, NFKD: 2, NFKC: 3 },
+
+    /**
+     *  Normalizes a UTF-8 buffer into the requested Unicode normal form.
+     *
+     *  @param {Buffer} buffer - UTF-8 encoded input
+     *  @param {number} form - One of the `Utf8NormalForm` constants
+     *  @param {boolean} validate - If true, validates UTF-8 and throws on invalid input
+     *  @returns {Buffer} Normalized UTF-8 bytes
+     */
+    utf8Norm: compiled.utf8Norm,
+
+    /**
+     *  Finds the first byte violating the requested Unicode normal form.
+     *
+     *  @param {Buffer} buffer - UTF-8 encoded input
+     *  @param {number} form - One of the `Utf8NormalForm` constants
+     *  @returns {bigint} Byte index of the first violation, or -1n if already normalized
+     */
+    utf8FindDenormalized: compiled.utf8FindDenormalized,
+
+    /**
+     *  Iterable over TR29 word segments: `for (const word of new sz.Utf8Wordbreaks(buffer)) ...`
+     */
+    Utf8Wordbreaks,
+
+    /**
+     *  Iterable over TR29 grapheme clusters, including multi-codepoint ZWJ emoji.
+     */
+    Utf8Graphemes,
+
+    /**
+     *  Iterable over TR29 sentence segments.
+     */
+    Utf8Sentences,
+
+    /**
+     *  Iterable over UAX14 line-break opportunities.
+     */
+    Utf8Linebreaks,
 };

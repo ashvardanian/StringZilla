@@ -6,7 +6,8 @@ Mirrors the C++ test/sort.cpp translation unit.
 
 Covers: Strs.sorted() and argsort() over Strs collections, repr/str truncation, top-K and reverse
 ordering, uncased case-folded sorting, the argsort(out=...) buffer protocol and its rejections,
-sampling, and a batch-size and corpus-shape sweep across every capability_sweep() backend.
+Strs.intersect() position pairing and duplicate collapsing, sampling, and a batch-size and
+corpus-shape sweep across every capability_sweep() backend.
 Compares against: CPython sorted() in byte mode, and cross-backend permutation agreement across
 every capability_sweep() backend.
 
@@ -93,6 +94,39 @@ def test_unit_strs_sequence():
     sampled = lines.sample(100, seed=42)
     assert "p3" in sampled
     assert "p4" not in sampled
+
+
+def test_unit_strs_intersect():
+    """`Strs.intersect` returns parallel position tuples mapping equal strings across two collections,
+    matching each distinct shared value exactly once even when either side holds duplicates."""
+    first = Str("banana\napple\ncherry").splitlines()
+    second = Str("cherry\norange\npineapple\nbanana").splitlines()
+
+    ours, theirs = first.intersect(second)
+    assert len(ours) == len(theirs) == 2
+    assert {str(first[i]) for i in ours} == {"banana", "cherry"}
+    for i, j in zip(ours, theirs):
+        assert str(first[i]) == str(second[j])
+
+    # Seeds only reshuffle the hash table; the matched set is identical.
+    seeded_ours, seeded_theirs = first.intersect(second, seed=42)
+    assert sorted(seeded_ours) == sorted(ours)
+    assert sorted(seeded_theirs) == sorted(theirs)
+
+    # No overlap and empty inputs produce empty tuples.
+    assert first.intersect(Str("kiwi\nmango").splitlines()) == ((), ())
+    assert first.intersect(Str("").splitlines()) == ((), ())
+
+    # Duplicates on either side collapse to a single match per distinct value.
+    dup_ours, dup_theirs = Str("apple\napple\nbanana").splitlines().intersect(Str("apple\napple").splitlines())
+    assert len(dup_ours) == len(dup_theirs) == 1
+
+    # Only Strs-to-Strs intersections are supported.
+    try:
+        first.intersect(["banana"])
+        assert False, "intersect() should reject non-Strs arguments"
+    except TypeError:
+        pass
 
 
 def test_unit_strs_argsort_out():

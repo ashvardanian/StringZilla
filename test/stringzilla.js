@@ -477,3 +477,65 @@ test("Sha256 Class - Streaming", () => {
     hasher.update(Buffer.from("test"));
     assert.strictEqual(hasher.digest().length, 32);
 });
+
+test("Utf8 Normalization - NFC and NFD Round-Trips", () => {
+    // "café" with a decomposed e + combining acute composes into NFC
+    const decomposed = Buffer.from("cafe\u0301"); // NFD: e + combining acute
+    const composed = Buffer.from("caf\u00e9"); // NFC: precomposed é
+    assert.strictEqual(stringzilla.utf8Norm(decomposed, stringzilla.Utf8NormalForm.NFC).toString(), composed.toString());
+    assert.strictEqual(stringzilla.utf8Norm(composed, stringzilla.Utf8NormalForm.NFD).toString(), decomposed.toString());
+
+    // Match the engine against JavaScript's built-in normalization
+    const sample = Buffer.from("Ångström: ﬁt ½ ℕ 가각");
+    for (const [name, form] of Object.entries(stringzilla.Utf8NormalForm)) {
+        assert.strictEqual(
+            stringzilla.utf8Norm(sample, form).toString(),
+            sample.toString().normalize(name),
+            `mismatch in ${name}`
+        );
+    }
+
+    // Violation detection: composed text is clean NFC, decomposed text is flagged
+    assert.strictEqual(stringzilla.utf8FindDenormalized(composed, stringzilla.Utf8NormalForm.NFC), -1n);
+    assert.strictEqual(stringzilla.utf8FindDenormalized(decomposed, stringzilla.Utf8NormalForm.NFC), 3n);
+
+    // Empty input stays empty
+    assert.strictEqual(stringzilla.utf8Norm(Buffer.alloc(0), stringzilla.Utf8NormalForm.NFC).length, 0);
+});
+
+test("Utf8 Segmentation - Words, Graphemes, Sentences, Linebreaks", () => {
+    const text = Buffer.from("Hello world! Пример текста.");
+    const words = [...new stringzilla.Utf8Wordbreaks(text)].map((b) => b.toString());
+    assert.deepStrictEqual(words, ["Hello", " ", "world", "!", " ", "Пример", " ", "текста", "."]);
+
+    // A ZWJ family emoji is a single grapheme cluster
+    const graphemes = [...new stringzilla.Utf8Graphemes(Buffer.from("a👩‍👩‍👧‍👦b"))].map((b) => b.toString());
+    assert.deepStrictEqual(graphemes, ["a", "👩‍👩‍👧‍👦", "b"]);
+
+    const sentences = [...new stringzilla.Utf8Sentences(text)].map((b) => b.toString());
+    assert.deepStrictEqual(sentences, ["Hello world! ", "Пример текста."]);
+
+    const lines = [...new stringzilla.Utf8Linebreaks(Buffer.from("one two\nthree"))].map((b) => b.toString());
+    assert.strictEqual(lines.join(""), "one two\nthree");
+    assert(lines.length > 1);
+
+    // Segments are zero-copy views into the source buffer
+    const buf = Buffer.from("live view");
+    const first = new stringzilla.Utf8Wordbreaks(buf).next().value;
+    buf[0] = "L".charCodeAt(0);
+    assert.strictEqual(first.toString(), "Live");
+
+    // Empty input yields nothing
+    assert.deepStrictEqual([...new stringzilla.Utf8Wordbreaks(Buffer.alloc(0))], []);
+});
+
+test("Utf8 Segmentation - Batch Refill Beyond 64 Segments", () => {
+    // Over 64 words forces the native iterator to refill its inline batch buffer
+    const count = 300;
+    const text = Buffer.from(Array.from({ length: count }, (_, i) => `w${i}`).join(" "));
+    const words = [...new stringzilla.Utf8Wordbreaks(text)].map((b) => b.toString());
+    assert.strictEqual(words.length, 2 * count - 1); // words interleaved with single spaces
+    assert.strictEqual(words[0], "w0");
+    assert.strictEqual(words[words.length - 1], `w${count - 1}`);
+    assert.strictEqual(words.join(""), text.toString());
+});

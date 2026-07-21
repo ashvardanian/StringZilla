@@ -395,14 +395,14 @@ Consider contributing if you need a feature that's not yet implemented.
 | Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |
 | Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 |                                |          |       |       |        |       |       |       |       |
-| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Uncased UTF-8 Search           |    🚧     |   ✅   |   ✅   |   ✅    |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ✅   |   ⚪   |
-| TR29 Grapheme Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| TR29 Sentence Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| UAX14 Line-Break Detection     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
-| Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ✅   |   ⚪   |
-| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
+| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Uncased UTF-8 Search           |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ⚪   |
+| TR29 Grapheme Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |
+| TR29 Sentence Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |
+| UAX14 Line-Break Detection     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |
+| Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |
+| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ✅   |
 |                                |          |       |       |        |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |
