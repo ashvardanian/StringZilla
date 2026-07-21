@@ -11,7 +11,8 @@ StringZilla reaches for those [SIMD][faq-simd] and [SWAR][faq-swar] instructions
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
-<!-- Those badges often stay in stale state - greyed out. Consider enabling them later.
+<!-- Those badges often stay in stale state - greyed out.
+Consider enabling them later.
 [![Ubuntu status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Linux%20CI&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![Windows status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=Windows%20CI&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![macOS status](https://img.shields.io/github/checks-status/ashvardanian/StringZilla/main?checkName=macOS%20CI&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
@@ -596,9 +597,13 @@ A simpler idea, the Galil-rule might be a more relevant optimizations, if many m
 
 Other algorithms previously considered and deprecated:
 
-- Apostolico-Giancarlo algorithm for longer needles. _Control-flow is too complex for efficient vectorization._
-- Shift-Or-based Bitap algorithm for short needles. _Slower than SWAR._
-- Horspool-style bad-character check in SIMD backends. _Effective only for very long needles, and very uneven character distributions between the needle and the haystack. Faster "character-in-set" check needed to generalize._
+- Apostolico-Giancarlo algorithm for longer needles.
+  _Control-flow is too complex for efficient vectorization._
+- Shift-Or-based Bitap algorithm for short needles.
+  _Slower than SWAR._
+- Horspool-style bad-character check in SIMD backends.
+  _Effective only for very long needles, and very uneven character distributions between the needle and the haystack._
+  _Faster "character-in-set" check needed to generalize._
 
 > § Reading materials.
 > [Exact String Matching Algorithms in Java](https://www-igm.univ-mlv.fr/~lecroq/string).

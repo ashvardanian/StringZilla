@@ -291,8 +291,12 @@ assert sz.Str("abc").decode() == "abc"
 
 ### One Shot Hashes and Checksums
 
-- `sz.hash(text, seed=0)` — seeded 64-bit AES-accelerated hash, returned as an unsigned `int`. This differs from Python's built-in `hash()`, which returns a platform-dependent `Py_hash_t`.
-- `sz.hash_multiseed(text, seeds, out=None)` — hash one string under many seeds at once. `seeds` is a contiguous buffer of `uint64`, such as a `numpy.uint64` array or `array('Q', ...)`; plain `int` lists are not accepted. Returns a tuple of ints, or fills the optional contiguous `uint64` `out` buffer in place and returns `None`. This is much faster than looping `hash` for short strings under many seeds, and is useful for feature hashing, Count-Min sketches, Bloom/cuckoo filters, and MinHash/LSH.
+- `sz.hash(text, seed=0)` — seeded 64-bit AES-accelerated hash, returned as an unsigned `int`.
+  This differs from Python's built-in `hash()`, which returns a platform-dependent `Py_hash_t`.
+- `sz.hash_multiseed(text, seeds, out=None)` — hash one string under many seeds at once.
+  `seeds` is a contiguous buffer of `uint64`, such as a `numpy.uint64` array or `array('Q', ...)`; plain `int` lists are not accepted.
+  Returns a tuple of ints, or fills the optional contiguous `uint64` `out` buffer in place and returns `None`.
+  This is much faster than looping `hash` for short strings under many seeds, and is useful for feature hashing, Count-Min sketches, Bloom/cuckoo filters, and MinHash/LSH.
 - `sz.bytesum(text)` — additive checksum of the individual byte values, as an `int`.
 - `sz.sha256(text)` — 32-byte SHA-256 digest as `bytes`.
 - `sz.hmac_sha256(key, message)` — 32-byte HMAC-SHA256 digest as `bytes`.
@@ -357,8 +361,10 @@ These operate on a `Strs` collection and return new collections or index tuples,
 
 ### Sorting
 
-- `sorted(reverse=False, uncased=False, top=None)` — return a new, stably sorted `Strs`. `reverse` sorts descending, `uncased` orders by Unicode case-folding, and `top` keeps only the leading `top` elements (a partial top-k, cheaper than a full sort).
-- `argsort(reverse=False, uncased=False, top=None, out=None)` — return the stable permutation of indices that sorts the collection, as a tuple of ints. `out` is an optional writable, C-contiguous 64-bit-unsigned buffer such as `numpy.uintp` or `array('Q')`, receiving the indices with zero allocation; when given, `out` itself is returned.
+- `sorted(reverse=False, uncased=False, top=None)` — return a new, stably sorted `Strs`.
+  `reverse` sorts descending, `uncased` orders by Unicode case-folding, and `top` keeps only the leading `top` elements (a partial top-k, cheaper than a full sort).
+- `argsort(reverse=False, uncased=False, top=None, out=None)` — return the stable permutation of indices that sorts the collection, as a tuple of ints.
+  `out` is an optional writable, C-contiguous 64-bit-unsigned buffer such as `numpy.uintp` or `array('Q')`, receiving the indices with zero allocation; when given, `out` itself is returned.
 
 ```python
 import stringzilla as sz
@@ -372,7 +378,8 @@ assert names.argsort() == (1, 0, 2)
 
 ### Intersection
 
-- `intersect(other, seed=0)` — return the positions of strings present in both collections, as a pair of parallel index tuples: `result[0][i]` in this collection and `result[1][i]` in `other` point to equal strings. Each distinct shared value is matched exactly once, even if either side holds duplicates; `seed` reshuffles the underlying hash table to resist adversarial inputs.
+- `intersect(other, seed=0)` — return the positions of strings present in both collections, as a pair of parallel index tuples: `result[0][i]` in this collection and `result[1][i]` in `other` point to equal strings.
+  Each distinct shared value is matched exactly once, even if either side holds duplicates; `seed` reshuffles the underlying hash table to resist adversarial inputs.
 
 ```python
 import stringzilla as sz
@@ -400,7 +407,9 @@ assert [str(x) for x in sorted(pool.shuffled(seed=42))] == ["a", "b", "c", "d"]
 These module-level functions generate random bytes and are not tied to `Strs`:
 
 - `sz.random(length, nonce=0, alphabet=None)` — return a fresh random `bytes` of `length`; if `alphabet` is given, each byte `b` is mapped to `alphabet[b % len(alphabet)]`.
-- `sz.fill_random(buffer, nonce=0, alphabet=None, start=0, end=len)` — fill a writable, contiguous byte buffer such as a `bytearray`, `memoryview`, or `Str` in place with pseudo-random bytes, optionally remapped to `alphabet`, optionally limited to the `[start, end)` slice. Returns `None`. Also available as the `Str.fill_random` method.
+- `sz.fill_random(buffer, nonce=0, alphabet=None, start=0, end=len)` — fill a writable, contiguous byte buffer such as a `bytearray`, `memoryview`, or `Str` in place with pseudo-random bytes, optionally remapped to `alphabet`, optionally limited to the `[start, end)` slice.
+  Returns `None`.
+  Also available as the `Str.fill_random` method.
 
 ```python
 import stringzilla as sz
@@ -571,9 +580,8 @@ Each yields `Str` views into the original buffer, so segmentation stays allocati
 | `utf8_split_delimiters(string, skip_empty=False, with_separators=False)` | punctuation/symbol/separator | content BETWEEN any Unicode delimiter (superset of whitespace).                  |
 | `utf8_delimiters(string, skip_empty=False)`            | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
 
-Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while
-`split_*` yields the content **between** them. `skip_empty` drops empty segments; `with_separators=True` interleaves
-both losslessly (concatenation reproduces the input), replacing the old `keepends`.
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while `split_*` yields the content **between** them.
+`skip_empty` drops empty segments; `with_separators=True` interleaves both losslessly (concatenation reproduces the input), replacing the old `keepends`.
 
 ```python
 import stringzilla as sz
@@ -603,7 +611,8 @@ assert len(sz.Str("é")) == 2      # bytes
 These apply Unicode case folding, correctly handling one-to-many expansions such as German `ß` matching `SS`.
 
 - `utf8_uncased_fold(text, validate=False)` — return the case-folded UTF-8 string as `bytes`.
-- `utf8_uncased_search(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`. For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
+- `utf8_uncased_search(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`.
+  For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
 - `utf8_uncased_order(a, b, validate=False)` — uncased lexicographic comparison: negative, zero, or positive `int`.
 - `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `Str` view whose length may differ from `needle` due to folding expansions.
 
@@ -640,7 +649,8 @@ StringZilla detects the running CPU's SIMD features at import time and routes ev
 
 - `sz.__version__` — the package version string.
 - `sz.__capabilities__` — a tuple of the detected backends, e.g. `('serial', 'haswell', 'skylake', 'ice')`.
-- `sz.reset_capabilities(names)` — restrict the active backends to `names`, intersected with the hardware's actual capabilities; if the intersection is empty it falls back to `'serial'`. This updates `sz.__capabilities__` and re-points the dispatch table, which is useful for testing, benchmarking one backend, or reproducibility.
+- `sz.reset_capabilities(names)` — restrict the active backends to `names`, intersected with the hardware's actual capabilities; if the intersection is empty it falls back to `'serial'`.
+  This updates `sz.__capabilities__` and re-points the dispatch table, which is useful for testing, benchmarking one backend, or reproducibility.
 
 ```python
 import stringzilla as sz

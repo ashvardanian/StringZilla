@@ -282,7 +282,8 @@ let nonempty: Vec<&[u8]> = b"a,,b,".sz_splits(b",").skip_empty().collect();
 assert_eq!(nonempty, vec![b"a", b"b"]);
 ```
 
-For direct construction, `MatcherType<'a>` selects the search mode and is paired with `FindMatches::new(haystack, matcher)`, `RFindMatches::new(...)`, `FindSplits::new(haystack, matcher)`, or `RFindSplits::new(...)`. Policies are compile-time markers, opted into with builder methods: `.overlapping()` (default `NonOverlapping`, like `str::matches`) and `.skip_empty()` (default `KeepEmpty`, like `str::split`):
+For direct construction, `MatcherType<'a>` selects the search mode and is paired with `FindMatches::new(haystack, matcher)`, `RFindMatches::new(...)`, `FindSplits::new(haystack, matcher)`, or `RFindSplits::new(...)`.
+Policies are compile-time markers, opted into with builder methods: `.overlapping()` (default `NonOverlapping`, like `str::matches`) and `.skip_empty()` (default `KeepEmpty`, like `str::split`):
 
 ```rust
 use stringzilla::sz::{MatcherType, FindMatches, FindSplits};
@@ -764,7 +765,8 @@ fn sz_utf8_sentences(&self) -> Utf8Sentences<'_>;             // UAX-29 sentence
 fn sz_utf8_linebreaks(&self) -> Utf8Linebreaks<'_>;          // UAX-14 line-break opportunities
 ```
 
-The naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them. Chain `.with_separators()` on a `split_*` iterator to interleave both losslessly.
+The naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them.
+Chain `.with_separators()` on a `split_*` iterator to interleave both losslessly.
 
 Every member of this family is lazy and zero-copy.
 `Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, and `Utf8Linebreaks`, together with the `sz_splits` / `sz_rsplits` iterators, all borrow from the source string and yield `&[u8]` or `&str` slices on demand without allocating.

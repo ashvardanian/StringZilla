@@ -169,8 +169,10 @@ The one owning C string type is `sz_string_t`, documented under [Memory Operatio
 
 The C++ layer lives in `namespace ashvardanian::stringzilla`, conventionally aliased as `sz`, and is built on two class templates plus a 256-bit `byteset`.
 
-- `sz::basic_string_slice<char_type>` — a non-owning, length-bounded view. Two aliases exist: the read-only `sz::string_view = basic_string_slice<char const>` and the mutable `sz::string_span = basic_string_slice<char>`.
-- `sz::basic_string<char_type, allocator = std::allocator<char_type>>` — an owning, Small-String-Optimized container; the alias `sz::string` uses `char` and the default `std::allocator`. The allocator must be stateless, i.e. empty.
+- `sz::basic_string_slice<char_type>` — a non-owning, length-bounded view.
+  Two aliases exist: the read-only `sz::string_view = basic_string_slice<char const>` and the mutable `sz::string_span = basic_string_slice<char>`.
+- `sz::basic_string<char_type, allocator = std::allocator<char_type>>` — an owning, Small-String-Optimized container; the alias `sz::string` uses `char` and the default `std::allocator`.
+  The allocator must be stateless, i.e. empty.
 - `sz::byteset = sz::basic_byteset<char>` — the C++ wrapper around `sz_byteset_t`, constructible from an initializer list, a `(pointer, count)` pair, or a `std::array`, and composable with `operator|`.
 - `sz::status_t` — a scoped enum mirroring `sz_status_t` with `success_k`, `bad_alloc_k`, `invalid_utf8_k`, `contains_duplicates_k`, and the rest, returned by the fallible `try_*` free functions.
 
@@ -369,7 +371,8 @@ for (sz::string_view s : prose.utf8_sentences()) (void)s, ++sentences;
 assert(sentences == 2); // the dot inside $9.99 is not a sentence break
 ```
 
-The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes. Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them:
+The full family of ranges, each borrowing from the source and yielding `sz::string_view` segments, or `sz_rune_t` for runes.
+Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators** the kernel finds, while `split_*` yields the content **between** them:
 
 - `utf8_runes()` — every codepoint as a decoded `sz_rune_t` UTF-32 scalar.
 - `utf8_graphemes()` — UAX-29 grapheme clusters, the user-perceived characters.
@@ -629,7 +632,10 @@ expected<size_t, status_t> sz::try_intersect(first, extractor, second, extractor
                                              span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions);
 ```
 
-The outputs are sized `sz::span<sorted_idx_t>` views over caller-owned storage. Size `order` to `container.size()` — the whole span receives a permutation, and a non-zero `top_count` only requests that the first `top_count` entries be fully sorted. Size each position span to `min(first.size(), second.size())`. `try_intersect` returns the number of matched pairs as an `expected<size_t, status_t>`, so there is no separate count out-parameter.
+The outputs are sized `sz::span<sorted_idx_t>` views over caller-owned storage.
+Size `order` to `container.size()` — the whole span receives a permutation, and a non-zero `top_count` only requests that the first `top_count` entries be fully sorted.
+Size each position span to `min(first.size(), second.size())`.
+`try_intersect` returns the number of matched pairs as an `expected<size_t, status_t>`, so there is no separate count out-parameter.
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -764,10 +770,14 @@ int main() {
 Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_lasx`, `_powervsx`).
 The public, suffix-free name such as `sz_find` or `sz_hash` resolves to the best available backend.
 
-- __Header-only mode, `SZ_DYNAMIC_DISPATCH=0`, the default.__ The dispatch is resolved at compile time: the umbrella header picks the most advanced backend enabled by your compiler flags, and the suffix-free functions inline straight to it. No runtime indirection.
-- __Dynamic-dispatch mode, `SZ_DYNAMIC_DISPATCH=1`.__ All backends are compiled and a dispatch table is initialized once, then the suffix-free functions jump through it. This is how the prebuilt shared library is shipped, so a single binary runs optimally on any CPU. `sz_dynamic_dispatch()` returns non-zero in this mode.
+- __Header-only mode, `SZ_DYNAMIC_DISPATCH=0`, the default.__ The dispatch is resolved at compile time: the umbrella header picks the most advanced backend enabled by your compiler flags, and the suffix-free functions inline straight to it.
+  No runtime indirection.
+- __Dynamic-dispatch mode, `SZ_DYNAMIC_DISPATCH=1`.__ All backends are compiled and a dispatch table is initialized once, then the suffix-free functions jump through it.
+  This is how the prebuilt shared library is shipped, so a single binary runs optimally on any CPU.
+  `sz_dynamic_dispatch()` returns non-zero in this mode.
 
-Capabilities are introspectable at both compile and run time. `sz_capability_t` is a bitmask whose flags include `sz_cap_serial_k` and `sz_cap_parallel_k`, the x86 tiers `sz_cap_westmere_k`, `sz_cap_goldmont_k`, `sz_cap_haswell_k`, `sz_cap_skylake_k`, and `sz_cap_icelake_k`, the ARM tiers `sz_cap_neon_k`, `sz_cap_neonaes_k`, `sz_cap_neonsha_k`, `sz_cap_sve_k`, `sz_cap_sve2_k`, and `sz_cap_sve2aes_k`, the portable-SIMD tiers `sz_cap_v128_k`, `sz_cap_v128relaxed_k`, `sz_cap_rvv_k`, `sz_cap_rvvcrypto_k`, `sz_cap_lasx_k`, and `sz_cap_powervsx_k`, and the GPU tiers `sz_cap_cuda_k`, `sz_cap_kepler_k`, and `sz_cap_hopper_k`.
+Capabilities are introspectable at both compile and run time.
+`sz_capability_t` is a bitmask whose flags include `sz_cap_serial_k` and `sz_cap_parallel_k`, the x86 tiers `sz_cap_westmere_k`, `sz_cap_goldmont_k`, `sz_cap_haswell_k`, `sz_cap_skylake_k`, and `sz_cap_icelake_k`, the ARM tiers `sz_cap_neon_k`, `sz_cap_neonaes_k`, `sz_cap_neonsha_k`, `sz_cap_sve_k`, `sz_cap_sve2_k`, and `sz_cap_sve2aes_k`, the portable-SIMD tiers `sz_cap_v128_k`, `sz_cap_v128relaxed_k`, `sz_cap_rvv_k`, `sz_cap_rvvcrypto_k`, `sz_cap_lasx_k`, and `sz_cap_powervsx_k`, and the GPU tiers `sz_cap_cuda_k`, `sz_cap_kepler_k`, and `sz_cap_hopper_k`.
 
 ```c
 sz_capability_t sz_capabilities(void); // intersection of compile-time and runtime
@@ -852,8 +862,12 @@ Conceptually:
 Something has to be said about its support for UTF-8.
 Aside from a single-byte `char` type, LibC provides `wchar_t`:
 
-- The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
-- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32). In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes. This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
+- The size of `wchar_t` is not consistent across platforms.
+  On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32).
+  This inconsistency can lead to portability issues when writing cross-platform code.
+- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32).
+  In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes.
+  This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
 
 StringZilla [partially addresses those issues](#utf-8-segmentation).
 

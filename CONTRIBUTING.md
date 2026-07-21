@@ -1,6 +1,7 @@
 # Contributing to StringZilla
 
-Thank you for coming here! It's always nice to have third-party contributors 🤗
+Thank you for coming here!
+It's always nice to have third-party contributors 🤗
 Depending on the type of contribution, you may need to follow different steps.
 
 ---
@@ -32,9 +33,7 @@ The project is split into the following parts:
 For minimal test coverage, check the following scripts:
 
 - `test/stringzilla.cpp` - tests C++ API (not underlying C) against STL.
-- `test/*.py` - tests the Python API against native strings, split per kernel family
-  (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`)
-  mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
+- `test/*.py` - tests the Python API against native strings, split per kernel family (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`) mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
 - `test/stringzilla.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
@@ -95,7 +94,8 @@ The project was originally developed in VS Code, and contains a set of configura
 The project uses `.clang-format` to enforce a consistent code style.
 Modern IDEs, like VS Code, can be configured to automatically format the code on save.
 
-- East const over const West. Write `char const*` instead of `const char*`.
+- East const over const West.
+  Write `char const*` instead of `const char*`.
 - For color-coded comments start the line with `!` for warnings or `?` for questions.
 - Sort the includes: standard libraries, third-party libraries, and only then internal project headers.
 
@@ -106,7 +106,8 @@ For C++ code:
 - Document all possible exceptions of an interface using `@throw` in Doxygen.
 - Avoid C-style variadic arguments in favor of templates.
 - Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
-- Use lower-case names for everything, except settings/conditions macros. Function-like macros, that take arguments, should be lowercase as well.
+- Use lower-case names for everything, except settings/conditions macros.
+  Function-like macros, that take arguments, should be lowercase as well.
 - In templates prefer `typename` over `class`.
 - Prepend "private" symbols with `_` underscore.
 
