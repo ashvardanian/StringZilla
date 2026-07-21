@@ -487,7 +487,9 @@ jobs:
           # CUDA toolchain runs natively instead of under QEMU - the old cross-arch emulation is what made this job
           # take hours and flake.
           CIBW_ARCHS_LINUX: auto64
-          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cuda PATH=/usr/local/cuda-12.9/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH CUDA_HOME=/usr/local/cuda-12.9
+          # The trailing `stubs` entry lets the test-phase `import stringzillas` resolve `libcuda.so.1` on the
+          # driver-less runner: `cuInit` then fails cleanly and the suite exercises the CPU engines.
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cuda PATH=/usr/local/cuda-12.9/bin:$PATH LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs CUDA_HOME=/usr/local/cuda-12.9
           # Install just nvcc + the CUDA runtime/driver dev headers from NVIDIA's repo (the manylinux base is
           # AlmaLinux 8 / rhel8; pick the repo matching the container arch), instead of the ~4 GB `.run` installer.
           # This lands the standard /usr/local/cuda-12.9 layout every StringZilla build system expects via CUDA_HOME.
@@ -497,6 +499,7 @@ jobs:
             dnf config-manager --add-repo "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${repo_arch}/cuda-rhel8.repo" &&
             dnf -y install --setopt=obsoletes=0 cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9 &&
             ln -sf /usr/local/cuda-12.9 /usr/local/cuda &&
+            ln -sf libcuda.so /usr/local/cuda-12.9/lib64/stubs/libcuda.so.1 &&
             /usr/local/cuda-12.9/bin/nvcc --version
           # Never vendor the CUDA driver (`libcuda`) into the wheel - it is resolved against the user's installed driver
           # at load time; bundling a build-host stub would shadow it. cudart stays bundled so the wheel is self-contained.
