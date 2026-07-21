@@ -44,6 +44,7 @@ jobs:
                       Cargo.toml:^version = "(\d+\.\d+\.\d+)"
                       package.json:"version": "(\d+\.\d+\.\d+)"
                       CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+                      CITATION.cff:^version: (\d+\.\d+\.\d+)
                   update-major-version-in: |
                       include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
                   update-minor-version-in: |

@@ -6,15 +6,16 @@ license: Apache-2.0
 version: 4.6.2
 repository-code: https://github.com/ashvardanian/StringZilla
 url: https://ashvardanian.com/posts/stringzilla/
+doi: 10.5281/zenodo.21472333
 abstract: >-
-  Portable string-processing library accelerated with SWAR, SIMD, and GPGPU,
-  covering substring and byte-set search, non-cryptographic hashing and SHA-256 checksums,
-  sorting and set intersection of string collections,
-  Unicode case folding, UAX-29 and UAX-14 segmentation, and UAX-15 normalization,
-  plus batch and on-GPU fuzzy matching with Levenshtein, Needleman-Wunsch, Smith-Waterman, and MinHash,
-  exposed through allocation-free lazily-evaluated iterators,
-  across C, C++, Python, Rust, Go, Swift, and JavaScript,
-  and tuned for x86, Arm, RISC-V, LoongArch, Power, and WebAssembly.
+  Portable string-processing library accelerated with SWAR, SIMD, and GPGPU.
+  It covers exact and fuzzy search, non-cryptographic hashing and SHA-256 checksums,
+  sorting and set intersection of string collections, and Unicode case folding, segmentation,
+  and normalization (UAX-15/29/14), plus batch and on-GPU fuzzy matching such as
+  Levenshtein, Needleman-Wunsch, Smith-Waterman, and MinHash.
+  It exposes lazily-evaluated, allocation-free iterators, with native bindings for languages
+  including C, C++, Python, Rust, Go, Swift, and JavaScript, and kernels tuned for architectures
+  including x86, Arm, RISC-V, LoongArch, Power, and WebAssembly.
 
 authors:
   - family-names: Vardanian
