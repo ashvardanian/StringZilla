@@ -303,7 +303,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         sz_size_t hash_slot = hash & (hash_table_slots - 1);
         // Implement linear probing to find the first free slot.
         // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
-        while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
+        while (table_hashes[hash_slot] != ~(sz_u64_t)0) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
         table_hashes[hash_slot] = hash;
         table_positions[hash_slot] = small_position;
     }
@@ -317,7 +317,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         sz_size_t hash_slot = hash & (hash_table_slots - 1);
 
         // Implement linear probing to resolve collisions.
-        for (; table_hashes[hash_slot] != SZ_SIZE_MAX; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
+        for (; table_hashes[hash_slot] != ~(sz_u64_t)0; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
             sz_u64_t small_hash = table_hashes[hash_slot];
             if (small_hash != hash) continue;
 
@@ -461,7 +461,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to find the first free slot.
                 // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
-                while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
+                while (table_hashes[hash_slot] != ~(sz_u64_t)0) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
                 table_hashes[hash_slot] = hash;
                 table_positions[hash_slot] = batch_positions.u64s[i];
             }
@@ -511,7 +511,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
                     sz_size_t hash_slot = batch_slots.u64s[i] & (hash_table_slots - 1);
                     // Implement linear probing to find the first free slot.
                     // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
-                    while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
+                    while (table_hashes[hash_slot] != ~(sz_u64_t)0) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
                     table_hashes[hash_slot] = batch_hashes.u64s[i];
                     table_positions[hash_slot] = batch_positions.u64s[i];
                 }
@@ -546,7 +546,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
                 sz_u64_t const hash = sz_hash(str, length, seed);
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to resolve collisions.
-                for (; table_hashes[hash_slot] != SZ_SIZE_MAX; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
+                for (; table_hashes[hash_slot] != ~(sz_u64_t)0; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
                     sz_u64_t small_hash = table_hashes[hash_slot];
                     if (small_hash != hash) continue;
 
@@ -645,7 +645,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
                 }
 
                 // Implement linear probing to resolve collisions.
-                for (; table_hashes[hash_slot] != SZ_SIZE_MAX; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
+                for (; table_hashes[hash_slot] != ~(sz_u64_t)0; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
                     sz_u64_t small_hash = table_hashes[hash_slot];
                     if (small_hash != hash) continue;
 
@@ -684,7 +684,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
             // Implement linear probing to find the first free slot.
             // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
-            while (table_hashes[hash_slot] != SZ_SIZE_MAX) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
+            while (table_hashes[hash_slot] != ~(sz_u64_t)0) hash_slot = (hash_slot + 1) & (hash_table_slots - 1);
             table_hashes[hash_slot] = hash;
             table_positions[hash_slot] = small_position;
         }
@@ -698,7 +698,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
 
             // Implement linear probing to resolve collisions.
-            for (; table_hashes[hash_slot] != SZ_SIZE_MAX; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
+            for (; table_hashes[hash_slot] != ~(sz_u64_t)0; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
                 sz_u64_t small_hash = table_hashes[hash_slot];
                 if (small_hash != hash) continue;
 

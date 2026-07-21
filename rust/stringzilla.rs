@@ -411,7 +411,7 @@ extern "C" {
         length: usize,
         source: *const c_void,
         lut: *const u8,
-    ) -> *const c_void;
+    );
 
     pub(crate) fn sz_find(
         haystack: *const c_void,
