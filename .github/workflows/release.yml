@@ -483,7 +483,7 @@ jobs:
             case "$(uname -m)" in x86_64) repo_arch=x86_64 ;; aarch64) repo_arch=sbsa ;; esac &&
             dnf -y install dnf-plugins-core &&
             dnf config-manager --add-repo "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${repo_arch}/cuda-rhel8.repo" &&
-            dnf -y install cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9 &&
+            dnf -y install --setopt=obsoletes=0 cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9 &&
             ln -sf /usr/local/cuda-12.9 /usr/local/cuda &&
             /usr/local/cuda-12.9/bin/nvcc --version
           # Never vendor the CUDA driver (`libcuda`) into the wheel - it is resolved against the user's installed driver
