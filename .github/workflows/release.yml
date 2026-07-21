@@ -718,7 +718,7 @@ jobs:
         run: git submodule update --init --recursive
       - name: Hide submodule Crates
         run: |
-          mv fork_union/Cargo.toml fork_union/Cargo.toml.bak
+          mv forkunion/Cargo.toml forkunion/Cargo.toml.bak
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Test Rust with dynamic dispatch
