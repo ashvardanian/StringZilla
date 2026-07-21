@@ -32,33 +32,40 @@
 
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
+ *  MSVC pins `__cplusplus` at 199711L unless `/Zc:__cplusplus` is passed, so prefer
+ *  `_MSVC_LANG` there - it always reports the real standard.
  */
-#if __cplusplus >= 202101L
+#if defined(_MSVC_LANG)
+#define SZ_CPP_LANG_ _MSVC_LANG
+#else
+#define SZ_CPP_LANG_ __cplusplus
+#endif
+#if SZ_CPP_LANG_ >= 202101L
 #define SZ_IS_CPP23_ 1
 #else
 #define SZ_IS_CPP23_ 0
 #endif
-#if __cplusplus >= 202002L
+#if SZ_CPP_LANG_ >= 202002L
 #define SZ_IS_CPP20_ 1
 #else
 #define SZ_IS_CPP20_ 0
 #endif
-#if __cplusplus >= 201703L
+#if SZ_CPP_LANG_ >= 201703L
 #define SZ_IS_CPP17_ 1
 #else
 #define SZ_IS_CPP17_ 0
 #endif
-#if __cplusplus >= 201402L
+#if SZ_CPP_LANG_ >= 201402L
 #define SZ_IS_CPP14_ 1
 #else
 #define SZ_IS_CPP14_ 0
 #endif
-#if __cplusplus >= 201103L
+#if SZ_CPP_LANG_ >= 201103L
 #define SZ_IS_CPP11_ 1
 #else
 #define SZ_IS_CPP11_ 0
 #endif
-#if __cplusplus >= 199711L
+#if SZ_CPP_LANG_ >= 199711L
 #define SZ_IS_CPP98_ 1
 #else
 #define SZ_IS_CPP98_ 0
