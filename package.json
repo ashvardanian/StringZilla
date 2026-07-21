@@ -1,6 +1,6 @@
 {
   "name": "stringzilla",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "description": "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
   "author": "Ash Vardanian",
   "license": "Apache-2.0",
@@ -43,12 +43,12 @@
     "node-gyp-build": "^4.8.4"
   },
   "optionalDependencies": {
-    "@stringzilla/darwin-arm64": "5.0.1",
-    "@stringzilla/darwin-x64": "5.0.1",
-    "@stringzilla/linux-arm64": "5.0.1",
-    "@stringzilla/linux-x64": "5.0.1",
-    "@stringzilla/win32-arm64": "5.0.1",
-    "@stringzilla/win32-x64": "5.0.1"
+    "@stringzilla/darwin-arm64": "5.0.2",
+    "@stringzilla/darwin-x64": "5.0.2",
+    "@stringzilla/linux-arm64": "5.0.2",
+    "@stringzilla/linux-x64": "5.0.2",
+    "@stringzilla/win32-arm64": "5.0.2",
+    "@stringzilla/win32-x64": "5.0.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0"
