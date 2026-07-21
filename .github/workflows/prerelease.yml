@@ -43,6 +43,18 @@ jobs:
           update-version-in: |
             Cargo.toml:^version = "(\d+\.\d+\.\d+)"
             package.json:"version": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/darwin-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/darwin-x64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/linux-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/linux-x64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/win32-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/win32-x64": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-darwin-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-darwin-x64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-linux-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-linux-x64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-win32-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
             CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
             CITATION.cff:^version: (\d+\.\d+\.\d+)
           update-major-version-in: |

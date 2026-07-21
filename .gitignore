@@ -30,6 +30,9 @@ CMakeFiles
 .venv/*
 node_modules/
 
+# Per-platform npm prebuilts are filled in CI, never committed
+javascript/@stringzilla-*/*.node
+
 # .NET / C# build output
 bin/
 obj/

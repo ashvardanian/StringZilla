@@ -1,6 +1,23 @@
-import bindings from "bindings";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-const compiled = bindings("stringzilla");
+const require = createRequire(import.meta.url);
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function loadNativeAddon() {
+    try {
+        return require(`@stringzilla/${process.platform}-${process.arch}`);
+    } catch { }
+    try {
+        return require("node-gyp-build")(packageRoot);
+    } catch { }
+    throw new Error(
+        "StringZilla native addon not found. Install `stringzilla` on a supported platform, or build it from source with a C toolchain."
+    );
+}
+
+const compiled = loadNativeAddon();
 
 export default {
     /**

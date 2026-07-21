@@ -26,12 +26,12 @@
     "fuzzy-search",
     "native-addon"
   ],
-  "gypfile": true,
   "engines": {
     "node": ">=22.0.0"
   },
   "files": [
-    "javascript/",
+    "javascript/stringzilla.js",
+    "javascript/lib.c",
     "include/",
     "c/",
     "binding.gyp",
@@ -39,7 +39,16 @@
   ],
   "dependencies": {
     "bindings": "^1.5.0",
-    "node-addon-api": "^8.0.0"
+    "node-addon-api": "^8.0.0",
+    "node-gyp-build": "^4.8.4"
+  },
+  "optionalDependencies": {
+    "@stringzilla/darwin-arm64": "5.0.1",
+    "@stringzilla/darwin-x64": "5.0.1",
+    "@stringzilla/linux-arm64": "5.0.1",
+    "@stringzilla/linux-x64": "5.0.1",
+    "@stringzilla/win32-arm64": "5.0.1",
+    "@stringzilla/win32-x64": "5.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0"
@@ -47,7 +56,6 @@
   "scripts": {
     "test": "node --test ./test/stringzilla.js",
     "build": "node-gyp rebuild",
-    "install": "node-gyp rebuild",
-    "prepack": "npm run build"
+    "install": "node-gyp-build"
   }
 }

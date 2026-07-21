@@ -1,0 +1,25 @@
+{
+  "name": "@stringzilla/linux-x64",
+  "version": "5.0.1",
+  "description": "Linux x64 native binary for StringZilla",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashvardanian/stringzilla.git"
+  },
+  "homepage": "https://ashvardanian.com/posts/stringzilla/",
+  "license": "Apache-2.0",
+  "preferUnplugged": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "stringzilla.node",
+  "files": [
+    "stringzilla.node"
+  ]
+}
