@@ -703,7 +703,15 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
     ]);
     build.try_compile("stringzillas")?;
     // Only demand libcuda once the build actually linked: the kernels use the driver API (cuLaunchKernel,
-    // cuEventElapsedTime, cuFuncSetAttribute) on top of the cudart that `build.cuda(true)` already links.
+    // cuEventElapsedTime, cuFuncSetAttribute) on top of the cudart that `build.cuda(true)` already links. On a
+    // driver-less host its only `libcuda.so` is the toolkit stub under `lib64/stubs`, off the default search path,
+    // so add that directory; the real driver's `libcuda.so.1` still wins at load time.
+    if !matches!(env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("windows")) {
+        let cuda_home = env::var("CUDA_HOME")
+            .or_else(|_| env::var("CUDA_PATH"))
+            .unwrap_or_else(|_| "/usr/local/cuda".to_string());
+        println!("cargo:rustc-link-search=native={cuda_home}/lib64/stubs");
+    }
     println!("cargo:rustc-link-lib=dylib=cuda");
     Ok(())
 }

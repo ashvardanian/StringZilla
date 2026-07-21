@@ -678,7 +678,16 @@ elif sz_target == "stringzillas-cuda":
     if os.name == "nt":
         cuda_link_args = link_args + [f"/LIBPATH:{os.path.join(cuda_home, 'lib', 'x64')}", "cudart.lib", "cuda.lib"]
     else:
-        cuda_link_args = link_args + [f"-L{cuda_home}/lib64", "-lcudart", "-lcuda", "-lstdc++"]
+        # `-lcuda` is the driver API; on a driver-less build host its only `libcuda.so` is the toolkit stub under
+        # `lib64/stubs`, so that directory must be on the search path. The real `libcuda.so.1` takes over at load
+        # time, and `auditwheel --exclude libcuda.so.1` keeps the stub out of the wheel.
+        cuda_link_args = link_args + [
+            f"-L{cuda_home}/lib64",
+            f"-L{cuda_home}/lib64/stubs",
+            "-lcudart",
+            "-lcuda",
+            "-lstdc++",
+        ]
     ext_modules = [
         Extension(
             "stringzillas",
