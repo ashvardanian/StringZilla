@@ -670,7 +670,12 @@ jobs:
   publish_pypi_stringzillas_cuda:
     name: Publish StringZillas-CUDA to PyPI
     # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
-    needs: [publish_pypi_stringzilla, build_wheels_stringzillas_cuda_linux, build_sdist_stringzillas_cuda]
+    needs:
+      [
+        publish_pypi_stringzilla,
+        build_wheels_stringzillas_cuda_linux,
+        build_sdist_stringzillas_cuda,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:
@@ -716,9 +721,6 @@ jobs:
           submodules: recursive
       - name: Initialize submodules
         run: git submodule update --init --recursive
-      - name: Hide submodule Crates
-        run: |
-          mv forkunion/Cargo.toml forkunion/Cargo.toml.bak
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Test Rust with dynamic dispatch

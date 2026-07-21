@@ -34,7 +34,6 @@
     "javascript/",
     "include/",
     "c/",
-    "fork_union/include/",
     "binding.gyp",
     "README.md"
   ],

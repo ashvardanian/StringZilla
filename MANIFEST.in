@@ -6,7 +6,7 @@ include setup.py
 include SZ_TARGET.env
 
 graft include
-graft fork_union/include
+graft forkunion/include
 graft c
 graft python
 
