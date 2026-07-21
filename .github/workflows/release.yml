@@ -620,8 +620,10 @@ jobs:
 
   publish_pypi_stringzillas_cpus:
     name: Publish StringZillas-CPUs to PyPI
+    # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
     needs:
       [
+        publish_pypi_stringzilla,
         build_wheels_stringzillas_cpus_linux_x86,
         build_wheels_stringzillas_cpus_linux_arm,
         build_wheels_stringzillas_cpus_macos,
@@ -667,7 +669,8 @@ jobs:
 
   publish_pypi_stringzillas_cuda:
     name: Publish StringZillas-CUDA to PyPI
-    needs: [build_wheels_stringzillas_cuda_linux, build_sdist_stringzillas_cuda]
+    # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
+    needs: [publish_pypi_stringzilla, build_wheels_stringzillas_cuda_linux, build_sdist_stringzillas_cuda]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     environment:

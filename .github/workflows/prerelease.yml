@@ -378,7 +378,7 @@ jobs:
                   pip install "setuptools>=64" wheel
                   pip install pytest pytest-repeat numpy pyarrow affine-gaps
                   SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-                  SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
+                  SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation --no-deps
             - name: Log Python capabilities
               run: |
                   python - << 'PY'
@@ -473,7 +473,7 @@ jobs:
                   pip install "setuptools>=64" wheel
                   pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
                   SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-                  SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
+                  SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation --no-deps
             - name: Log Python capabilities
               run: |
                   python - << 'PY'
