@@ -46,7 +46,7 @@
     "@types/node": "^24.0.0"
   },
   "scripts": {
-    "test": "node --test ./scripts/test.js",
+    "test": "node --test ./test/stringzilla.js",
     "build": "node-gyp rebuild",
     "install": "node-gyp rebuild",
     "prepack": "npm run build"

@@ -13,8 +13,9 @@ CLI Commands
     -   pull-deps [PROJECT_DIR]: when testing parallel targets, installs
         the serial stringzilla into the test venv, and ensures test-only
         deps (NumPy, affine-gaps) are present.
-    -   run-tests [PROJECT_DIR]: runs scripts/test_stringzilla.py and,
-        for parallel targets, also runs scripts/test_stringzillas.py.
+    -   run-tests [PROJECT_DIR]: runs the serial `test/` suite (minus the
+        StringZillas modules) for the `stringzilla` target, and the
+        StringZillas modules for the parallel targets.
 """
 
 import os
@@ -159,7 +160,7 @@ def cli_prepare_tests(project_dir: Optional[str] = None) -> None:
         env = os.environ.copy()
         env["SZ_TARGET"] = "stringzilla"
         subprocess.check_call([sys.executable, "-m", "pip", "install", project_dir], env=env)
-        # Install test-only deps required by scripts/test_stringzillas.py
+        # Install test-only deps required by test/stringzillas.py
         subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy", "affine-gaps"])  # noqa: S603
 
 
@@ -170,11 +171,22 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
     proj = Path(project_dir).resolve()
     sz_target = os.environ.get("SZ_TARGET", "stringzilla")
     if sz_target == "stringzilla":
-        tests = [str(proj / "scripts" / "test_stringzilla.py")]
+        # The same file set the platform CI jobs run: everything under `test/` except the StringZillas modules.
+        tests = [
+            str(proj / "test"),
+            "--ignore=" + str(proj / "test" / "stringzillas.py"),
+            "--ignore=" + str(proj / "test" / "similarities.py"),
+            "--ignore=" + str(proj / "test" / "fingerprints.py"),
+            "--ignore=" + str(proj / "test" / "szs_helpers.py"),
+        ]
     else:
         # For stringzillas-cpus and stringzillas-cuda, only test stringzillas
         # but we still need to build stringzilla as a dependency
-        tests = [str(proj / "scripts" / "test_stringzillas.py")]
+        tests = [
+            str(proj / "test" / "stringzillas.py"),
+            str(proj / "test" / "similarities.py"),
+            str(proj / "test" / "fingerprints.py"),
+        ]
     subprocess.check_call([sys.executable, "-m", "pytest", "-s", "-x", *tests])  # noqa: S603
 
 

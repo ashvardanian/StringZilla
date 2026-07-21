@@ -1,0 +1,8 @@
+// Only the C API umbrella is exposed as a Clang module. The C++ headers
+// (similarities.hpp / fingerprints.hpp) pull in heavy templated dependencies
+// (forkunion, <chrono>, <atomic>) that don't build cleanly as Clang modules
+// against current libstdc++, so they stay textual includes.
+module StringZillasC {
+    header "stringzillas.h"
+    export *
+}

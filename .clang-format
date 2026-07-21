@@ -4,17 +4,25 @@ IndentWidth: 4
 TabWidth: 4
 NamespaceIndentation: None
 ColumnLimit: 120
-ReflowComments: true
+# Docstrings are hand-formatted to a fixed 6-space continuation indent; do not let clang-format reflow
+# comment bodies (ReflowComments:true would collapse that to a 1-space hanging indent).
+ReflowComments: false
 UseTab: Never
 IndentPPDirectives: None
+InsertNewlineAtEOF: true
+PointerAlignment: Right
+DerivePointerAlignment: false
+BreakBeforeBinaryOperators: None
+PenaltyBreakAssignment: 50
 
 # StringZilla-specific macros
 # Visibility/linkage macros that act like storage class specifiers
 StatementAttributeLikeMacros:
-  - SZ_PUBLIC
-  - SZ_INTERNAL
-  - SZ_DYNAMIC
-  - SZ_EXTERNAL
+  - SZ_API_COMPTIME
+  - SZ_API_RUNTIME
+  - SZ_HELPER_AUTO
+  - SZ_HELPER_INLINE
+  - SZ_HELPER_NOINLINE
 
 # Attribute-like macros (clang-format 12+)
 AttributeMacros:
@@ -35,7 +43,7 @@ AllowAllArgumentsOnNextLine: false
 AllowAllConstructorInitializersOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortBlocksOnASingleLine: Always
-AllowShortIfStatementsOnASingleLine: Always
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: true
 AllowShortLambdasOnASingleLine: true
@@ -85,3 +93,9 @@ SpacesInSquareBrackets: false
 BinPackArguments: true
 BinPackParameters: true
 PenaltyBreakBeforeFirstCallParameter: 1
+
+# Pack long braced lists (big LUT / constant tables) densely instead of one element per line.
+# Requires clang-format 22+ (we use clang-format-23).
+BreakAdjacentStringLiterals: false
+BinPackLongBracedList: true
+BreakBeforeCloseBracketBracedList: false

@@ -1,817 +1,1164 @@
 name: "Pre-Release"
 
 on:
-  push:
-    branches: ["main-dev"]
-  pull_request:
-    branches: ["main-dev"]
+    push:
+        branches: ["main"]
+    pull_request:
+        branches: ["main*"]
+
+# One group per source branch, so a `main*` branch with an open PR is not built twice - `push` no longer
+# matches it, and `head_ref` folds any number of PRs from that branch into the same group. Superseded PR
+# runs are cancelled; `main` runs are not, so a build feeding the release pipeline is never killed midway.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  BUILD_TYPE: Release
-  GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
-  PYTHON_VERSION: 3.13
-  SWIFT_VERSION: 6.2
-  PYTHONUTF8: 1
+    BUILD_TYPE: Release
+    GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+    PYTHON_VERSION: 3.13
+    SWIFT_VERSION: 6.2
+    PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  versioning:
-    name: Update Version
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v3.0.1
-        with:
-          verbose: "true"
-          version-file: "VERSION"
-          update-version-in: |
-            Cargo.toml:^version = "(\d+\.\d+\.\d+)"
-            package.json:"version": "(\d+\.\d+\.\d+)"
-            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
-          update-major-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
-          update-minor-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
-          update-patch-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
-          dry-run: "true"
+    versioning:
+        name: Update Version
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  fetch-tags: true
+                  persist-credentials: false
+            - name: Run TinySemVer
+              uses: ashvardanian/tinysemver@v3.0.1
+              with:
+                  verbose: "true"
+                  version-file: "VERSION"
+                  update-version-in: |
+                      Cargo.toml:^version = "(\d+\.\d+\.\d+)"
+                      package.json:"version": "(\d+\.\d+\.\d+)"
+                      CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+                      CITATION.cff:^version: (\d+\.\d+\.\d+)
+                  update-major-version-in: |
+                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+                  update-minor-version-in: |
+                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+                  update-patch-version-in: |
+                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+                  dry-run: "true"
 
-  test_ubuntu_gcc:
-    name: Ubuntu (GCC 12) - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
-    env:
-      CC: gcc-12
-      CXX: g++-12
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
-
-        # C/C++
-        # If the compilation fails, we want to log the compilation commands in addition to
-        # the standard output.
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
-
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
-            echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
-            echo "GCC Version:"
-            gcc-12 --version
-            echo "G++ Version:"
-            g++-12 --version
-            exit 1
-          }
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
-      - name: Build shared library for Go binding
-        run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ">=1.24"
-          cache: false
-      - name: Test Go binding
-        working-directory: golang
+    test_ubuntu_gcc:
+        name: Ubuntu GCC 12 - ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-22.04, ubuntu-22.04-arm]
         env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-        run: go test -v -tags no_sha256 # Skip SHA tests for GCC
-      - name: Test on Real World Data
-        run: |
-          build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+            CC: gcc-12
+            CXX: g++-12
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
+
+              # C/C++
+              # If the compilation fails, we want to log the compilation commands in addition to
+              # the standard output.
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential gcc-12 g++-12
+
+            - name: Build C/C++
+              run: |
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
+
+                  cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+                    echo "Compilation failed. Here are the logs:"
+                    cat build_artifacts/logs.txt
+                    echo "The original compilation commands:"
+                    cat build_artifacts/compile_commands.json
+                    echo "GCC Version:"
+                    gcc-12 --version
+                    echo "G++ Version:"
+                    g++-12 --version
+                    exit 1
+                  }
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp20
+            - name: Check stringzilla_bare is built correctly
+              run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+            - name: Build shared library for Go binding
+              run: |
+                  cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
+                  cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+            - name: Set up Go
+              uses: actions/setup-go@v6
+              with:
+                  go-version: ">=1.24"
+                  cache: false
+            - name: Test Go binding
+              working-directory: golang
+              env:
+                  LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+              run: go test -v -tags no_sha256 # Skip SHA tests for GCC
+            - name: Test on Real World Data
+              run: |
+                  build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
+                  build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
+                  build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+                  build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
+                  build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+              env:
+                  DATASET_PATH: ./README.md
+              # Don't overload GitHub with our benchmarks.
+              # The results in such an unstable environment will be meaningless anyway.
+              if: 0
+
+            - name: Test Parallel Algorithms on Real World Data
+              run: |
+                  build_artifacts/stringzillas_bench_similarities_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
+                  build_artifacts/stringzillas_bench_fingerprints_cpp20 ${DATASET_PATH} # for multi-needle search in many strings
+              env:
+                  DATASET_PATH: ./README.md
+              # Don't overload GitHub with our benchmarks.
+              # The results in such an unstable environment will be meaningless anyway.
+              if: 0
+
+              # Python
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+            - name: Build Python
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install pytest pytest-repeat numpy pyarrow
+                  python -m pip install .
+            - name: Log Python capabilities
+              run: |
+                  python - << 'PY'
+                  import platform
+                  import stringzilla as sz
+                  print("platform:", platform.platform())
+                  print("machine:", platform.machine(), "processor:", platform.processor())
+                  print("stringzilla.__capabilities__:", sz.__capabilities__)
+                  PY
+            - name: Test Python
+              run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+
+              # JavaScript
+            - name: Set up Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 22
+            - name: Build and test JavaScript
+              run: npm install && npm test
+
+            # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
+
+    test_ubuntu_clang:
+        name: Ubuntu Clang 16 - ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-22.04, ubuntu-22.04-arm]
         env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
+            CC: clang-16
+            CXX: clang++-16
 
-      - name: Test Parallel Algorithms on Real World Data
-        run: |
-          build_artifacts/stringzillas_bench_similarities_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzillas_bench_fingerprints_cpp20 ${DATASET_PATH} # for multi-needle search in many strings
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
+
+              # C/C++
+              # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential libjemalloc-dev
+                  wget https://apt.llvm.org/llvm.sh
+                  chmod +x llvm.sh
+                  sudo ./llvm.sh 16
+
+            - name: Build C/C++
+              run: |
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
+
+                  cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+                    echo "Compilation failed. Here are the logs:"
+                    cat build_artifacts/logs.txt
+                    echo "The original compilation commands:"
+                    cat build_artifacts/compile_commands.json
+                    echo "Clang Version:"
+                    clang-16 --version
+                    echo "Clang++ Version:"
+                    clang++-16 --version
+                    exit 1
+                  }
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp20
+            - name: Check stringzilla_bare is built correctly
+              run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+            - name: Build shared library for Go binding
+              run: |
+                  cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
+                  cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
+            - name: Set up Go
+              uses: actions/setup-go@v6
+              with:
+                  go-version: ">=1.24"
+                  cache: false
+            - name: Test Go binding
+              working-directory: golang
+              env:
+                  LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
+              run: go test -v
+            - name: Test on Real World Data
+              run: |
+                  build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+                  build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+                  build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+                  build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+              env:
+                  DATASET_PATH: ./README.md
+              # Don't overload GitHub with our benchmarks.
+              # The results in such an unstable environment will be meaningless anyway.
+              if: 0
+
+              # Python
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+            - name: Build Python
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install pytest pytest-repeat numpy pyarrow
+                  python -m pip install .
+            - name: Log Python capabilities
+              run: |
+                  python - << 'PY'
+                  import platform
+                  import stringzilla as sz
+                  print("platform:", platform.platform())
+                  print("machine:", platform.machine(), "processor:", platform.processor())
+                  print("stringzilla.__capabilities__:", sz.__capabilities__)
+                  PY
+            - name: Test Python
+              run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
+
+              # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with parallel engines
+              run: cargo test --release --features cpus
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
+
+              # Swift
+              # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
+            # - name: Set up Swift ${{ env.SWIFT_VERSION }}
+            #   uses: swift-actions/setup-swift@v2.4.0
+            #   with:
+            #     swift-version: ${{ env.SWIFT_VERSION }}
+            # - name: Build Swift
+            #   run: swift build -c release --static-swift-stdlib
+            # - name: Test Swift
+            #   run: swift test -c release
+
+    test_ubuntu_cpus:
+        name: Ubuntu StringZillas-CPUs
+        runs-on: ubuntu-22.04
         env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
+            CC: gcc-12
+            CXX: g++-12
 
-        # Python
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Build Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy pyarrow
-          python -m pip install .
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          PY
-      - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
 
-        # JavaScript
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-      - name: Build and test JavaScript
-        run: npm install && npm test
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
 
-      # Rust
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+              # C/C++
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential gcc-12 g++-12
 
-  test_ubuntu_clang:
-    name: Ubuntu (Clang 16) - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm]
-    env:
-      CC: clang-16
-      CXX: clang++-16
+            - name: Build C/C++
+              run: |
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+                  cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+                    echo "Compilation failed. Here are the logs:"
+                    cat build_artifacts/logs.txt
+                    echo "The original compilation commands:"
+                    cat build_artifacts/compile_commands.json
+                    echo "GCC Version:"
+                    gcc-12 --version
+                    echo "G++ Version:"
+                    g++-12 --version
+                    exit 1
+                  }
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp20
+            - name: Check stringzilla_bare is built correctly
+              run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
+              # Python StringZillas-CPUs
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+              # Ensure modern build backend is available for editable installs
+            - name: Build Python StringZillas-CPUs
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install "setuptools>=64" wheel
+                  pip install pytest pytest-repeat numpy pyarrow affine-gaps
+                  SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
+                  SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation --no-deps
+            - name: Log Python capabilities
+              run: |
+                  python - << 'PY'
+                  import platform
+                  import stringzilla as sz
+                  import stringzillas as szs
+                  print("platform:", platform.platform())
+                  print("machine:", platform.machine(), "processor:", platform.processor())
+                  print("stringzilla.__capabilities__:", sz.__capabilities__)
+                  print("stringzillas.__capabilities__:", szs.__capabilities__)
+                  PY
+            - name: Test Python StringZillas-CPUs
+              run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/doctests.py -s -vv --maxfail=1 --full-trace
 
-        # C/C++
-        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential libjemalloc-dev
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
-
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
-            echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
-            echo "Clang Version:"
-            clang-16 --version
-            echo "Clang++ Version:"
-            clang++-16 --version
-            exit 1
-          }
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
-      - name: Build shared library for Go binding
-        run: |
-          cmake -B build_shared -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_SHARED=1
-          cmake --build build_shared --target stringzilla_shared --config RelWithDebInfo
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: ">=1.24"
-          cache: false
-      - name: Test Go binding
-        working-directory: golang
+    test_ubuntu_cuda:
+        name: Ubuntu StringZillas-CUDA
+        runs-on: ubuntu-22.04
         env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_shared
-        run: go test -v
-      - name: Test on Real World Data
-        run: |
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+            CC: gcc-12
+            CXX: g++-12
+
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+              # Install CUDA Toolkit
+            - name: Install CUDA Toolkit
+              uses: Jimver/cuda-toolkit@v0.2.35
+              with:
+                  cuda: "12.9.1"
+                  method: "network"
+
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo ""
+                  echo "GPU Info:"
+                  nvcc --version 2>/dev/null || echo "nvcc not yet installed"
+                  nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
+                  echo "────────────────────────────────────────────────────────────────"
+
+              # C/C++
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential gcc-12 g++-12
+
+            - name: Build C/C++ with CUDA
+              run: |
+                  # Note: Using Release build type instead of RelWithDebInfo
+                  # Optimized debugging not supported in CUDA and results in PTXAS fatal errors
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
+
+                  cmake --build build_artifacts --config Release > build_artifacts/logs.txt 2>&1 || {
+                    echo "Compilation failed. Here are the logs:"
+                    cat build_artifacts/logs.txt
+                    echo "The original compilation commands:"
+                    cat build_artifacts/compile_commands.json
+                    echo "CUDA Version:"
+                    nvcc --version
+                    echo "GCC Version:"
+                    gcc-12 --version
+                    echo "G++ Version:"
+                    g++-12 --version
+                    exit 1
+                  }
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp20
+            - name: Check stringzilla_bare is built correctly
+              run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+
+              # Python StringZillas-CUDA
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+              # Ensure modern build backend is available for editable installs
+            - name: Build Python StringZillas-CUDA
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install "setuptools>=64" wheel
+                  pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
+                  SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
+                  SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation --no-deps
+            - name: Log Python capabilities
+              run: |
+                  python - << 'PY'
+                  import platform
+                  import stringzilla as sz
+                  import stringzillas as szs
+                  print("platform:", platform.platform())
+                  print("machine:", platform.machine(), "processor:", platform.processor())
+                  print("stringzilla.__capabilities__:", sz.__capabilities__)
+                  print("stringzillas.__capabilities__:", szs.__capabilities__)
+                  PY
+            - name: Test Python StringZillas-CUDA
+              run: python -X faulthandler -m pytest test/stringzillas.py test/similarities.py test/fingerprints.py test/doctests.py -s -vv --maxfail=1 --full-trace
+
+    # Temporary workaround to run Swift tests on Linux
+    # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
+    test_ubuntu_swift:
+        name: Swift on Linux
+        runs-on: ubuntu-22.04
+        container: swift:latest
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu || true
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
+
+            - name: Test Swift
+              run: swift test
+
+    test_ubuntu_dotnet:
+        name: C# on Linux
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+            - name: Install build tools
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential
+
+            - name: Build shared library
+              run: |
+                  cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
+                  cmake --build build_shared --target stringzilla_shared --config Release
+
+              # The runtime resolver probes runtimes/{rid}/native first; the shared target emits
+              # libstringzilla_shared.so, so copy it under the name the binding looks up.
+            - name: Stage native library
+              run: |
+                  mkdir -p csharp/runtimes/linux-x64/native
+                  cp -L build_shared/libstringzilla_shared.so csharp/runtimes/linux-x64/native/libstringzilla.so
+
+            - name: Set up .NET
+              uses: actions/setup-dotnet@v5
+              with:
+                  dotnet-version: 8.0.x
+
+            - name: Check formatting
+              run: |
+                  dotnet format StringZilla.csproj --verify-no-changes
+                  dotnet format csharp/StringZillaTests.csproj --verify-no-changes
+
+            - name: Test C#
+              run: dotnet test csharp/StringZillaTests.csproj -c Release --nologo
+
+    test_ubuntu_java:
+        name: Java on Linux
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+
+            - name: Install build tools
+              run: |
+                  sudo apt update
+                  sudo apt install -y cmake build-essential
+
+            - name: Build shared library
+              run: |
+                  cmake -B build_shared -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1
+                  cmake --build build_shared --target stringzilla_shared --config Release
+
+              # NativeLoader extracts /native/{os}-{arch}/libstringzilla.so from the classpath at runtime;
+              # Maven copies src/main/resources into target/classes before the tests run.
+            - name: Stage native library
+              run: |
+                  mkdir -p java/src/main/resources/native/linux-x86_64
+                  cp -L build_shared/libstringzilla_shared.so java/src/main/resources/native/linux-x86_64/libstringzilla.so
+
+              # JDK 23: finalized Foreign Function & Memory API (since 22) and Palantir Java Format (needs <= 23).
+            - name: Set up JDK
+              uses: actions/setup-java@v5
+              with:
+                  distribution: temurin
+                  java-version: "23"
+                  cache: maven
+
+            - name: Check formatting
+              run: mvn -B spotless:check
+
+            - name: Test Java
+              run: mvn -B test
+
+    # Cross-compile the static test executables once per target architecture and publish them as artifacts. The
+    # actual execution under QEMU happens in `test_cross_qemu`, which fans the vector-length-agnostic RISC-V
+    # binary across several VLENs WITHOUT recompiling it.
+    test_cross_linux:
+        name: Cross Compile ${{ matrix.arch }} to ${{ matrix.target_arch }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: ubuntu-24.04
+                      arch: x86-64
+                      target_arch: aarch64
+                      target: aarch64-linux-gnu
+                      target_processor: arm64
+                      cross_package: crossbuild-essential-arm64
+                      cflags: ""
+                      file_id: aarch64 # substring `file` prints for this ELF
+                    - os: ubuntu-24.04-arm
+                      arch: aarch64
+                      target_arch: x86-64
+                      target: x86_64-linux-gnu
+                      target_processor: amd64
+                      cross_package: crossbuild-essential-amd64
+                      cflags: ""
+                      file_id: x86-64
+                    - os: ubuntu-24.04
+                      arch: x86-64
+                      target_arch: riscv64
+                      target: riscv64-linux-gnu
+                      target_processor: riscv64
+                      cross_package: crossbuild-essential-riscv64
+                      cflags: "-march=rv64gcv"
+                      file_id: RISC-V # `file` prints "UCB RISC-V", not "riscv64"
+                    - os: ubuntu-24.04
+                      arch: x86-64
+                      target_arch: loongarch64
+                      target: loongarch64-linux-gnu
+                      target_processor: loong64
+                      cross_package: g++-13-loongarch64-linux-gnu
+                      cflags: "-mlasx"
+                      file_id: LoongArch
+                    - os: ubuntu-24.04
+                      arch: x86-64
+                      target_arch: ppc64le
+                      target: powerpc64le-linux-gnu
+                      target_processor: ppc64el
+                      cross_package: crossbuild-essential-ppc64el
+                      cflags: "-mcpu=power9"
+                      file_id: PowerPC
+
         env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
+            CC: clang-20
+            CXX: clang++-20
+            AR: llvm-ar-20
+            NM: llvm-nm-20
+            RANLIB: llvm-ranlib-20
 
-        # Python
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Build Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy pyarrow
-          python -m pip install .
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          PY
-      - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
 
-        # Rust
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Cross-Compilation: ${{ matrix.arch }} → ${{ matrix.target_arch }}"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
 
-        # Swift
-        # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
-      # - name: Set up Swift ${{ env.SWIFT_VERSION }}
-      #   uses: swift-actions/setup-swift@v2.4.0
-      #   with:
-      #     swift-version: ${{ env.SWIFT_VERSION }}
-      # - name: Build Swift
-      #   run: swift build -c release --static-swift-stdlib
-      # - name: Test Swift
-      #   run: swift test -c release
+            - name: Install cross-compilation toolchain
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y make build-essential ${{ matrix.cross_package }}
+                  wget https://apt.llvm.org/llvm.sh
+                  chmod +x llvm.sh
+                  sudo ./llvm.sh 20
 
-  test_ubuntu_cpus:
-    name: Ubuntu (StringZillas-CPUs)
-    runs-on: ubuntu-22.04
-    env:
-      CC: gcc-12
-      CXX: g++-12
+            - name: Build C/C++ for ${{ matrix.target_arch }}
+              run: |
+                  # Static-link the test/benchmark executables so QEMU user-mode can run them without juggling the
+                  # cross dynamic loader + sysroot library paths. `clang` drives the GNU linker directly and does not
+                  # add `-lstdc++` on its own, so we point it at the cross libstdc++ and pull it in explicitly.
+                  gcc_libdir=$(dirname "$(find /usr/lib/gcc-cross/${{ matrix.target }} -name 'libstdc++.a' 2>/dev/null | head -1)")
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+                    -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+                    -DCMAKE_SYSTEM_NAME=Linux \
+                    -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
+                    -DCMAKE_C_FLAGS="${{ matrix.cflags }}" \
+                    -DCMAKE_CXX_FLAGS="${{ matrix.cflags }}" \
+                    -DCMAKE_EXE_LINKER_FLAGS="-static -L${gcc_libdir} -lstdc++ -lm" \
+                    -DSTRINGZILLA_BUILD_SHARED=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+                  cmake --build build_artifacts --config RelWithDebInfo
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
+            - name: Verify ${{ matrix.target_arch }} binaries
+              run: |
+                  test -e build_artifacts/libstringzilla_bare.so
+                  test -e build_artifacts/libstringzilla_shared.so
+                  test -e build_artifacts/stringzilla_test_cpp20
+                  file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
+                  echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
-        # C/C++
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
+            - name: Upload ${{ matrix.target_arch }} test binaries
+              uses: actions/upload-artifact@v7
+              with:
+                  name: cross-tests-${{ matrix.target_arch }}
+                  path: build_artifacts/stringzilla*_test_*
+                  if-no-files-found: error
+                  retention-days: 1
 
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+    # Run the cross-compiled (static) test binaries under QEMU user-mode. Build-and-verify alone never exercised
+    # the SIMD kernels. Each row is its own pass/fail status; RVV/SVE are vector-length-agnostic, so the RISC-V
+    # binary built once above is swept across VLEN 128/256/512 here (`-cpu rv64,v=true,vlen=N`) with no rebuild —
+    # a single width under-tests VLA code.
+    test_cross_qemu:
+        name: QEMU Tests ${{ matrix.target_arch }}${{ matrix.variant }}
+        needs: test_cross_linux
+        runs-on: ubuntu-24.04
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    # ARM is vector-length-agnostic under SVE just like RISC-V, so the one binary is run NEON-only
+                    # (`sve=off`, else dynamic dispatch always prefers SVE2 and NEON is never exercised) plus SVE at
+                    # 128/256/512-bit (`sve-max-vq` = VL/128).
+                    - target_arch: aarch64
+                      qemu: qemu-aarch64-static
+                      qemu_cpu: "max,sve=off"
+                      variant: " @ neon"
+                    - target_arch: aarch64
+                      qemu: qemu-aarch64-static
+                      qemu_cpu: "max,sve-max-vq=1"
+                      variant: " @ sve=128"
+                    - target_arch: aarch64
+                      qemu: qemu-aarch64-static
+                      qemu_cpu: "max,sve-max-vq=2"
+                      variant: " @ sve=256"
+                    - target_arch: aarch64
+                      qemu: qemu-aarch64-static
+                      qemu_cpu: "max,sve-max-vq=4"
+                      variant: " @ sve=512"
+                    - target_arch: x86-64
+                      qemu: qemu-x86_64-static
+                      qemu_cpu: max
+                      variant: ""
+                    - target_arch: riscv64
+                      qemu: qemu-riscv64-static
+                      qemu_cpu: "rv64,v=true,vlen=128"
+                      variant: " @ vlen=128"
+                    - target_arch: riscv64
+                      qemu: qemu-riscv64-static
+                      qemu_cpu: "rv64,v=true,vlen=256"
+                      variant: " @ vlen=256"
+                    - target_arch: riscv64
+                      qemu: qemu-riscv64-static
+                      qemu_cpu: "rv64,v=true,vlen=512"
+                      variant: " @ vlen=512"
+                    - target_arch: loongarch64
+                      qemu: qemu-loongarch64-static
+                      qemu_cpu: la464
+                      variant: ""
+                    - target_arch: ppc64le
+                      qemu: qemu-ppc64le-static
+                      qemu_cpu: power9
+                      variant: ""
 
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
-            echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
-            echo "GCC Version:"
-            gcc-12 --version
-            echo "G++ Version:"
-            g++-12 --version
-            exit 1
-          }
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+        steps:
+            - name: Install QEMU user-mode
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y qemu-user-static
 
-        # Python StringZillas-CPUs
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-        # Ensure modern build backend is available for editable installs
-      - name: Build Python StringZillas-CPUs
-        run: |
-          python -m pip install --upgrade pip
-          pip install "setuptools>=64" wheel
-          pip install pytest pytest-repeat numpy pyarrow affine-gaps
-          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-          SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          import stringzillas as szs
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          print("stringzillas.__capabilities__:", szs.__capabilities__)
-          PY
-      - name: Test Python StringZillas-CPUs
-        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
+            - name: Download ${{ matrix.target_arch }} test binaries
+              uses: actions/download-artifact@v8
+              with:
+                  name: cross-tests-${{ matrix.target_arch }}
+                  path: tests
 
-  test_ubuntu_cuda:
-    name: Ubuntu (StringZillas-CUDA)
-    runs-on: ubuntu-22.04
-    env:
-      CC: gcc-12
-      CXX: g++-12
+            - name: Run tests under QEMU for ${{ matrix.target_arch }}${{ matrix.variant }}
+              timeout-minutes: 150
+              env:
+                  # User-mode emulation runs the fuzz loops 20-40x slower than native hardware; the full
+                  # iteration budget needs over six hours per variant and the jobs die at the runner
+                  # timeout without ever reaching the later test families. A scaled-down budget still
+                  # sweeps every backend and vector length within the job limits.
+                  SZ_TESTS_MULTIPLIER: "0.05"
+              run: |
+                  set -euo pipefail
+                  chmod +x tests/*
+                  for test_binary in $(find tests -type f -name 'stringzilla*_test_*' | sort); do
+                    echo "▶ ${{ matrix.qemu }} -cpu ${{ matrix.qemu_cpu }} ${test_binary}"
+                    ${{ matrix.qemu }} -cpu "${{ matrix.qemu_cpu }}" "${test_binary}"
+                  done
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+    test_wasm:
+        name: WebAssembly wasm32-wasip1
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
 
-        # Install CUDA Toolkit
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: "12.9.1"
-          method: "network"
+            - name: Install WASI SDK
+              run: |
+                  WASI_VERSION_FULL=33.0
+                  curl -sSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-33/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux.tar.gz" \
+                    | tar xz -C "$HOME"
+                  echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux" >> "$GITHUB_ENV"
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo ""
-          echo "GPU Info:"
-          nvcc --version 2>/dev/null || echo "nvcc not yet installed"
-          nvidia-smi 2>/dev/null || echo "nvidia-smi not yet available"
-          echo "────────────────────────────────────────────────────────────────"
+            - name: Install Wasmtime
+              run: |
+                  curl https://wasmtime.dev/install.sh -sSf | bash
+                  echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
-        # C/C++
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y cmake build-essential gcc-12 g++-12
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  targets: wasm32-wasip1
 
-      - name: Build C/C++ with CUDA
-        run: |
-          # Note: Using Release build type instead of RelWithDebInfo
-          # Optimized debugging not supported in CUDA and results in PTXAS fatal errors
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+            # The C kernels need the WASI SDK clang + sysroot; `build.rs` passes `-msimd128` (+ probed
+            # `-mrelaxed-simd`). Tests run under Wasmtime via the `.cargo/config.toml` runner, single-threaded
+            # (wasm32-wasip1 has no threads).
+            - name: Test Rust with relaxed SIMD128
+              env:
+                  CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
+                  AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
+                  CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+              run: |
+                  cargo build --target wasm32-wasip1
+                  cargo test --release --target wasm32-wasip1 -- --test-threads=1
 
-          cmake --build build_artifacts --config Release > build_artifacts/logs.txt 2>&1 || {
-            echo "Compilation failed. Here are the logs:"
-            cat build_artifacts/logs.txt
-            echo "The original compilation commands:"
-            cat build_artifacts/compile_commands.json
-            echo "CUDA Version:"
-            nvcc --version
-            echo "GCC Version:"
-            gcc-12 --version
-            echo "G++ Version:"
-            g++-12 --version
-            exit 1
-          }
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
+            - name: Test Rust with baseline SIMD128
+              env:
+                  CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
+                  AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
+                  CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
+                  SZ_USE_V128RELAXED: "0"
+              run: cargo test --release --target wasm32-wasip1 -- --test-threads=1
 
-        # Python StringZillas-CUDA
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-        # Ensure modern build backend is available for editable installs
-      - name: Build Python StringZillas-CUDA
-        run: |
-          python -m pip install --upgrade pip
-          pip install "setuptools>=64" wheel
-          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
-          SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
-          SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
-      - name: Log Python capabilities
-        run: |
-          python - << 'PY'
-          import platform
-          import stringzilla as sz
-          import stringzillas as szs
-          print("platform:", platform.platform())
-          print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
-          print("stringzillas.__capabilities__:", szs.__capabilities__)
-          PY
-      - name: Test Python StringZillas-CUDA
-        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
+            # The same C++ test suite every native platform runs, cross-compiled to wasm32-wasip1: the WASI SDK
+            # `eh` multilib plus `-fwasm-exceptions` (exnref flavor) gives working C++ exceptions under
+            # Wasmtime's exceptions proposal, and WASI signal emulation covers the harness hooks. The `utf8`
+            # filter scopes the run to the Unicode families; `test_hash_unit` still asserts on wasm and is
+            # tracked separately, so the filter widens once that is fixed.
+            - name: Build C++ tests for wasm32-wasip1
+              run: |
+                  cmake -B build_wasi \
+                    -DCMAKE_TOOLCHAIN_FILE=${WASI_SDK_PATH}/share/cmake/wasi-sdk-p1.cmake \
+                    -DWASI_SDK_PREFIX=${WASI_SDK_PATH} \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DSTRINGZILLA_BUILD_TEST=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=0 \
+                    -DSTRINGZILLA_BUILD_SHARED=0 \
+                    -DSTRINGZILLAS_BUILD_SHARED=0 \
+                    -DSTRINGZILLA_BUILD_CUDA=0 \
+                    -DCMAKE_C_FLAGS="-msimd128 -D_WASI_EMULATED_SIGNAL" \
+                    -DCMAKE_CXX_FLAGS="-msimd128 -D_WASI_EMULATED_SIGNAL -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false" \
+                    -DCMAKE_EXE_LINKER_FLAGS="-lwasi-emulated-signal -lunwind -fwasm-exceptions"
+                  cmake --build build_wasi --target stringzilla_test_cpp20
+            - name: Test C++ UTF-8 suites under Wasmtime
+              env:
+                  SZ_TESTS_FILTER: utf8
+                  SZ_TESTS_MULTIPLIER: "0.05"
+              run: |
+                  wasmtime -W exceptions=y --dir . --env SZ_TESTS_FILTER --env SZ_TESTS_MULTIPLIER \
+                    build_wasi/stringzilla_test_cpp20
 
-  # Temporary workaround to run Swift tests on Linux
-  # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
-  test_ubuntu_swift:
-    name: Swift on Linux
-    runs-on: ubuntu-22.04
-    container: swift:latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+    test_macos:
+        name: MacOS
+        runs-on: macos-15
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu || true
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
 
-      - name: Test Swift
-        run: swift test
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  sysctl -a | grep machdep.cpu || true
+                  echo ""
+                  echo "System Info:"
+                  system_profiler SPHardwareDataType || true
+                  echo "────────────────────────────────────────────────────────────────"
 
-  test_cross_linux:
-    name: Cross Compile (${{ matrix.arch }} → ${{ matrix.target_arch }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            arch: x86-64
-            target_arch: aarch64
-            target: aarch64-linux-gnu
-            target_processor: arm64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-            target_arch: x86-64
-            target: x86_64-linux-gnu
-            target_processor: amd64
+              # C/C++
+            - name: Install dependencies
+              run: |
+                  brew update
+                  brew reinstall cmake
+            - name: Build C/C++
+              run: |
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
+                  cmake --build build_artifacts --config RelWithDebInfo
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp17
+            - name: Test on Real World Data
+              run: |
+                  build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+                  build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+                  build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+                  build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+              env:
+                  DATASET_PATH: ./README.md
+              # Don't overload GitHub with our benchmarks.
+              # The results in such an unstable environment will be meaningless anyway.
+              if: 0
 
-    env:
-      CC: clang-16
-      CXX: clang++-16
-      AR: llvm-ar-16
-      NM: llvm-nm-16
-      RANLIB: llvm-ranlib-16
+              # Python
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+            - name: Build Python
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install pytest pytest-repeat numpy pyarrow
+                  python -m pip install .
+              env:
+                  MACOSX_DEPLOYMENT_TARGET: "11.0"
+            - name: Test Python
+              run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+              # Swift
+            - name: Set up Swift ${{ env.SWIFT_VERSION }}
+              uses: swift-actions/setup-swift@v2.4.0
+              with:
+                  swift-version: ${{ env.SWIFT_VERSION }}
+            - name: Build Swift
+              run: swift build
+            - name: Test Swift
+              run: swift test
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Cross-Compilation: ${{ matrix.arch }} → ${{ matrix.target_arch }}"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
+              # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
-      - name: Install cross-compilation toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make build-essential crossbuild-essential-${{ matrix.target_processor }}
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
+    test_windows:
+        name: Windows - ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - os: windows-2022
+                      arch: x64
+                    - os: windows-11-arm
+                      arch: arm64
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+            - uses: ilammy/msvc-dev-cmd@v1
+              with:
+                  arch: ${{ matrix.arch }}
 
-      - name: Build C/C++ for ${{ matrix.target_arch }}
-        run: |
-          # Configure and build the project
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
-            -DSTRINGZILLA_BUILD_SHARED=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
+            - name: Log hardware capabilities
+              shell: powershell
+              run: |
+                  Write-Host "────────────────────────────────────────────────────────────────"
+                  Write-Host "Hardware Capabilities"
+                  Write-Host "────────────────────────────────────────────────────────────────"
+                  Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
+                  Write-Host "────────────────────────────────────────────────────────────────"
 
-          cmake --build build_artifacts --config RelWithDebInfo
+            - name: Build C/C++
+              shell: cmd
+              run: |
+                  cmake -GNinja -B build_artifacts ^
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
+                    -DSTRINGZILLA_BUILD_TEST=1
 
-      - name: Verify ${{ matrix.target_arch }} binaries
-        run: |
-          # We can't run ${{ matrix.target_arch }} binaries on ${{ matrix.arch }}, but we can verify they exist and are ${{ matrix.target_arch }}
-          test -e build_artifacts/libstringzilla_bare.so
-          test -e build_artifacts/libstringzilla_shared.so
-          test -e build_artifacts/stringzilla_test_cpp20
-          file build_artifacts/stringzilla_test_cpp20 | grep -q "${{ matrix.target_arch }}"
-          echo "✓ ${{ matrix.target_arch }} binaries built successfully"
+                  cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || (
+                    echo "Compilation failed. Here are the logs:"
+                    type build_artifacts\logs.txt
+                    echo "The original compilation commands:"
+                    type build_artifacts\compile_commands.json
+                    exit 1
+                  )
+            - name: Test C++
+              run: .\build_artifacts\stringzilla_test_cpp20.exe
+            - name: Check stringzilla_bare is built correctly
+              shell: cmd
+              run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
+            - name: Test on Real World Data
+              run: |
+                  .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
+                  .\build_artifacts\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+                  .\build_artifacts\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
+                  .\build_artifacts\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
+              env:
+                  DATASET_PATH: ./README.md
+              # Don't overload GitHub with our benchmarks.
+              # The results in such an unstable environment will be meaningless anyway.
+              if: 0
 
-  test_macos:
-    name: MacOS
-    runs-on: macos-15
+              # Python
+            - name: Set up Python ${{ env.PYTHON_VERSION }}
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: ${{ env.PYTHON_VERSION }}
+            - name: Build Python
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install pytest pytest-repeat numpy
+                  python -m pip install .
+            - name: Test Python
+              run: python -X faulthandler -m pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -vv --maxfail=1 --full-trace
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+              # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with dynamic dispatch
+              run: cargo test --release
+            - name: Build Rust with compile-time dispatch
+              run: cargo build --release --no-default-features --features std
 
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          sysctl -a | grep machdep.cpu || true
-          echo ""
-          echo "System Info:"
-          system_profiler SPHardwareDataType || true
-          echo "────────────────────────────────────────────────────────────────"
+    test_alpine:
+        name: Alpine Linux
+        runs-on: ubuntu-24.04
+        container:
+            image: alpine:latest
+            options: --privileged # If needed for certain Docker operations
+        steps:
+            # bash and curl are required by dtolnay/rust-toolchain
+            - name: Install Git for checkout
+              run: |
+                  apk add --no-cache git openssh ca-certificates bash curl
+                  git --version
+            - name: Log Alpine and Git versions
+              run: |
+                  echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
+                  git --version || echo "git not installed"
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
 
-        # C/C++
-      - name: Install dependencies
-        run: |
-          brew update
-          brew reinstall cmake
-      - name: Build C/C++
-        run: |
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-          cmake --build build_artifacts --config RelWithDebInfo
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp17
-      - name: Test on Real World Data
-        run: |
-          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
-        env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
+            - name: Log hardware capabilities
+              run: |
+                  echo "────────────────────────────────────────────────────────────────"
+                  echo "Hardware Capabilities"
+                  echo "────────────────────────────────────────────────────────────────"
+                  lscpu || true
+                  echo ""
+                  echo "CPU Info:"
+                  grep -E "model name|flags" /proc/cpuinfo | head -5 || true
+                  echo "────────────────────────────────────────────────────────────────"
 
-        # Python
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Build Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy pyarrow
-          python -m pip install .
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
-      - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
+              # C/C++
+            - name: Build C/C++
+              run: |
+                  apk add --update make cmake g++ gcc
+                  cmake -B build_artifacts \
+                    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+                    -DSTRINGZILLA_BUILD_TEST=1
+                  cmake --build build_artifacts --config RelWithDebInfo
+            - name: Test C++
+              run: build_artifacts/stringzilla_test_cpp20
+            - name: Check stringzilla_bare is built correctly
+              run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so' | grep '=>')"
 
-        # Swift
-      - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v2.4.0
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-      - name: Build Swift
-        run: swift build
-      - name: Test Swift
-        run: swift test
+              # Python
+            - name: Build Python
+              run: |
+                  apk add python3 py3-pip python3-dev
+                  pip install --break-system-packages pytest pytest-repeat
+                  pip install --break-system-packages .
+            - name: Test Python
+              run: pytest test/ --ignore=test/stringzillas.py --ignore=test/similarities.py --ignore=test/fingerprints.py --ignore=test/szs_helpers.py -s -x
 
-        # Rust
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+              # Rust
+            - name: Set up Rust
+              uses: dtolnay/rust-toolchain@stable
+            - name: Test Rust with compile-time dispatch
+              run: cargo test --release --no-default-features --features std
 
-  test_windows:
-    name: Windows - ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            arch: x64
-          - os: windows-11-arm
-            arch: arm64
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
+    # Native wheels - each runner's native arch (Linux pinned to x86_64; emulated arches in `build_wheels_emulated`).
+    # windows-11-arm validates the Windows ARM64 wheel that release ships; ARM64 CPython is official from 3.11.
+    build_wheels_native:
+        name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
+        runs-on: ${{ matrix.os }}
+        needs:
+            [
+                test_ubuntu_gcc,
+                test_ubuntu_clang,
+                test_macos,
+                test_windows,
+                test_cross_linux,
+            ]
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-24.04, macos-15, windows-2022, windows-11-arm]
+                python-version: ["310", "311", "312", "313", "314"]
+                exclude:
+                    - os: windows-11-arm
+                      python-version: "310"
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+            - name: Set up Python
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: 3.x
+            - name: Install cibuildwheel
+              run: python -m pip install cibuildwheel==3.4.1
+            - name: Build wheels
+              run: cibuildwheel --output-dir wheelhouse
+              env:
+                  CIBW_BUILD: cp${{ matrix.python-version }}-*
+                  CIBW_ARCHS_LINUX: x86_64
 
-      - name: Log hardware capabilities
-        shell: powershell
-        run: |
-          Write-Host "────────────────────────────────────────────────────────────────"
-          Write-Host "Hardware Capabilities"
-          Write-Host "────────────────────────────────────────────────────────────────"
-          Get-CimInstance -ClassName Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed | Format-List
-          Write-Host "────────────────────────────────────────────────────────────────"
-
-      - name: Build C/C++
-        shell: cmd
-        run: |
-          cmake -GNinja -B build_artifacts ^
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
-            -DSTRINGZILLA_BUILD_TEST=1
-
-          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || (
-            echo "Compilation failed. Here are the logs:"
-            type build_artifacts\logs.txt
-            echo "The original compilation commands:"
-            type build_artifacts\compile_commands.json
-            exit 1
-          )
-      - name: Test C++
-        run: .\build_artifacts\stringzilla_test_cpp20.exe
-      - name: Check stringzilla_bare is built correctly
-        shell: cmd
-        run: dumpbin /nologo /dependents .\build_artifacts\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
-      - name: Test on Real World Data
-        run: |
-          .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
-          .\build_artifacts\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          .\build_artifacts\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
-          .\build_artifacts\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
-        env:
-          DATASET_PATH: ./README.md
-        # Don't overload GitHub with our benchmarks.
-        # The results in such an unstable environment will be meaningless anyway.
-        if: 0
-
-        # Python
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Build Python
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-repeat numpy
-          python -m pip install .
-      - name: Test Python
-        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
-
-  test_alpine:
-    name: Alpine Linux
-    runs-on: ubuntu-24.04
-    container:
-      image: alpine:latest
-      options: --privileged # If needed for certain Docker operations
-    steps:
-      # bash and curl are required by dtolnay/rust-toolchain
-      - name: Install Git for checkout
-        run: |
-          apk add --no-cache git openssh ca-certificates bash curl
-          git --version
-      - name: Log Alpine and Git versions
-        run: |
-          echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
-          git --version || echo "git not installed"
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - name: Log hardware capabilities
-        run: |
-          echo "────────────────────────────────────────────────────────────────"
-          echo "Hardware Capabilities"
-          echo "────────────────────────────────────────────────────────────────"
-          lscpu || true
-          echo ""
-          echo "CPU Info:"
-          grep -E "model name|flags" /proc/cpuinfo | head -5 || true
-          echo "────────────────────────────────────────────────────────────────"
-
-        # C/C++
-      - name: Build C/C++
-        run: |
-          apk add --update make cmake g++ gcc
-          cmake -B build_artifacts \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-            -DSTRINGZILLA_BUILD_TEST=1
-          cmake --build build_artifacts --config RelWithDebInfo
-      - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so' | grep '=>')"
-
-        # Python
-      - name: Build Python
-        run: |
-          apk add python3 py3-pip python3-dev
-          pip install --break-system-packages pytest pytest-repeat
-          pip install --break-system-packages .
-      - name: Test Python
-        run: pytest scripts/test_stringzilla.py -s -x
-
-        # Rust
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-  build_wheels:
-    name: Build Python ${{ matrix.python-version }} for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    needs:
-      [
-        test_ubuntu_gcc,
-        test_ubuntu_clang,
-        test_macos,
-        test_windows,
-        test_cross_linux,
-      ]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022]
-        python-version: ["310", "311", "312", "313", "314"]
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: 3.x
-
-        # We only need QEMU for Linux builds
-      - name: Setup QEMU
-        if: matrix.os == 'ubuntu-24.04'
-        uses: docker/setup-qemu-action@v4
-      - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
-      - name: Build wheels
-        run: cibuildwheel --output-dir wheelhouse
-        env:
-          CIBW_BUILD: cp${{ matrix.python-version }}-*
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
+    # Emulated Linux wheels - one arch per runner so no runner pulls every image; fuzz depth thinned under QEMU.
+    build_wheels_emulated:
+        name: Build Python wheels for ${{ matrix.arch }}
+        runs-on: ubuntu-24.04
+        needs:
+            [
+                test_ubuntu_gcc,
+                test_ubuntu_clang,
+                test_macos,
+                test_windows,
+                test_cross_linux,
+            ]
+        strategy:
+            fail-fast: false
+            matrix:
+                arch: [aarch64, ppc64le, s390x, i686, armv7l, riscv64]
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+            - name: Set up Python
+              uses: actions/setup-python@v7.0.0
+              with:
+                  python-version: 3.x
+            - name: Setup QEMU
+              uses: docker/setup-qemu-action@v4
+            - name: Install cibuildwheel
+              run: python -m pip install cibuildwheel==3.4.1
+            - name: Build wheels
+              run: cibuildwheel --output-dir wheelhouse
+              env:
+                  CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+                  CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+                  # SZ_IS_QEMU_ disables tricky SIMD; SZ_TESTS_MULTIPLIER matches `test_cross_qemu`.
+                  CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05

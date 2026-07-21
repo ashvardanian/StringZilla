@@ -14,6 +14,10 @@ backend-path = ["."]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
+# `test/` is a package (test/__init__.py) so the prefix-less modules namespace as `test.string` etc. and
+# never shadow stdlib modules (e.g. `string`); `python_files` collects the `test_`-free filenames.
+testpaths = ["test"]
+python_files = ["*.py"]
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]

@@ -1,0 +1,206 @@
+/**
+ *  @brief Serial backend for UTF-8 newline and whitespace delimiter scanning.
+ *  @file include/stringzilla/utf8_tokens/serial.h
+ *  @author Ash Vardanian
+ */
+#ifndef STRINGZILLA_UTF8_TOKENS_SERIAL_H_
+#define STRINGZILLA_UTF8_TOKENS_SERIAL_H_
+
+#include "stringzilla/types.h"
+#include "stringzilla/utf8_runes/serial.h"
+#include "stringzilla/utf8_tokens/tables.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ *  @brief Scalar newline scan emitting every delimiter into parallel offset/length arrays.
+ *
+ *  A @c "\r\n" CRLF is one match of length 2 (its trailing LF is never emitted alone). `base` is added to every
+ *  emitted offset and to `*bytes_consumed`, the resume offset, which is always a true delimiter boundary.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_newlines_serial_(      //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_bytes = (sz_u8_t const *)text;
+    sz_size_t match_count = 0, position = 0;
+    while (position < length && match_count < matches_capacity) {
+        sz_u8_t const lead_byte = text_bytes[position];
+        sz_size_t match_length = 0; // 0 means "no delimiter starts at this position"
+        switch (lead_byte) {
+        case '\n':
+        case '\v':
+        case '\f': match_length = 1; break;
+        case '\r': match_length = (position + 1 < length && text_bytes[position + 1] == '\n') ? 2 : 1; break;
+        case 0xC2: // U+0085 NEXT LINE
+            if (position + 1 < length && text_bytes[position + 1] == 0x85) match_length = 2;
+            break;
+        case 0xE2: // U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR
+            if (position + 2 < length && text_bytes[position + 1] == 0x80 &&
+                (text_bytes[position + 2] == 0xA8 || text_bytes[position + 2] == 0xA9))
+                match_length = 3;
+            break;
+        default: break;
+        }
+        if (match_length) {
+            match_offsets[match_count] = base + position, match_lengths[match_count] = match_length, ++match_count;
+            position += match_length;
+        }
+        else { position += 1; }
+    }
+    if (bytes_consumed) *bytes_consumed = base + position;
+    return match_count;
+}
+
+/**
+ *  @brief Scalar multistep whitespace scan: classify each codepoint inline and emit every delimiter.
+ *
+ *  Same contract as `sz_utf8_newlines_serial_` but for the Unicode White_Space set. There is no CRLF
+ *  merging here - CR and LF are independent length-1 matches.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_whitespaces_serial_(   //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_bytes = (sz_u8_t const *)text;
+    sz_size_t match_count = 0, position = 0;
+    while (position < length && match_count < matches_capacity) {
+        sz_u8_t const lead_byte = text_bytes[position];
+        sz_size_t match_length = 0;
+        switch (lead_byte) {
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\v':
+        case '\f':
+        case '\r': match_length = 1; break;
+        case 0xC2: // U+0085 NEL, U+00A0 NBSP
+            if (position + 1 < length && (text_bytes[position + 1] == 0x85 || text_bytes[position + 1] == 0xA0))
+                match_length = 2;
+            break;
+        case 0xE1: // U+1680 OGHAM SPACE MARK (E1 9A 80)
+            if (position + 2 < length && text_bytes[position + 1] == 0x9A && text_bytes[position + 2] == 0x80)
+                match_length = 3;
+            break;
+        case 0xE2: // U+2000..U+200A, U+2028, U+2029, U+202F, U+205F
+            if (position + 2 < length) {
+                sz_u8_t const second = text_bytes[position + 1], third = text_bytes[position + 2];
+                if (second == 0x80 &&
+                    ((third >= 0x80 && third <= 0x8A) || third == 0xA8 || third == 0xA9 || third == 0xAF))
+                    match_length = 3;
+                else if (second == 0x81 && third == 0x9F) match_length = 3;
+            }
+            break;
+        case 0xE3: // U+3000 IDEOGRAPHIC SPACE (E3 80 80)
+            if (position + 2 < length && text_bytes[position + 1] == 0x80 && text_bytes[position + 2] == 0x80)
+                match_length = 3;
+            break;
+        default: break;
+        }
+        if (match_length) {
+            match_offsets[match_count] = base + position, match_lengths[match_count] = match_length, ++match_count;
+            position += match_length;
+        }
+        else { position += 1; }
+    }
+    if (bytes_consumed) *bytes_consumed = base + position;
+    return match_count;
+}
+
+SZ_API_COMPTIME sz_size_t sz_utf8_newlines_serial(      //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+}
+
+SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial(   //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+}
+
+#pragma region Serial
+
+/** @brief  Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the first
+ *          2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window. Shared u64 mask
+ *          math for every windowed ISA front-end. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                            sz_u64_t four_byte_starts, sz_size_t loaded) {
+    sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
+                             (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
+                             (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
+    return overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+}
+
+/** @brief  Emit already-decided delimiter starts from a vector tile's lane mask: bit `i` of @p hits marks a
+ *          verified match at `base + i`, and its byte length rereads only the lead's high nibble. The portable
+ *          ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_; returns the appended match count. */
+SZ_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
+    sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
+    sz_size_t capacity) {
+    static sz_u8_t const length_by_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
+    sz_size_t count = 0;
+    while (hits && count < capacity) {
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+        hits &= hits - 1;
+        match_offsets[count] = base + lane;
+        match_lengths[count] = length_by_nibble[text[base + lane] >> 4];
+        ++count;
+    }
+    return count;
+}
+
+/**
+ *  @brief Reference scan emitting every delimiter codepoint into parallel offset/length arrays.
+ *
+ *  Decodes each codepoint with the bounds-checked `sz_rune_decode`, so a truncated trailing UTF-8
+ *  sequence never over-reads past @p text + @p length. A byte that does not begin a well-formed
+ *  codepoint (lone continuation, overlong, surrogate, truncated tail) is skipped one byte at a time
+ *  and is never reported as a delimiter. `base` is added to every emitted offset and to
+ *  `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
+ */
+SZ_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_(    //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_cptr_t const start = text;
+    sz_cptr_t const end = text + length;
+    sz_cptr_t position = text;
+    sz_size_t match_count = 0;
+    while (position < end && match_count < matches_capacity) {
+        sz_rune_t rune;
+        sz_rune_length_t const rune_length = sz_rune_decode(position, end, &rune);
+        if (rune_length == sz_rune_invalid_k) { position += 1; }
+        else if (sz_rune_is_delimiter_(rune)) {
+            match_offsets[match_count] = base + (sz_size_t)(position - start);
+            match_lengths[match_count] = (sz_size_t)rune_length;
+            ++match_count;
+            position += rune_length;
+        }
+        else { position += rune_length; }
+    }
+    if (bytes_consumed) *bytes_consumed = base + (sz_size_t)(position - start);
+    return match_count;
+}
+
+SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_serial(    //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    return sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+}
+
+#pragma endregion // Serial
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // STRINGZILLA_UTF8_TOKENS_SERIAL_H_

@@ -1,0 +1,23 @@
+# Run wasm32-wasip1 test/bench binaries under Wasmtime with SIMD enabled, so
+# `cargo test --target wasm32-wasip1` works out of the box.
+#
+# Building the C kernels for wasm needs a wasm-capable C compiler with a WASI sysroot
+# (the host `clang` lacks libc headers). Point the `cc` crate at the WASI SDK via env, e.g.:
+#
+#   export CC_wasm32_wasip1="$WASI_SDK_PATH/bin/clang"
+#   export AR_wasm32_wasip1="$WASI_SDK_PATH/bin/ar"
+#   export CFLAGS_wasm32_wasip1="--sysroot=$WASI_SDK_PATH/share/wasi-sysroot"
+#
+# (We intentionally do not hardcode the SDK path here so the config stays portable.)
+
+[target.wasm32-wasip1]
+runner = "wasmtime -W relaxed-simd=y --dir ."
+
+[target.wasm32-wasip1-threads]
+runner = "wasmtime -W relaxed-simd=y -S threads=y --dir ."
+
+# Resolve `forkunion` from the submodule until its next crates.io release ships the
+# `cargo:include=` metadata and the libnuma-free runtime; registry consumers are unaffected,
+# since this file is not part of the published package.
+[patch.crates-io]
+forkunion = { path = "forkunion" }

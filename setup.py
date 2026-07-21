@@ -5,26 +5,176 @@ from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
+import concurrent.futures
 
 
-class NumpyBuildExt(build_ext):
+def _max_compile_workers() -> int:
+    """Concurrency cap for compiling translation units. Each `cicc`/`cc1plus` pass on the heavily-templated
+    similarity headers needs ~1-2 GB, so we cap below the core count to avoid thrashing or OOM on big boxes."""
+    return max(1, min(os.cpu_count() or 1, 8))
+
+
+def _depfile_prerequisites(dep_path: str):
+    """Parse a `-MMD/-MF` makefile fragment into its list of prerequisite paths, or `None` if absent."""
+    try:
+        with open(dep_path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    text = text.replace("\\\n", " ")  # un-escape the line continuations make uses
+    if ":" in text:
+        text = text.split(":", 1)[1]  # drop the `target.o:` prefix, keep the prerequisites
+    return [token for token in text.split() if token]
+
+
+def _object_is_fresh(obj_path: str, dep_path: str) -> bool:
+    """True when `obj_path` exists and is newer than every header/source in its depfile (so it can be skipped).
+    Conservative: a missing depfile (e.g. a first build) returns False so the object is (re)compiled."""
+    if not os.path.exists(obj_path):
+        return False
+    prerequisites = _depfile_prerequisites(dep_path)
+    if not prerequisites:
+        return False
+    object_mtime = os.path.getmtime(obj_path)
+    for prerequisite in prerequisites:
+        try:
+            if os.path.getmtime(prerequisite) > object_mtime:
+                return False
+        except OSError:
+            return False  # a prerequisite vanished -> rebuild
+    return True
+
+
+def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
+    """Run `(callable, label)` compile jobs concurrently, surfacing the first failure (and its label)."""
+    if not jobs:
+        return
+    workers = max(1, min(max_workers, len(jobs)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(job): label for job, label in jobs}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as error:
+                raise RuntimeError(f"Compilation failed: {futures[future]}") from error
+
+
+# CUDA architecture partition, kept in lockstep with the CMake build (`define_stringzillas_cuda_library` in
+# CMakeLists.txt) and build.rs. Two tiers: the base group (C-API entry TUs + base-SIMT + Kepler providers) ships
+# sm_80 and sm_90 real SASS; the Hopper DPX group (`*_hopper.cu`) is sm_90 only. Both add forward-compatible PTX
+# (`-virtual`) for the distributed wheel, which the driver JITs on newer GPUs. sm_80/sm_90 are valid on CUDA 12.x
+# and 13.x alike (13.x dropped the older floors), so the set needs no per-toolkit probing.
+_CUDA_BASE_ARCHES: Final = ["80-real", "90-real", "90-virtual"]
+_CUDA_HOPPER_ARCHES: Final = ["90-real", "90-virtual"]
+
+
+def _cuda_gencode_flags(cuda_source: str) -> List[str]:
+    """`-gencode` flags for one `.cu`, by tier so the Hopper providers carry no dead sm_80 cubin. Mirrors the CMake
+    `<x>-real` / `<x>-virtual` arch lists: `-real` emits SASS (`code=sm_x`), `-virtual` emits PTX (`code=compute_x`)."""
+    stem = os.path.splitext(os.path.basename(cuda_source))[0]
+    arches = _CUDA_HOPPER_ARCHES if stem.endswith("_hopper") else _CUDA_BASE_ARCHES
+    flags = []
+    for arch in arches:
+        number, kind = arch.split("-")
+        code = f"sm_{number}" if kind == "real" else f"compute_{number}"
+        flags += ["-gencode", f"arch=compute_{number},code={code}"]
+    return flags
+
+
+def _parallel_compiler_compile(
+    self,
+    sources,
+    output_dir=None,
+    macros=None,
+    include_dirs=None,
+    debug=0,
+    extra_preargs=None,
+    extra_postargs=None,
+    depends=None,
+):
+    """A parallel drop-in for `distutils.ccompiler.CCompiler.compile`, which compiles the sources of one
+    extension serially. Reuses the compiler's own `_setup_compile` / `_get_cc_args` / `_compile`, so the exact
+    flags distutils would pass are preserved; only the per-object loop is spread across a thread pool."""
+    is_msvc = getattr(self, "compiler_type", "") == "msvc"
+    if is_msvc and not self.initialized:
+        self.initialize()
+
+    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
+        output_dir, macros, include_dirs, sources, depends, extra_postargs
+    )
+    cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
+
+    # `-MMD/-MF` emits a makefile depfile listing the headers each TU pulled in, so an incremental rebuild can skip
+    # a translation unit whose object is newer than every source AND header (distutils' own check tracks sources
+    # only, which is why a header-only edit otherwise needs `--force`). MSVC has no `-MMD`, so it keeps the
+    # source-only behavior. `_sz_force` mirrors `build_ext --force`.
+    use_depfiles = not is_msvc
+    force = getattr(self, "_sz_force", False)
+
+    # MSVC's `_compile` is a no-op — it does all work inside its `compile()` override. Build the per-object
+    # command template once so each thread can compile independently.
+    if is_msvc:
+        msvc_compile_opts = list(extra_preargs or [])
+        msvc_compile_opts.append("/c")
+        if debug:
+            msvc_compile_opts.extend(self.compile_options_debug)
+        else:
+            msvc_compile_opts.extend(self.compile_options)
+
+    def _compile_one(obj):
+        try:
+            src, ext = build[obj]
+        except KeyError:
+            return
+        if is_msvc:
+            if ext in self._c_extensions:
+                input_opt = "/Tc" + src
+            elif ext in self._cpp_extensions:
+                input_opt = "/Tp" + src
+            else:
+                return
+            args = [self.cc] + msvc_compile_opts + pp_opts
+            if ext in self._cpp_extensions:
+                args.append("/EHsc")
+            args.extend([input_opt, "/Fo" + obj])
+            args.extend(extra_postargs)
+            self.spawn(args)
+        elif use_depfiles:
+            dep_path = obj + ".d"
+            if not force and _object_is_fresh(obj, dep_path):
+                return
+            self._compile(obj, src, ext, cc_args, extra_postargs + ["-MMD", "-MF", dep_path], pp_opts)
+        else:
+            self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+
+    workers = max(1, min(_max_compile_workers(), len(objects)))
+    if workers > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            for _ in pool.map(_compile_one, objects):
+                pass
+    else:
+        for obj in objects:
+            _compile_one(obj)
+    return objects
+
+
+class ParallelBuildExt(build_ext):
     """
-    Custom build_ext class that defers `numpy` import until build time.
-
-    This is necessary because NumPy may not be available during the initial
-    `setup.py` parsing phase (e.g., when `cibuildwheel` is gathering build requirements),
-    but we need NumPy's include directories during the actual compilation.
-    By deferring the import to `build_extensions()`, we ensure NumPy is only
-    required when actually building the extensions, not when querying metadata.
+    Custom `build_ext` shared by every target: compiles an extension's many C/C++ translation units across cores
+    (distutils compiles them serially) and applies per-language flags. Has no third-party dependency, so the base
+    `stringzilla` CPython module uses it directly; `NumpyBuildExt` extends it for the numpy-dependent targets.
     """
 
     def build_extension(self, ext):
-        import numpy as np
+        import types
 
-        # Ensure NumPy headers are available
-        numpy_include = np.get_include()
-        if numpy_include not in ext.include_dirs:
-            ext.include_dirs.append(numpy_include)
+        # Swap in a parallel `compile` so the many C/C++ translation units build across cores like `make -j`; the
+        # hook also carries header-depfile staleness skipping (see `_parallel_compiler_compile`). `_sz_force` lets
+        # it honor `build_ext --force`.
+        if self.compiler is not None and not getattr(self.compiler, "_sz_parallelized", False):
+            self.compiler._sz_force = bool(self.force)
+            self.compiler.compile = types.MethodType(_parallel_compiler_compile, self.compiler)
+            self.compiler._sz_parallelized = True
 
         # Decide per-language compile flags using our platform helpers
         if sys.platform == "linux" or sys.platform.startswith("freebsd"):
@@ -86,6 +236,23 @@ class NumpyBuildExt(build_ext):
         )
 
 
+class NumpyBuildExt(ParallelBuildExt):
+    """
+    Adds the NumPy include directory for the numpy-dependent targets (the `stringzillas` parallel-algorithm
+    modules), deferring the `numpy` import until build time so `cibuildwheel`'s metadata pass — which may run
+    before numpy is installed — does not need it. Everything else (parallel per-language compile + link) comes
+    from `ParallelBuildExt`.
+    """
+
+    def build_extension(self, ext):
+        import numpy as np
+
+        numpy_include = np.get_include()
+        if numpy_include not in ext.include_dirs:
+            ext.include_dirs.append(numpy_include)
+        super().build_extension(ext)
+
+
 class CudaBuildExtension(NumpyBuildExt):
     """
     Custom `build_ext` class for CUDA extensions with deferred NumPy import.
@@ -106,46 +273,79 @@ class CudaBuildExtension(NumpyBuildExt):
         cuda_sources = [s for s in ext.sources if s.endswith(".cu")]
         c_sources = [s for s in ext.sources if not s.endswith(".cu")]
 
-        # Compile CUDA files with nvcc first
+        # Compile the CUDA sources with nvcc, concurrently, skipping any whose object is already up to date.
+        # nvcc itself does not parallelize across input files (and `--threads` only splits per-`-gencode` passes,
+        # of which we have one), so the only lever is running several nvcc processes at once - mirroring `make -j`.
+        os.makedirs(self.build_temp, exist_ok=True)
+        # nvcc rejects host compilers newer than it supports (CUDA 12.x caps out at GCC 14). Honor the standard
+        # CUDAHOSTCXX so the caller can point nvcc at a compatible host compiler, mirroring CMake and build.rs.
+        host_cxx = os.environ.get("CUDAHOSTCXX")
+        is_msvc = getattr(self.compiler, "compiler_type", "") == "msvc"
+        # Host-compiler flags nvcc must forward to cl.exe / gcc, mirroring CMake and build.rs. On a Windows (MSVC)
+        # host, CUDA 13.3 / CCCL 3.x needs the standard-conforming preprocessor, accurate `__cplusplus`, and UTF-8
+        # source reading; `/Oi-` (MSVC) and `-fno-builtin-mem*` (GCC/Clang) stop the compiler from substituting
+        # builtins for StringZilla's bytewise primitives. `-fPIC` is a GCC/Clang-only flag.
+        if is_msvc:
+            host_compiler_flags = ["/Zc:preprocessor", "/Zc:__cplusplus", "/utf-8", "/Oi-"]
+        else:
+            host_compiler_flags = [
+                "-fPIC",
+                "-fno-builtin-memcmp",
+                "-fno-builtin-memchr",
+                "-fno-builtin-memcpy",
+                "-fno-builtin-memset",
+            ]
+        # nvcc forwards `-MMD` to a gcc host (Linux) but a cl host rejects it (`nvcc fatal: Unknown option '-MMD'`),
+        # so gate the depfile off on MSVC — matching the C/C++ path's `use_depfiles = not is_msvc`.
+        use_depfiles = not is_msvc
         objects = []
+        nvcc_jobs = []
         for cuda_source in cuda_sources:
-            # Generate object file path
             obj_name = os.path.splitext(os.path.basename(cuda_source))[0] + ".o"
             obj_path = os.path.join(self.build_temp, obj_name)
-            os.makedirs(self.build_temp, exist_ok=True)
+            dep_path = obj_path + ".d"
+            objects.append(obj_path)
 
-            # NVCC command
             nvcc_cmd = [
                 "nvcc",
                 "-c",
                 cuda_source,
                 "-o",
                 obj_path,
-                "--compiler-options",
-                "-fPIC",
-                "-std=c++17",
-                "-O3",
+                "-std=c++20",
+                "-O2",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
-                "-arch=sm_90a",  # Default to Hopper
+                # Per-TU arch partition: one real cubin per GPU-major for the tier this TU serves, plus a single PTX
+                # floor on the base tier - a no-overlap manual fatbin (see `_cuda_gencode_flags`).
+                *_cuda_gencode_flags(cuda_source),
+                "-Xfatbin=--compress-all",  # erases the size cost of multi-arch breadth (compressed ~= single arch)
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
             ]
-
-            # Add include directories
+            if use_depfiles:
+                # Emit a depfile so incremental rebuilds can skip translation units with no changed header.
+                nvcc_cmd.extend(["-MMD", "-MF", dep_path])
+            if host_cxx:
+                nvcc_cmd.extend(["-ccbin", host_cxx])
             for inc_dir in ext.include_dirs:
                 nvcc_cmd.extend(["-I", inc_dir])
-
-            # Add defines
             for define in ext.define_macros:
                 if len(define) == 2:
                     nvcc_cmd.append(f"-D{define[0]}={define[1]}")
                 else:
                     nvcc_cmd.append(f"-D{define[0]}")
+            for flag in host_compiler_flags:
+                nvcc_cmd.extend(["-Xcompiler", flag])
 
-            print(f"Compiling {cuda_source} with nvcc...")
-            subprocess.check_call(nvcc_cmd)
-            objects.append(obj_path)
+            if use_depfiles and not self.force and _object_is_fresh(obj_path, dep_path):
+                print(f"Skipping {cuda_source} (object up to date)")
+                continue
+            nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
+
+        if nvcc_jobs:
+            print(f"Compiling {len(nvcc_jobs)} CUDA source(s) with nvcc ({_max_compile_workers()} parallel workers)...")
+        _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers())
 
         # Update extension: remove .cu sources, add compiled objects
         ext.sources = c_sources
@@ -245,13 +445,13 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_SVE2_AES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE2AES", "1" if is_64bit_arm() else "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -301,10 +501,10 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         ("SZ_USE_GOLDMONT", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
-        ("SZ_USE_ICE", "0"),
+        ("SZ_USE_ICELAKE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -333,10 +533,10 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
         ("SZ_USE_GOLDMONT", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICELAKE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_AES", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_NEON_SHA", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONAES", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_NEONSHA", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
@@ -366,6 +566,71 @@ elif sys.platform == "win32":
 else:
     compile_args, link_args, macros_args = [], [], []
 
+# The compiled C shims are split into one translation unit per domain (single-CPU) and per
+# algorithm (parallel); each binding lists the full set. See c/stringzilla/ and c/stringzillas/.
+STRINGZILLA_CORE_SOURCES = [
+    "c/stringzilla/runtime.c",
+    "c/stringzilla/compare.c",
+    "c/stringzilla/memory.c",
+    "c/stringzilla/hash.c",
+    "c/stringzilla/find.c",
+    "c/stringzilla/sort.c",
+    "c/stringzilla/intersect.c",
+    "c/stringzilla/utf8_norm.c",
+    "c/stringzilla/utf8_runes.c",
+    "c/stringzilla/utf8_tokens.c",
+    "c/stringzilla/utf8_wordbreaks.c",
+    "c/stringzilla/utf8_graphemes.c",
+    "c/stringzilla/utf8_sentences.c",
+    "c/stringzilla/utf8_linebreaks.c",
+    "c/stringzilla/utf8_uncased_fold.c",
+    "c/stringzilla/utf8_uncased.c",
+]
+STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
+# Per-capability instantiation units: each emits one ISA's (CPU) or tier's (CUDA) heavy engine code exactly once, so
+# the algorithm entry TUs above only declare them `extern` and link against them. Off-platform files compile to empty
+# objects via their internal SZ_USE_* guards. These lists mirror the CMake STRINGZILLAS_*_SOURCES.
+STRINGZILLAS_CPU_PROVIDER_STEMS = [
+    "levenshtein_serial",
+    "levenshtein_icelake",
+    "levenshtein_haswell",
+    "levenshtein_neon",
+    "levenshtein_rvv",
+    "needleman_wunsch_serial",
+    "needleman_wunsch_icelake",
+    "needleman_wunsch_haswell",
+    "needleman_wunsch_neon",
+    "needleman_wunsch_rvv",
+    "smith_waterman_serial",
+    "smith_waterman_icelake",
+    "smith_waterman_haswell",
+    "smith_waterman_neon",
+    "smith_waterman_rvv",
+]
+STRINGZILLAS_CUDA_PROVIDER_STEMS = [
+    "levenshtein_cuda",
+    "levenshtein_kepler",
+    "levenshtein_hopper",
+    "needleman_wunsch_cuda",
+    "needleman_wunsch_hopper",
+    "smith_waterman_cuda",
+    "smith_waterman_hopper",
+]
+# The compiled ForkUnion runtime rides along in every StringZillas extension as a host C++ translation unit;
+# `ParallelBuildExt` splits sources by extension, so it never reaches `nvcc`. `FU_WITH_TOPOLOGY=0` keeps the
+# wheels on the flat thread pool: measured on a 2-socket Sapphire Rapids, the topology-aware pool runs small
+# 16-thread jobs 1.8x slower and larger ones at parity, so the single-domain pool is the better default until
+# ForkUnion picks the pool kind from the requested thread count.
+STRINGZILLAS_RUNTIME_SOURCES = ["forkunion/c/forkunion.cpp"]
+STRINGZILLAS_CPU_SOURCES = [
+    f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
+] + STRINGZILLAS_RUNTIME_SOURCES
+STRINGZILLAS_CUDA_SOURCES = (
+    [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
+    + [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS]
+    + STRINGZILLAS_RUNTIME_SOURCES
+)
+
 ext_modules = []
 entry_points = {}
 command_class = {}
@@ -375,42 +640,53 @@ if sz_target == "stringzilla":
     ext_modules = [
         Extension(
             "stringzilla",
-            ["python/stringzilla.c", "c/stringzilla.c"],
-            include_dirs=["include"],
+            ["python/stringzilla.c"] + STRINGZILLA_CORE_SOURCES,
+            include_dirs=["include", "c/stringzilla"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
             define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
         ),
     ]
-    entry_points = {
-        "console_scripts": [
-            "sz_split=cli.split:main",
-            "sz_wc=cli.wc:main",
-        ],
-    }
+    # The `sz_split` / `sz_wc` CLIs moved to the standalone StringZilla-CLI repository.
+    entry_points = {"console_scripts": []}
+    # Parallel per-language compile + header-depfile incremental rebuilds for the 17 core C TUs (the base module
+    # has no numpy dependency, so it uses ParallelBuildExt directly rather than NumpyBuildExt).
+    command_class = {"build_ext": ParallelBuildExt}
 elif sz_target == "stringzillas-cpus":
     __lib_name__ = "stringzillas-cpus"
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cpp"],
-            include_dirs=["include", "c", "fork_union/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CPU_SOURCES,
+            include_dirs=["include", "c/stringzillas", "forkunion/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
         ),
     ]
     command_class = {"build_ext": NumpyBuildExt}
 elif sz_target == "stringzillas-cuda":
     __lib_name__ = "stringzillas-cuda"
+    # Honor the standard CUDA_HOME / CUDA_PATH so the include + runtime-library paths can be pinned to a
+    # toolkit whose `libcudart` the installed driver supports (mismatched runtimes raise
+    # `cudaErrorInsufficientDriver` at load). Falls back to the `/usr/local/cuda` symlink.
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
+    # MSVC and the GNU/Clang toolchains spell library search paths and names differently. On Windows the CUDA
+    # runtime + driver import libraries live under `lib\x64` and link.exe wants `/LIBPATH:` plus bare `*.lib`
+    # names; elsewhere it is the usual `-L.../lib64 -l...`. The C++ runtime links implicitly under MSVC, so the
+    # explicit `-lstdc++` is GNU/Clang-only.
+    if os.name == "nt":
+        cuda_link_args = link_args + [f"/LIBPATH:{os.path.join(cuda_home, 'lib', 'x64')}", "cudart.lib", "cuda.lib"]
+    else:
+        cuda_link_args = link_args + [f"-L{cuda_home}/lib64", "-lcudart", "-lcuda", "-lstdc++"]
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c", "c/stringzillas.cu"],
-            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include"],
+            ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
+            include_dirs=["include", "c/stringzillas", "forkunion/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
-            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lstdc++"],
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,
+            extra_link_args=cuda_link_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1"), ("FU_WITH_TOPOLOGY", "0")] + macros_args,
             language="c++",  # Force C++ linking
         ),
     ]

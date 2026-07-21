@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# StringZilla commit-msg hook - keeps commit messages free of tool attributions and session links.
+# Install once per clone with:  git config core.hooksPath .githooks
+# Bypass in a genuine emergency with:  git commit --no-verify
+
+set -u
+
+message_file="$1"
+
+attributions=$(grep -inE \
+    '(co-authored-by:.*(claude|anthropic|copilot|chatgpt|openai|gemini|cursor)|generated (with|by).*(claude|copilot|chatgpt|gpt|gemini|cursor|ai)|claude-session|noreply@anthropic\.com|noreply@openai\.com)' \
+    "$message_file" || true)
+if [ -n "$attributions" ]; then
+    echo "commit-msg: tool attributions and session links do not belong in commit messages:" >&2
+    echo "$attributions" >&2
+    echo "Remove the line(s), or bypass with --no-verify only if intentional." >&2
+    exit 1
+fi
+
+exit 0

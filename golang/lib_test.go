@@ -274,3 +274,60 @@ func TestUtf8CaseInsensitiveFind(t *testing.T) {
 		t.Fatalf("second match = %q, want %q", secondMatch, "ein Maß von etwa 20 μK")
 	}
 }
+
+// TestUtf8Count verifies SIMD codepoint counting across byte widths.
+func TestUtf8Count(t *testing.T) {
+	tests := []struct {
+		s    string
+		want int
+	}{
+		{"", 0},
+		{"hello", 5}, // 1-byte ASCII
+		{"héllo", 5}, // é is 2 bytes, 1 codepoint
+		{"日本語", 3},   // 3-byte CJK
+		{"a👍b", 3},   // 👍 is 4 bytes, 1 codepoint
+		{"éé", 2},    // two précomposed é
+	}
+	for _, tt := range tests {
+		if got := sz.Utf8Count(tt.s); got != tt.want {
+			t.Errorf("Utf8Count(%q) = %d, want %d", tt.s, got, tt.want)
+		}
+	}
+}
+
+// TestUtf8Normalize verifies NFC composition, NFKC folding, and idempotence.
+func TestUtf8Normalize(t *testing.T) {
+	// NFC composes base + combining mark: "e" + U+0301 -> "é" (U+00E9).
+	if got := sz.Utf8Normalize("é", sz.NFC); got != "é" {
+		t.Errorf("Utf8Normalize(NFC, e+combining acute) = %q, want %q", got, "é")
+	}
+	// NFKC folds the compatibility ligature U+FB01 (ﬁ) to "fi".
+	if got := sz.Utf8Normalize("ﬁ", sz.NFKC); got != "fi" {
+		t.Errorf("Utf8Normalize(NFKC, ligature fi) = %q, want %q", got, "fi")
+	}
+	// Idempotence: normalizing an already-NFC string is a no-op.
+	nfc := sz.Utf8Normalize("é", sz.NFC)
+	if got := sz.Utf8Normalize(nfc, sz.NFC); got != nfc {
+		t.Errorf("Utf8Normalize not idempotent: %q -> %q", nfc, got)
+	}
+	// Empty input.
+	if got := sz.Utf8Normalize("", sz.NFC); got != "" {
+		t.Errorf("Utf8Normalize(\"\") = %q, want \"\"", got)
+	}
+}
+
+func BenchmarkUtf8Count(b *testing.B) {
+	s := strings.Repeat("Hello, 世界! café 👍 ", 64)
+	b.SetBytes(int64(len(s)))
+	for i := 0; i < b.N; i++ {
+		_ = sz.Utf8Count(s)
+	}
+}
+
+func BenchmarkUtf8Normalize(b *testing.B) {
+	s := strings.Repeat("café é ﬁ ", 64)
+	b.SetBytes(int64(len(s)))
+	for i := 0; i < b.N; i++ {
+		_ = sz.Utf8Normalize(s, sz.NFC)
+	}
+}

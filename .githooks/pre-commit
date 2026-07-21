@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+#
+# StringZilla pre-commit hook - house-style guards over staged C/C++/CUDA (and the public headers).
+# Install once per clone with:  git config core.hooksPath .githooks
+# Bypass in a genuine emergency with:  git commit --no-verify
+
+set -u
+
+# Decorative comment separators - runs of three or more `-` or `=` used purely as visual dividers inside
+# C/C++ comments. Proper sentences communicate structure better than attention-grabbing rules.
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM \
+    -- '*.c' '*.h' '*.hpp' '*.cpp' '*.cc' '*.cxx' '*.cu' '*.cuh' '*.inl')
+separators=0
+for file in "${staged[@]}"; do
+    [ -f "$file" ] || continue
+    while IFS= read -r line; do
+        added="${line#+}"
+        if printf '%s\n' "$added" | grep -qE '(//|/\*|^\s*\*).*[-=]{3,}'; then
+            if [ "$separators" -eq 0 ]; then
+                printf 'Decorative comment separators are not allowed (--- / ===):\n\n' >&2
+            fi
+            printf '  %s: %s\n' "$file" "$(printf '%s' "$added" | sed 's/^[[:space:]]*//')" >&2
+            separators=$((separators + 1))
+        fi
+    done < <(git diff --cached -U0 -- "$file" | grep -E '^\+' | grep -vE '^\+\+\+')
+done
+if [ "$separators" -ne 0 ]; then
+    printf '\nWrite a plain sentence instead, or bypass with --no-verify.\n' >&2
+    exit 1
+fi
+
+# The `&*iterator` antipattern (iterator -> reference -> pointer laundering). Use the container's
+# `.data()`, `std::to_address(it)`, or a raw pointer directly instead.
+laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '&\*' || true)
+if [ -n "$laundering" ]; then
+  echo "pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):" >&2
+  echo "$laundering" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Dashes in `#pragma region` / `#pragma endregion` names: clang-format parses the trailing text as an
+# expression and rewrites `X-Y` into `X - Y`, desyncing region/endregion pairs. Use spaces in region names instead.
+pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '#pragma[[:space:]]+(region|endregion)' | grep -E '[A-Za-z0-9] *- *[A-Za-z0-9]' || true)
+if [ -n "$pragma_dashes" ]; then
+  echo "pre-commit: dash in a #pragma region/endregion name (clang-format rewrites 'X-Y' to 'X - Y'); use spaces:" >&2
+  echo "$pragma_dashes" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# LibC string/memory symbols under include/stringzilla/**: StringZilla supersedes LibC and cannot share a
+# translation unit with the compiler `__builtin_*` it emits. Use the project wrappers (`sz_copy`, `sz_fill`,
+# `sz_move`, `sz_equal`) or a `sz_u(128|256|512)_vec_t` union `.u8s[]` buffer for staging. The default allocator
+# and assert live in `types.h` (the sanctioned LibC touch-points) and are excluded; the `alloc->`/`allocator->`
+# callbacks are not LibC.
+libc=$(git diff --cached --no-color -U0 -- 'include/stringzilla' ':(exclude)include/stringzilla/types.h' \
+  | grep -nE '^\+' \
+  | grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' \
+  | grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
+if [ -n "$libc" ]; then
+  echo "pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC)." >&2
+  echo "Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:" >&2
+  echo "$libc" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# GitHub Actions job & step names: no parentheses, and the visible name starts with an uppercase letter
+# (or a `${{ … }}` expression). Checks job-level `name:` keys (8-space indent in our 4-space YAML style)
+# and step-level `- name:` items on ADDED lines only, so `with:` parameters like artifact names are
+# untouched. Prefer `Test Rust with compile-time dispatch` over `Test Rust (compile-time dispatch)`, and
+# `QEMU Tests ${{ matrix.target_arch }}` over `QEMU Tests (${{ matrix.target_arch }})`.
+workflow_names=$(git diff --cached --no-color -U0 -- '.github/workflows/*.yml' '.github/workflows/*.yaml' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '^\+( {8}name:| *- name:)' \
+  | grep -E '[()]|name:[[:space:]]*["'"'"']?[a-z]' || true)
+if [ -n "$workflow_names" ]; then
+  echo "pre-commit: workflow job/step names must avoid parentheses and start with an uppercase letter:" >&2
+  echo "$workflow_names" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Shared test scaffolding lives only in test/sz_helpers.py, test/szs_helpers.py, test/utf8_helpers.py,
+# and test/conftest.py. Every other test file imports it, so corpora, the seed system, the iterations
+# multiplier, and the backend sweep can't drift apart.
+scaffolding=$(git diff --cached --no-color -U0 \
+  -- 'test/*.py' ':(exclude)test/sz_helpers.py' ':(exclude)test/szs_helpers.py' ':(exclude)test/utf8_helpers.py' ':(exclude)test/conftest.py' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '^\+(def (vector_width_bracketing_strings|malformed_utf8_corpus|boundary_strings|differential_bodies|get_random_string|is_equal_strings|seed_random_generators|scale_iterations|unaligned_views|run_across_backends|assert_backends_agree|run_across_engines|assert_engines_agree|device_scope_and_capabilities|generate_string_batches|capability_sweep|forced_capabilities)\(|(SEED_VALUES|ITERATIONS_MULTIPLIER)[[:space:]]*=)' || true)
+if [ -n "$scaffolding" ]; then
+  echo "pre-commit: shared test scaffolding redefined outside test/sz_helpers.py; import it instead:" >&2
+  echo "$scaffolding" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Seeded tests parametrize over test.sz_helpers.SEED_VALUES, not a hardcoded literal list, so every run
+# includes the per-run random seed and honors SZ_TESTS_SEED.
+seedlists=$(git diff --cached --no-color -U0 -- 'test/*.py' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E 'parametrize\(.*"seed_value".*,[[:space:]]*\[' || true)
+if [ -n "$seedlists" ]; then
+  echo "pre-commit: parametrize seed_value over test.sz_helpers.SEED_VALUES, not a literal list:" >&2
+  echo "$seedlists" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Random-draw fuzz loops use a throwaway target and must scale with SZ_TESTS_MULTIPLIER, so their count
+# is wrapped in scale_iterations(...). Algorithmic loops use a named index and are left alone.
+frozen_fuzz=$(git diff --cached --no-color -U0 -- 'test/*.py' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E 'for _ in range\([0-9]' || true)
+if [ -n "$frozen_fuzz" ]; then
+  echo "pre-commit: frozen fuzz-loop count; wrap it as 'for _ in range(scale_iterations(N)):'" >&2
+  echo "$frozen_fuzz" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+# Serial bit-op helpers and raw compiler builtins inside ISA-specific kernel files are a symptom of not
+# leveraging the platform: masks were materialized into a scalar just to count or scan them, when native
+# mask/lane instructions do it in place (RVV `vcpop.m`/`vfirst.m`, x86 `popcnt` on a fresh movemask is fine
+# but a `k`-register `kortest`/`vpopcnt` path may be cheaper, NEON `cnt`+`addv`). `sz_u64_clz` stays exempt:
+# find-last-set has no mask-native counterpart on any of our targets.
+serial_bitops=$(git diff --cached --no-color -U0 \
+  -- 'include/stringzilla/*/westmere.h' 'include/stringzilla/*/goldmont.h' 'include/stringzilla/*/haswell.h' \
+     'include/stringzilla/*/skylake.h' 'include/stringzilla/*/icelake.h' 'include/stringzilla/*/neon.h' \
+     'include/stringzilla/*/sve.h' 'include/stringzilla/*/sve2.h' 'include/stringzilla/*/rvv.h' \
+     'include/stringzilla/*/rvvcrypto.h' 'include/stringzilla/*/v128.h' 'include/stringzilla/*/lasx.h' \
+     'include/stringzilla/*/powervsx.h' 'include/stringzillas/*/*.hpp' ':(exclude)include/stringzillas/*/serial.hpp' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -E 'sz_u(32|64)_(popcount|ctz)|__builtin_(popcount|ctz|clz|ffs|parity)' || true)
+if [ -n "$serial_bitops" ]; then
+  echo "pre-commit: serial bit-op helper or raw __builtin_* in a staged ISA kernel file." >&2
+  echo "Prefer the native mask/lane instruction (vcpop.m / vfirst.m on RVV, kortest / popcnt-on-movemask on x86," >&2
+  echo "cnt+addv on NEON) over materializing a mask into a scalar just to count or scan it:" >&2
+  echo "$serial_bitops" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
+exit 0

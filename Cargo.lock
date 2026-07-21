@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "allocator-api2"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c583acf993cf4245c4acb0a2cc2ab1f9cc097de73411bb6d3647ff6af2b1013d"
+checksum = "c880a97d28a3681c0267bd29cff89621202715b065127cd445fa0f0fe0aa2880"
 
 [[package]]
 name = "cc"
@@ -25,6 +25,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
+name = "forkunion"
+version = "3.0.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -32,9 +39,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "stringtape"
-version = "2.4.1"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb8ad32851d524ac82e67afa6ab2cc382da77b92df2acbd9a8723609a6143f3f"
+checksum = "2c2ad8ddd435760c2439d6548e52bca5097890f3af26b3c417af3a87ed28e0fa"
 dependencies = [
  "allocator-api2",
 ]
@@ -45,5 +52,6 @@ version = "4.6.3"
 dependencies = [
  "allocator-api2",
  "cc",
+ "forkunion",
  "stringtape",
 ]

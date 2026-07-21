@@ -1,10 +1,16 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_void, CStr};
+use core::ops::Index;
 use core::ptr;
 
 use allocator_api2::{alloc::AllocError, alloc::Allocator, alloc::Layout};
 use stringtape::{BytesTape, BytesTapeView, CharsTape, CharsTapeView};
+
+// The `forkunion` crate's build script compiles and links the thread-pool runtime resolving the `fu_*`
+// symbols behind the StringZillas engines; referencing the crate keeps that native library in the final
+// link even though all calls happen on the C++ side.
+use forkunion as _;
 
 // Re-export common types from stringzilla
 pub use crate::stringzilla::{SortedIdx, Status as SzStatus};
@@ -58,6 +64,15 @@ pub enum AnyCharsTape<'a> {
     View64(CharsTapeView<'a, u64>),
 }
 
+impl<'a> AnyCharsTape<'a> {
+    /// Copy string sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
+    /// automatically from the input size. Use this to feed the engines' `compute_into` methods
+    /// without depending on the `stringtape` crate directly.
+    pub fn from_sequences<T: AsRef<str>>(sequences: &[T]) -> Result<Self, Error> {
+        copy_chars_into_tape(sequences, false)
+    }
+}
+
 /// Tape variant that can hold either 32-bit or 64-bit byte tapes with unsigned offsets
 pub enum AnyBytesTape<'a> {
     Tape32(BytesTape<u32, UnifiedAlloc>),
@@ -65,6 +80,15 @@ pub enum AnyBytesTape<'a> {
     // Zero-copy FFI views (bytes)
     View32(BytesTapeView<'a, u32>),
     View64(BytesTapeView<'a, u64>),
+}
+
+impl<'a> AnyBytesTape<'a> {
+    /// Copy byte sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
+    /// automatically from the input size. Use this to feed the engines' `compute_into` methods
+    /// without depending on the `stringtape` crate directly.
+    pub fn from_sequences<T: AsRef<[u8]>>(sequences: &[T]) -> Result<Self, Error> {
+        copy_bytes_into_tape(sequences, false)
+    }
 }
 
 /// Manages execution context and hardware resource allocation.
@@ -617,33 +641,33 @@ extern "C" {
         error_message: *mut *const c_char,
     ) -> Status;
 
-    fn szs_levenshtein_distances_sequence(
+    fn szs_levenshtein_distances(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
+        queries: *const c_void,    // sz_sequence_t
+        candidates: *const c_void, // sz_sequence_t; NULL => symmetric self-similarity of queries
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_u32tape(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
+        queries: *const c_void,    // sz_sequence_u32tape_t
+        candidates: *const c_void, // sz_sequence_u32tape_t; NULL => symmetric self-similarity
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_u64tape(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
+        queries: *const c_void,    // sz_sequence_u64tape_t
+        candidates: *const c_void, // sz_sequence_u64tape_t; NULL => symmetric self-similarity
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
@@ -661,33 +685,33 @@ extern "C" {
         error_message: *mut *const c_char,
     ) -> Status;
 
-    fn szs_levenshtein_distances_utf8_sequence(
+    fn szs_levenshtein_distances_utf8(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
+        queries: *const c_void,    // sz_sequence_t
+        candidates: *const c_void, // sz_sequence_t; NULL => symmetric self-similarity of queries
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_u32tape(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
+        queries: *const c_void,    // sz_sequence_u32tape_t
+        candidates: *const c_void, // sz_sequence_u32tape_t; NULL => symmetric self-similarity
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_levenshtein_distances_utf8_u64tape(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
+        queries: *const c_void,    // sz_sequence_u64tape_t
+        candidates: *const c_void, // sz_sequence_u64tape_t; NULL => symmetric self-similarity
         results: *mut usize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
@@ -695,7 +719,8 @@ extern "C" {
 
     // Needleman-Wunsch scoring functions
     fn szs_needleman_wunsch_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
+        byte_to_class: *const u8,            // 256 byte-to-class map
+        class_substitution_costs: *const i8, // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,
@@ -704,33 +729,33 @@ extern "C" {
         error_message: *mut *const c_char,
     ) -> Status;
 
-    fn szs_needleman_wunsch_scores_sequence(
+    fn szs_needleman_wunsch_scores(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
+        queries: *const c_void,    // sz_sequence_t
+        candidates: *const c_void, // sz_sequence_t; NULL => symmetric self-similarity of queries
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_u32tape(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
+        queries: *const c_void,    // sz_sequence_u32tape_t
+        candidates: *const c_void, // sz_sequence_u32tape_t; NULL => symmetric self-similarity
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_needleman_wunsch_scores_u64tape(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
+        queries: *const c_void,    // sz_sequence_u64tape_t
+        candidates: *const c_void, // sz_sequence_u64tape_t; NULL => symmetric self-similarity
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
@@ -738,7 +763,8 @@ extern "C" {
 
     // Smith-Waterman scoring functions
     fn szs_smith_waterman_scores_init(
-        subs: *const i8, // 256x256 substitution matrix
+        byte_to_class: *const u8,            // 256 byte-to-class map
+        class_substitution_costs: *const i8, // 32x32 class substitution matrix
         open_cost: i8,
         extend_cost: i8,
         alloc: *const c_void,
@@ -747,33 +773,33 @@ extern "C" {
         error_message: *mut *const c_char,
     ) -> Status;
 
-    fn szs_smith_waterman_scores_sequence(
+    fn szs_smith_waterman_scores(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_t
-        b: *const c_void, // sz_sequence_t
+        queries: *const c_void,    // sz_sequence_t
+        candidates: *const c_void, // sz_sequence_t; NULL => symmetric self-similarity of queries
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_u32tape(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u32tape_t
-        b: *const c_void, // sz_sequence_u32tape_t
+        queries: *const c_void,    // sz_sequence_u32tape_t
+        candidates: *const c_void, // sz_sequence_u32tape_t; NULL => symmetric self-similarity
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
     fn szs_smith_waterman_scores_u64tape(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
-        a: *const c_void, // sz_sequence_u64tape_t
-        b: *const c_void, // sz_sequence_u64tape_t
+        queries: *const c_void,    // sz_sequence_u64tape_t
+        candidates: *const c_void, // sz_sequence_u64tape_t; NULL => symmetric self-similarity
         results: *mut isize,
-        results_stride: usize,
+        results_row_stride: usize,
         error_message: *mut *const c_char,
     ) -> Status;
 
@@ -785,6 +811,7 @@ extern "C" {
         alphabet_size: usize,
         window_widths: *const usize,
         window_widths_count: usize,
+        seed: u64,
         alloc: *const c_void, // MemoryAllocator - using null for default
         capabilities: Capability,
         engine: *mut FingerprintsHandle,
@@ -864,6 +891,105 @@ unsafe impl Allocator for UnifiedAlloc {
 /// Type alias for Vec with unified allocator
 pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 
+/// Row-major cross-product result matrix produced by the similarity engines.
+///
+/// Every similarity engine computes a dense `queries_count × candidates_count`
+/// matrix where `matrix[(query_index, candidate_index)]` holds the distance or
+/// score between `queries[query_index]` and `candidates[candidate_index]`.
+///
+/// The backing storage is a [`UnifiedVec`], so the buffer lives in unified
+/// memory and can be consumed by a GPU kernel without an extra copy. Rows are
+/// laid out contiguously with a stride of `row_stride` elements; for a freshly
+/// allocated matrix `row_stride == candidates_count`.
+///
+/// # Examples
+///
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+/// let device = DeviceScope::default().unwrap();
+/// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+///
+/// let queries = vec!["kitten", "saturday"];
+/// let candidates = vec!["sitting", "sunday"];
+/// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
+/// assert_eq!(matrix.dimensions(), (2, 2));
+/// assert_eq!(matrix[(0, 0)], 3); // kitten vs sitting
+/// ```
+pub struct Mat<T, A: Allocator = allocator_api2::alloc::Global> {
+    data: allocator_api2::vec::Vec<T, A>,
+    queries_count: usize,
+    candidates_count: usize,
+    row_stride: usize,
+}
+
+/// A [`Mat`] backed by unified (CPU+GPU) memory - the matrix counterpart of [`UnifiedVec`].
+pub type UnifiedMat<T> = Mat<T, UnifiedAlloc>;
+
+impl<T> Mat<T, UnifiedAlloc>
+where
+    T: Copy + Default,
+{
+    /// Allocate a zero-initialized `queries_count × candidates_count` matrix in unified memory, guarding
+    /// against allocation failure (mirrors the C++ engines' `try_resize` discipline - never panics on OOM).
+    ///
+    /// The row stride equals `candidates_count`, so rows are stored back-to-back with no padding. The buffer
+    /// is suitable for direct GPU consumption.
+    pub fn try_allocate(queries_count: usize, candidates_count: usize) -> Result<Self, Error> {
+        let element_count = queries_count.saturating_mul(candidates_count);
+        let mut data = allocator_api2::vec::Vec::new_in(UnifiedAlloc);
+        data.try_reserve_exact(element_count)
+            .map_err(|_| Error::from(SzStatus::BadAlloc))?;
+        data.resize(element_count, T::default()); // No reallocation: capacity was just reserved.
+        Ok(Mat {
+            data,
+            queries_count,
+            candidates_count,
+            row_stride: candidates_count,
+        })
+    }
+}
+
+impl<T, A: Allocator> Mat<T, A> {
+    /// Returns the `(queries_count, candidates_count)` shape of the matrix.
+    pub fn dimensions(&self) -> (usize, usize) {
+        (self.queries_count, self.candidates_count)
+    }
+
+    /// Returns the number of query rows.
+    pub fn queries_count(&self) -> usize {
+        self.queries_count
+    }
+
+    /// Returns the number of candidate columns.
+    pub fn candidates_count(&self) -> usize {
+        self.candidates_count
+    }
+
+    /// Returns the element stride between consecutive rows in the backing buffer.
+    pub fn row_stride(&self) -> usize {
+        self.row_stride
+    }
+
+    /// Returns the row of distances for `query_index` as a contiguous slice of `candidates_count` elements.
+    pub fn row(&self, query_index: usize) -> &[T] {
+        let row_start = query_index * self.row_stride;
+        &self.data[row_start..row_start + self.candidates_count]
+    }
+
+    /// Returns the entire backing buffer (including any inter-row padding) as a flat slice.
+    pub fn as_slice(&self) -> &[T] {
+        &self.data[..]
+    }
+}
+
+impl<T, A: Allocator> Index<(usize, usize)> for Mat<T, A> {
+    type Output = T;
+
+    fn index(&self, (query_index, candidate_index): (usize, usize)) -> &T {
+        &self.data[query_index * self.row_stride + candidate_index]
+    }
+}
+
 /// Returns StringZillas similarity engine version information.
 pub fn version() -> crate::stringzilla::SemVer {
     crate::stringzilla::SemVer {
@@ -882,8 +1008,8 @@ pub fn capabilities() -> crate::stringzilla::SmallCString {
 
 /// Levenshtein distance engine for batch processing of binary sequences.
 ///
-/// Computes edit distances between byte sequence pairs using configurable gap costs.
-/// Optimized for processing large batches in parallel.
+/// Computes a cross-product matrix of edit distances between query and candidate
+/// byte sequences using configurable gap costs. Optimized for large batches.
 ///
 /// # Examples
 ///
@@ -892,10 +1018,12 @@ pub fn capabilities() -> crate::stringzilla::SmallCString {
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
 ///
-/// let strings_a = vec!["kitten", "saturday"];
-/// let strings_b = vec!["sitting", "sunday"];
-/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-/// assert_eq!(&distances[..], &[3, 3]);
+/// let queries = vec!["kitten", "saturday"];
+/// let candidates = vec!["sitting", "sunday"];
+/// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
+/// assert_eq!(matrix.dimensions(), (2, 2));
+/// assert_eq!(matrix[(0, 0)], 3); // kitten vs sitting
+/// assert_eq!(matrix[(1, 1)], 3); // saturday vs sunday
 /// ```
 pub struct LevenshteinDistances {
     handle: LevenshteinDistancesHandle,
@@ -937,29 +1065,23 @@ impl LevenshteinDistances {
         }
     }
 
-    /// Compute Levenshtein distances between sequence pairs.
+    /// Compute the cross-product matrix of Levenshtein distances between queries and candidates.
     ///
-    /// Processes pairs of sequences in parallel, computing edit distance for each pair.
-    /// The function automatically handles both CPU SIMD and GPU acceleration based
-    /// on the device scope configuration.
+    /// Builds a dense row-major `queries × candidates` matrix where
+    /// `matrix[(query_index, candidate_index)]` is the edit distance between
+    /// `queries[query_index]` and `candidates[candidate_index]`. The function
+    /// automatically dispatches to CPU SIMD or GPU based on the device scope.
     ///
     /// # Parameters
     ///
     /// - `device`: Device scope for execution
-    /// - `sequences_a`: First collection of sequences
-    /// - `sequences_b`: Second collection of sequences  
+    /// - `queries`: Collection of query sequences (matrix rows)
+    /// - `candidates`: Collection of candidate sequences (matrix columns)
     ///
     /// # Returns
     ///
-    /// - `Ok(UnifiedVec<usize>)`: Vector of distances, one per sequence pair
+    /// - `Ok(UnifiedMat<usize>)`: `queries.len() × candidates.len()` distance matrix
     /// - `Err(Error)`: Computation failed
-    ///
-    /// # Behavior
-    ///
-    /// - Pairs sequences by index: (a[0], b[0]), (a[1], b[1]), etc.
-    /// - Result length equals `min(sequences_a.len(), sequences_b.len())`
-    /// - Uses unified memory allocation for GPU compatibility
-    /// - Empty sequences are handled correctly (distance equals other sequence length)
     ///
     /// # Examples
     ///
@@ -968,118 +1090,156 @@ impl LevenshteinDistances {
     /// let device = DeviceScope::default().unwrap();
     /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
     ///
-    /// // Basic usage
-    /// let words_a = vec!["cat", "dog", "bird"];
-    /// let words_b = vec!["bat", "fog", "word"];
-    /// let distances = engine.compute(&device, &words_a, &words_b).unwrap();
+    /// let queries = vec!["cat", "dog"];
+    /// let candidates = vec!["bat", "fog", "word"];
+    /// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
     ///
-    /// assert_eq!(distances.len(), 3);
-    /// println!("Distances: {:?}", distances); // [1, 1, 3]
+    /// assert_eq!(matrix.dimensions(), (2, 3));
+    /// assert_eq!(matrix[(0, 0)], 1); // cat vs bat
     /// ```
-    ///
-    /// # Performance
-    ///
-    /// - CPU performance scales with SIMD width and core count
-    /// - GPU optimal for batches >1000 pairs with medium-length sequences
-    /// - Memory layout optimized for cache efficiency
-    /// - Consider sequence length distribution for optimal performance
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
     {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+        let queries_slice = queries.as_ref();
+        let candidates_slice = candidates.as_ref();
+        let mut matrix = UnifiedMat::<usize>::try_allocate(queries_slice.len(), candidates_slice.len())?;
+        self.compute_pair(device, queries_slice, Some(candidates_slice), &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
+    /// Compute the symmetric self-similarity matrix of a single sequence collection.
+    ///
+    /// Produces a square `sequences × sequences` matrix of pairwise distances by
+    /// passing a null candidates pointer to the engine, which then compares the
+    /// queries against themselves. The diagonal is the distance of each sequence
+    /// to itself and the matrix is symmetric.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
+    ///
+    /// let sequences = vec!["cat", "bat", "rat"];
+    /// let matrix = engine.compute_symmetric(&device, &sequences).unwrap();
+    /// assert_eq!(matrix.dimensions(), (3, 3));
+    /// assert_eq!(matrix[(0, 1)], matrix[(1, 0)]);
+    /// ```
+    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<usize>, Error>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
+    {
+        let sequences_slice = sequences.as_ref();
+        let mut matrix = UnifiedMat::<usize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
+        self.compute_pair(device, sequences_slice, None, &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let results_stride = core::mem::size_of::<usize>();
-
+    /// Shared implementation for `compute` and `compute_symmetric`.
+    ///
+    /// When `candidates` is `None`, a null candidates pointer is forwarded to the
+    /// engine to request symmetric self-similarity of `queries`. On GPU devices the
+    /// inputs are first copied into unified-memory tapes and dispatched through
+    /// `compute_into`.
+    fn compute_pair<S>(
+        &self,
+        device: &DeviceScope,
+        queries: &[S],
+        candidates: Option<&[S]>,
+        matrix: &mut UnifiedMat<usize>,
+    ) -> Result<(), Error>
+    where
+        S: AsRef<[u8]>,
+    {
         if device.is_gpu() {
-            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
-            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
-            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-
-            // Forward to the in-place variant to avoid code duplication
-            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
-            Ok(results)
-        } else {
-            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
-            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_levenshtein_distances_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
+            let force_64bit = match candidates {
+                Some(candidates_slice) => should_use_64bit_for_bytes(queries, candidates_slice),
+                None => should_use_64bit_for_bytes(queries, queries),
             };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            let queries_tape = copy_bytes_into_tape(queries, force_64bit)?;
+            let candidates_tape = match candidates {
+                Some(candidates_slice) => Some(copy_bytes_into_tape(candidates_slice, force_64bit)?),
+                None => None,
+            };
+            return self.compute_into(device, queries_tape, candidates_tape, matrix);
+        }
+
+        let queries_sequence = SzSequenceFromBytes::to_sz_sequence(queries);
+        let candidates_sequence = candidates.map(SzSequenceFromBytes::to_sz_sequence);
+        let candidates_ptr = match &candidates_sequence {
+            Some(sequence) => sequence as *const _ as *const c_void,
+            None => ptr::null(),
+        };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances(
+                self.handle,
+                device.handle,
+                &queries_sequence as *const _ as *const c_void,
+                candidates_ptr,
+                matrix.data.as_mut_ptr(),
+                matrix.row_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(()),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
-    /// Compute Levenshtein distances into an existing results buffer.
+    /// Compute the cross-product distance matrix into a caller-provided matrix.
     ///
-    /// - Accepts `AnyBytesTape<'_>` for both sides: either owned `BytesTape` or `BytesTapeView`.
-    /// - Supports 32-bit or 64-bit offsets; both inputs must use the same width.
-    /// - Writes distances into `results` without reallocating.
-    ///
-    /// Requirements
-    /// - `results.len() >= min(a.len(), b.len())`
-    /// - For GPU devices, inputs should be allocated in unified/device memory.
+    /// - Accepts `AnyBytesTape<'_>` for `queries`: either an owned `BytesTape` or a `BytesTapeView`.
+    /// - `candidates` may be `None` to request symmetric self-similarity (a null candidates
+    ///   pointer is forwarded to the engine); when `Some`, both inputs must share the same offset width.
+    /// - Writes the `queries × candidates` matrix into `matrix` without reallocating.
     ///
     /// Errors
-    /// - `UnexpectedDimensions` if buffer is too small or widths are mixed.
+    /// - `UnexpectedDimensions` if the matrix shape does not match the inputs or widths are mixed.
     /// - Underlying engine errors forwarded from the FFI.
     pub fn compute_into<'a>(
         &self,
         device: &DeviceScope,
-        a: AnyBytesTape<'a>,
-        b: AnyBytesTape<'a>,
-        results: &mut [usize],
+        queries: AnyBytesTape<'a>,
+        candidates: Option<AnyBytesTape<'a>>,
+        matrix: &mut UnifiedMat<usize>,
     ) -> Result<(), Error> {
-        // Convert to FFI views and validate matching offset widths
         let mut error_msg: *const c_char = ptr::null();
-        let results_stride = core::mem::size_of::<usize>();
 
-        // Convert both inputs to 64-bit views if possible, else to 32-bit views.
-        let a64 = match &a {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+        // Prefer 64-bit views when the query tape is 64-bit wide.
+        let queries64 = match &queries {
+            AnyBytesTape::Tape64(tape) => Some(SzSequenceU64Tape::from(tape)),
+            AnyBytesTape::View64(view) => Some(SzSequenceU64Tape::from(view)),
             _ => None,
         };
-        let b64 = match &b {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a64, b64) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries64 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape64(tape)) => Some(SzSequenceU64Tape::from(tape)),
+                Some(AnyBytesTape::View64(view)) => Some(SzSequenceU64Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_levenshtein_distances_u64tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1089,29 +1249,34 @@ impl LevenshteinDistances {
             };
         }
 
-        let a32 = match &a {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+        let queries32 = match &queries {
+            AnyBytesTape::Tape32(tape) => Some(SzSequenceU32Tape::from(tape)),
+            AnyBytesTape::View32(view) => Some(SzSequenceU32Tape::from(view)),
             _ => None,
         };
-        let b32 = match &b {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a32, b32) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries32 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape32(tape)) => Some(SzSequenceU32Tape::from(tape)),
+                Some(AnyBytesTape::View32(view)) => Some(SzSequenceU32Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_levenshtein_distances_u32tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1149,10 +1314,11 @@ unsafe impl Sync for LevenshteinDistances {}
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
 ///
-/// let strings_a = vec!["café", "🦀 rust"];
-/// let strings_b = vec!["cafe", "🔥 rust"];
-/// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
-/// assert_eq!(&distances[..], &[1, 1]); // Character-level edits
+/// let queries = vec!["café", "🦀 rust"];
+/// let candidates = vec!["cafe", "🔥 rust"];
+/// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
+/// assert_eq!(matrix[(0, 0)], 1); // café vs cafe, one character edit
+/// assert_eq!(matrix[(1, 1)], 1); // 🦀 rust vs 🔥 rust
 /// ```
 pub struct LevenshteinDistancesUtf8 {
     handle: LevenshteinDistancesUtf8Handle,
@@ -1234,13 +1400,13 @@ impl LevenshteinDistancesUtf8 {
     /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
     ///
     /// // Unicode strings (same container type for both sides)
-    /// let strings_a: Vec<String> = vec!["résumé".to_string(), "naïve".to_string()];
-    /// let strings_b: Vec<String> = vec!["resume".to_string(), "naive".to_string()];
-    /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
+    /// let queries: Vec<String> = vec!["résumé".to_string(), "naïve".to_string()];
+    /// let candidates: Vec<String> = vec!["resume".to_string(), "naive".to_string()];
+    /// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
     ///
-    /// // Each accented character counts as 1 edit
-    /// assert_eq!(distances[0], 2); // é->e, é->e
-    /// assert_eq!(distances[1], 1); // ï->i
+    /// // Each accented character counts as 1 edit (diagonal of the matrix)
+    /// assert_eq!(matrix[(0, 0)], 2); // é->e, é->e
+    /// assert_eq!(matrix[(1, 1)], 1); // ï->i
     /// ```
     ///
     /// # Unicode Normalization
@@ -1257,94 +1423,132 @@ impl LevenshteinDistancesUtf8 {
     /// // Distance would be non-zero without normalization
     /// // Use unicode-normalization crate if needed
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<usize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<str>,
     {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+        let queries_slice = queries.as_ref();
+        let candidates_slice = candidates.as_ref();
+        let mut matrix = UnifiedMat::<usize>::try_allocate(queries_slice.len(), candidates_slice.len())?;
+        self.compute_pair(device, queries_slice, Some(candidates_slice), &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
+    /// Compute the symmetric self-similarity matrix of a single UTF-8 collection.
+    ///
+    /// Produces a square `sequences × sequences` matrix of character-level edit
+    /// distances by forwarding a null candidates pointer to the engine. The matrix
+    /// is symmetric and its diagonal holds the distance of each string to itself.
+    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<usize>, Error>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<str>,
+    {
+        let sequences_slice = sequences.as_ref();
+        let mut matrix = UnifiedMat::<usize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
+        self.compute_pair(device, sequences_slice, None, &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let results_stride = core::mem::size_of::<usize>();
-
+    /// Shared implementation for `compute` and `compute_symmetric`.
+    ///
+    /// Forwards a null candidates pointer when `candidates` is `None` to request
+    /// symmetric self-similarity. On GPU devices the inputs are first copied into
+    /// unified-memory tapes and dispatched through `compute_into`.
+    fn compute_pair<S>(
+        &self,
+        device: &DeviceScope,
+        queries: &[S],
+        candidates: Option<&[S]>,
+        matrix: &mut UnifiedMat<usize>,
+    ) -> Result<(), Error>
+    where
+        S: AsRef<str>,
+    {
         if device.is_gpu() {
-            let force_64bit = should_use_64bit_for_strings(seq_a_slice, seq_b_slice);
-            let tape_a = copy_chars_into_tape(seq_a_slice, force_64bit)?;
-            let tape_b = copy_chars_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
-            Ok(results)
-        } else {
-            let seq_a = SzSequenceFromChars::to_sz_sequence(seq_a_slice);
-            let seq_b = SzSequenceFromChars::to_sz_sequence(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_levenshtein_distances_utf8_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
+            let force_64bit = match candidates {
+                Some(candidates_slice) => should_use_64bit_for_strings(queries, candidates_slice),
+                None => should_use_64bit_for_strings(queries, queries),
             };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            let queries_tape = copy_chars_into_tape(queries, force_64bit)?;
+            let candidates_tape = match candidates {
+                Some(candidates_slice) => Some(copy_chars_into_tape(candidates_slice, force_64bit)?),
+                None => None,
+            };
+            return self.compute_into(device, queries_tape, candidates_tape, matrix);
+        }
+
+        let queries_sequence = SzSequenceFromChars::to_sz_sequence(queries);
+        let candidates_sequence = candidates.map(SzSequenceFromChars::to_sz_sequence);
+        let candidates_ptr = match &candidates_sequence {
+            Some(sequence) => sequence as *const _ as *const c_void,
+            None => ptr::null(),
+        };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_levenshtein_distances_utf8(
+                self.handle,
+                device.handle,
+                &queries_sequence as *const _ as *const c_void,
+                candidates_ptr,
+                matrix.data.as_mut_ptr(),
+                matrix.row_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(()),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
-    /// Compute UTF-8 Levenshtein distances into an existing results buffer.
+    /// Compute the cross-product distance matrix into a caller-provided matrix.
     ///
-    /// - Accepts `AnyCharsTape<'_>` for both sides: `CharsTape` or `CharsTapeView`.
-    /// - Supports 32-bit or 64-bit offsets; both inputs must use the same width.
-    /// - No result allocations; writes into `results`.
+    /// - Accepts `AnyCharsTape<'_>` for `queries`: `CharsTape` or `CharsTapeView`.
+    /// - `candidates` may be `None` for symmetric self-similarity; when `Some`, both
+    ///   inputs must share the same offset width.
+    /// - Writes the `queries × candidates` matrix into `matrix` without reallocating.
     ///
     /// Requirements and errors are the same as the bytes variant.
     pub fn compute_into<'a>(
         &self,
         device: &DeviceScope,
-        a: AnyCharsTape<'a>,
-        b: AnyCharsTape<'a>,
-        results: &mut [usize],
+        queries: AnyCharsTape<'a>,
+        candidates: Option<AnyCharsTape<'a>>,
+        matrix: &mut UnifiedMat<usize>,
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
-        let results_stride = core::mem::size_of::<usize>();
 
-        // Try 64-bit first
-        let a64 = match &a {
-            AnyCharsTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyCharsTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+        // Prefer 64-bit views when the query tape is 64-bit wide.
+        let queries64 = match &queries {
+            AnyCharsTape::Tape64(tape) => Some(SzSequenceU64Tape::from(tape)),
+            AnyCharsTape::View64(view) => Some(SzSequenceU64Tape::from(view)),
             _ => None,
         };
-        let b64 = match &b {
-            AnyCharsTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyCharsTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a64, b64) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries64 {
+            let candidates_view = match &candidates {
+                Some(AnyCharsTape::Tape64(tape)) => Some(SzSequenceU64Tape::from(tape)),
+                Some(AnyCharsTape::View64(view)) => Some(SzSequenceU64Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_levenshtein_distances_utf8_u64tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1354,30 +1558,34 @@ impl LevenshteinDistancesUtf8 {
             };
         }
 
-        // Then 32-bit
-        let a32 = match &a {
-            AnyCharsTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyCharsTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+        let queries32 = match &queries {
+            AnyCharsTape::Tape32(tape) => Some(SzSequenceU32Tape::from(tape)),
+            AnyCharsTape::View32(view) => Some(SzSequenceU32Tape::from(view)),
             _ => None,
         };
-        let b32 = match &b {
-            AnyCharsTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyCharsTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a32, b32) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries32 {
+            let candidates_view = match &candidates {
+                Some(AnyCharsTape::Tape32(tape)) => Some(SzSequenceU32Tape::from(tape)),
+                Some(AnyCharsTape::View32(view)) => Some(SzSequenceU32Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_levenshtein_distances_utf8_u32tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1404,21 +1612,26 @@ unsafe impl Sync for LevenshteinDistancesUtf8 {}
 
 /// Needleman-Wunsch global sequence alignment scoring engine.
 ///
-/// Finds optimal global alignments using a substitution matrix and gap penalties.
-/// Returns alignment scores rather than distances.
+/// Finds optimal global alignments using a compact class-based substitution matrix and gap
+/// penalties. Returns alignment scores rather than distances.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-/// // Create scoring matrix (match=2, mismatch=-1)
-/// let mut matrix = [[-1i8; 256]; 256];
+/// // Map each byte to one of 32 classes; here every byte is its own class modulo 32.
+/// let mut byte_to_class = [0u8; 256];
 /// for i in 0..256 {
-///     matrix[i][i] = 2;
+///     byte_to_class[i] = (i % 32) as u8;
+/// }
+/// // Class scoring matrix (match=2, mismatch=-1)
+/// let mut class_costs = [[-1i8; 32]; 32];
+/// for i in 0..32 {
+///     class_costs[i][i] = 2;
 /// }
 ///
 /// let device = DeviceScope::default().unwrap();
-/// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+/// let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
 ///
 /// let seq_a = vec!["ACGT"];
 /// let seq_b = vec!["AGCT"];
@@ -1432,12 +1645,14 @@ impl NeedlemanWunschScores {
     /// Create a new Needleman-Wunsch global alignment scoring engine.
     ///
     /// # Parameters
-    /// - `substitution_matrix`: 256x256 matrix of alignment scores
+    /// - `byte_to_class`: 256-entry map from each input byte to one of 32 character classes
+    /// - `class_substitution_costs`: 32x32 matrix of alignment scores between character classes
     /// - `open_cost`: Penalty for opening a gap (typically negative)
     /// - `extend_cost`: Penalty for extending a gap (typically negative, ≤ open_cost)
     pub fn new(
         device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
+        byte_to_class: &[u8; 256],
+        class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
     ) -> Result<Self, Error> {
@@ -1446,7 +1661,8 @@ impl NeedlemanWunschScores {
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_needleman_wunsch_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
+                byte_to_class.as_ptr() as *const u8,
+                class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
                 ptr::null(),
@@ -1489,27 +1705,30 @@ impl NeedlemanWunschScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 2; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// # let mut byte_to_class = [0u8; 256];
+    /// # for i in 0..256 { byte_to_class[i] = (i % 32) as u8; }
+    /// # let mut class_costs = [[-1i8; 32]; 32];
+    /// # for i in 0..32 { class_costs[i][i] = 2; }
     /// let device = DeviceScope::default().unwrap();
-    /// let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     ///
     /// // Compare DNA sequences
-    /// let dna_a = vec!["ATCGATCG", "GGCCTTAA"];
-    /// let dna_b = vec!["ATCGATCC", "GGCCTTAA"]; // One mismatch, one exact
-    /// let scores = engine.compute(&device, &dna_a, &dna_b).unwrap();
+    /// let queries = vec!["ATCGATCG", "GGCCTTAA"];
+    /// let candidates = vec!["ATCGATCC", "GGCCTTAA"]; // One mismatch, one exact
+    /// let matrix = engine.compute(&device, &queries, &candidates).unwrap();
     ///
-    /// println!("DNA alignment scores: {:?}", scores);
-    /// // Expect: [positive but lower for mismatch, high positive for exact match]
+    /// // matrix[(0, 0)] is a lower score (mismatch); matrix[(1, 1)] is the exact match
+    /// println!("DNA alignment scores: {:?}", matrix.as_slice());
     /// ```
     ///
     /// # Batch Processing
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
+    /// # let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// // Process large batches efficiently
     /// let sequences: Vec<&str> = vec![
     ///     "PROTEIN_SEQUENCE_1", "PROTEIN_SEQUENCE_2", /* ... */
@@ -1518,103 +1737,137 @@ impl NeedlemanWunschScores {
     ///     "REFERENCE_SEQ_1", "REFERENCE_SEQ_2", /* ... */
     /// ];
     ///
-    /// let scores = engine.compute(&device, &sequences, &references).unwrap();
+    /// let matrix = engine.compute(&device, &sequences, &references).unwrap();
     ///
-    /// // Find best alignments
-    /// let best_idx = scores.iter().enumerate()
+    /// // Find the best-scoring query/candidate cell in the flat matrix buffer
+    /// let best_cell = matrix.as_slice().iter().enumerate()
     ///     .max_by_key(|(_, &score)| score)
-    ///     .map(|(idx, _)| idx);
+    ///     .map(|(flat_index, _)| flat_index);
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
     {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+        let queries_slice = queries.as_ref();
+        let candidates_slice = candidates.as_ref();
+        let mut matrix = UnifiedMat::<isize>::try_allocate(queries_slice.len(), candidates_slice.len())?;
+        self.compute_pair(device, queries_slice, Some(candidates_slice), &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
+    /// Compute the symmetric self-alignment matrix of a single sequence collection.
+    ///
+    /// Produces a square `sequences × sequences` matrix of global-alignment scores
+    /// by forwarding a null candidates pointer to the engine. The matrix is symmetric
+    /// and its diagonal holds the self-alignment score of each sequence.
+    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<isize>, Error>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
+    {
+        let sequences_slice = sequences.as_ref();
+        let mut matrix = UnifiedMat::<isize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
+        self.compute_pair(device, sequences_slice, None, &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let results_stride = core::mem::size_of::<isize>();
-
+    /// Shared implementation for `compute` and `compute_symmetric`.
+    ///
+    /// Forwards a null candidates pointer when `candidates` is `None` to request
+    /// symmetric self-similarity. On GPU devices the inputs are first copied into
+    /// unified-memory tapes and dispatched through `compute_into`.
+    fn compute_pair<S>(
+        &self,
+        device: &DeviceScope,
+        queries: &[S],
+        candidates: Option<&[S]>,
+        matrix: &mut UnifiedMat<isize>,
+    ) -> Result<(), Error>
+    where
+        S: AsRef<[u8]>,
+    {
         if device.is_gpu() {
-            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
-            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
-            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
-            Ok(results)
-        } else {
-            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
-            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_needleman_wunsch_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
+            let force_64bit = match candidates {
+                Some(candidates_slice) => should_use_64bit_for_bytes(queries, candidates_slice),
+                None => should_use_64bit_for_bytes(queries, queries),
             };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            let queries_tape = copy_bytes_into_tape(queries, force_64bit)?;
+            let candidates_tape = match candidates {
+                Some(candidates_slice) => Some(copy_bytes_into_tape(candidates_slice, force_64bit)?),
+                None => None,
+            };
+            return self.compute_into(device, queries_tape, candidates_tape, matrix);
+        }
+
+        let queries_sequence = SzSequenceFromBytes::to_sz_sequence(queries);
+        let candidates_sequence = candidates.map(SzSequenceFromBytes::to_sz_sequence);
+        let candidates_ptr = match &candidates_sequence {
+            Some(sequence) => sequence as *const _ as *const c_void,
+            None => ptr::null(),
+        };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_needleman_wunsch_scores(
+                self.handle,
+                device.handle,
+                &queries_sequence as *const _ as *const c_void,
+                candidates_ptr,
+                matrix.data.as_mut_ptr(),
+                matrix.row_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(()),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
-    /// Compute Needleman–Wunsch scores into an existing results buffer.
+    /// Compute the cross-product score matrix into a caller-provided matrix.
     ///
-    /// - Accepts `AnyBytesTape<'_>` inputs (owned tapes or views), with matching offset widths.
-    /// - Writes scores into `results` without allocating. On GPU, inputs should be device-accessible.
-    /// - Errors if `results.len()` is insufficient or widths are mixed.
-    /// Compute Smith–Waterman scores into an existing results buffer.
-    ///
-    /// - Accepts `AnyBytesTape<'_>` inputs (owned tapes or views), with matching offset widths.
-    /// - Writes scores into `results` without allocating. On GPU, inputs should be device-accessible.
-    /// - Errors if `results.len()` is insufficient or widths are mixed.
+    /// - Accepts `AnyBytesTape<'_>` for `queries` (owned tape or view).
+    /// - `candidates` may be `None` for symmetric self-similarity; when `Some`, both
+    ///   inputs must share the same offset width.
+    /// - Writes the `queries × candidates` matrix into `matrix` without allocating.
+    /// - Errors if the matrix shape mismatches the inputs or widths are mixed.
     pub fn compute_into<'a>(
         &self,
         device: &DeviceScope,
-        a: AnyBytesTape<'a>,
-        b: AnyBytesTape<'a>,
-        results: &mut [isize],
+        queries: AnyBytesTape<'a>,
+        candidates: Option<AnyBytesTape<'a>>,
+        matrix: &mut UnifiedMat<isize>,
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
-        let results_stride = core::mem::size_of::<isize>();
 
-        let a64 = match &a {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+        let queries64 = match &queries {
+            AnyBytesTape::Tape64(tape) => Some(SzSequenceU64Tape::from(tape)),
+            AnyBytesTape::View64(view) => Some(SzSequenceU64Tape::from(view)),
             _ => None,
         };
-        let b64 = match &b {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a64, b64) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries64 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape64(tape)) => Some(SzSequenceU64Tape::from(tape)),
+                Some(AnyBytesTape::View64(view)) => Some(SzSequenceU64Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_needleman_wunsch_scores_u64tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1624,29 +1877,34 @@ impl NeedlemanWunschScores {
             };
         }
 
-        let a32 = match &a {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+        let queries32 = match &queries {
+            AnyBytesTape::Tape32(tape) => Some(SzSequenceU32Tape::from(tape)),
+            AnyBytesTape::View32(view) => Some(SzSequenceU32Tape::from(view)),
             _ => None,
         };
-        let b32 = match &b {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a32, b32) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries32 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape32(tape)) => Some(SzSequenceU32Tape::from(tape)),
+                Some(AnyBytesTape::View32(view)) => Some(SzSequenceU32Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_needleman_wunsch_scores_u32tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1672,21 +1930,26 @@ unsafe impl Sync for NeedlemanWunschScores {}
 
 /// Smith-Waterman local sequence alignment scoring engine.
 ///
-/// Finds optimal local alignments within sequences using a substitution matrix
-/// and gap penalties. Returns maximum scores found anywhere in the alignment matrix.
+/// Finds optimal local alignments within sequences using a compact class-based substitution
+/// matrix and gap penalties. Returns maximum scores found anywhere in the alignment matrix.
 ///
 /// # Examples
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-/// // Create scoring matrix
-/// let mut matrix = [[-1i8; 256]; 256];
+/// // Map each byte to one of 32 classes; here every byte is its own class modulo 32.
+/// let mut byte_to_class = [0u8; 256];
 /// for i in 0..256 {
-///     matrix[i][i] = 2;
+///     byte_to_class[i] = (i % 32) as u8;
+/// }
+/// // Class scoring matrix (match=2, mismatch=-1)
+/// let mut class_costs = [[-1i8; 32]; 32];
+/// for i in 0..32 {
+///     class_costs[i][i] = 2;
 /// }
 ///
 /// let device = DeviceScope::default().unwrap();
-/// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+/// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
 ///
 /// let seq_a = vec!["ACGTAAACGT"];
 /// let seq_b = vec!["ACGT"];
@@ -1705,15 +1968,16 @@ impl SmithWatermanScores {
     /// # Parameters
     ///
     /// - `device`: Device scope for execution context
-    /// - `substitution_matrix`: 256x256 scoring matrix for character pairs
+    /// - `byte_to_class`: 256-entry map from each input byte to one of 32 character classes
+    /// - `class_substitution_costs`: 32x32 scoring matrix between character classes
     /// - `open_cost`: Gap opening penalty (typically negative)
     /// - `extend_cost`: Gap extension penalty (typically negative, ≥ open_cost)
     ///
     /// # Matrix Design for Local Alignment
     ///
-    /// For effective local alignment, the matrix should have:
-    /// - **Positive match scores**: Reward similar characters
-    /// - **Negative mismatch scores**: Penalize dissimilar characters
+    /// For effective local alignment, the class matrix should have:
+    /// - **Positive match scores**: Reward similar classes
+    /// - **Negative mismatch scores**: Penalize dissimilar classes
     /// - **Balanced penalties**: Prevent excessive gap formation
     ///
     /// # Examples
@@ -1722,37 +1986,43 @@ impl SmithWatermanScores {
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// let device = DeviceScope::default().unwrap();
     ///
-    /// // Protein alignment matrix (simplified)
-    /// let mut protein_matrix = [[-1i8; 256]; 256];  // Default mismatch
-    ///
-    /// // Set positive scores for similar amino acids
+    /// // Assign one class per amino-acid, everything else falls into class 0.
+    /// let mut byte_to_class = [0u8; 256];
     /// let amino_acids = b"ACDEFGHIKLMNPQRSTVWY";
-    /// for &aa in amino_acids {
-    ///     protein_matrix[aa as usize][aa as usize] = 5; // Identity
+    /// for (i, &aa) in amino_acids.iter().enumerate() {
+    ///     byte_to_class[aa as usize] = (i + 1) as u8;
     /// }
     ///
-    /// // Similar amino acids get positive but lower scores
-    /// protein_matrix[b'L' as usize][b'I' as usize] = 2; // Leucine-Isoleucine
-    /// protein_matrix[b'I' as usize][b'L' as usize] = 2;
+    /// // Default mismatch, identity on the diagonal, plus a similar-residue bonus.
+    /// let mut class_costs = [[-1i8; 32]; 32];
+    /// for i in 0..32 {
+    ///     class_costs[i][i] = 5; // Identity
+    /// }
+    /// let leucine = byte_to_class[b'L' as usize] as usize;
+    /// let isoleucine = byte_to_class[b'I' as usize] as usize;
+    /// class_costs[leucine][isoleucine] = 2; // Leucine-Isoleucine
+    /// class_costs[isoleucine][leucine] = 2;
     ///
-    /// let engine = SmithWatermanScores::new(&device, &protein_matrix, -3, -1).unwrap();
+    /// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -3, -1).unwrap();
     /// ```
     ///
     /// # Gap Penalty Strategy
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
     /// // Conservative gaps (discourage insertions/deletions)
-    /// let conservative = SmithWatermanScores::new(&device, &matrix, -10, -2).unwrap();
+    /// let conservative = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -10, -2).unwrap();
     ///
     /// // Permissive gaps (allow more insertions/deletions)
-    /// let permissive = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let permissive = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// ```
     pub fn new(
         device: &DeviceScope,
-        substitution_matrix: &[[i8; 256]; 256],
+        byte_to_class: &[u8; 256],
+        class_substitution_costs: &[[i8; 32]; 32],
         open_cost: i8,
         extend_cost: i8,
     ) -> Result<Self, Error> {
@@ -1761,7 +2031,8 @@ impl SmithWatermanScores {
         let mut error_msg: *const c_char = ptr::null();
         let status = unsafe {
             szs_smith_waterman_scores_init(
-                substitution_matrix.as_ptr() as *const i8,
+                byte_to_class.as_ptr() as *const u8,
+                class_substitution_costs.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
                 ptr::null(),
@@ -1804,10 +2075,12 @@ impl SmithWatermanScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
-    /// # for i in 0..256 { matrix[i][i] = 3; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
+    /// # let mut byte_to_class = [0u8; 256];
+    /// # for i in 0..256 { byte_to_class[i] = (i % 32) as u8; }
+    /// # let mut class_costs = [[-1i8; 32]; 32];
+    /// # for i in 0..32 { class_costs[i][i] = 3; }
     /// let device = DeviceScope::default().unwrap();
-    /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     ///
     /// // Local similarity search
     /// let sequences = vec![
@@ -1817,11 +2090,12 @@ impl SmithWatermanScores {
     /// ];
     /// let pattern = vec!["ATCGATCGATCG"; 3];  // Search for this pattern
     ///
-    /// let scores = engine.compute(&device, &sequences, &pattern).unwrap();
+    /// let matrix = engine.compute(&device, &sequences, &pattern).unwrap();
     ///
-    /// for (i, &score) in scores.iter().enumerate() {
+    /// for query_index in 0..matrix.queries_count() {
+    ///     let score = matrix[(query_index, query_index)];
     ///     if score > 20 {  // Threshold for significant similarity
-    ///         println!("Sequence {} contains similar region (score: {})", i, score);
+    ///         println!("Sequence {} contains similar region (score: {})", query_index, score);
     ///     }
     /// }
     /// ```
@@ -1830,9 +2104,10 @@ impl SmithWatermanScores {
     ///
     /// ```rust
     /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
-    /// # let mut matrix = [[0i8; 256]; 256];
+    /// # let byte_to_class = [0u8; 256];
+    /// # let class_costs = [[0i8; 32]; 32];
     /// # let device = DeviceScope::default().unwrap();
-    /// # let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
+    /// # let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1).unwrap();
     /// // Find homologous sequences in a database
     /// let query_seq = vec!["PROTEIN_QUERY_SEQUENCE"];
     /// let database_seqs = vec![
@@ -1841,100 +2116,144 @@ impl SmithWatermanScores {
     ///     "UNRELATED_PROTEIN_SEQUENCE",
     /// ];
     ///
-    /// let queries = vec![query_seq[0]; database_seqs.len()];
-    /// let scores = engine.compute(&device, &queries, &database_seqs).unwrap();
+    /// // One query against the whole database yields a single matrix row.
+    /// let matrix = engine.compute(&device, &query_seq, &database_seqs).unwrap();
     ///
-    /// // Sort by score to find best matches
-    /// let mut scored_results: Vec<_> = scores.iter().enumerate()
-    ///     .map(|(i, &score)| (i, score))
+    /// // Sort the row by score to find the best matches
+    /// let mut scored_results: Vec<_> = matrix.row(0).iter().enumerate()
+    ///     .map(|(database_index, &score)| (database_index, score))
     ///     .collect();
     /// scored_results.sort_by_key(|(_, score)| -score);  // Descending
     ///
     /// println!("Best matches:");
-    /// for (idx, score) in scored_results.iter().take(3) {
-    ///     println!("Database[{}]: score {}", idx, score);
+    /// for (database_index, score) in scored_results.iter().take(3) {
+    ///     println!("Database[{}]: score {}", database_index, score);
     /// }
     /// ```
-    pub fn compute<T, S>(
-        &self,
-        device: &DeviceScope,
-        sequences_a: T,
-        sequences_b: T,
-    ) -> Result<UnifiedVec<isize>, Error>
+    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
     where
         T: AsRef<[S]>,
         S: AsRef<[u8]>,
     {
-        let seq_a_slice = sequences_a.as_ref();
-        let seq_b_slice = sequences_b.as_ref();
-        let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
+        let queries_slice = queries.as_ref();
+        let candidates_slice = candidates.as_ref();
+        let mut matrix = UnifiedMat::<isize>::try_allocate(queries_slice.len(), candidates_slice.len())?;
+        self.compute_pair(device, queries_slice, Some(candidates_slice), &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
-        results.resize(num_pairs, 0);
+    /// Compute the symmetric self-alignment matrix of a single sequence collection.
+    ///
+    /// Produces a square `sequences × sequences` matrix of local-alignment scores
+    /// by forwarding a null candidates pointer to the engine. The matrix is symmetric
+    /// and its diagonal holds the self-alignment score of each sequence.
+    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<isize>, Error>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
+    {
+        let sequences_slice = sequences.as_ref();
+        let mut matrix = UnifiedMat::<isize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
+        self.compute_pair(device, sequences_slice, None, &mut matrix)?;
+        Ok(matrix)
+    }
 
-        let results_stride = core::mem::size_of::<isize>();
-
+    /// Shared implementation for `compute` and `compute_symmetric`.
+    ///
+    /// Forwards a null candidates pointer when `candidates` is `None` to request
+    /// symmetric self-similarity. On GPU devices the inputs are first copied into
+    /// unified-memory tapes and dispatched through `compute_into`.
+    fn compute_pair<S>(
+        &self,
+        device: &DeviceScope,
+        queries: &[S],
+        candidates: Option<&[S]>,
+        matrix: &mut UnifiedMat<isize>,
+    ) -> Result<(), Error>
+    where
+        S: AsRef<[u8]>,
+    {
         if device.is_gpu() {
-            let force_64bit = should_use_64bit_for_bytes(seq_a_slice, seq_b_slice);
-            let tape_a = copy_bytes_into_tape(seq_a_slice, force_64bit)?;
-            let tape_b = copy_bytes_into_tape(seq_b_slice, force_64bit)?;
-            self.compute_into(device, tape_a, tape_b, &mut results[..])?;
-            Ok(results)
-        } else {
-            let seq_a = SzSequenceFromBytes::to_sz_sequence(seq_a_slice);
-            let seq_b = SzSequenceFromBytes::to_sz_sequence(seq_b_slice);
-            let mut error_msg: *const c_char = ptr::null();
-            let status = unsafe {
-                szs_smith_waterman_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                    &mut error_msg,
-                )
+            let force_64bit = match candidates {
+                Some(candidates_slice) => should_use_64bit_for_bytes(queries, candidates_slice),
+                None => should_use_64bit_for_bytes(queries, queries),
             };
-            match status {
-                Status::Success => Ok(results),
-                err => Err(rust_error_from_c_message(err, error_msg)),
-            }
+            let queries_tape = copy_bytes_into_tape(queries, force_64bit)?;
+            let candidates_tape = match candidates {
+                Some(candidates_slice) => Some(copy_bytes_into_tape(candidates_slice, force_64bit)?),
+                None => None,
+            };
+            return self.compute_into(device, queries_tape, candidates_tape, matrix);
+        }
+
+        let queries_sequence = SzSequenceFromBytes::to_sz_sequence(queries);
+        let candidates_sequence = candidates.map(SzSequenceFromBytes::to_sz_sequence);
+        let candidates_ptr = match &candidates_sequence {
+            Some(sequence) => sequence as *const _ as *const c_void,
+            None => ptr::null(),
+        };
+        let mut error_msg: *const c_char = ptr::null();
+        let status = unsafe {
+            szs_smith_waterman_scores(
+                self.handle,
+                device.handle,
+                &queries_sequence as *const _ as *const c_void,
+                candidates_ptr,
+                matrix.data.as_mut_ptr(),
+                matrix.row_stride,
+                &mut error_msg,
+            )
+        };
+        match status {
+            Status::Success => Ok(()),
+            err => Err(rust_error_from_c_message(err, error_msg)),
         }
     }
 
+    /// Compute the cross-product score matrix into a caller-provided matrix.
+    ///
+    /// - Accepts `AnyBytesTape<'_>` for `queries` (owned tape or view).
+    /// - `candidates` may be `None` for symmetric self-similarity; when `Some`, both
+    ///   inputs must share the same offset width.
+    /// - Writes the `queries × candidates` matrix into `matrix` without allocating.
+    /// - Errors if the matrix shape mismatches the inputs or widths are mixed.
     pub fn compute_into<'a>(
         &self,
         device: &DeviceScope,
-        a: AnyBytesTape<'a>,
-        b: AnyBytesTape<'a>,
-        results: &mut [isize],
+        queries: AnyBytesTape<'a>,
+        candidates: Option<AnyBytesTape<'a>>,
+        matrix: &mut UnifiedMat<isize>,
     ) -> Result<(), Error> {
         let mut error_msg: *const c_char = ptr::null();
-        let results_stride = core::mem::size_of::<isize>();
 
-        let a64 = match &a {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
+        let queries64 = match &queries {
+            AnyBytesTape::Tape64(tape) => Some(SzSequenceU64Tape::from(tape)),
+            AnyBytesTape::View64(view) => Some(SzSequenceU64Tape::from(view)),
             _ => None,
         };
-        let b64 = match &b {
-            AnyBytesTape::Tape64(t) => Some(SzSequenceU64Tape::from(t)),
-            AnyBytesTape::View64(v) => Some(SzSequenceU64Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a64, b64) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries64 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape64(tape)) => Some(SzSequenceU64Tape::from(tape)),
+                Some(AnyBytesTape::View64(view)) => Some(SzSequenceU64Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_smith_waterman_scores_u64tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -1944,29 +2263,34 @@ impl SmithWatermanScores {
             };
         }
 
-        let a32 = match &a {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
+        let queries32 = match &queries {
+            AnyBytesTape::Tape32(tape) => Some(SzSequenceU32Tape::from(tape)),
+            AnyBytesTape::View32(view) => Some(SzSequenceU32Tape::from(view)),
             _ => None,
         };
-        let b32 = match &b {
-            AnyBytesTape::Tape32(t) => Some(SzSequenceU32Tape::from(t)),
-            AnyBytesTape::View32(v) => Some(SzSequenceU32Tape::from(v)),
-            _ => None,
-        };
-        if let (Some(va), Some(vb)) = (a32, b32) {
-            let need = core::cmp::min(va.count, vb.count);
-            if results.len() < need {
+        if let Some(queries_view) = queries32 {
+            let candidates_view = match &candidates {
+                Some(AnyBytesTape::Tape32(tape)) => Some(SzSequenceU32Tape::from(tape)),
+                Some(AnyBytesTape::View32(view)) => Some(SzSequenceU32Tape::from(view)),
+                Some(_) => return Err(Error::from(SzStatus::UnexpectedDimensions)),
+                None => None,
+            };
+            let candidates_count = candidates_view.map(|view| view.count).unwrap_or(queries_view.count);
+            if matrix.queries_count != queries_view.count || matrix.candidates_count != candidates_count {
                 return Err(Error::from(SzStatus::UnexpectedDimensions));
             }
+            let candidates_ptr = match &candidates_view {
+                Some(view) => view as *const _ as *const c_void,
+                None => ptr::null(),
+            };
             let status = unsafe {
                 szs_smith_waterman_scores_u32tape(
                     self.handle,
                     device.handle,
-                    &va as *const _ as *const c_void,
-                    &vb as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
+                    &queries_view as *const _ as *const c_void,
+                    candidates_ptr,
+                    matrix.data.as_mut_ptr(),
+                    matrix.row_stride,
                     &mut error_msg,
                 )
             };
@@ -2019,6 +2343,7 @@ pub struct FingerprintsBuilder {
     alphabet_size: usize,
     window_widths: Option<Vec<usize>>,
     dimensions: usize,
+    seed: u64,
 }
 
 impl FingerprintsBuilder {
@@ -2045,6 +2370,7 @@ impl FingerprintsBuilder {
             alphabet_size: 0,
             window_widths: None,
             dimensions: 1024, // Default dimensions
+            seed: 0,          // Default reproducibility seed
         }
     }
 
@@ -2352,6 +2678,37 @@ impl FingerprintsBuilder {
         self
     }
 
+    /// Set the per-dimension diversity seed for the rolling hashers.
+    ///
+    /// The seed controls how the per-dimension multipliers and moduli are derived. Every value - including the
+    /// default `0` - derives both the multiplier and the modulo of every dimension from an independent SplitMix64
+    /// stream, which is what makes the resulting MinHashes statistically independent across dimensions.
+    ///
+    /// # Parameters
+    ///
+    /// - `seed`: Reproducibility seed; every value yields a distinct, deterministic set of per-dimension parameters.
+    ///
+    /// # Returns
+    ///
+    /// - `Self`: Updated builder
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
+    /// let device = DeviceScope::default().unwrap();
+    /// let engine = Fingerprints::builder()
+    ///     .ascii()
+    ///     .dimensions(256)
+    ///     .seed(0xC0FFEE)
+    ///     .build(&device)
+    ///     .unwrap();
+    /// ```
+    pub fn seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
     /// Build the fingerprinting engine with the configured parameters.
     ///
     /// Creates an optimized fingerprinting engine based on the builder configuration
@@ -2403,6 +2760,7 @@ impl FingerprintsBuilder {
                 self.alphabet_size,
                 widths_ptr,
                 widths_len,
+                self.seed,
                 ptr::null(), // No custom allocator
                 capabilities,
                 &mut engine,
@@ -2686,24 +3044,29 @@ impl Drop for Fingerprints {
 unsafe impl Send for Fingerprints {}
 unsafe impl Sync for Fingerprints {}
 
-/// Creates a diagonal substitution matrix for sequence alignment.
-/// Diagonal entries (matches) get `match_score`, off-diagonal (mismatches) get `mismatch_score`.
-/// Equivalent to C++'s `error_costs_256x256_t::diagonal()` method.
-pub fn error_costs_256x256_diagonal(match_score: i8, mismatch_score: i8) -> [[i8; 256]; 256] {
-    let mut result = [[0i8; 256]; 256];
-
+/// Creates a compact class-based diagonal substitution scheme for sequence alignment.
+/// Returns a `(byte_to_class, class_substitution_costs)` pair, where each byte maps to one of 32
+/// classes (`byte % 32`), matching classes get `match_score`, and mismatching classes get
+/// `mismatch_score`.
+pub fn error_costs_classes_diagonal(match_score: i8, mismatch_score: i8) -> ([u8; 256], [[i8; 32]; 32]) {
+    let mut byte_to_class = [0u8; 256];
     for i in 0..256 {
-        for j in 0..256 {
-            result[i][j] = if i == j { match_score } else { mismatch_score };
+        byte_to_class[i] = (i % 32) as u8;
+    }
+
+    let mut class_costs = [[0i8; 32]; 32];
+    for i in 0..32 {
+        for j in 0..32 {
+            class_costs[i][j] = if i == j { match_score } else { mismatch_score };
         }
     }
 
-    result
+    (byte_to_class, class_costs)
 }
 
-/// Equivalent to `error_costs_256x256_diagonal(0, -1)`.
-pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
-    error_costs_256x256_diagonal(0, -1)
+/// Equivalent to `error_costs_classes_diagonal(0, -1)`.
+pub fn error_costs_classes_unary() -> ([u8; 256], [[i8; 32]; 32]) {
+    error_costs_classes_diagonal(0, -1)
 }
 
 /// Check if either byte collection requires 64-bit tapes
@@ -2950,19 +3313,65 @@ mod tests {
         }
         let engine = engine_result.unwrap();
 
-        // Test distance computation
-        let strings_a = vec!["kitten", "saturday"];
-        let strings_b = vec!["sitting", "sunday"];
-        let result = engine.compute(&device, &strings_a, &strings_b);
+        // Cross-product distance computation over a non-square query/candidate set.
+        let queries = vec!["kitten", "saturday"];
+        let candidates = vec!["sitting", "sunday", "kitten"];
+        let result = engine.compute(&device, &queries, &candidates);
         match result {
-            Ok(distances) => {
-                assert_eq!(distances.len(), 2);
-                println!("Levenshtein distances: {:?}", distances);
-                // kitten -> sitting should be 3 (substitute k->s, e->i, insert g)
-                // saturday -> sunday should be 3 (delete a,t,r)
+            Ok(matrix) => {
+                assert_eq!(matrix.dimensions(), (2, 3));
+                // kitten -> sitting is 3 (substitute k->s, e->i, insert g)
+                assert_eq!(matrix[(0, 0)], 3);
+                // kitten -> kitten is 0 (identical)
+                assert_eq!(matrix[(0, 2)], 0);
+                // saturday -> sunday is 3 (delete a,t,r)
+                assert_eq!(matrix[(1, 1)], 3);
+                // The row slice mirrors the indexed cells.
+                assert_eq!(matrix.row(0), &[3usize, 6, 0][..]);
+                println!("Levenshtein distance matrix: {:?}", matrix.as_slice());
             }
             Err(e) => println!("Levenshtein computation failed: {:?}", e),
         }
+    }
+
+    #[test]
+    fn levenshtein_distance_symmetric() {
+        let device = match DeviceScope::default() {
+            Ok(device) => device,
+            Err(_) => return,
+        };
+        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
+            Ok(engine) => engine,
+            Err(_) => return,
+        };
+
+        let sequences = vec!["cat", "bat", "cart"];
+        let matrix = match engine.compute_symmetric(&device, &sequences) {
+            Ok(matrix) => matrix,
+            Err(error) => {
+                println!("Symmetric Levenshtein computation failed: {:?}", error);
+                return;
+            }
+        };
+
+        assert_eq!(matrix.dimensions(), (3, 3));
+        // The diagonal of a self-similarity matrix is all zeros.
+        for diagonal_index in 0..3 {
+            assert_eq!(matrix[(diagonal_index, diagonal_index)], 0);
+        }
+        // The matrix is symmetric across its diagonal.
+        for first_index in 0..3 {
+            for second_index in 0..3 {
+                assert_eq!(matrix[(first_index, second_index)], matrix[(second_index, first_index)]);
+            }
+        }
+        // cat vs bat differs by one substitution.
+        assert_eq!(matrix[(0, 1)], 1);
+
+        // The diagonal entry equals a one-by-one cross-product of the same string.
+        let single = vec!["cat"];
+        let single_matrix = engine.compute(&device, &single, &single).unwrap();
+        assert_eq!(single_matrix[(0, 0)], matrix[(0, 0)]);
     }
 
     #[test]
@@ -2981,15 +3390,17 @@ mod tests {
         }
         let engine = engine_result.unwrap();
 
-        // Test with Unicode strings
-        let strings_a = vec!["café", "naïve"];
-        let strings_b = vec!["cafe", "naive"];
-        let result = engine.compute(&device, &strings_a, &strings_b);
+        // Cross-product over Unicode strings.
+        let queries = vec!["café", "naïve"];
+        let candidates = vec!["cafe", "naive"];
+        let result = engine.compute(&device, &queries, &candidates);
         match result {
-            Ok(distances) => {
-                assert_eq!(distances.len(), 2);
-                println!("UTF-8 Levenshtein distances: {:?}", distances);
-                // Each accented character should count as 1 substitution
+            Ok(matrix) => {
+                assert_eq!(matrix.dimensions(), (2, 2));
+                // Each accented character counts as one character-level substitution.
+                assert_eq!(matrix[(0, 0)], 1); // café vs cafe
+                assert_eq!(matrix[(1, 1)], 1); // naïve vs naive
+                println!("UTF-8 Levenshtein distance matrix: {:?}", matrix.as_slice());
             }
             Err(e) => println!("UTF-8 Levenshtein computation failed: {:?}", e),
         }
@@ -3004,29 +3415,46 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Create simple scoring matrix
-        let mut matrix = [[-1i8; 256]; 256];
-        for i in 0..256 {
-            matrix[i][i] = 2; // Match score
-        }
+        // Create a simple class-based scoring scheme
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
 
-        let engine_result = NeedlemanWunschScores::new(&device, &matrix, -2, -1);
+        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping Needleman-Wunsch test - engine initialization failed");
             return;
         }
         let engine = engine_result.unwrap();
 
-        let sequences_a = vec!["ACGT"];
-        let sequences_b = vec!["ACGT"];
-        let result = engine.compute(&device, &sequences_a, &sequences_b);
+        let queries = vec!["ACGT", "ACGT"];
+        let candidates = vec!["ACGT", "TTTT"];
+        let result = engine.compute(&device, &queries, &candidates);
         match result {
-            Ok(scores) => {
-                assert_eq!(scores.len(), 1);
-                println!("Needleman-Wunsch score: {:?}", scores);
-                // Perfect match should give positive score
+            Ok(matrix) => {
+                assert_eq!(matrix.dimensions(), (2, 2));
+                // Identical sequences score higher than the mismatching pair.
+                assert!(matrix[(0, 0)] > matrix[(0, 1)]);
+                assert!(matrix[(0, 0)] > 0, "Identical sequences should score positively");
+                println!("Needleman-Wunsch score matrix: {:?}", matrix.as_slice());
             }
             Err(e) => println!("Needleman-Wunsch computation failed: {:?}", e),
+        }
+
+        // Symmetric self-alignment matrix.
+        let sequences = vec!["ACGT", "AGGT", "TTTT"];
+        if let Ok(matrix) = engine.compute_symmetric(&device, &sequences) {
+            assert_eq!(matrix.dimensions(), (3, 3));
+            for first_index in 0..3 {
+                for second_index in 0..3 {
+                    assert_eq!(matrix[(first_index, second_index)], matrix[(second_index, first_index)]);
+                }
+            }
+            // The diagonal self-alignment score is the strongest in its row.
+            for diagonal_index in 0..3 {
+                let diagonal_score = matrix[(diagonal_index, diagonal_index)];
+                for candidate_index in 0..3 {
+                    assert!(diagonal_score >= matrix[(diagonal_index, candidate_index)]);
+                }
+            }
         }
     }
 
@@ -3039,29 +3467,40 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Create simple scoring matrix
-        let mut matrix = [[-1i8; 256]; 256];
-        for i in 0..256 {
-            matrix[i][i] = 3; // Match score
-        }
+        // Create a simple class-based scoring scheme
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(3, -1);
 
-        let engine_result = SmithWatermanScores::new(&device, &matrix, -2, -1);
+        let engine_result = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping Smith-Waterman test - engine initialization failed");
             return;
         }
         let engine = engine_result.unwrap();
 
-        let sequences_a = vec!["ACGTACGT"];
-        let sequences_b = vec!["ACGT"];
-        let result = engine.compute(&device, &sequences_a, &sequences_b);
+        // One query against two candidates yields a single-row cross-product matrix.
+        let queries = vec!["ACGTACGT"];
+        let candidates = vec!["ACGT", "TTTT"];
+        let result = engine.compute(&device, &queries, &candidates);
         match result {
-            Ok(scores) => {
-                assert_eq!(scores.len(), 1);
-                println!("Smith-Waterman score: {:?}", scores);
-                // Should find local alignment with positive score
+            Ok(matrix) => {
+                assert_eq!(matrix.dimensions(), (1, 2));
+                // The embedded "ACGT" run aligns better than the all-mismatch candidate.
+                assert!(matrix[(0, 0)] > matrix[(0, 1)]);
+                assert!(matrix[(0, 0)] > 0, "Local alignment should be positive");
+                println!("Smith-Waterman score matrix: {:?}", matrix.as_slice());
             }
             Err(e) => println!("Smith-Waterman computation failed: {:?}", e),
+        }
+
+        // Symmetric self-alignment matrix is symmetric with a dominant diagonal.
+        let sequences = vec!["ACGTACGT", "ACGT", "TTTT"];
+        if let Ok(matrix) = engine.compute_symmetric(&device, &sequences) {
+            assert_eq!(matrix.dimensions(), (3, 3));
+            for first_index in 0..3 {
+                for second_index in 0..3 {
+                    assert_eq!(matrix[(first_index, second_index)], matrix[(second_index, first_index)]);
+                }
+            }
         }
     }
 
@@ -3263,23 +3702,24 @@ mod tests {
         }
         let device = device_result.unwrap();
 
-        // Test our diagonal matrix function with NW aligner
-        let matrix = error_costs_256x256_diagonal(2, -1);
-        let engine_result = NeedlemanWunschScores::new(&device, &matrix, -2, -1);
+        // Test our diagonal class-based scoring function with NW aligner
+        let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
+        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
         if engine_result.is_err() {
             println!("Skipping error_costs test - NW engine initialization failed");
             return;
         }
         let engine = engine_result.unwrap();
 
-        let seq_a = vec!["ABCD"];
-        let seq_b = vec!["ABCD"];
-        let result = engine.compute(&device, &seq_a, &seq_b);
+        let queries = vec!["ABCD"];
+        let candidates = vec!["ABCD"];
+        let result = engine.compute(&device, &queries, &candidates);
 
         match result {
-            Ok(scores) => {
-                assert!(scores[0] > 0, "Identical sequences should have positive score");
-                println!("Error costs matrix integration test passed: score = {}", scores[0]);
+            Ok(matrix) => {
+                assert_eq!(matrix.dimensions(), (1, 1));
+                assert!(matrix[(0, 0)] > 0, "Identical sequences should have positive score");
+                println!("Error costs matrix integration test passed: score = {}", matrix[(0, 0)]);
             }
             Err(e) => println!("Error costs test failed: {:?}", e),
         }
@@ -3296,25 +3736,26 @@ mod tests {
             Err(_) => return,
         };
 
-        let a = [b"kitten".as_ref(), b"saturday".as_ref()];
-        let b = [b"sitting".as_ref(), b"sunday".as_ref()];
+        let queries = [b"kitten".as_ref(), b"saturday".as_ref()];
+        let candidates = [b"sitting".as_ref(), b"sunday".as_ref()];
 
-        let mut ta = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
-        ta.extend(a).unwrap();
-        let mut tb = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tb.extend(b).unwrap();
+        let mut queries_tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        queries_tape.extend(queries).unwrap();
+        let mut candidates_tape = BytesTape::<u32, UnifiedAlloc>::new_in(UnifiedAlloc);
+        candidates_tape.extend(candidates).unwrap();
 
-        let mut results: UnifiedVec<usize> = UnifiedVec::with_capacity_in(2, UnifiedAlloc);
-        results.resize(2, 0);
+        let mut matrix = UnifiedMat::<usize>::try_allocate(2, 2).expect("matrix allocation");
 
-        let res = engine.compute_into(
+        let outcome = engine.compute_into(
             &device,
-            AnyBytesTape::Tape32(ta),
-            AnyBytesTape::Tape32(tb),
-            &mut results[..],
+            AnyBytesTape::Tape32(queries_tape),
+            Some(AnyBytesTape::Tape32(candidates_tape)),
+            &mut matrix,
         );
-        if let Ok(()) = res {
-            assert_eq!(&results[..], &[3, 3]);
+        if let Ok(()) = outcome {
+            // Diagonal: kitten vs sitting = 3, saturday vs sunday = 3.
+            assert_eq!(matrix[(0, 0)], 3);
+            assert_eq!(matrix[(1, 1)], 3);
         }
     }
 
@@ -3329,26 +3770,26 @@ mod tests {
             Err(_) => return,
         };
 
-        let a = [b"abc".as_ref(), b"abcdef".as_ref()];
-        let b = [b"yabd".as_ref(), b"abcxef".as_ref()];
+        let queries = [b"abc".as_ref(), b"abcdef".as_ref()];
+        let candidates = [b"yabd".as_ref(), b"abcxef".as_ref()];
 
-        let mut ta = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
-        ta.extend(a).unwrap();
-        let mut tb = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
-        tb.extend(b).unwrap();
+        let mut queries_tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        queries_tape.extend(queries).unwrap();
+        let mut candidates_tape = BytesTape::<u64, UnifiedAlloc>::new_in(UnifiedAlloc);
+        candidates_tape.extend(candidates).unwrap();
 
-        let mut results: UnifiedVec<usize> = UnifiedVec::with_capacity_in(2, UnifiedAlloc);
-        results.resize(2, 0);
+        let mut matrix = UnifiedMat::<usize>::try_allocate(2, 2).expect("matrix allocation");
 
-        let res = engine.compute_into(
+        let outcome = engine.compute_into(
             &device,
-            AnyBytesTape::Tape64(ta),
-            AnyBytesTape::Tape64(tb),
-            &mut results[..],
+            AnyBytesTape::Tape64(queries_tape),
+            Some(AnyBytesTape::Tape64(candidates_tape)),
+            &mut matrix,
         );
-        if let Ok(()) = res {
-            // abc vs yabd => distance 2, abcdef vs abcxef => distance 1
-            assert_eq!(&results[..], &[2, 1]);
+        if let Ok(()) = outcome {
+            // Diagonal: abc vs yabd => 2, abcdef vs abcxef => 1.
+            assert_eq!(matrix[(0, 0)], 2);
+            assert_eq!(matrix[(1, 1)], 1);
         }
     }
 }
