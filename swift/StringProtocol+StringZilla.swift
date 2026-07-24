@@ -16,11 +16,16 @@
 
 import StringZillaC
 
-// We need to link the standard libraries.
-#if os(Linux)
-    import Glibc
-#else
+// We need to link the C standard library; the module differs per platform, and `os(...)` misses
+// Windows and musl, so probe by availability instead.
+#if canImport(Darwin)
     import Darwin.C
+#elseif canImport(Glibc)
+    import Glibc
+#elseif canImport(Musl)
+    import Musl
+#elseif canImport(ucrt)
+    import ucrt
 #endif
 
 /// Result of a three-way string comparison.

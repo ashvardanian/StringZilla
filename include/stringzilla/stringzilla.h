@@ -503,7 +503,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
         } named;
     } info0, info1, info7;
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
     __cpuidex(info0.array, 0, 0);
     __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
@@ -534,7 +534,7 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_implementation_x86_(void) {
 
     unsigned long long xcr0 = 0;
     if (has_osxsave) {
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
         xcr0 = _xgetbv(0);
 #else
         unsigned eax, edx;
