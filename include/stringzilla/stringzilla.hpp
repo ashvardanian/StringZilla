@@ -1835,6 +1835,37 @@ class reversed_iterator_for {
     value_type_ *ptr_;
 };
 
+template <typename first_type_, typename second_type_>
+struct concatenation;
+
+/**
+ *  @brief Infers how an operand is stored inside a `concatenation` expression.
+ *
+ *  The `concatenate` function and `operator|` take forwarding references, so an lvalue `sz::string`
+ *  deduces to `sz::string &` and a literal deduces to `char const (&)[N]`. Neither exposes the
+ *  `value_type`, `size()` and `copy()` interface the expression template relies on, which is why
+ *  baking the deduced type straight into `concatenation` fails to compile. Everything that is not
+ *  already a nested expression is therefore normalized into a `string_view`, matching what the
+ *  `basic_string_slice::operator|` overloads have always produced.
+ */
+template <typename type_>
+struct concatenation_operand {
+    using type = string_view;
+};
+
+template <typename first_type_, typename second_type_>
+struct concatenation_operand<concatenation<first_type_, second_type_>> {
+    using type = concatenation<first_type_, second_type_>;
+};
+
+template <typename first_type_, typename second_type_>
+struct concatenation_operand<concatenation<first_type_, second_type_> &>
+    : concatenation_operand<concatenation<first_type_, second_type_>> {};
+
+template <typename first_type_, typename second_type_>
+struct concatenation_operand<concatenation<first_type_, second_type_> const &>
+    : concatenation_operand<concatenation<first_type_, second_type_>> {};
+
 /**
  *  @brief An "expression template" for lazy concatenation of strings using the `operator|`.
  *  @see https://en.wikipedia.org/wiki/Expression_templates
@@ -1870,7 +1901,8 @@ struct concatenation {
     }
 
     template <typename last_type>
-    concatenation<concatenation<first_type_, second_type_>, last_type> operator|(last_type &&last) const {
+    concatenation<concatenation<first_type_, second_type_>, typename concatenation_operand<last_type>::type> operator|(
+        last_type &&last) const {
         return {*this, last};
     }
 };
@@ -2482,6 +2514,14 @@ class basic_string_slice {
 
 #pragma endregion
 #pragma endregion
+
+    /**
+     *  @brief Lazily concatenates two slices into an expression template, without allocating.
+     *  @sa `concatenate` for the variadic form, and `basic_string`'s converting constructor to materialize.
+     */
+    concatenation<string_view, string_view> operator|(string_view other) const noexcept {
+        return {string_view(data(), size()), other};
+    }
 
 #pragma region Matching Character Sets
 
@@ -3197,8 +3237,12 @@ class basic_string {
 
 #endif
 
+    /**
+     *  @brief Materializes a lazy concatenation expression into an owning string in one allocation.
+     *  @note Intentionally implicit, so the documented `sz::string email = name | "@" | domain;` form works.
+     */
     template <typename first_type_, typename second_type_>
-    explicit basic_string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
+    basic_string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
         raise(_with_alloc([&](sz_alloc_type &alloc) {
             sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &alloc);
             if (!ptr) return sz_bad_alloc_k;
@@ -4962,12 +5006,14 @@ struct concatenation_result {};
 
 template <typename first_type_, typename second_type_>
 struct concatenation_result<first_type_, second_type_> {
-    using type = concatenation<first_type_, second_type_>;
+    using type = concatenation<typename concatenation_operand<first_type_>::type,
+                               typename concatenation_operand<second_type_>::type>;
 };
 
 template <typename first_type_, typename... following_types_>
 struct concatenation_result<first_type_, following_types_...> {
-    using type = concatenation<first_type_, typename concatenation_result<following_types_...>::type>;
+    using type = concatenation<typename concatenation_operand<first_type_>::type,
+                               typename concatenation_result<following_types_...>::type>;
 };
 
 /**
@@ -4975,7 +5021,8 @@ struct concatenation_result<first_type_, following_types_...> {
  *  @sa `concatenation` class for more details.
  */
 template <typename first_type_, typename second_type_>
-concatenation<first_type_, second_type_> concatenate(first_type_ &&first, second_type_ &&second) noexcept(false) {
+concatenation<typename concatenation_operand<first_type_>::type, typename concatenation_operand<second_type_>::type>
+concatenate(first_type_ &&first, second_type_ &&second) noexcept(false) {
     return {first, second};
 }
 
