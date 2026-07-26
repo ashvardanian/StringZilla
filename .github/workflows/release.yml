@@ -95,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314"]
+        python-version: ["310", "311", "312", "313", "314", "314t"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -128,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314"]
+        python-version: ["310", "311", "312", "313", "314", "314t"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -196,7 +196,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314"]
+        python-version: ["310", "311", "312", "313", "314", "314t"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -230,7 +230,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314"]
+        python-version: ["310", "311", "312", "313", "314", "314t"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -264,7 +264,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["311", "312", "313", "314"]
+        python-version: ["311", "312", "313", "314", "314t"]
     steps:
       - uses: actions/checkout@v7
         with:
