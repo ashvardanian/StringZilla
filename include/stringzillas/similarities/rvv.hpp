@@ -16,6 +16,7 @@
 #define STRINGZILLAS_SIMILARITIES_RVV_HPP_
 
 #include "stringzillas/similarities/serial.hpp"
+#include "stringzilla/find/rvv.h" // `sz_find_byteset_rvv`
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -2418,16 +2419,12 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, linear_gap_costs_t gaps,
                           allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    bool is_unit_cost_() const noexcept {
-        return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
-    }
 
     /**
      *  @brief Worst-case scratch for a single cell over the whole input, in O(Q+C): the Myers `match_masks` for the
@@ -2600,7 +2597,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
+        if (!is_unit_cost(substituter_, gap_costs_))
             return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                                cross_similarities_t::all_pairs_k, score_scratch_, specs);
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
@@ -2616,7 +2613,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
+        if (!is_unit_cost(substituter_, gap_costs_))
             return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
                                               cross_similarities_t::all_pairs_k, score_scratch_,
                                               std::forward<executor_type_>(executor), specs);
@@ -2628,7 +2625,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename sequences_type_, typename value_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
+        if (!is_unit_cost(substituter_, gap_costs_))
             return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                                cross_similarities_t::symmetric_k, score_scratch_, specs);
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
@@ -2643,7 +2640,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
+        if (!is_unit_cost(substituter_, gap_costs_))
             return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
                                               cross_similarities_t::symmetric_k, score_scratch_,
                                               std::forward<executor_type_>(executor), specs);
@@ -2674,21 +2671,19 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     using myers_t = levenshtein_distance_myers<rune_t, capability_k>;          // ? RVV rune Myers fast path.
     static constexpr index_t myers_lanes_k = myers_t::lanes_k;
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using bytes_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
+    bytes_fallback_t bytes_fallback_;
 
-    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc), bytes_fallback_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, linear_gap_costs_t gaps,
                                allocator_t alloc = allocator_t {}) noexcept
-        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    bool is_unit_cost_() const noexcept {
-        return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
-    }
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc), bytes_fallback_(subs, gaps, alloc) {}
 
     /**
      *  @brief Worst-case scratch for a single cell over the whole input: the rune-Myers transcode arena (up to
@@ -2941,27 +2936,14 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                               cross_similarities_t::all_pairs_k, score_scratch_, specs);
-        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
-            status != status_t::success_k)
-            return status;
-        return score_range_(
-            queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
-            cross_live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
-            scratch_space_t(score_scratch_), specs);
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
-                                              cross_similarities_t::all_pairs_k, score_scratch_,
-                                              std::forward<executor_type_>(executor), specs);
-        return score_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
+        return cross_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
                                std::forward<executor_type_>(executor), specs);
     }
 
@@ -2969,30 +2951,51 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     template <typename sequences_type_, typename value_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                               cross_similarities_t::symmetric_k, score_scratch_, specs);
-        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
-            status != status_t::success_k)
-            return status;
-        return score_range_(
-            sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
-            cross_live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
-            scratch_space_t(score_scratch_), specs);
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, sequences, sequences, results,
-                                              cross_similarities_t::symmetric_k, score_scratch_,
-                                              std::forward<executor_type_>(executor), specs);
-        return score_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
+        return cross_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                std::forward<executor_type_>(executor), specs);
     }
 
 #pragma endregion Public Cross Product Overloads
+
+#pragma region Cross Product Dispatch
+
+  private:
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, strided_rows<value_type_> results,
+                    cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
+        if (corpus_is_ascii_<sz_find_byteset_rvv>(queries) && corpus_is_ascii_<sz_find_byteset_rvv>(candidates))
+            return bytes_fallback_(queries, candidates, results, specs);
+        if (!is_unit_cost(substituter_, gap_costs_))
+            return cross_sequentially_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                               cross_kind, score_scratch_, specs);
+        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
+            status != status_t::success_k)
+            return status;
+        return score_range_(queries, candidates, results, cross_kind, 0,
+                            cross_live_cells_count_(queries.size(), candidates.size(), cross_kind),
+                            scratch_space_t(score_scratch_), specs);
+    }
+
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t cross_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cross_similarities_t cross_kind,
+                             executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+        if (corpus_is_ascii_<sz_find_byteset_rvv>(queries) && corpus_is_ascii_<sz_find_byteset_rvv>(candidates))
+            return bytes_fallback_(queries, candidates, results, std::forward<executor_type_>(executor), specs);
+        if (!is_unit_cost(substituter_, gap_costs_))
+            return cross_in_parallel_<size_t>(scoring_t {substituter_, gap_costs_}, queries, candidates, results,
+                                              cross_kind, score_scratch_, std::forward<executor_type_>(executor),
+                                              specs);
+        return score_parallel_(queries, candidates, results, cross_kind, std::forward<executor_type_>(executor), specs);
+    }
+
+#pragma endregion Cross Product Dispatch
 };
 
 #pragma endregion Cross Product
@@ -3037,7 +3040,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, linear_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -3187,7 +3190,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, linear_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -3337,7 +3340,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, affine_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -3488,7 +3491,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, affine_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept

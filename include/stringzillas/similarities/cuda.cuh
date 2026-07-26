@@ -1248,7 +1248,6 @@ __global__ void score_per_cuda_warp_(                                        //
     substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
     unsigned const shared_memory_size) {
 
-    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
     using char_t = char_type_;
     using index_t = index_type_;
@@ -1258,7 +1257,6 @@ __global__ void score_per_cuda_warp_(                                        //
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = objective_;
 
-    // Pre-load the substituter and gap costs.
     using substituter_t = substituter_type_;
     using gap_costs_t = linear_gap_costs_t;
     static_assert(std::is_trivially_copyable<substituter_t>::value, "Substituter must be trivially copyable.");
@@ -1437,7 +1435,6 @@ __global__ void affine_score_per_cuda_warp_(                                 //
     substituter_type_ const substituter, affine_gap_costs_t const gap_costs, //
     unsigned const shared_memory_size) {
 
-    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
     using char_t = char_type_;
     using index_t = index_type_;
@@ -1447,7 +1444,6 @@ __global__ void affine_score_per_cuda_warp_(                                 //
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = objective_;
 
-    // Pre-load the substituter and gap costs.
     using substituter_t = substituter_type_;
     using gap_costs_t = affine_gap_costs_t;
     static_assert(std::is_trivially_copyable<substituter_t>::value, "Substituter must be trivially copyable.");

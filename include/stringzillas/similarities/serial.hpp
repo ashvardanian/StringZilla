@@ -85,6 +85,9 @@ struct affine_gap_costs_t {
     constexpr error_cost_magnitude_t magnitude() const noexcept {
         return std::max(error_cost_abs(open), error_cost_abs(extend));
     }
+
+    /** @brief Whether opening a gap costs the same as extending it, making the second affine plane dead weight. */
+    constexpr bool is_linear() const noexcept { return open == extend; }
 };
 
 template <typename gap_costs_type_>
@@ -110,6 +113,26 @@ struct uniform_substitution_costs_t {
         return std::max(error_cost_abs(match), error_cost_abs(mismatch));
     }
 };
+
+/** @brief Whether costs reduce to a plain edit distance, which is what unlocks the bit-parallel Myers kernels. */
+constexpr bool is_unit_cost(uniform_substitution_costs_t substituter, linear_gap_costs_t gap_costs) noexcept {
+    return substituter.match == 0 && substituter.mismatch == 1 && gap_costs.open_or_extend == 1;
+}
+
+/** @brief Whether a `(query, candidate)` cell's worst-case score stays within @p reach_limit under linear gaps. */
+constexpr bool fits_reach(uniform_substitution_costs_t substituter, linear_gap_costs_t gap_costs, size_t query_length,
+                          size_t candidate_length, size_t reach_limit) noexcept {
+    size_t const magnitude = sz_max_of_two((size_t)substituter.mismatch, (size_t)gap_costs.open_or_extend);
+    return (query_length + candidate_length) * magnitude <= reach_limit;
+}
+
+/** @brief The affine sibling, where one gap opening rides on top of the per-cell magnitude. */
+constexpr bool fits_reach(uniform_substitution_costs_t substituter, affine_gap_costs_t gap_costs, size_t query_length,
+                          size_t candidate_length, size_t reach_limit) noexcept {
+    size_t const magnitude = sz_max_of_three((size_t)substituter.mismatch, (size_t)gap_costs.open,
+                                             (size_t)gap_costs.extend);
+    return (query_length + candidate_length) * magnitude + (size_t)gap_costs.open <= reach_limit;
+}
 
 /**
  *  @brief The number of distinct character classes in a @b `error_costs_32x32_t` table.
@@ -2686,7 +2709,7 @@ struct levenshtein_distance {
 
         // Redirect to linear costs
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
-            if (gap_costs_.open == gap_costs_.extend) {
+            if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend.scratch_space_needed(first, second, specs);
@@ -2697,7 +2720,7 @@ struct levenshtein_distance {
         // SIMD lockstep families stay bounded to their widest 512-rune tier. Its `layout()` sizes both the `match_masks`
         // table and, for very long patterns, the spilled vertical state.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
+            if (is_unit_cost(substituter_, gap_costs_) &&
                 (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512)) {
                 return myers_t {}.layout(first, second, specs);
             }
@@ -2744,7 +2767,7 @@ struct levenshtein_distance {
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
-            if (gap_costs_.open == gap_costs_.extend) {
+            if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
@@ -2754,7 +2777,7 @@ struct levenshtein_distance {
         // scalar generic tier above 512 runes). The serial walker covers any shorter-side length; the SIMD lockstep
         // families stay bounded to 512 and fall through to the anti-diagonal DP below for longer shorter sides.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1 &&
+            if (is_unit_cost(substituter_, gap_costs_) &&
                 (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512))
                 return myers_t {}(first, second, result_ref, scratch_space);
 
@@ -2889,7 +2912,7 @@ struct levenshtein_distance_utf8 {
         // diagonal. Its `match_masks` hash + vertical state can outsize the diagonal's two rune rows, so widen the reserve.
         // The Myers `layout()` reads only the rune-count via `.size()`; the worst case is one rune per UTF-8 byte.
         if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1) {
+            if (is_unit_cost(substituter_, gap_costs_)) {
                 span<rune_t const> const first_runes_upper_bound {nullptr, first.size()};
                 span<rune_t const> const second_runes_upper_bound {nullptr, second.size()};
                 size_t const myers_path =
@@ -2920,7 +2943,7 @@ struct levenshtein_distance_utf8 {
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
         if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
-            if (gap_costs_.open == gap_costs_.extend) {
+            if (gap_costs_.is_linear()) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap);
                 return linear_backend(first, second, result_ref, scratch_space, executor, specs);
@@ -2970,7 +2993,7 @@ struct levenshtein_distance_utf8 {
         // hash lookup does not erode Myers' advantage). Unit-cost linear only (match 0, mismatch 1, gap 1); the rune
         // diagonal walker below remains the oracle for non-unit / affine costs. Bit-exact with that diagonal.
         if constexpr (rune_myers_available_k && is_same_type<gap_costs_t, linear_gap_costs_t>::value)
-            if (substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1)
+            if (is_unit_cost(substituter_, gap_costs_))
                 return rune_myers_t {}(first_utf32, second_utf32, result_ref, walker_scratch);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
@@ -3837,7 +3860,7 @@ struct levenshtein_distances {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, gap_costs_t gaps,
@@ -3899,7 +3922,7 @@ struct levenshtein_distances_utf8 {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, gap_costs_t gaps,
@@ -3961,7 +3984,7 @@ struct needleman_wunsch_scores {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -4022,7 +4045,7 @@ struct smith_waterman_scores {
     allocator_t alloc_ {};
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_}; // grow-only cross-product scratch, reused
+    safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept

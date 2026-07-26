@@ -9,6 +9,7 @@
 #define STRINGZILLAS_SIMILARITIES_NEON_HPP_
 
 #include "stringzillas/similarities/serial.hpp"
+#include "stringzilla/find/neon.h" // `sz_find_byteset_neon`
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -5540,28 +5541,12 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, linear_gap_costs_t gaps,
                           allocator_t alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    bool is_unit_cost_() const noexcept {
-        return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
-    }
-
-    /** @brief Whether a `(query, candidate)` cell's worst-case distance stays inside the lane walker's `u16` headroom. */
-    bool fits_u16_(size_t query_length, size_t candidate_length) const noexcept {
-        size_t const magnitude = sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open_or_extend);
-        return (query_length + candidate_length) * magnitude <= u16_reach_limit_k;
-    }
-
-    /** @brief Whether a `(query, candidate)` cell's worst-case distance stays inside the wide walker's `u32` headroom. */
-    bool fits_u32_(size_t query_length, size_t candidate_length) const noexcept {
-        size_t const magnitude = sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open_or_extend);
-        return (query_length + candidate_length) * magnitude <= u32_reach_limit_k;
-    }
 
     /**
      *  @brief Worst-case scratch for a single cell over the whole input, in O(Q+C): the Myers `match_masks` for the longest
@@ -5746,14 +5731,14 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `u16` walker. */
     auto fits_narrow_policy_() const noexcept {
         return [this](size_t query_length, size_t candidate_length) noexcept {
-            return fits_u16_(query_length, candidate_length);
+            return fits_reach(substituter_, gap_costs_, query_length, candidate_length, u16_reach_limit_k);
         };
     }
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the `u32` walker. */
     auto fits_wide_policy_() const noexcept {
         return [this](size_t query_length, size_t candidate_length) noexcept {
-            return fits_u32_(query_length, candidate_length);
+            return fits_reach(substituter_, gap_costs_, query_length, candidate_length, u32_reach_limit_k);
         };
     }
 
@@ -5767,7 +5752,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_()) {
+        if (!is_unit_cost(substituter_, gap_costs_)) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
             scoring_t fallback {substituter_, gap_costs_};
@@ -5794,7 +5779,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_()) {
+        if (!is_unit_cost(substituter_, gap_costs_)) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
             scoring_t fallback {substituter_, gap_costs_};
@@ -5811,7 +5796,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename sequences_type_, typename value_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_()) {
+        if (!is_unit_cost(substituter_, gap_costs_)) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
             scoring_t fallback {substituter_, gap_costs_};
@@ -5837,7 +5822,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_()) {
+        if (!is_unit_cost(substituter_, gap_costs_)) {
             lane_walker_narrow_t narrow {substituter_, gap_costs_};
             lane_walker_wide_t wide {substituter_, gap_costs_};
             scoring_t fallback {substituter_, gap_costs_};
@@ -5887,49 +5872,34 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
                                                      void>; // ? NEON affine shared-query `u32` lanes.
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using linear_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
+    linear_fallback_t linear_fallback_;
 
-    levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc), linear_fallback_(alloc) {}
     levenshtein_distances(uniform_substitution_costs_t subs, affine_gap_costs_t gaps,
                           allocator_t alloc = allocator_t {}) noexcept
-        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    /** @brief Whether a `(query, candidate)` cell's worst-case distance stays inside the lane walker's `u16` headroom. */
-    bool fits_u16_(size_t query_length, size_t candidate_length) const noexcept {
-        return (query_length + candidate_length) *
-                       sz_max_of_two(sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open),
-                                     (size_t)gap_costs_.extend) +
-                   (size_t)gap_costs_.open <=
-               u16_reach_limit_k;
-    }
-
-    /** @brief Whether a `(query, candidate)` cell's worst-case distance stays inside the wide walker's `u32` headroom. */
-    bool fits_u32_(size_t query_length, size_t candidate_length) const noexcept {
-        return (query_length + candidate_length) *
-                       sz_max_of_two(sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open),
-                                     (size_t)gap_costs_.extend) +
-                   (size_t)gap_costs_.open <=
-               u32_reach_limit_k;
-    }
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc),
+          linear_fallback_(subs, linear_gap_costs_t {gaps.open}, alloc) {}
 
 #pragma region Public Cross Product Overloads
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case distance fits the `u16` walker. */
     auto fits_narrow_policy_() const noexcept {
         return [this](size_t query_length, size_t candidate_length) noexcept {
-            return fits_u16_(query_length, candidate_length);
+            return fits_reach(substituter_, gap_costs_, query_length, candidate_length, u16_reach_limit_k);
         };
     }
 
     /** @brief `(query_length, candidate_length) -> bool`: whether a cell's worst-case distance fits the `u32` walker. */
     auto fits_wide_policy_() const noexcept {
         return [this](size_t query_length, size_t candidate_length) noexcept {
-            return fits_u32_(query_length, candidate_length);
+            return fits_reach(substituter_, gap_costs_, query_length, candidate_length, u32_reach_limit_k);
         };
     }
 
@@ -5944,6 +5914,40 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
+    }
+
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
+                                 strided_rows<value_type_> results, executor_type_ &&executor,
+                                 cpu_specs_t const &specs = {}) noexcept {
+        return cross_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
+                               std::forward<executor_type_>(executor), specs);
+    }
+
+    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
+    template <typename sequences_type_, typename value_type_>
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 cpu_specs_t const &specs = {}) noexcept {
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
+    }
+
+    template <typename sequences_type_, typename value_type_, typename executor_type_>
+    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
+                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
+        return cross_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
+                               std::forward<executor_type_>(executor), specs);
+    }
+
+#pragma endregion Public Cross Product Overloads
+
+#pragma region Cross Product Dispatch
+
+  private:
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, strided_rows<value_type_> results,
+                    cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
+        if (gap_costs_.is_linear()) return linear_fallback_(queries, candidates, results, specs);
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
@@ -5953,55 +5957,27 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
             status != status_t::success_k)
             return status;
         return cross_product_candidate_lanes_range_(
-            narrow, wide, fallback, queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
-            cross_live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
-            fits_narrow_policy_(), fits_wide, empty_cell_policy_(), scratch_space_t(score_scratch_), specs);
+            narrow, wide, fallback, queries, candidates, results, cross_kind, 0,
+            cross_live_cells_count_(queries.size(), candidates.size(), cross_kind), fits_narrow_policy_(), fits_wide,
+            empty_cell_policy_(), scratch_space_t(score_scratch_), specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
-    SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
-                                 strided_rows<value_type_> results, executor_type_ &&executor,
-                                 cpu_specs_t const &specs = {}) noexcept {
+    status_t cross_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cross_similarities_t cross_kind,
+                             executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+        if (gap_costs_.is_linear())
+            return linear_fallback_(queries, candidates, results, std::forward<executor_type_>(executor), specs);
         lane_walker_narrow_t narrow {substituter_, gap_costs_};
         lane_walker_wide_t wide {substituter_, gap_costs_};
         scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results,
-                                                       cross_similarities_t::all_pairs_k, score_scratch_,
-                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
-                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
+        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, queries, candidates, results, cross_kind,
+                                                       score_scratch_, std::forward<executor_type_>(executor),
+                                                       fits_narrow_policy_(), fits_wide_policy_(), empty_cell_policy_(),
+                                                       specs);
     }
 
-    /** @brief Symmetric self-similarity: one set scored against itself (lower triangle + mirror). */
-    template <typename sequences_type_, typename value_type_>
-    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                                 cpu_specs_t const &specs = {}) noexcept {
-        lane_walker_narrow_t narrow {substituter_, gap_costs_};
-        lane_walker_wide_t wide {substituter_, gap_costs_};
-        scoring_t fallback {substituter_, gap_costs_};
-        auto const fits_wide = fits_wide_policy_();
-        if (status_t status = score_scratch_.try_resize(
-                cross_product_candidate_lanes_scratch_(narrow, wide, fallback, sequences, sequences, fits_wide, specs));
-            status != status_t::success_k)
-            return status;
-        return cross_product_candidate_lanes_range_(
-            narrow, wide, fallback, sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
-            cross_live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
-            fits_narrow_policy_(), fits_wide, empty_cell_policy_(), scratch_space_t(score_scratch_), specs);
-    }
-
-    template <typename sequences_type_, typename value_type_, typename executor_type_>
-    SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
-                                 executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        lane_walker_narrow_t narrow {substituter_, gap_costs_};
-        lane_walker_wide_t wide {substituter_, gap_costs_};
-        scoring_t fallback {substituter_, gap_costs_};
-        return cross_product_candidate_lanes_parallel_(narrow, wide, fallback, sequences, sequences, results,
-                                                       cross_similarities_t::symmetric_k, score_scratch_,
-                                                       std::forward<executor_type_>(executor), fits_narrow_policy_(),
-                                                       fits_wide_policy_(), empty_cell_policy_(), specs);
-    }
-
-#pragma endregion Public Cross Product Overloads
+#pragma endregion Cross Product Dispatch
 };
 
 /**
@@ -6040,7 +6016,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, linear_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -6189,7 +6165,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, linear_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -6339,7 +6315,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     needleman_wunsch_scores(substituter_t subs, affine_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -6490,7 +6466,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
     smith_waterman_scores(substituter_t subs, affine_gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
@@ -6644,18 +6620,20 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     // capability covers every cell width, and this long-tail path is rare. It stays bit-exact with the serial oracle.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
     static constexpr index_t myers_lanes_k = myers_t::lanes_k;
-    static constexpr size_t u16_reach_limit_k = 60000; // ? `u16` headroom for the non-unit rune lane walker.
+    static constexpr size_t u16_reach_limit_k = 60000;      // ? `u16` headroom for the non-unit rune lane walker.
+    static constexpr size_t u32_reach_limit_k = 1500000000; // ? `u32` headroom for the wide walker.
 
     using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
     using rune_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<rune_t>;
     using rune_view_allocator_t =
         typename std::allocator_traits<allocator_t>::template rebind_alloc<span<rune_t const>>;
+    using bytes_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
     // The non-unit path transcodes every query/candidate to UTF-32 once and exposes each as a `span<rune_t const>`
     // view, so the driver's `to_view` yields rune spans. Queries and candidates own @b separate arenas so the second
     // transcode does not invalidate the first set of views; the symmetric self-similarity case reuses the query arena.
@@ -6663,27 +6641,12 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     safe_vector<rune_t, rune_allocator_t> candidate_arena_ {alloc_};
     safe_vector<span<rune_t const>, rune_view_allocator_t> query_runes_ {alloc_};
     safe_vector<span<rune_t const>, rune_view_allocator_t> candidate_runes_ {alloc_};
+    bytes_fallback_t bytes_fallback_;
 
-    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc), bytes_fallback_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, linear_gap_costs_t gaps,
                                allocator_t alloc = allocator_t {}) noexcept
-        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    bool is_unit_cost_() const noexcept {
-        return substituter_.match == 0 && substituter_.mismatch == 1 && gap_costs_.open_or_extend == 1;
-    }
-
-    /** @brief Whether a `(query, candidate)` rune cell's worst-case distance fits the narrow `u16` walker's headroom. */
-    bool fits_u16_(size_t query_runes, size_t candidate_runes) const noexcept {
-        size_t const magnitude = sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open_or_extend);
-        return (query_runes + candidate_runes) * magnitude <= u16_reach_limit_k;
-    }
-
-    /** @brief Whether a `(query, candidate)` rune cell's worst-case distance fits the wide `u32` walker's headroom. */
-    bool fits_u32_(size_t query_runes, size_t candidate_runes) const noexcept {
-        size_t const magnitude = sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open_or_extend);
-        return (query_runes + candidate_runes) * magnitude <= 1500000000;
-    }
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc), bytes_fallback_(subs, gaps, alloc) {}
 
     /**
      *  @brief Transcodes every UTF-8 sequence in @p sequences to UTF-32 runes appended to @p arena, recording each
@@ -7013,14 +6976,14 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the narrow `u16` rune walker's range. */
     auto fits_narrow_policy_() const noexcept {
         return [this](size_t query_runes, size_t candidate_runes) noexcept {
-            return fits_u16_(query_runes, candidate_runes);
+            return fits_reach(substituter_, gap_costs_, query_runes, candidate_runes, u16_reach_limit_k);
         };
     }
 
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the wide `u32` rune walker's range. */
     auto fits_wide_policy_() const noexcept {
         return [this](size_t query_runes, size_t candidate_runes) noexcept {
-            return fits_u32_(query_runes, candidate_runes);
+            return fits_reach(substituter_, gap_costs_, query_runes, candidate_runes, u32_reach_limit_k);
         };
     }
 
@@ -7092,25 +7055,14 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     template <typename queries_type_, typename candidates_type_, typename value_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_via_lanes_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
-        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
-            status != status_t::success_k)
-            return status;
-        return score_range_(
-            queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
-            cross_live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
-            scratch_space_t(score_scratch_), specs);
+        return cross_(queries, candidates, results, cross_similarities_t::all_pairs_k, specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                                  strided_rows<value_type_> results, executor_type_ &&executor,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_via_lanes_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
-                                             std::forward<executor_type_>(executor), specs);
-        return score_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
+        return cross_parallel_(queries, candidates, results, cross_similarities_t::all_pairs_k,
                                std::forward<executor_type_>(executor), specs);
     }
 
@@ -7118,28 +7070,49 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     template <typename sequences_type_, typename value_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_via_lanes_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
-        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
-            status != status_t::success_k)
-            return status;
-        return score_range_(
-            sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
-            cross_live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
-            scratch_space_t(score_scratch_), specs);
+        return cross_(sequences, sequences, results, cross_similarities_t::symmetric_k, specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
     SZ_NOIPA status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                                  executor_type_ &&executor, cpu_specs_t const &specs = {}) noexcept {
-        if (!is_unit_cost_())
-            return cross_via_lanes_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
-                                             std::forward<executor_type_>(executor), specs);
-        return score_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
+        return cross_parallel_(sequences, sequences, results, cross_similarities_t::symmetric_k,
                                std::forward<executor_type_>(executor), specs);
     }
 
 #pragma endregion Public Cross Product Overloads
+
+#pragma region Cross Product Dispatch
+
+  private:
+    template <typename queries_type_, typename candidates_type_, typename value_type_>
+    status_t cross_(queries_type_ const &queries, candidates_type_ const &candidates, strided_rows<value_type_> results,
+                    cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
+        if (corpus_is_ascii_<sz_find_byteset_neon>(queries) && corpus_is_ascii_<sz_find_byteset_neon>(candidates))
+            return bytes_fallback_(queries, candidates, results, specs);
+        if (!is_unit_cost(substituter_, gap_costs_))
+            return cross_via_lanes_(queries, candidates, results, cross_kind, specs);
+        if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
+            status != status_t::success_k)
+            return status;
+        return score_range_(queries, candidates, results, cross_kind, 0,
+                            cross_live_cells_count_(queries.size(), candidates.size(), cross_kind),
+                            scratch_space_t(score_scratch_), specs);
+    }
+
+    template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
+    status_t cross_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
+                             strided_rows<value_type_> results, cross_similarities_t cross_kind,
+                             executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+        if (corpus_is_ascii_<sz_find_byteset_neon>(queries) && corpus_is_ascii_<sz_find_byteset_neon>(candidates))
+            return bytes_fallback_(queries, candidates, results, std::forward<executor_type_>(executor), specs);
+        if (!is_unit_cost(substituter_, gap_costs_))
+            return cross_via_lanes_parallel_(queries, candidates, results, cross_kind,
+                                             std::forward<executor_type_>(executor), specs);
+        return score_parallel_(queries, candidates, results, cross_kind, std::forward<executor_type_>(executor), specs);
+    }
+
+#pragma endregion Cross Product Dispatch
 };
 
 /**
@@ -7164,8 +7137,9 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     using index_t = u32_t;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr size_t candidate_lanes_k = 8;     // ? `u16` lanes for the affine rune candidate-lane walker.
-    static constexpr size_t u16_reach_limit_k = 50000; // ? `u16` headroom below the affine walker's discard bias.
+    static constexpr size_t candidate_lanes_k = 8;          // ? `u16` lanes for the affine rune candidate-lane walker.
+    static constexpr size_t u16_reach_limit_k = 50000;      // ? `u16` headroom below the affine walker's discard bias.
+    static constexpr size_t u32_reach_limit_k = 1500000000; // ? `u32` headroom for the wide walker.
 
     using scoring_t = levenshtein_distance_utf8<gap_costs_t, sz_cap_serial_k>; // ? Per-pair UTF-8 serial fallback.
     using lane_walker_narrow_t =
@@ -7181,41 +7155,27 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     using rune_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<rune_t>;
     using rune_view_allocator_t =
         typename std::allocator_traits<allocator_t>::template rebind_alloc<span<rune_t const>>;
+    using linear_fallback_t = levenshtein_distances_utf8<linear_gap_costs_t, allocator_t, capability_k>;
+    using bytes_fallback_t = levenshtein_distances<affine_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_}; // grow-only, reused; partitioned per worker
-    // Queries and candidates own separate rune arenas so the second transcode does not invalidate the first set of
-    // views; the symmetric self-similarity case reuses the query arena.
+    safe_vector<std::byte, scratch_allocator_t> score_scratch_ {alloc_};
     safe_vector<rune_t, rune_allocator_t> query_arena_ {alloc_};
     safe_vector<rune_t, rune_allocator_t> candidate_arena_ {alloc_};
     safe_vector<span<rune_t const>, rune_view_allocator_t> query_runes_ {alloc_};
     safe_vector<span<rune_t const>, rune_view_allocator_t> candidate_runes_ {alloc_};
+    linear_fallback_t linear_fallback_;
+    bytes_fallback_t bytes_fallback_;
 
-    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances_utf8(allocator_t alloc = {}) noexcept
+        : alloc_(alloc), linear_fallback_(alloc), bytes_fallback_(alloc) {}
     levenshtein_distances_utf8(uniform_substitution_costs_t subs, affine_gap_costs_t gaps,
                                allocator_t alloc = allocator_t {}) noexcept
-        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
-
-    /** @brief Whether a `(query, candidate)` rune cell's worst-case distance fits the narrow `u16` walker's headroom. */
-    bool fits_u16_(size_t query_runes, size_t candidate_runes) const noexcept {
-        return (query_runes + candidate_runes) *
-                       sz_max_of_two(sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open),
-                                     (size_t)gap_costs_.extend) +
-                   (size_t)gap_costs_.open <=
-               u16_reach_limit_k;
-    }
-
-    /** @brief Whether a `(query, candidate)` rune cell's worst-case distance fits the wide `u32` walker's headroom. */
-    bool fits_u32_(size_t query_runes, size_t candidate_runes) const noexcept {
-        return (query_runes + candidate_runes) *
-                       sz_max_of_two(sz_max_of_two((size_t)substituter_.mismatch, (size_t)gap_costs_.open),
-                                     (size_t)gap_costs_.extend) +
-                   (size_t)gap_costs_.open <=
-               1500000000;
-    }
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc),
+          linear_fallback_(subs, linear_gap_costs_t {gaps.open}, alloc), bytes_fallback_(subs, gaps, alloc) {}
 
     /**
      *  @brief Transcodes every UTF-8 sequence in @p sequences to UTF-32 runes appended to @p arena, recording each
@@ -7250,14 +7210,14 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the narrow `u16` rune walker's range. */
     auto fits_narrow_policy_() const noexcept {
         return [this](size_t query_runes, size_t candidate_runes) noexcept {
-            return fits_u16_(query_runes, candidate_runes);
+            return fits_reach(substituter_, gap_costs_, query_runes, candidate_runes, u16_reach_limit_k);
         };
     }
 
     /** @brief `(query_runes, candidate_runes) -> bool`: whether a cell fits the wide `u32` rune walker's range. */
     auto fits_wide_policy_() const noexcept {
         return [this](size_t query_runes, size_t candidate_runes) noexcept {
-            return fits_u32_(query_runes, candidate_runes);
+            return fits_reach(substituter_, gap_costs_, query_runes, candidate_runes, u32_reach_limit_k);
         };
     }
 
@@ -7273,6 +7233,9 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     template <typename queries_type_, typename candidates_type_, typename results_type_>
     status_t cross_via_lanes_(queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
                               cross_similarities_t cross_kind, cpu_specs_t const &specs) noexcept {
+        if (gap_costs_.is_linear()) return linear_fallback_(queries, candidates, results, specs);
+        if (corpus_is_ascii_<sz_find_byteset_neon>(queries) && corpus_is_ascii_<sz_find_byteset_neon>(candidates))
+            return bytes_fallback_(queries, candidates, results, specs);
         bool const same = static_cast<void const *>(&queries) == static_cast<void const *>(&candidates);
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
@@ -7299,6 +7262,10 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
     status_t cross_via_lanes_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
                                        results_type_ &&results, cross_similarities_t cross_kind,
                                        executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
+        if (gap_costs_.is_linear())
+            return linear_fallback_(queries, candidates, results, std::forward<executor_type_>(executor), specs);
+        if (corpus_is_ascii_<sz_find_byteset_neon>(queries) && corpus_is_ascii_<sz_find_byteset_neon>(candidates))
+            return bytes_fallback_(queries, candidates, results, std::forward<executor_type_>(executor), specs);
         bool const same = static_cast<void const *>(&queries) == static_cast<void const *>(&candidates);
         if (!transcode_views_(queries, query_arena_, query_runes_) ||
             (!same && !transcode_views_(candidates, candidate_arena_, candidate_runes_)))
