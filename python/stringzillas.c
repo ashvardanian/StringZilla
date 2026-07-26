@@ -117,6 +117,28 @@ static sz_memory_allocator_t unified_allocator;
 // Default CPU-side allocator for buffer-based flows
 static sz_memory_allocator_t default_allocator;
 
+/**
+ *  Per-object serialization for free-threaded builds.
+ *
+ *  Engines keep a grow-only `scratch_` buffer that every call writes through, and an explicit
+ *  `DeviceScope` owns either a fork-union pool - which admits a single driver - or a CUDA executor.
+ *  The GIL is what serializes both today, so a build without it has to say so out loud. The default
+ *  scope needs no lock: it is an empty struct handing out a stateless executor by value.
+ *
+ *  `PyMutex` is zero-initialized, and `tp_alloc` zeroes the object, so these fields need no setup or
+ *  teardown. On a GIL build every macro compiles away. Locks are always taken scope-first, then
+ *  engine, so two threads sharing either object cannot deadlock.
+ */
+#ifdef Py_GIL_DISABLED
+#define SZS_LOCK_FIELD_ PyMutex lock;
+#define SZS_LOCK_(mutex) PyMutex_Lock(mutex)
+#define SZS_UNLOCK_(mutex) PyMutex_Unlock(mutex)
+#else
+#define SZS_LOCK_FIELD_
+#define SZS_LOCK_(mutex) ((void)0)
+#define SZS_UNLOCK_(mutex) ((void)0)
+#endif
+
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
     sz_bool_t (*sz_py_export_strings_as_sequence)(PyObject *, sz_sequence_t *);
@@ -170,6 +192,7 @@ typedef struct {
     PyObject ob_base;
     szs_device_scope_t handle;
     char description[32];
+    SZS_LOCK_FIELD_
 } DeviceScope;
 
 static void DeviceScope_dealloc(DeviceScope *self) {
@@ -361,6 +384,7 @@ typedef struct {
     szs_levenshtein_distances_t handle;
     char description[32];
     sz_capability_t capabilities;
+    SZS_LOCK_FIELD_
 } LevenshteinDistances;
 
 static void LevenshteinDistances_dealloc(LevenshteinDistances *self) {
@@ -734,11 +758,16 @@ static PyObject *LevenshteinDistances_vectorcall(PyObject *callable, PyObject *c
 
     char const *error_detail = NULL;
     sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
-    if (kernel_punned)
+    if (kernel_punned) {
+        if (device_scope) SZS_LOCK_(&device_scope->lock);
+        SZS_LOCK_(&self->lock);
         status = kernel_punned(                              //
             self->handle, device_handle,                     //
             kernel_queries_punned, kernel_candidates_punned, //
             kernel_results, kernel_results_row_stride, &error_detail);
+        SZS_UNLOCK_(&self->lock);
+        if (device_scope) SZS_UNLOCK_(&device_scope->lock);
+    }
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Levenshtein distances computation");
@@ -823,6 +852,7 @@ typedef struct {
     szs_levenshtein_distances_utf8_t handle;
     char description[32];
     sz_capability_t capabilities;
+    SZS_LOCK_FIELD_
 } LevenshteinDistancesUTF8;
 
 static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObject *const *args, size_t nargsf,
@@ -1122,11 +1152,16 @@ static PyObject *LevenshteinDistancesUTF8_vectorcall(PyObject *callable, PyObjec
 
     char const *error_detail = NULL;
     sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
-    if (kernel_punned)
+    if (kernel_punned) {
+        if (device_scope) SZS_LOCK_(&device_scope->lock);
+        SZS_LOCK_(&self->lock);
         status = kernel_punned(                              //
             self->handle, device_handle,                     //
             kernel_queries_punned, kernel_candidates_punned, //
             kernel_results, kernel_results_row_stride, &error_detail);
+        SZS_UNLOCK_(&self->lock);
+        if (device_scope) SZS_UNLOCK_(&device_scope->lock);
+    }
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "Levenshtein distances computation");
@@ -1208,6 +1243,7 @@ typedef struct {
     szs_needleman_wunsch_scores_t handle;
     char description[32];
     sz_capability_t capabilities;
+    SZS_LOCK_FIELD_
 } NeedlemanWunsch;
 
 static void NeedlemanWunsch_dealloc(NeedlemanWunsch *self) {
@@ -1546,11 +1582,15 @@ static PyObject *NeedlemanWunsch_vectorcall(PyObject *callable, PyObject *const 
 
     char const *error_detail = NULL;
     sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
-    if (kernel_punned)
+    if (kernel_punned) {
+        // The default scope is stateless, so only the engine's scratch needs guarding.
+        SZS_LOCK_(&self->lock);
         status = kernel_punned(                              //
             self->handle, device_handle,                     //
             kernel_queries_punned, kernel_candidates_punned, //
             kernel_results, kernel_results_row_stride, &error_detail);
+        SZS_UNLOCK_(&self->lock);
+    }
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "NeedlemanWunsch computation");
@@ -1635,6 +1675,7 @@ typedef struct {
     szs_smith_waterman_scores_t handle;
     char description[32];
     sz_capability_t capabilities;
+    SZS_LOCK_FIELD_
 } SmithWaterman;
 
 static void SmithWaterman_dealloc(SmithWaterman *self) {
@@ -1963,11 +2004,15 @@ static PyObject *SmithWaterman_vectorcall(PyObject *callable, PyObject *const *a
 
     char const *error_detail = NULL;
     sz_status_t status = sz_success_k; // An empty cross product (zero-row/col matrix) needs no kernel
-    if (kernel_punned)
+    if (kernel_punned) {
+        // The default scope is stateless, so only the engine's scratch needs guarding.
+        SZS_LOCK_(&self->lock);
         status = kernel_punned(                              //
             self->handle, device_handle,                     //
             kernel_queries_punned, kernel_candidates_punned, //
             kernel_results, kernel_results_row_stride, &error_detail);
+        SZS_UNLOCK_(&self->lock);
+    }
 
     if (status != sz_success_k) {
         set_stringzilla_error(status, error_detail, "SmithWaterman computation");
@@ -2060,6 +2105,7 @@ typedef struct {
     char description[64];
     sz_capability_t capabilities;
     sz_size_t ndim;
+    SZS_LOCK_FIELD_
 } Fingerprints;
 
 static void Fingerprints_dealloc(Fingerprints *self) {
@@ -2272,9 +2318,13 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         }
 
         char const *error_detail = NULL;
+        if (device_scope) SZS_LOCK_(&device_scope->lock);
+        SZS_LOCK_(&self->lock);
         sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, buf_hashes,
                                            self->ndim * sizeof(sz_u32_t), buf_counts, self->ndim * sizeof(sz_u32_t),
                                            &error_detail);
+        SZS_UNLOCK_(&self->lock);
+        if (device_scope) SZS_UNLOCK_(&device_scope->lock);
         if (status != sz_success_k) {
             out_alloc->free(buf_hashes, total_bytes, out_alloc->handle);
             out_alloc->free(buf_counts, total_bytes, out_alloc->handle);
