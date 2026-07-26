@@ -22,7 +22,8 @@
 #define STRINGZILLAS_SIMILARITIES_SERIAL_HPP_
 
 #include "stringzilla/types.hpp"           // `sz::error_cost_t`
-#include "stringzilla/memory.h"            // `sz_move_serial`
+#include "stringzilla/memory/serial.h"     // `sz_move_serial`
+#include "stringzilla/find/serial.h"       // `sz_find_byteset_serial`
 #include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode_unchecked`
 #include "stringzillas/types.hpp"          // `sz::executor_like`
 
@@ -450,6 +451,29 @@ status_t dispatch_word_bucket_(size_t bucket, fixed_type_ &&fixed, overflow_type
     if constexpr (current_k > high_k) return sz_unused_(bucket), overflow();
     else if (bucket == current_k) return fixed(std::integral_constant<size_t, current_k> {});
     else return dispatch_word_bucket_<current_k + 1, high_k>(bucket, fixed, overflow);
+}
+
+/**
+ *  @brief Whether @p text is free of bytes above `0x7F`, so its runes coincide with its bytes.
+ *
+ *  Takes the byteset scanner as a template argument so each engine supplies the kernel matching its own ISA,
+ *  the same way it picks its walkers. An engine that names no scanner fails to compile rather than silently
+ *  dropping to the serial one.
+ */
+template <sz_find_byteset_t find_byteset_>
+SZ_INLINE bool text_is_ascii_(span<char const> text) noexcept {
+    sz_byteset_t non_ascii;
+    sz_byteset_init_ascii(&non_ascii);
+    sz_byteset_invert(&non_ascii);
+    return find_byteset_(text.data(), text.size(), &non_ascii) == SZ_NULL_CHAR;
+}
+
+/** @brief Whether every string in @p corpus is ASCII, so rune distances equal byte distances. */
+template <sz_find_byteset_t find_byteset_, typename corpus_type_>
+SZ_INLINE bool corpus_is_ascii_(corpus_type_ const &corpus) noexcept {
+    for (size_t index = 0; index != corpus.size(); ++index)
+        if (!text_is_ascii_<find_byteset_>(to_view(corpus[index]))) return false;
+    return true;
 }
 
 #pragma region Core Templates
@@ -2904,7 +2928,7 @@ struct levenshtein_distance_utf8 {
 
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
-        if (sz_isascii(first.data(), first.size()) && sz_isascii(second.data(), second.size()))
+        if (text_is_ascii_<sz_find_byteset_serial>(first) && text_is_ascii_<sz_find_byteset_serial>(second))
             return ascii_fallback_t {substituter_, gap_costs_}(first, second, result_ref, scratch_space, executor,
                                                                specs);
 

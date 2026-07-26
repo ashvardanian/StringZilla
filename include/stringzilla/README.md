@@ -459,7 +459,8 @@ int main() {
 }
 ```
 
-The C side ships ready-made table initializers — `sz_lookup_init_lower`, `sz_lookup_init_upper`, and `sz_lookup_init_ascii` — plus a fast `sz_isascii(text, length)` predicate for selecting ASCII-only fast paths.
+The C side ships ready-made table initializers — `sz_lookup_init_lower`, `sz_lookup_init_upper`, and `sz_lookup_init_ascii`.
+To select an ASCII-only fast path, scan for the complement of `sz_byteset_init_ascii` with `sz_find_byteset`, which reaches the SIMD byteset kernels instead of a scalar loop.
 
 
 ## Hashing and Checksums

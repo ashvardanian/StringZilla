@@ -22,9 +22,6 @@
  *  - `sz_lookup_init_lower` for transforms like `tolower`
  *  - `sz_lookup_init_upper` for transforms like `toupper`
  *  - `sz_lookup_init_ascii` for transforms like `isascii`
- *
- *  The header also exposes a minimalistic @b `sz_isascii` which can be used in UTF-8 capable
- *  methods to select a simpler execution path for ASCII characters.
  */
 #ifndef STRINGZILLA_MEMORY_H_
 #define STRINGZILLA_MEMORY_H_
@@ -347,37 +344,6 @@ SZ_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
  */
 SZ_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
-}
-
-/**
- *  @brief Checks if all characters in a @p text are valid ASCII characters.
- *  @param text String to be analyzed.
- *  @param length Number of bytes in the string.
- *  @return Whether all characters are valid ASCII characters.
- */
-SZ_API_COMPTIME sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
-
-    if (!length) return sz_true_k;
-    sz_u8_t const *text_cursor = (sz_u8_t const *)text;
-    sz_u8_t const *const text_end = text_cursor + length;
-
-#if !SZ_USE_MISALIGNED_LOADS
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)text_cursor & 7ull) && text_cursor < text_end; ++text_cursor)
-        if (*text_cursor & 0x80ull) return sz_false_k;
-#endif
-
-    // Validate eight bytes at once using SWAR.
-    sz_u64_vec_t text_vec;
-    for (; text_cursor + 8 <= text_end; text_cursor += 8) {
-        text_vec.u64 = *(sz_u64_t const *)text_cursor;
-        if (text_vec.u64 & 0x8080808080808080ull) return sz_false_k;
-    }
-
-    // Handle the misaligned tail.
-    for (; text_cursor < text_end; ++text_cursor)
-        if (*text_cursor & 0x80ull) return sz_false_k;
-    return sz_true_k;
 }
 
 #pragma endregion // Helper API
