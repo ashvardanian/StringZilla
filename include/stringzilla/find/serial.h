@@ -124,10 +124,6 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t leng
     return SZ_NULL_CHAR;
 }
 
-/*  Find the first occurrence of a @b single-character needle in an arbitrary length haystack.
- *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
- *  Identical to `memchr(haystack, needle[0], haystack_length)`.
- */
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
     if (!haystack_length) return SZ_NULL_CHAR;
@@ -161,11 +157,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t hays
     return SZ_NULL_CHAR;
 }
 
-/*  Find the last occurrence of a @b single-character needle in an arbitrary length haystack.
- *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
- *  Identical to `memrchr(haystack, needle[0], haystack_length)`.
- */
-sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
     if (!haystack_length) return SZ_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
