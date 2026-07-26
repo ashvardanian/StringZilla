@@ -1361,6 +1361,42 @@ void test_extensions_updates_unit() {
     assert(str(sz::concatenate("a"_sv, "b"_sv)) == "ab");
     assert(str(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
 
+    // The cases above pass only rvalues carrying a `::value_type`. Named lvalues deduce to a
+    // reference and raw literals to a character array, neither of which has member typedefs.
+    {
+        str name = "ash", domain = "mail", tld = "com";
+        assert(str(sz::concatenate(name, "@", domain, ".", tld)) == "ash@mail.com");
+        assert(str(name | "@" | domain | "." | tld) == "ash@mail.com");
+        assert(str(sz::concatenate(name, domain)) == "ashmail");
+        assert(str(sz::concatenate("@", name)) == "@ash");
+
+        // Materializing uses an implicit conversion, so the concatenation constructor is not explicit.
+        sz::string email = name | "@" | domain;
+        assert(email == "ash@mail");
+    }
+
+    // Range members slice the string they were called on, so offsets stay inside its own buffer.
+    {
+        str text = "hello brave new world";
+        for (auto segment : text.utf8_wordbreaks()) {
+            std::ptrdiff_t const offset = segment.data() - text.data();
+            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+        }
+        for (auto token : text.utf8_split_whitespaces()) {
+            std::ptrdiff_t const offset = token.data() - text.data();
+            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+        }
+        for (auto field : text.utf8_split_delimiters()) {
+            std::ptrdiff_t const offset = field.data() - text.data();
+            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+        }
+        str sso = "a b c";
+        for (auto token : sso.utf8_split_whitespaces()) {
+            std::ptrdiff_t const offset = token.data() - sso.data();
+            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()));
+        }
+    }
+
     // Randomization.
     assert(str::random(0).empty());
     assert(str::random(4).size() == 4);

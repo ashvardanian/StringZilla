@@ -403,12 +403,12 @@ inline static constexpr exclude_overlaps_type exclude_overlaps;
  *  @brief Zero-cost wrapper around the `.find` member function of string-like classes.
  *  @see https://en.cppreference.com/w/cpp/string/basic_string/find
  */
-template <typename string_type_, typename overlaps_type_ = include_overlaps_type>
+template <typename string_type_, typename overlaps_type_ = include_overlaps_type, typename needle_type_ = string_type_>
 struct matcher_find {
     using size_type = typename string_type_::size_type;
-    string_type_ needle_;
+    needle_type_ needle_;
 
-    matcher_find(string_type_ needle = {}) noexcept : needle_(needle) {}
+    matcher_find(needle_type_ needle = {}) noexcept : needle_(needle) {}
     size_type needle_length() const noexcept { return needle_.length(); }
     size_type operator()(string_type_ haystack) const noexcept { return haystack.find(needle_); }
     size_type skip_length() const noexcept {
@@ -424,12 +424,12 @@ struct matcher_find {
  *  @brief Zero-cost wrapper around the `.rfind` member function of string-like classes.
  *  @see https://en.cppreference.com/w/cpp/string/basic_string/rfind
  */
-template <typename string_type_, typename overlaps_type_ = include_overlaps_type>
+template <typename string_type_, typename overlaps_type_ = include_overlaps_type, typename needle_type_ = string_type_>
 struct matcher_rfind {
     using size_type = typename string_type_::size_type;
-    string_type_ needle_;
+    needle_type_ needle_;
 
-    matcher_rfind(string_type_ needle = {}) noexcept : needle_(needle) {}
+    matcher_rfind(needle_type_ needle = {}) noexcept : needle_(needle) {}
     size_type needle_length() const noexcept { return needle_.length(); }
     size_type operator()(string_type_ haystack) const noexcept { return haystack.rfind(needle_); }
     size_type skip_length() const noexcept {
@@ -528,6 +528,117 @@ struct string_view_for<string_type_, true> {
 };
 
 /**
+ *  @brief Helper to detect if a type can be shrunk from the front, as the range iterators require.
+ *         Uses SFINAE with no STL dependencies, same shape as `has_string_view_member_`.
+ *
+ *  Owning types like `std::string` have no `remove_prefix`, so they can be passed to the
+ *  range-producing functions but fail deep inside the iterator. This probe backs a `static_assert`
+ *  that rejects them at the call site instead.
+ */
+template <typename type_>
+struct has_remove_prefix_member_ {
+  private:
+    template <typename candidate_>
+    static char test_(candidate_ *candidate, decltype(candidate->remove_prefix(1)) * = nullptr);
+    template <typename candidate_>
+    static int test_(...);
+
+  public:
+    static constexpr bool value = sizeof(test_<type_>(nullptr)) == sizeof(char);
+};
+
+/**
+ *  @brief Infers how a haystack is stored inside a range-producing view.
+ *
+ *  The range-producing functions take a forwarding reference, so the value category of the argument
+ *  decides the storage. An @b lvalue is borrowed as a non-owning view into the caller's buffer - no
+ *  copy is made, and the produced slices stay comparable against iterators of the original string.
+ *  An @b rvalue is stored by value, keeping the temporary alive for as long as the range walks it.
+ *
+ *  Borrowing matters beyond the copy: a view over a copied haystack yields slices that point into
+ *  that private copy, so measuring them against the caller's iterators gives meaningless offsets.
+ */
+template <typename haystack_type_>
+struct range_haystack_for {
+    using type = haystack_type_;
+};
+
+// A `const` lvalue must shed its qualifier first. StringZilla types survive it either way, as
+// `has_string_view_member_` reaches the nested typedef through the `const`, but an STL view is its own
+// view type - `std::string_view const` would keep the qualifier and lose its `remove_prefix`.
+template <typename haystack_type_>
+struct range_haystack_for<haystack_type_ &> {
+    using type = typename string_view_for<typename std::remove_cv<haystack_type_>::type>::type;
+};
+
+/**
+ *  @brief Infers how a needle is stored inside a matcher.
+ *
+ *  Unlike the haystack, the needle is always stored by value in its own type, which is what keeps
+ *  `find_all(haystack, sz::string("x"))` safe - viewing a temporary needle would leave the matcher
+ *  pointing at freed memory for the whole life of the range. Raw character buffers are the exception:
+ *  they have no `length()` member to match against, and string literals have static storage, so they
+ *  are narrowed to the haystack's view type instead.
+ */
+template <typename view_type_, typename needle_type_>
+struct range_needle_for {
+    using type = needle_type_;
+};
+
+template <typename view_type_, std::size_t length_>
+struct range_needle_for<view_type_, char[length_]> {
+    using type = view_type_;
+};
+
+template <typename view_type_, std::size_t length_>
+struct range_needle_for<view_type_, char const[length_]> {
+    using type = view_type_;
+};
+
+template <typename view_type_>
+struct range_needle_for<view_type_, char *> {
+    using type = view_type_;
+};
+
+template <typename view_type_>
+struct range_needle_for<view_type_, char const *> {
+    using type = view_type_;
+};
+
+/**  @brief Storage for a forwarded haystack - a borrowed view for lvalues, an owned copy for rvalues. */
+template <typename haystack_type_>
+using range_haystack_type = typename range_haystack_for<haystack_type_>::type;
+
+/**
+ *  @brief Rejects haystacks that cannot be walked, before the range types are instantiated.
+ *
+ *  The check has to live in a trait rather than in the function body: the return type of every
+ *  range-producing function mentions the matcher, and a haystack like a bare string literal explodes
+ *  inside `matcher_find` while the body is still uninstantiated. Sitting on the path to the view type
+ *  means this diagnostic is the one the caller sees.
+ */
+template <typename view_type_, bool has_remove_prefix_ = has_remove_prefix_member_<view_type_>::value>
+struct range_walkable_view_ {
+    using type = view_type_;
+};
+
+template <typename view_type_>
+struct range_walkable_view_<view_type_, false> {
+    static_assert(has_remove_prefix_member_<view_type_>::value,
+                  "Range haystacks need a `remove_prefix` member - pass a view, or `.view()` of an owning string.");
+    using type = view_type_;
+};
+
+/**  @brief The slice type produced when iterating a forwarded haystack. */
+template <typename haystack_type_>
+using range_view_type =
+    typename range_walkable_view_<typename string_view_for<range_haystack_type<haystack_type_>>::type>::type;
+
+/**  @brief Storage for a needle paired with the haystack view type it will be matched against. */
+template <typename haystack_type_, typename needle_type_>
+using range_needle_type = typename range_needle_for<range_view_type<haystack_type_>, needle_type_>::type;
+
+/**
  *  @brief A range of string slices representing the matches of a substring search.
  *
  *  @note Lifetime semantics: Stores forwarded objects (including owning strings) to maintain lifetime.
@@ -557,7 +668,8 @@ class find_matches_view {
     using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
     using reference = string_view_type; // Needed for compatibility with STL container constructors.
 
-    find_matches_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    find_matches_view(string_type haystack, matcher_type needle) noexcept
+        : matcher_(std::move(needle)), haystack_(std::move(haystack)) {}
 
     class iterator {
         matcher_type matcher_;
@@ -648,7 +760,8 @@ class rfind_matches_view {
     string_type haystack_;
 
   public:
-    rfind_matches_view(string_type haystack, matcher_type needle) : matcher_(needle), haystack_(haystack) {}
+    rfind_matches_view(string_type haystack, matcher_type needle) noexcept
+        : matcher_(std::move(needle)), haystack_(std::move(haystack)) {}
 
     class iterator {
         matcher_type matcher_;
@@ -756,7 +869,8 @@ class find_splits_view {
     string_type haystack_;
 
   public:
-    find_splits_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    find_splits_view(string_type haystack, matcher_type needle) noexcept
+        : matcher_(std::move(needle)), haystack_(std::move(haystack)) {}
 
     class iterator {
         char const *start_;      // Start of current segment
@@ -889,7 +1003,8 @@ class rfind_splits_view {
     string_type haystack_;
 
   public:
-    rfind_splits_view(string_type haystack, matcher_type needle) noexcept : matcher_(needle), haystack_(haystack) {}
+    rfind_splits_view(string_type haystack, matcher_type needle) noexcept
+        : matcher_(std::move(needle)), haystack_(std::move(haystack)) {}
 
     class iterator {
         char const *start_;      // Start of haystack (immutable)
@@ -1556,152 +1671,225 @@ template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps
 using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks, string_type_, steps_>;
 
 /**
+ *  @brief Resolves a forwarded haystack into the form the range views store, checking it can be iterated.
+ *
+ *  Whether the haystack can be walked at all is checked by `range_walkable_view_`, on the path to the
+ *  view type, so the diagnostic lands before these return types are instantiated.
+ */
+template <typename haystack_type_>
+range_haystack_type<haystack_type_> borrow_range_haystack_(haystack_type_ &&h) noexcept {
+    return static_cast<range_haystack_type<haystack_type_>>(std::forward<haystack_type_>(h));
+}
+
+/**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty needle, the zero-length match at every offset still advances by 1 byte per
  *        step (never 0), so the range always terminates.
  */
-template <typename string_type_>
-find_matches_view<string_type_, matcher_find<string_type_, include_overlaps_type>> find_all(
-    string_type_ const &h, string_type_ const &n, include_overlaps_type = {}) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_matches_view<range_haystack_type<haystack_type_>,
+                  matcher_find<range_view_type<haystack_type_>, include_overlaps_type,
+                               range_needle_type<haystack_type_, needle_type_>>>
+find_all(haystack_type_ &&h, needle_type_ const &n, include_overlaps_type = {}) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_find<range_view_type<haystack_type_>, include_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Find all potentially @b overlapping inclusions of a needle substring in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty needle, always terminates; @sa find_all.
  */
-template <typename string_type_>
-rfind_matches_view<string_type_, matcher_rfind<string_type_, include_overlaps_type>> rfind_all(
-    string_type_ const &h, string_type_ const &n, include_overlaps_type = {}) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_matches_view<range_haystack_type<haystack_type_>,
+                   matcher_rfind<range_view_type<haystack_type_>, include_overlaps_type,
+                                 range_needle_type<haystack_type_, needle_type_>>>
+rfind_all(haystack_type_ &&h, needle_type_ const &n, include_overlaps_type = {}) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_rfind<range_view_type<haystack_type_>, include_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Find all @b non-overlapping inclusions of a needle substring.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty needle, the disjoint step is floored at 1 byte (instead of the needle's
  *        zero length), so the range always terminates.
  */
-template <typename string_type_>
-find_matches_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> find_all(
-    string_type_ const &h, string_type_ const &n, exclude_overlaps_type) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_matches_view<range_haystack_type<haystack_type_>,
+                  matcher_find<range_view_type<haystack_type_>, exclude_overlaps_type,
+                               range_needle_type<haystack_type_, needle_type_>>>
+find_all(haystack_type_ &&h, needle_type_ const &n, exclude_overlaps_type) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Find all @b non-overlapping inclusions of a needle substring in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty needle, always terminates; @sa find_all.
  */
-template <typename string_type_>
-rfind_matches_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rfind_all(
-    string_type_ const &h, string_type_ const &n, exclude_overlaps_type) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_matches_view<range_haystack_type<haystack_type_>,
+                   matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_type,
+                                 range_needle_type<haystack_type_, needle_type_>>>
+rfind_all(haystack_type_ &&h, needle_type_ const &n, exclude_overlaps_type) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Find all inclusions of characters from the second string.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-find_matches_view<string_type_, matcher_find_first_of<string_type_>> find_all_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_matches_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_first_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+find_all_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Find all inclusions of characters from the second string in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-rfind_matches_view<string_type_, matcher_find_last_of<string_type_>> rfind_all_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_matches_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_last_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+rfind_all_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Find all characters except the ones in the second string.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-find_matches_view<string_type_, matcher_find_first_not_of<string_type_>> find_all_other_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_matches_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_first_not_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+find_all_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Find all characters except the ones in the second string in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-rfind_matches_view<string_type_, matcher_find_last_not_of<string_type_>> rfind_all_other_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_matches_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_last_not_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+rfind_all_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Splits a string around every @b non-overlapping inclusion of the second string.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty delimiter, every segment is empty and the delimiter step is floored at 1 byte,
  *        so the range always terminates, yielding `size() + 1` segments.
  */
-template <typename string_type_>
-find_splits_view<string_type_, matcher_find<string_type_, exclude_overlaps_type>> split(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_splits_view<range_haystack_type<haystack_type_>,
+                 matcher_find<range_view_type<haystack_type_>, exclude_overlaps_type,
+                              range_needle_type<haystack_type_, needle_type_>>>
+split(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Splits a string around every @b non-overlapping inclusion of the second string in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  *  @note For an @b empty delimiter, always terminates, yielding `size() + 1` segments; @sa split.
  */
-template <typename string_type_>
-rfind_splits_view<string_type_, matcher_rfind<string_type_, exclude_overlaps_type>> rsplit(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_splits_view<range_haystack_type<haystack_type_>,
+                  matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_type,
+                                range_needle_type<haystack_type_, needle_type_>>>
+rsplit(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
+            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_type, needle_storage>(needle_storage(n))};
 }
 
 /**
  *  @brief Splits a string around every character from the second string.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-find_splits_view<string_type_, matcher_find_first_of<string_type_>> split_characters(string_type_ const &h,
-                                                                                     string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_splits_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_first_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+split_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Splits a string around every character from the second string in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-rfind_splits_view<string_type_, matcher_find_last_of<string_type_>> rsplit_characters(string_type_ const &h,
-                                                                                      string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_splits_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_last_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+rsplit_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Splits a string around every character except the ones from the second string.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-find_splits_view<string_type_, matcher_find_first_not_of<string_type_>> split_other_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+find_splits_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_first_not_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+split_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**
  *  @brief Splits a string around every character except the ones from the second string in @b reverse order.
- *  @tparam string_type_ A string-like type, ideally a view, like StringZilla or STL `string_view`.
+ *  @tparam haystack_type_ A string-like type; an lvalue is borrowed, an rvalue is kept alive by value.
+ *  @tparam needle_type_ Anything convertible to the haystack's view type, including a string literal.
  */
-template <typename string_type_>
-rfind_splits_view<string_type_, matcher_find_last_not_of<string_type_>> rsplit_other_characters(
-    string_type_ const &h, string_type_ const &n) noexcept {
-    return {h, n};
+template <typename haystack_type_, typename needle_type_>
+rfind_splits_view<
+    range_haystack_type<haystack_type_>,
+    matcher_find_last_not_of<range_view_type<haystack_type_>, range_needle_type<haystack_type_, needle_type_>>>
+rsplit_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
+    using needle_storage = range_needle_type<haystack_type_, needle_type_>;
+    return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
 /**  @brief Helper function using `std::advance` iterator and return it back. */
@@ -4593,28 +4781,32 @@ class basic_string {
      *  @brief Iterate over UTF-8 characters (codepoints) in the string.
      *  @return A range view over UTF-32 codepoints decoded from UTF-8 bytes.
      */
-    utf8_runes_view<basic_string> utf8_runes() const noexcept { return {*this}; }
+    utf8_runes_view<string_view> utf8_runes() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /** @brief Lazily splits into the lines @b between Unicode newlines; @sa utf8_newlines() for the runs. */
-    utf8_split_newlines_view<basic_string> utf8_split_newlines() const noexcept { return {*this}; }
+    utf8_split_newlines_view<string_view> utf8_split_newlines() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /** @brief Lazily yields the Unicode newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...). */
-    utf8_newlines_view<basic_string> utf8_newlines() const noexcept { return {*this}; }
+    utf8_newlines_view<string_view> utf8_newlines() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /** @brief Lazily splits into the tokens @b between Unicode whitespace runs (empties kept; `.skip_empty()` drops). */
-    utf8_split_whitespaces_view<basic_string> utf8_split_whitespaces() const noexcept { return {*this}; }
+    utf8_split_whitespaces_view<string_view> utf8_split_whitespaces() const noexcept sz_lifetime_bound_ {
+        return {view()};
+    }
 
     /** @brief Lazily yields the Unicode whitespace runs themselves. */
-    utf8_whitespaces_view<basic_string> utf8_whitespaces() const noexcept { return {*this}; }
+    utf8_whitespaces_view<string_view> utf8_whitespaces() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /** @brief Lazily splits into the fields @b between any Unicode delimiter (P/S/Z); the superset of utf8_split_whitespaces(). */
-    utf8_split_delimiters_view<basic_string> utf8_split_delimiters() const noexcept { return {*this}; }
+    utf8_split_delimiters_view<string_view> utf8_split_delimiters() const noexcept sz_lifetime_bound_ {
+        return {view()};
+    }
 
     /** @brief Lazily yields the Unicode delimiter runs themselves (punctuation, symbols, separators). */
-    utf8_delimiters_view<basic_string> utf8_delimiters() const noexcept { return {*this}; }
+    utf8_delimiters_view<string_view> utf8_delimiters() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /** @brief Lazily yields the UAX-29 word segments, in order (words + the separators between them; they tile). */
-    utf8_wordbreaks_view<basic_string> utf8_wordbreaks() const noexcept { return {*this}; }
+    utf8_wordbreaks_view<string_view> utf8_wordbreaks() const noexcept sz_lifetime_bound_ { return {view()}; }
 
     /**
      *  @brief Apply Unicode case folding to the string in-place.

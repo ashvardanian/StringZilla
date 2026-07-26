@@ -332,6 +332,38 @@ void test_find_unit() {
     assert(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
     assert(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
 
+    // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
+    // haystack would offset into a private copy - and under SSO those offsets look plausible.
+    {
+        sz::string haystack("hello world, hello cpp");
+        sz::string sso("a b a");
+        let_assert(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
+                   matches.size() == 2 &&                          //
+                       matches[0].data() - haystack.data() == 0 && //
+                       matches[1].data() - haystack.data() == 13);
+        let_assert(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
+                   in_sso.size() == 2 &&                     //
+                       in_sso[0].data() - sso.data() == 0 && //
+                       in_sso[1].data() - sso.data() == 4);
+    }
+
+    // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
+    assert(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
+
+    // Haystack and needle need not share a type - literals, views, and owning strings mix.
+    {
+        sz::string owning("a-b-c");
+        sz::string_view view("a-b-c");
+        sz::string needle("-");
+        assert(sz::find_all(view, "-").size() == 2);
+        assert(sz::find_all(owning, "-").size() == 2);
+        assert(sz::find_all(owning, view.substr(1, 1)).size() == 2);
+        assert(sz::find_all(view, needle).size() == 2);
+        assert(sz::split(owning, "-").size() == 3);
+        assert(sz::rsplit(view, needle).size() == 3);
+        assert(sz::split_characters(owning, "-").size() == 3);
+    }
+
     // Check splitting - the inverse of `find_all` ranges
     let_assert(auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>(),
                splits.size() == 5 && splits[0] == "" && splits[1] == "a" && splits[4] == "");
