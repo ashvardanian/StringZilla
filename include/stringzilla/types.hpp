@@ -992,6 +992,50 @@ sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_t
 }
 
 /**
+ *  @brief The number of significant bits in @p x, or zero when @p x is zero.
+ *
+ *  Widens to `u64_t` first, so one body serves every unsigned width - shifting a 32-bit value by 32 would be
+ *  undefined even on a branch that never runs.
+ *  @note Unrolled rather than delegating to `sz_u64_clz`, which is an intrinsic wrapper and not `constexpr`.
+ */
+template <typename scalar_type_>
+sz_constexpr_if_cpp14 int bit_width(scalar_type_ x) noexcept {
+    static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
+    u64_t wide = (u64_t)x;
+    int width = 0;
+    if (wide >> 32) { width += 32, wide >>= 32; }
+    if (wide >> 16) { width += 16, wide >>= 16; }
+    if (wide >> 8) { width += 8, wide >>= 8; }
+    if (wide >> 4) { width += 4, wide >>= 4; }
+    if (wide >> 2) { width += 2, wide >>= 2; }
+    if (wide >> 1) { width += 1, wide >>= 1; }
+    return width + (int)(wide != 0);
+}
+
+/**
+ *  @brief Exact `floor(sqrt(x))` over integers, without floating-point arithmetic and without a loop.
+ *
+ *  Seeds a power of two at or above the root, then runs five Newton steps: each doubles the count of correct bits,
+ *  and a 64-bit input has a 32-bit root, so 1 → 2 → 4 → 8 → 16 → 32 covers every width. Newton converges
+ *  from above, so one clamp lands on the floor. `constexpr` keeps it callable from CUDA device code, unlike
+ *  `std::sqrt`.
+ */
+template <typename scalar_type_>
+sz_constexpr_if_cpp14 scalar_type_ integer_square_root(scalar_type_ x) noexcept {
+    static_assert(std::is_unsigned<scalar_type_>::value, "Value type must be unsigned integer");
+    static_assert(sizeof(scalar_type_) <= sizeof(u64_t), "Newton ladder is sized for at most 64-bit inputs");
+    if (x <= 1) return x;
+    u64_t const wide = (u64_t)x;
+    u64_t guess = (u64_t)1 << ((bit_width(wide) + 1) / 2);
+    guess = (guess + wide / guess) / 2;
+    guess = (guess + wide / guess) / 2;
+    guess = (guess + wide / guess) / 2;
+    guess = (guess + wide / guess) / 2;
+    guess = (guess + wide / guess) / 2;
+    return (scalar_type_)(guess > wide / guess ? guess - 1 : guess);
+}
+
+/**
  *  @brief Equivalent to `(condition ? value : 0)`, but avoids branching.
  */
 template <typename value_type_>

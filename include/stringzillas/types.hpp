@@ -46,6 +46,28 @@ class spin_mutex_t {
 };
 
 /**
+ *  @brief A `status_t` shared by parallel workers: keeps the @b first failure and lets the others bail out early.
+ *
+ *  Relaxed throughout, as the pool's join already establishes happens-before between the workers and the caller.
+ *  Assigning @b success_k is a no-op, so the success path never writes to the shared line.
+ */
+struct atomic_status_t {
+    std::atomic<status_t> status_ {status_t::success_k};
+
+    atomic_status_t() = default;
+    atomic_status_t(atomic_status_t const &) = delete;
+    atomic_status_t &operator=(atomic_status_t const &) = delete;
+
+    operator status_t() const noexcept { return status_.load(std::memory_order_relaxed); }
+    atomic_status_t &operator=(status_t status) noexcept {
+        if (status == status_t::success_k) return *this; // ? The flag starts here; never write it back.
+        status_t expected = status_t::success_k;
+        status_.compare_exchange_strong(expected, status, std::memory_order_relaxed, std::memory_order_relaxed);
+        return *this;
+    }
+};
+
+/**
  *  @brief Simple RAII lock guard analog to `std::lock_guard` for C++11 compatibility.
  *      Automatically locks the mutex on construction and unlocks on destruction.
  */

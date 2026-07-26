@@ -2841,71 +2841,6 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         return sz_max_of_two(sz_max_of_two(myers_scratch, dp_scratch), eightxN_scratch);
     }
 
-#pragma region Cross Product Cell Addressing
-
-    /**
-     *  @brief A destination for one scored cell: the primary matrix slot plus an optional mirror slot.
-     *      The Myers kernels assign `writer[group_local_index] = distance`, so the writer holds one of
-     *      these per active lane and fans the score out to both slots on assignment.
-     */
-    template <typename value_type_>
-    struct cross_cell_destination_ {
-        value_type_ *primary = nullptr;
-        value_type_ *mirror = nullptr;
-    };
-
-    /**
-     *  @brief An indexable adapter handed to the Myers kernels and the DP fallback so they can stay
-     *      grouping-agnostic: a lane's group-local index selects its destination, and assigning a score
-     *      writes the primary cell and, for symmetric self-similarity, the mirrored cell too.
-     */
-    template <typename value_type_>
-    struct cross_cell_writer_ {
-        cross_cell_destination_<value_type_> const *destinations = nullptr;
-
-        struct cell_proxy_ {
-            cross_cell_destination_<value_type_> destination;
-            cell_proxy_ &operator=(size_t value) noexcept {
-                *destination.primary = static_cast<value_type_>(value);
-                if (destination.mirror) *destination.mirror = static_cast<value_type_>(value);
-                return *this;
-            }
-        };
-
-        cell_proxy_ operator[](size_t group_local_index) const noexcept {
-            return cell_proxy_ {destinations[group_local_index]};
-        }
-    };
-
-    /** @brief The number of live cells: the full rectangle, or the lower triangle (incl. diagonal) when symmetric. */
-    static size_t live_cells_count_(size_t queries_count, size_t candidates_count,
-                                    cross_similarities_t cross_kind) noexcept {
-        if (cross_kind == cross_similarities_t::symmetric_k) return queries_count * (queries_count + 1) / 2;
-        return queries_count * candidates_count;
-    }
-
-    /**
-     *  @brief Decodes a flat live-cell index into its `(query_index, candidate_index)` grid coordinates.
-     *      For the full rectangle the layout is row-major; for the symmetric case it walks the lower triangle
-     *      (including the diagonal) row by row, so consecutive cells stay on the same query row when possible.
-     */
-    static void cell_to_indices_(size_t cell_index, size_t candidates_count, cross_similarities_t cross_kind,
-                                 size_t &query_index, size_t &candidate_index) noexcept {
-        if (cross_kind == cross_similarities_t::symmetric_k) {
-            // Triangular inverse: find the row whose prefix `row * (row + 1) / 2 <= cell_index`.
-            size_t row = 0;
-            while ((row + 1) * (row + 2) / 2 <= cell_index) ++row;
-            query_index = row;
-            candidate_index = cell_index - row * (row + 1) / 2;
-        }
-        else {
-            query_index = cell_index / candidates_count;
-            candidate_index = cell_index % candidates_count;
-        }
-    }
-
-#pragma endregion Cross Product Cell Addressing
-
 #pragma region Cross Product Scoring
 
     /**
@@ -2926,7 +2861,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
 
         // Maps a query row and candidate column to their primary (and mirrored) destination slots.
         auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-            cross_cell_destination_<value_t> destination;
+            cross_cell_destination_t<value_t> destination;
             destination.primary = results.data + query_index * results.row_stride + candidate_index;
             if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
                 destination.mirror = results.data + candidate_index * results.row_stride + query_index;
@@ -2934,18 +2869,18 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         };
 
         myers_t myers;
-        cross_cell_writer_<value_t> writer;
+        cross_cell_writer_t<value_t> writer;
         dummy_executor_t dummy;
         for (size_t cell_index = cell_begin; cell_index != cell_end;) {
             size_t query_index = 0, candidate_index = 0;
-            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+            cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
             auto const query = to_view(queries[query_index]);
             auto const candidate = to_view(candidates[candidate_index]);
             size_t const shorter = sz_min_of_two(query.size(), candidate.size());
 
             if (shorter == 0) {
-                cross_cell_destination_<value_t> const destination = destination_for(query_index, candidate_index);
-                cross_cell_writer_<value_t> {&destination}[0] = sz_max_of_two(query.size(), candidate.size());
+                cross_cell_destination_t<value_t> const destination = destination_for(query_index, candidate_index);
+                cross_cell_writer_t<value_t> {&destination}[0] = sz_max_of_two(query.size(), candidate.size());
                 ++cell_index;
                 continue;
             }
@@ -2955,7 +2890,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 span<char const> shorters[myers_t::lanes_k], longers[myers_t::lanes_k];
                 span<char const> candidate_views[myers_t::lanes_k]; // ? Candidate view, for the shared-query kernel.
                 size_t positions[myers_t::lanes_k];
-                cross_cell_destination_<value_t> destinations[myers_t::lanes_k];
+                cross_cell_destination_t<value_t> destinations[myers_t::lanes_k];
                 size_t const seed_query_index = query_index;
                 bool const seed_query_shorter = query.size() <= candidate.size();
                 shorters[0] = seed_query_shorter ? query : candidate;
@@ -2969,7 +2904,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 // `distances_8x64_shared_query_` kernel can pay the `match_masks` build once per query.
                 for (; cell_index != cell_end && group != (index_t)myers_t::lanes_k; ++cell_index, ++group) {
                     size_t next_query_index = 0, next_candidate_index = 0;
-                    cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
+                    cross_cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index,
+                                           next_candidate_index);
                     if (next_query_index != seed_query_index) break;
                     auto const next_query = to_view(queries[next_query_index]);
                     auto const next_candidate = to_view(candidates[next_candidate_index]);
@@ -3006,7 +2942,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             size_t const seed_bucket = (shorter + 63) / 64;
             span<char const> group_shorters[myers_t::lanes_k], group_longers[myers_t::lanes_k];
             size_t group_positions[myers_t::lanes_k];
-            cross_cell_destination_<value_t> group_destinations[myers_t::lanes_k];
+            cross_cell_destination_t<value_t> group_destinations[myers_t::lanes_k];
             bool const seed_query_shorter = query.size() <= candidate.size();
             group_shorters[0] = seed_query_shorter ? query : candidate;
             group_longers[0] = seed_query_shorter ? candidate : query;
@@ -3016,7 +2952,8 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
             ++cell_index;
             for (; cell_index != cell_end && group != (index_t)myers_t::lanes_k; ++cell_index, ++group) {
                 size_t next_query_index = 0, next_candidate_index = 0;
-                cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
+                cross_cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index,
+                                       next_candidate_index);
                 auto const next_query = to_view(queries[next_query_index]);
                 auto const next_candidate = to_view(candidates[next_candidate_index]);
                 size_t const next_shorter = sz_min_of_two(next_query.size(), next_candidate.size());
@@ -3028,7 +2965,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                 group_destinations[group] = destination_for(next_query_index, next_candidate_index);
             }
 
-            cross_cell_writer_<value_t> group_writer;
+            cross_cell_writer_t<value_t> group_writer;
             group_writer.destinations = group_destinations;
             // The compile-time variants cover buckets 2..8 (shorter <= 512); buckets beyond that take the runtime
             // sibling, or - for a lone long cell - the single-pair anti-diagonal DP to avoid a ragged regression.
@@ -3042,7 +2979,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                                                     specs);
                     lone_status != status_t::success_k)
                     return lone_status;
-                cross_cell_writer_<value_t> {&group_destinations[0]}[0] = result_score;
+                cross_cell_writer_t<value_t> {&group_destinations[0]}[0] = result_score;
                 continue;
             }
             // Buckets 2..8 (shorter <= 512) hit the compile-time variant; longer groups take the runtime sibling.
@@ -3060,7 +2997,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
                                                     dummy, specs);
                     lane_status != status_t::success_k)
                     return lane_status;
-                cross_cell_writer_<value_t> {&group_destinations[lane]}[0] = lane_score;
+                cross_cell_writer_t<value_t> {&group_destinations[lane]}[0] = lane_score;
             }
         }
         return status_t::success_k;
@@ -3071,7 +3008,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
                                          results_type_ &&results, cross_similarities_t cross_kind,
                                          executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
-        size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
+        size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into per-thread slices: `prong.thread` indexes a disjoint partition, so the
         // work-stealing scheduler never aliases scratch and no per-cell allocation happens.
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
@@ -3079,15 +3016,18 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         if (status_t status = score_scratch_.try_resize(worker_scratch * workers); status != status_t::success_k)
             return status;
         using prong_t = typename remove_cvref<executor_type_>::prong_t;
-        std::atomic<status_t> error {status_t::success_k};
-        executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+        // One cell per prong fills one lane of a lockstep launch and idles the rest.
+        schedule_batches_t const schedule_batches = schedule_batches_(cells_count, workers,
+                                                                      lockstep_lanes_of_<myers_t>::value);
+        atomic_status_t status;
+        executor.for_n_dynamic(schedule_batches.batches_count, [&](prong_t prong) noexcept {
+            if (status != status_t::success_k) return;
             scratch_space_t slice =
                 scratch_space_t(score_scratch_).subspan(prong.thread * worker_scratch, worker_scratch);
-            status_t status =
-                score_range_(queries, candidates, results, cross_kind, prong.task, prong.task + 1, slice, specs);
-            if (status != status_t::success_k) error.store(status);
+            status = score_range_(queries, candidates, results, cross_kind, schedule_batches.batch_begin(prong.task),
+                                  schedule_batches.batch_end(prong.task, cells_count), slice, specs);
         });
-        return error.load();
+        return status;
     }
 
 #pragma endregion Cross Product Scoring
@@ -3135,9 +3075,10 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
             status != status_t::success_k)
             return status;
-        return score_range_(queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
-                            live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
-                            scratch_space_t(score_scratch_), specs);
+        return score_range_(
+            queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
+            cross_live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
+            scratch_space_t(score_scratch_), specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -3178,9 +3119,10 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
             status != status_t::success_k)
             return status;
-        return score_range_(sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
-                            live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
-                            scratch_space_t(score_scratch_), specs);
+        return score_range_(
+            sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
+            cross_live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
+            scratch_space_t(score_scratch_), specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>
@@ -4182,46 +4124,6 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         return sz_max_of_two(sz_max_of_two(lane_walker_path, myers_path), dp_scratch);
     }
 
-#pragma region Cross Product Cell Addressing
-
-    /**
-     *  @brief A destination for one scored cell: the primary matrix slot plus an optional mirror slot. The lane
-     *      walker writes one score per lane, and the scatter fans it out to both slots on assignment.
-     */
-    template <typename value_type_>
-    struct cross_cell_destination_ {
-        value_type_ *primary = nullptr;
-        value_type_ *mirror = nullptr;
-    };
-
-    /** @brief The number of live cells: the full rectangle, or the lower triangle (incl. diagonal) when symmetric. */
-    static size_t live_cells_count_(size_t queries_count, size_t candidates_count,
-                                    cross_similarities_t cross_kind) noexcept {
-        if (cross_kind == cross_similarities_t::symmetric_k) return queries_count * (queries_count + 1) / 2;
-        return queries_count * candidates_count;
-    }
-
-    /**
-     *  @brief Decodes a flat live-cell index into its `(query_index, candidate_index)` grid coordinates.
-     *      For the full rectangle the layout is row-major; for the symmetric case it walks the lower triangle
-     *      (including the diagonal) row by row, so consecutive cells stay on the same query row when possible.
-     */
-    static void cell_to_indices_(size_t cell_index, size_t candidates_count, cross_similarities_t cross_kind,
-                                 size_t &query_index, size_t &candidate_index) noexcept {
-        if (cross_kind == cross_similarities_t::symmetric_k) {
-            size_t row = 0;
-            while ((row + 1) * (row + 2) / 2 <= cell_index) ++row;
-            query_index = row;
-            candidate_index = cell_index - row * (row + 1) / 2;
-        }
-        else {
-            query_index = cell_index / candidates_count;
-            candidate_index = cell_index % candidates_count;
-        }
-    }
-
-#pragma endregion Cross Product Cell Addressing
-
 #pragma region Cross Product Scoring
 
     /**
@@ -4247,7 +4149,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         size_t longest_query = 0, longest_candidate = 0;
         for (size_t cell_index = cell_begin; cell_index != cell_end; ++cell_index) {
             size_t query_index = 0, candidate_index = 0;
-            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+            cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
             longest_query = sz_max_of_two(longest_query, to_view(queries[query_index]).size());
             longest_candidate = sz_max_of_two(longest_candidate, to_view(candidates[candidate_index]).size());
         }
@@ -4265,30 +4167,18 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         dummy_executor_t dummy;
 
         auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
-            cross_cell_destination_<value_t> destination;
+            cross_cell_destination_t<value_t> destination;
             destination.primary = results.data + query_index * results.row_stride + candidate_index;
             if (cross_kind == cross_similarities_t::symmetric_k && candidate_index != query_index)
                 destination.mirror = results.data + candidate_index * results.row_stride + query_index;
             return destination;
         };
-        auto const scatter = [&](cross_cell_destination_<value_t> const &destination, size_t score) noexcept {
+        auto const scatter = [&](cross_cell_destination_t<value_t> const &destination, size_t score) noexcept {
             *destination.primary = static_cast<value_t>(score);
             if (destination.mirror) *destination.mirror = static_cast<value_t>(score);
         };
 
         // The cross-cell writer the rune-Myers kernels assign through: lane-local index -> destination slot(s).
-        struct cross_cell_writer_ {
-            cross_cell_destination_<value_t> const *destinations = nullptr;
-            struct cell_proxy_ {
-                cross_cell_destination_<value_t> destination;
-                cell_proxy_ &operator=(size_t value) noexcept {
-                    *destination.primary = static_cast<value_t>(value);
-                    if (destination.mirror) *destination.mirror = static_cast<value_t>(value);
-                    return *this;
-                }
-            };
-            cell_proxy_ operator[](size_t lane_index) const noexcept { return cell_proxy_ {destinations[lane_index]}; }
-        };
 
         myers_t myers;
 
@@ -4327,7 +4217,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             64; // ? `distances_8x_multiword_large_` covers shorter <= 4096 runes.
         for (size_t cell_index = cell_begin; cell_index != cell_end;) {
             size_t query_index = 0, candidate_index = 0;
-            cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
+            cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
             auto const query = to_view(queries[query_index]);
             auto const candidate = to_view(candidates[candidate_index]);
 
@@ -4351,7 +4241,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             size_t arena_used = 0;
             span<rune_t const> group_shorters[myers_lanes_k], group_longers[myers_lanes_k];
             size_t group_positions[myers_lanes_k];
-            cross_cell_destination_<value_t> group_destinations[myers_lanes_k];
+            cross_cell_destination_t<value_t> group_destinations[myers_lanes_k];
             size_t group_query_indices[myers_lanes_k], group_candidate_indices[myers_lanes_k];
             span<rune_t const> seed_shorter, seed_longer;
             if (!transcode_cell(query, candidate, arena_used, seed_shorter, seed_longer)) {
@@ -4386,7 +4276,8 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
             ++cell_index;
             for (; cell_index != cell_end && group != myers_lanes_k; ++cell_index) {
                 size_t next_query_index = 0, next_candidate_index = 0;
-                cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index, next_candidate_index);
+                cross_cell_to_indices_(cell_index, candidates_count, cross_kind, next_query_index,
+                                       next_candidate_index);
                 auto const next_query = to_view(queries[next_query_index]);
                 auto const next_candidate = to_view(candidates[next_candidate_index]);
                 if (next_query.size() == 0 || next_candidate.size() == 0 ||
@@ -4411,7 +4302,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
                 ++group;
             }
 
-            cross_cell_writer_ group_writer;
+            cross_cell_writer_t<value_t> group_writer;
             group_writer.destinations = group_destinations;
             lane_pairs_view<rune_t> const group_pairs {{group_shorters, group},
                                                        {group_longers, group},
@@ -4449,7 +4340,7 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     SZ_NOINLINE status_t score_parallel_(queries_type_ const &queries, candidates_type_ const &candidates,
                                          results_type_ &&results, cross_similarities_t cross_kind,
                                          executor_type_ &&executor, cpu_specs_t const &specs) noexcept {
-        size_t const cells_count = live_cells_count_(queries.size(), candidates.size(), cross_kind);
+        size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
         // One hoisted buffer carved into per-thread slices: `prong.thread` indexes a disjoint partition, so the
         // work-stealing scheduler never aliases scratch and no per-cell allocation happens.
         size_t const worker_scratch = worst_cell_scratch_(queries, candidates, specs);
@@ -4457,15 +4348,18 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         if (status_t status = score_scratch_.try_resize(worker_scratch * workers); status != status_t::success_k)
             return status;
         using prong_t = typename remove_cvref<executor_type_>::prong_t;
-        std::atomic<status_t> error {status_t::success_k};
-        executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+        // One cell per prong fills one lane of a lockstep launch and idles the rest.
+        schedule_batches_t const schedule_batches = schedule_batches_(cells_count, workers,
+                                                                      lockstep_lanes_of_<myers_t>::value);
+        atomic_status_t status;
+        executor.for_n_dynamic(schedule_batches.batches_count, [&](prong_t prong) noexcept {
+            if (status != status_t::success_k) return;
             scratch_space_t slice =
                 scratch_space_t(score_scratch_).subspan(prong.thread * worker_scratch, worker_scratch);
-            status_t status =
-                score_range_(queries, candidates, results, cross_kind, prong.task, prong.task + 1, slice, specs);
-            if (status != status_t::success_k) error.store(status);
+            status = score_range_(queries, candidates, results, cross_kind, schedule_batches.batch_begin(prong.task),
+                                  schedule_batches.batch_end(prong.task, cells_count), slice, specs);
         });
-        return error.load();
+        return status;
     }
 
 #pragma endregion Cross Product Scoring
@@ -4559,9 +4453,10 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(queries, candidates, specs));
             status != status_t::success_k)
             return status;
-        return score_range_(queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
-                            live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
-                            scratch_space_t(score_scratch_), specs);
+        return score_range_(
+            queries, candidates, results, cross_similarities_t::all_pairs_k, 0,
+            cross_live_cells_count_(queries.size(), candidates.size(), cross_similarities_t::all_pairs_k),
+            scratch_space_t(score_scratch_), specs);
     }
 
     template <typename queries_type_, typename candidates_type_, typename value_type_, typename executor_type_>
@@ -4584,9 +4479,10 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
         if (status_t status = score_scratch_.try_resize(worst_cell_scratch_(sequences, sequences, specs));
             status != status_t::success_k)
             return status;
-        return score_range_(sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
-                            live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
-                            scratch_space_t(score_scratch_), specs);
+        return score_range_(
+            sequences, sequences, results, cross_similarities_t::symmetric_k, 0,
+            cross_live_cells_count_(sequences.size(), sequences.size(), cross_similarities_t::symmetric_k),
+            scratch_space_t(score_scratch_), specs);
     }
 
     template <typename sequences_type_, typename value_type_, typename executor_type_>

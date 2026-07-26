@@ -2191,14 +2191,10 @@ __global__ void similarity_materialize_tasks_(                                  
 
     size_t query_index, candidate_index;
     if (is_symmetric) {
-        // Lower triangle (incl. diagonal), filled row-major: recover (row, column) from the flat cell index via a
-        // double-precision seed + integer fixup (sqrtf is too lossy for large cell indices).
-        double const discriminant = 8.0 * static_cast<double>(cell_index) + 1.0;
-        size_t row = static_cast<size_t>((sqrt(discriminant) - 1.0) * 0.5);
-        while (row * (row + 1) / 2 > cell_index) row -= 1;
-        while ((row + 1) * (row + 2) / 2 <= cell_index) row += 1;
+        // Lower triangle (incl. diagonal), filled row-major; `triangular_row_` is exact, so nothing to fix up.
+        size_t const row = triangular_row_(cell_index);
         query_index = row;
-        candidate_index = cell_index - row * (row + 1) / 2;
+        candidate_index = cell_index - triangular_number_(row);
     }
     else {
         query_index = cell_index / candidates_count;
@@ -2961,12 +2957,10 @@ __global__ void unit_myers_singleword_direct_per_cuda_cell_(                    
 
     size_t query_index, candidate_index;
     if (is_symmetric) {
-        double const discriminant = 8.0 * static_cast<double>(cell_index) + 1.0;
-        size_t row = static_cast<size_t>((sqrt(discriminant) - 1.0) * 0.5);
-        while (row * (row + 1) / 2 > cell_index) row -= 1;
-        while ((row + 1) * (row + 2) / 2 <= cell_index) row += 1;
+        // Lower triangle (incl. diagonal), filled row-major; `triangular_row_` is exact, so nothing to fix up.
+        size_t const row = triangular_row_(cell_index);
         query_index = row;
-        candidate_index = cell_index - row * (row + 1) / 2;
+        candidate_index = cell_index - triangular_number_(row);
     }
     else {
         query_index = cell_index / candidates_count;

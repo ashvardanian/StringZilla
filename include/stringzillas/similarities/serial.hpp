@@ -3350,7 +3350,7 @@ status_t cross_in_parallel_(                                         //
     if (status_t status = scratch_buffer.try_resize(max_memory_requirement); status != status_t::success_k)
         return status;
 
-    std::atomic<status_t> error {status_t::success_k};
+    atomic_status_t status;
 
     auto const write_cell = [&](size_t query_index, size_t candidate_index, score_t result_score) noexcept {
         results.data[query_index * results.row_stride + candidate_index] = result_score;
@@ -3362,7 +3362,7 @@ status_t cross_in_parallel_(                                         //
     // symmetric upper triangle is skipped here (it is filled by mirroring the lower triangle).
     size_t const flattened_cells = queries_count * candidates_count;
     executor.for_n_dynamic(flattened_cells, [&](prong_t prong) noexcept {
-        if (error.load() != status_t::success_k) return;
+        if (status != status_t::success_k) return;
         size_t const query_index = prong.task / candidates_count;
         size_t const candidate_index = prong.task % candidates_count;
         if (is_symmetric && candidate_index > query_index) return;
@@ -3370,28 +3370,28 @@ status_t cross_in_parallel_(                                         //
         score_t result_score = 0;
         scratch_space_t worker_scratch = scratch_space_t(scratch_buffer).part_i_of_n(prong.thread, threads_count);
         dummy_executor_t dummy_executor; // Lvalue, so the scorer pins the bare executor type.
-        status_t status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]), result_score,
-                                  worker_scratch, dummy_executor, specs);
-        if (status == status_t::success_k) write_cell(query_index, candidate_index, result_score);
-        else error.store(status);
+        status_t const cell_status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]),
+                                             result_score, worker_scratch, dummy_executor, specs);
+        if (cell_status == status_t::success_k) write_cell(query_index, candidate_index, result_score);
+        else status = cell_status;
     });
 
     // Large cells: all cores cooperate on one cell at a time, so only this thread allocates.
-    for (size_t query_index = 0; query_index < queries_count && error.load() == status_t::success_k; ++query_index) {
+    for (size_t query_index = 0; query_index < queries_count && status == status_t::success_k; ++query_index) {
         size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
         for (size_t candidate_index = 0; candidate_index < candidate_end; ++candidate_index) {
             if (is_small(queries[query_index].size(), candidates[candidate_index].size())) continue;
             score_t result_score = 0;
-            status_t status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]), result_score,
-                                      scratch_space_t(scratch_buffer), executor, specs);
-            if (status != status_t::success_k) {
-                error.store(status);
+            status_t const cell_status = scoring(to_view(queries[query_index]), to_view(candidates[candidate_index]),
+                                                 result_score, scratch_space_t(scratch_buffer), executor, specs);
+            if (cell_status != status_t::success_k) {
+                status = cell_status;
                 break;
             }
             write_cell(query_index, candidate_index, result_score);
         }
     }
-    return error.load();
+    return status;
 }
 
 #pragma region Shared Candidate Lane Cross Product Driver
@@ -3406,9 +3406,43 @@ struct cross_cell_destination_t {
     value_type_ *mirror = nullptr;
 };
 
+/**
+ *  @brief An indexable adapter handed to the lockstep kernels so they stay grouping-agnostic.
+ *
+ *  A lane's group-local index selects its destination, and assigning a score writes the primary cell and, for
+ *  symmetric self-similarity, the mirrored cell too.
+ */
+template <typename value_type_>
+struct cross_cell_writer_t {
+    cross_cell_destination_t<value_type_> const *destinations = nullptr;
+
+    struct cell_proxy_t {
+        cross_cell_destination_t<value_type_> destination;
+        cell_proxy_t &operator=(size_t value) noexcept {
+            *destination.primary = static_cast<value_type_>(value);
+            if (destination.mirror) *destination.mirror = static_cast<value_type_>(value);
+            return *this;
+        }
+    };
+
+    cell_proxy_t operator[](size_t lane_index) const noexcept { return cell_proxy_t {destinations[lane_index]}; }
+};
+
 /** @brief Triangular number `T(n) = n*(n+1)/2`: the count of lower-triangle cells (including the diagonal) across the
  *         first @p rows rows of a symmetric self-similarity grid. */
-SZ_INLINE size_t triangular_number_(size_t rows) noexcept { return rows * (rows + 1) / 2; }
+sz_constexpr_if_cpp14 size_t triangular_number_(size_t rows) noexcept { return rows * (rows + 1) / 2; }
+
+/**
+ *  @brief Inverse of `triangular_number_`: the largest `row` with `triangular_number_(row) <= cell_index`.
+ *
+ *  Closed form over integers - `row = (sqrt(8 * cell_index + 1) - 1) / 2` - so there is nothing to iterate and,
+ *  because `integer_square_root` is exact, no rounding to repair afterwards. `constexpr` so the CUDA kernels can
+ *  share it under @b `--expt-relaxed-constexpr` instead of open-coding their own `sqrt` and fixup loops.
+ *  @note `8 * cell_index + 1` wraps above `cell_index >= 2^61`, far beyond any grid that also fits a results matrix.
+ */
+sz_constexpr_if_cpp14 size_t triangular_row_(size_t cell_index) noexcept {
+    return (integer_square_root<size_t>(8 * cell_index + 1) - 1) / 2;
+}
 
 /** @brief The number of live cells: the full rectangle, or the lower triangle (incl. diagonal) when symmetric. */
 SZ_INLINE size_t cross_live_cells_count_(size_t queries_count, size_t candidates_count,
@@ -3423,8 +3457,7 @@ SZ_INLINE void cross_cell_to_indices_(size_t cell_index, size_t candidates_count
     if (cross_kind == cross_similarities_t::symmetric_k) {
         // The row containing the flat cell is the largest `row` with `T(row) <= cell_index`; the column is the
         // remainder past that row's triangular base.
-        size_t row = 0;
-        while (triangular_number_(row + 1) <= cell_index) ++row;
+        size_t const row = triangular_row_(cell_index);
         query_index = row;
         candidate_index = cell_index - triangular_number_(row);
     }
@@ -3432,6 +3465,63 @@ SZ_INLINE void cross_cell_to_indices_(size_t cell_index, size_t candidates_count
         query_index = cell_index / candidates_count;
         candidate_index = cell_index % candidates_count;
     }
+}
+
+/** @brief `kernel_type_::lanes_k`, or @p missing_k for the scalar kernels that declare no lane count. */
+template <typename kernel_type_, size_t missing_k, typename enable_ = void>
+struct lockstep_lanes_or_ : std::integral_constant<size_t, missing_k> {};
+template <typename kernel_type_, size_t missing_k>
+struct lockstep_lanes_or_<kernel_type_, missing_k, decltype((void)kernel_type_::lanes_k)>
+    : std::integral_constant<size_t, (size_t)kernel_type_::lanes_k> {};
+
+/** @brief `kernel_type_::single_word_lanes_k`, or @p missing_k where no bucket interleaves extra chains. */
+template <typename kernel_type_, size_t missing_k, typename enable_ = void>
+struct single_word_lanes_or_ : std::integral_constant<size_t, missing_k> {};
+template <typename kernel_type_, size_t missing_k>
+struct single_word_lanes_or_<kernel_type_, missing_k, decltype((void)kernel_type_::single_word_lanes_k)>
+    : std::integral_constant<size_t, (size_t)kernel_type_::single_word_lanes_k> {};
+
+/**
+ *  @brief The widest run of score cells one kernel launch scores in lockstep, for sizing scheduler batches.
+ *
+ *  Reads each kernel's own constants rather than making every specialization restate its width under a second
+ *  name. The maximum is deliberate: over-splitting a narrower bucket is free, under-splitting idles lanes.
+ */
+template <typename kernel_type_>
+struct lockstep_lanes_of_ {
+  private:
+    static constexpr size_t shared_k = lockstep_lanes_or_<kernel_type_, 1>::value;
+    static constexpr size_t single_word_k = single_word_lanes_or_<kernel_type_, 1>::value;
+
+  public:
+    static constexpr size_t value = shared_k > single_word_k ? shared_k : single_word_k;
+};
+
+/** @brief How the live score cells of one cross-product dispatch are cut into scheduler batches. */
+struct schedule_batches_t {
+    size_t cells_per_batch = 1;
+    size_t batches_count = 0;
+
+    SZ_INLINE size_t batch_begin(size_t batch) const noexcept { return batch * cells_per_batch; }
+    SZ_INLINE size_t batch_end(size_t batch, size_t cells_count) const noexcept {
+        return sz_min_of_two(batch_begin(batch) + cells_per_batch, cells_count);
+    }
+};
+
+/**
+ *  @brief Cuts @p cells_count live score cells into batches of whole @p lockstep_lanes launches.
+ *
+ *  Batching beats threading: a shorter batch idles lanes while still paying the full vector cost, so a launch is
+ *  never split even when that leaves workers unused. Above that floor we oversubscribe to leave room to steal.
+ */
+SZ_INLINE schedule_batches_t schedule_batches_(size_t cells_count, size_t workers, size_t lockstep_lanes) noexcept {
+    static constexpr size_t batches_per_worker_k = 8; // ? Steal granularity; ragged cells cost at most one batch.
+    if (cells_count == 0) return {1, 0};
+    size_t const lanes = sz_max_of_two(lockstep_lanes, (size_t)1);
+    size_t const ideal = divide_round_up<size_t>(cells_count, sz_max_of_two(workers, (size_t)1) * batches_per_worker_k);
+    size_t cells_per_batch = round_up_to_multiple<size_t>(sz_max_of_two(ideal, (size_t)1), lanes);
+    if (cells_per_batch > cells_count) cells_per_batch = cells_count; // ? Tiny inputs: one full-width batch.
+    return {cells_per_batch, divide_round_up<size_t>(cells_count, cells_per_batch)};
 }
 
 /**
@@ -3684,15 +3774,19 @@ status_t cross_product_candidate_lanes_parallel_( //
     if (status_t status = scratch_buffer.try_resize(worker_scratch * workers); status != status_t::success_k)
         return status;
     using prong_t = typename remove_cvref<executor_type_>::prong_t;
-    std::atomic<status_t> error {status_t::success_k};
-    executor.for_n_dynamic(cells_count, [&](prong_t prong) noexcept {
+    // One cell per prong fills one lane of a `candidate_lanes_k`-wide block and zeroes the whole transpose buffer.
+    constexpr size_t candidate_lanes_k = remove_cvref<narrow_kernel_type_>::candidate_lanes_k;
+    schedule_batches_t const schedule_batches = schedule_batches_(cells_count, workers, candidate_lanes_k);
+    atomic_status_t status;
+    executor.for_n_dynamic(schedule_batches.batches_count, [&](prong_t prong) noexcept {
+        if (status != status_t::success_k) return;
         scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(prong.thread * worker_scratch, worker_scratch);
-        status_t status = cross_product_candidate_lanes_range_(
-            narrow_kernel, wide_kernel, fallback, queries, candidates, results, cross_kind, prong.task,
-            prong.task + 1, fits_narrow, fits_wide, empty_cell, slice, specs);
-        if (status != status_t::success_k) error.store(status);
+        status = cross_product_candidate_lanes_range_(narrow_kernel, wide_kernel, fallback, queries, candidates,
+                                                      results, cross_kind, schedule_batches.batch_begin(prong.task),
+                                                      schedule_batches.batch_end(prong.task, cells_count), fits_narrow,
+                                                      fits_wide, empty_cell, slice, specs);
     });
-    return error.load();
+    return status;
 }
 
 #pragma endregion Shared Candidate Lane Cross Product Driver
