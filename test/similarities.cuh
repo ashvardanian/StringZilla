@@ -1399,8 +1399,9 @@ void test_similarities_cross_product() {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_oracle(q, c, cell);
         };
-        fuzzy_config_t const utf8_queries {"ABCD", /* batch_size */ 4, /* min */ 1, /* max */ 48};
-        fuzzy_config_t const utf8_candidates {"ABCD", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+        // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
+        fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_candidates {"AÉ中😀", /* batch_size */ 40, /* min */ 1, /* max */ 48};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {}, utf8_baseline, utf8_queries,
             utf8_candidates);
@@ -1539,8 +1540,9 @@ void test_similarities_cross_product() {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_oracle(q, c, cell);
         };
-        fuzzy_config_t const utf8_queries {"ABCD", /* batch_size */ 4, /* min */ 1, /* max */ 48};
-        fuzzy_config_t const utf8_candidates {"ABCD", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+        // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
+        fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_candidates {"AÉ中😀", /* batch_size */ 40, /* min */ 1, /* max */ 48};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t,
                                        (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {},
@@ -1619,8 +1621,9 @@ void test_similarities_cross_product() {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_oracle(q, c, cell);
         };
-        fuzzy_config_t const utf8_queries {"ABCD", /* batch_size */ 4, /* min */ 1, /* max */ 48};
-        fuzzy_config_t const utf8_candidates {"ABCD", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+        // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
+        fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_candidates {"AÉ中😀", /* batch_size */ 40, /* min */ 1, /* max */ 48};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sn_k> {}, utf8_baseline, utf8_queries,
             utf8_candidates);
@@ -1697,8 +1700,9 @@ void test_similarities_cross_product() {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_oracle(q, c, cell);
         };
-        fuzzy_config_t const utf8_queries {"ABCD", /* batch_size */ 4, /* min */ 1, /* max */ 48};
-        fuzzy_config_t const utf8_candidates {"ABCD", /* batch_size */ 40, /* min */ 1, /* max */ 48};
+        // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
+        fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_candidates {"AÉ中😀", /* batch_size */ 40, /* min */ 1, /* max */ 48};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {}, utf8_baseline, utf8_queries,
             utf8_candidates);

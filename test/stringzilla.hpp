@@ -263,21 +263,48 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept
     }
 }
 
+/**
+ *  @brief Splits @p alphabet into its UTF-8 characters, so a multi-byte alphabet still generates valid text.
+ *
+ *  A character runs from a lead byte to the last continuation byte after it, which needs no decoder and leaves
+ *  an ASCII alphabet one character per byte.
+ */
+inline std::vector<std::string> alphabet_characters(std::string const &alphabet) noexcept(false) {
+    auto const continues_character = [&](std::size_t offset) {
+        return (static_cast<unsigned char>(alphabet[offset]) & 0xC0) == 0x80;
+    };
+    std::vector<std::string> characters;
+    for (std::size_t start = 0; start < alphabet.size();) {
+        std::size_t end = start + 1;
+        while (end < alphabet.size() && continues_character(end)) ++end;
+        characters.push_back(alphabet.substr(start, end - start));
+        start = end;
+    }
+    return characters;
+}
+
+/** @brief Concatenates @p length characters drawn uniformly from @p characters. */
+inline std::string random_string(std::size_t length, std::vector<std::string> const &characters) noexcept(false) {
+    std::uniform_int_distribution<std::size_t> distribution(0, characters.size() - 1);
+    std::string result;
+    while (length--) result += characters[distribution(global_random_generator())];
+    return result;
+}
+
 struct fuzzy_config_t {
-    std::string alphabet = "ABC";
+    std::string alphabet = "ABC"; // ? Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text.
     std::size_t batch_size = 16;
-    std::size_t min_string_length = 1;
+    std::size_t min_string_length = 1; // ? In characters, which equals bytes only for an ASCII alphabet.
     std::size_t max_string_length = 200;
 };
 
 inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, bool unique = false) {
     array.resize(config.batch_size);
 
+    std::vector<std::string> const characters = alphabet_characters(config.alphabet);
     std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
-    for (std::size_t i = 0; i != config.batch_size; ++i) {
-        std::size_t length = length_distribution(global_random_generator());
-        array[i] = random_string(length, config.alphabet.data(), config.alphabet.size());
-    }
+    for (std::size_t i = 0; i != config.batch_size; ++i)
+        array[i] = random_string(length_distribution(global_random_generator()), characters);
 
     if (unique) {
         std::sort(array.begin(), array.end());
