@@ -365,9 +365,12 @@ struct diagonal_memory_requirements {
         // cost of the longer string into a cell of this width -- so it must be sized here, or a value like
         // 256 truncates to 0 in an 8-bit cell (the empty-vs-long, non-unit-gap wraparound).
         size_t shorter_length = sz_min_of_two(first_length, second_length);
-        size_t longer_length = sz_max_of_two(first_length, second_length);
-        error_cost_magnitude_t magnitude = sz_max_of_two(substitute_magnitude, gap_magnitude);
-        size_t max_cell_value = (longer_length + 1) * magnitude;
+        // The bound the lane walkers tier by, so both size cells from one derivation. An unsigned accumulator
+        // holds a distance and minimizes; a signed one holds a score and maximizes, spanning both sides.
+        worst_case_reach_t const reach {
+            sz_max_of_two((size_t)sz_max_of_two(substitute_magnitude, gap_magnitude), (size_t)1),
+            gap_type == sz_gaps_linear_k ? (size_t)1 : (size_t)3, is_signed_k};
+        size_t max_cell_value = reach.of(first_length, second_length);
         if constexpr (!is_signed_k)
             this->bytes_per_cell = //
                 max_cell_value < 256          ? one_byte_per_cell_k

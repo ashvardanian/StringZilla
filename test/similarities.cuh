@@ -1304,6 +1304,22 @@ void test_similarities_cross_product() {
             blosum62_matrix, blosum62_linear_cost},
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, many_queries, many_candidates);
 
+    // Straddle the per-pair `i16` → `i32` cell-width step, near a combined 327 at magnitude 100. Sizing the cell
+    // from `longer + 1` instead of the walkers' reach used to underflow the affine seed and flip the score's sign.
+    {
+        error_costs_32x32_t wide_matrix {};
+        for (std::size_t first = 0; first != 32; ++first)
+            for (std::size_t second = 0; second != 32; ++second)
+                wide_matrix.class_substitution_costs[first][second] = first == second ? 0 : -100;
+        constexpr affine_gap_costs_t wide_nw_affine {-100, -100};
+        fuzzy_config_t const cell_edge_queries {"ABC", scale_iterations(2), /* min */ 300, /* max */ 340};
+        fuzzy_config_t const cell_edge_candidates {"ABC", scale_iterations(8), /* min */ 300, /* max */ 340};
+        check_cross_product_cell_exact_<sz_ssize_t>(
+            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+                wide_matrix, wide_nw_affine},
+            needleman_wunsch_baselines_t {wide_matrix, wide_nw_affine}, cell_edge_queries, cell_edge_candidates);
+    }
+
     // Serial symmetric self-similarity. The diagonal-is-zero identity needs a zero match cost, so both the
     // linear and affine variants keep `unit_uniform` (match 0) while still exercising the affine gap path.
     constexpr affine_gap_costs_t unit_affine {1, 1};
