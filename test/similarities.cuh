@@ -1388,6 +1388,21 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {wide_uniform, wide_affine},
             levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_queries, wide_lev_candidates);
+
+        // Top of the `u16` affine band, where the discard seed's next-row `+ extend` grows with the length.
+        // Ragged on purpose: a square shape hides it, as escaping a corrupt corner costs a losing gap run.
+        fuzzy_config_t const wrap_short {"ABC", scale_iterations(4), /* min */ 1, /* max */ 4};
+        fuzzy_config_t const wrap_long {"ABC", scale_iterations(16), /* min */ 109, /* max */ 130};
+        fuzzy_config_t const wrap_below {"ABC", scale_iterations(16), /* min */ 100, /* max */ 108};
+        auto icelake_affine = [&]() {
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {wide_uniform, wide_affine};
+        };
+        check_cross_product_cell_exact_<sz_size_t>(
+            icelake_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_short, wrap_long);
+        check_cross_product_cell_exact_<sz_size_t>( // ? Transposed, for the horizontal `E` reseed.
+            icelake_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_long, wrap_short);
+        check_cross_product_cell_exact_<sz_size_t>( // ? Just below the band, pinning the clean side.
+            icelake_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_short, wrap_below);
     }
 
     // UTF-8 rune candidate-lane (multi-cell, FILLS the 32 rune lanes) vs the serial UTF-8 engine as oracle. The
@@ -1567,6 +1582,21 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances<affine_gap_costs_t, malloc_t, hcap> {wide_uniform, wide_affine},
             levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+
+        // Top of the `u16` affine band, where the discard seed's next-row `+ extend` grows with the length.
+        // Ragged on purpose: a square shape hides it, as escaping a corrupt corner costs a losing gap run.
+        fuzzy_config_t const wrap_short {"ABC", scale_iterations(4), /* min */ 1, /* max */ 4};
+        fuzzy_config_t const wrap_long {"ABC", scale_iterations(16), /* min */ 109, /* max */ 130};
+        fuzzy_config_t const wrap_below {"ABC", scale_iterations(16), /* min */ 100, /* max */ 108};
+        auto haswell_affine = [&]() {
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, hcap> {wide_uniform, wide_affine};
+        };
+        check_cross_product_cell_exact_<sz_size_t>(
+            haswell_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_short, wrap_long);
+        check_cross_product_cell_exact_<sz_size_t>( // ? Transposed, for the horizontal `E` reseed.
+            haswell_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_long, wrap_short);
+        check_cross_product_cell_exact_<sz_size_t>( // ? Just below the band, pinning the clean side.
+            haswell_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_short, wrap_below);
     }
 #endif
 
@@ -1646,6 +1676,25 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k> {wide_uniform, wide_affine},
             levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+    }
+
+    // Top of the `u16` affine band, where the discard seed's next-row `+ extend` grows with the length.
+    // Ragged on purpose: a square shape hides it, as escaping a corrupt corner costs a losing gap run.
+    {
+        fuzzy_config_t const wrap_short {"ABC", scale_iterations(4), /* min */ 1, /* max */ 4};
+        fuzzy_config_t const wrap_long {"ABC", scale_iterations(16), /* min */ 109, /* max */ 130};
+        fuzzy_config_t const wrap_below {"ABC", scale_iterations(16), /* min */ 100, /* max */ 108};
+        auto neon_affine = [&]() {
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k> {wide_uniform, wide_affine};
+        };
+        check_cross_product_cell_exact_<sz_size_t>(neon_affine(), levenshtein_baselines_t {wide_uniform, wide_affine},
+                                                   wrap_short, wrap_long);
+        // Transposed, so the rolling horizontal `E` reseed is covered as well as the vertical `F` seed.
+        check_cross_product_cell_exact_<sz_size_t>(neon_affine(), levenshtein_baselines_t {wide_uniform, wide_affine},
+                                                   wrap_long, wrap_short);
+        // Just below the band, pinning the side that must stay clean.
+        check_cross_product_cell_exact_<sz_size_t>(neon_affine(), levenshtein_baselines_t {wide_uniform, wide_affine},
+                                                   wrap_short, wrap_below);
     }
 #endif
 

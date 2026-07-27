@@ -3850,7 +3850,7 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, linear_g
  *      M[column] = min(M_diagonal + substitution, min(E, F))
  *  The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
  *  cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary. A
- *  large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *  one-step `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
  *
  *  @note The cells are unsigned `u16`, so the kernel is only valid while every reachable score - plus the
  *      `discard_bias` headroom - stays below 65535; enforcing that bound is the caller's dispatch contract.
@@ -3917,9 +3917,9 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
         __m256i const mismatch_vec = _mm256_set1_epi16(static_cast<short>(mismatch_cost));
         __m256i const open_vec = _mm256_set1_epi16(static_cast<short>(open));
         __m256i const extend_vec = _mm256_set1_epi16(static_cast<short>(extend));
-        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
-        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u16`.
-        __m256i const discard_bias_vec = _mm256_set1_epi16(static_cast<short>(static_cast<u16_t>(60000)));
+        // One `open + extend` worse than any real path into the cell, so `min` never selects a track that has
+        // not been opened, and no `+ extend` on the next row can wrap; mirrors the serial `init_gap`.
+        __m256i const discard_bias_vec = _mm256_set1_epi16(static_cast<short>(static_cast<u16_t>(open + extend)));
 
         // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
         // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
@@ -4001,7 +4001,7 @@ struct candidate_lane_walker<char, u16_t, uniform_substitution_costs_t, affine_g
  *      M[column] = min(M_diagonal + substitution, min(E, F))
  *  The `F` track is materialized as a third scratch row indexed exactly like `M`; the `E` track only depends on the
  *  cell to its left, so it lives in a single rolling lane-register reseeded per row from the discarded boundary. A
- *  large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *  one-step `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
  *
  *  @note The cells are unsigned `u32`, so the kernel is only valid while every reachable score - plus the
  *      `discard_bias` headroom - stays below 4294967295; enforcing that bound is the caller's dispatch contract.
@@ -4068,9 +4068,9 @@ struct candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, affine_g
         __m256i const mismatch_vec = _mm256_set1_epi32(static_cast<int>(mismatch_cost));
         __m256i const open_vec = _mm256_set1_epi32(static_cast<int>(open));
         __m256i const extend_vec = _mm256_set1_epi32(static_cast<int>(extend));
-        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
-        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u32`.
-        __m256i const discard_bias_vec = _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(2000000000)));
+        // One `open + extend` worse than any real path into the cell, so `min` never selects a track that has
+        // not been opened, and no `+ extend` on the next row can wrap; mirrors the serial `init_gap`.
+        __m256i const discard_bias_vec = _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend)));
 
         // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
         // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
@@ -4477,9 +4477,9 @@ struct candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, affine
         __m256i const mismatch_vec = _mm256_set1_epi16(static_cast<short>(mismatch_cost));
         __m256i const open_vec = _mm256_set1_epi16(static_cast<short>(open));
         __m256i const extend_vec = _mm256_set1_epi16(static_cast<short>(extend));
-        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
-        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u16`.
-        __m256i const discard_bias_vec = _mm256_set1_epi16(static_cast<short>(static_cast<u16_t>(60000)));
+        // One `open + extend` worse than any real path into the cell, so `min` never selects a track that has
+        // not been opened, and no `+ extend` on the next row can wrap; mirrors the serial `init_gap`.
+        __m256i const discard_bias_vec = _mm256_set1_epi16(static_cast<short>(static_cast<u16_t>(open + extend)));
 
         // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
         // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
@@ -4566,7 +4566,7 @@ struct candidate_lane_walker<rune_t, u16_t, uniform_substitution_costs_t, affine
  *      F[column] = min(M_up + open,   F_up + extend)        // vertical track: a gap in the candidate
  *      E         = min(M_left + open, E_left + extend)       // horizontal track: a gap in the query
  *      M[column] = min(M_diagonal + substitution, min(E, F))
- *  A large `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
+ *  A one-step `discard_bias` is added to any track that cannot have been opened yet, keeping `min` from selecting it.
  *
  *  @note The cells are unsigned `u32`, so the kernel is only valid while every reachable score - plus the
  *      `discard_bias` headroom - stays below 4294967295; enforcing that bound is the caller's dispatch contract.
@@ -4633,9 +4633,9 @@ struct candidate_lane_walker<rune_t, u32_t, uniform_substitution_costs_t, affine
         __m256i const mismatch_vec = _mm256_set1_epi32(static_cast<int>(mismatch_cost));
         __m256i const open_vec = _mm256_set1_epi32(static_cast<int>(open));
         __m256i const extend_vec = _mm256_set1_epi32(static_cast<int>(extend));
-        // A magnitude above any in-range score so `min` never selects a track that has not been opened yet; the
-        // caller's reach bound keeps real scores below it, and `discard_bias + extend` must not wrap `u32`.
-        __m256i const discard_bias_vec = _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(2000000000)));
+        // One `open + extend` worse than any real path into the cell, so `min` never selects a track that has
+        // not been opened, and no `+ extend` on the next row can wrap; mirrors the serial `init_gap`.
+        __m256i const discard_bias_vec = _mm256_set1_epi32(static_cast<int>(static_cast<u32_t>(open + extend)));
 
         // Row 0 (global): `M[0] = 0`; `M[column] = open + extend * (column - 1)`. The vertical `F` row cannot have
         // been entered from above at row 0, so it is seeded with the discarded magnitude added to the boundary.
