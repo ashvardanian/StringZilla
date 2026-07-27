@@ -123,7 +123,8 @@ static void check_sha256_multistate_unit_(                                      
         messages[lane_index].start = vectors[lane_index].message;
         messages[lane_index].length = (sz_size_t)std::strlen(vectors[lane_index].message);
     }
-    sz_sequence_t const texts = sequence_from_(messages.data(), vectors_count);
+    sz_sequence_t texts;
+    sz_sequence_from_string_views(messages.data(), vectors_count, &texts);
     update(states.data(), &texts);
     digest(states.data(), (sz_size_t)vectors_count, produced.data());
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
@@ -525,7 +526,8 @@ void test_sha256_multistate_equivalence(reference_ reference, candidate_ candida
                 offsets[lane_index] += take;
                 if (offsets[lane_index] != messages[lane_index].size()) ++remaining_lanes;
             }
-            sz_sequence_t const slice_texts = sequence_from_(slices.data(), slices.size());
+            sz_sequence_t slice_texts;
+            sz_sequence_from_string_views(slices.data(), slices.size(), &slice_texts);
             reference.update(reference_states.data(), &slice_texts);
             candidate.update(candidate_states.data(), &slice_texts);
         }

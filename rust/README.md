@@ -510,7 +510,23 @@ let mac = hmac_sha256(b"secret_key", b"important message");
 assert_eq!(mac.len(), 32);
 ```
 
-`Sha256` API: `new()`, `update(&mut self, &[u8]) -> &mut Self`, `digest(&self) -> [u8; 32]`, `hash(&[u8]) -> [u8; 32]`.
+`Sha256` API: `new()`, `update(&mut self, &[u8]) -> &mut Self`, `digest(&self) -> Sha256Digest`, `hash(&[u8]) -> Sha256Digest`, where `Sha256Digest` is `[u8; SHA256_DIGEST_LENGTH]`.
+
+Digesting one message is a serial dependency chain, but independent messages compress in parallel lanes — sixteen at a time on AVX-512, eight on AVX2.
+`sha256_multistate_update` advances one hasher per message, taking anything that dereferences to bytes, so a `Vec<String>` needs no intermediate slice of slices.
+Use `sha256_multistate_update_by` when the messages are not in one contiguous slice.
+
+```rust
+use stringzilla::sz;
+
+let texts: Vec<String> = vec!["alpha".into(), "beta".into()];
+let mut states = vec![sz::Sha256::new(); texts.len()];
+let mut digests = vec![[0u8; 32]; texts.len()];
+
+sz::sha256_multistate_update(&mut states, &texts).unwrap();
+sz::sha256_multistate_digest(&states, &mut digests).unwrap();
+assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
+```
 
 ## Sorting, Sampling, and Shuffling
 

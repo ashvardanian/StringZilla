@@ -541,7 +541,8 @@ struct sha256_multistate_from_sz {
             sz_sha256_state_init(&states[lane_index]);
             bytes_passed += token.size();
         }
-        sz_sequence_t const texts = sequence_from_(lanes, multistate_lanes_k);
+        sz_sequence_t texts;
+        sz_sequence_from_string_views(lanes, multistate_lanes_k, &texts);
         update_(states, &texts);
         sz_sha256_multistate_digest(states, multistate_lanes_k, digests);
         // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane ordering is

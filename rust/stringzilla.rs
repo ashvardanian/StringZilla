@@ -266,6 +266,12 @@ pub struct Hasher {
     ins_length: usize, // Ignored in comparisons
 }
 
+/// Bytes in a SHA256 digest, fixed by FIPS 180-4.
+pub const SHA256_DIGEST_LENGTH: usize = 32;
+
+/// One SHA256 digest, as produced by [`Sha256::digest`] and [`sha256_multistate_digest`].
+pub type Sha256Digest = [u8; SHA256_DIGEST_LENGTH];
+
 /// Incremental SHA256 hasher state for cryptographic hashing.
 ///
 /// # Examples
@@ -288,15 +294,17 @@ pub struct Hasher {
 /// let digest = hasher.digest();
 /// assert_eq!(digest, Sha256::hash(b"Hello, world!"));
 /// ```
-#[repr(C)]
+/*  Mirrors the C `sz_sha256_state_t` by size and alignment only. Every operation on it is an FFI call, so
+ *  restating the C fields here would buy nothing and would let a field change in `hash.h` desynchronize
+ *  silently. Deliberately not over-aligned: forcing 64-byte alignment would change the array stride
+ *  relative to C and silently misplace every element of a `&mut [Sha256]` handed to the batched kernels. */
+#[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
-#[repr(align(64))] // For optimal performance we align to 64 bytes.
-pub struct Sha256 {
-    hash: [u32; 8],      // Current hash state (h0-h7)
-    block: [u8; 64],     // 64-byte message block buffer
-    block_length: usize, // Current bytes in block (0-63)
-    total_length: u64,   // Total message length in bytes
-}
+pub struct Sha256([u8; 128]);
+
+/*  Guards the layout the batched kernels depend on: they index a contiguous array with the C stride. */
+const _: () = assert!(core::mem::size_of::<Sha256>() == 128);
+const _: () = assert!(core::mem::align_of::<Sha256>() == 8);
 
 pub type SortedIdx = usize;
 
@@ -551,6 +559,8 @@ extern "C" {
     pub(crate) fn sz_sha256_state_init(state: *const c_void);
     pub(crate) fn sz_sha256_state_update(state: *const c_void, data: *const c_void, length: usize);
     pub(crate) fn sz_sha256_state_digest(state: *const c_void, digest: *mut u8);
+    pub(crate) fn sz_sha256_multistate_update(states: *mut c_void, texts: *const _SzSequence);
+    pub(crate) fn sz_sha256_multistate_digest(states: *const c_void, states_count: usize, digests: *mut u8);
 
     pub(crate) fn sz_sequence_argsort(
         //
@@ -638,12 +648,7 @@ impl Default for Hasher {
 impl Sha256 {
     /// Creates a new SHA256 hasher with the initial state.
     pub fn new() -> Self {
-        let mut state = Sha256 {
-            hash: [0; 8],
-            block: [0; 64],
-            block_length: 0,
-            total_length: 0,
-        };
+        let mut state = Sha256([0; 128]);
         unsafe {
             sz_sha256_state_init(&mut state as *mut _ as *mut c_void);
         }
@@ -662,9 +667,9 @@ impl Sha256 {
         self
     }
 
-    /// Returns the current SHA256 hash digest as a 32-byte array.
-    pub fn digest(&self) -> [u8; 32] {
-        let mut digest = [0u8; 32];
+    /// Returns the current SHA256 digest, leaving the hasher able to accept more data.
+    pub fn digest(&self) -> Sha256Digest {
+        let mut digest = [0u8; SHA256_DIGEST_LENGTH];
         unsafe {
             sz_sha256_state_digest(self as *const _ as *const c_void, digest.as_mut_ptr());
         }
@@ -672,7 +677,7 @@ impl Sha256 {
     }
 
     /// Convenience method to hash data in one call.
-    pub fn hash(data: &[u8]) -> [u8; 32] {
+    pub fn hash(data: &[u8]) -> Sha256Digest {
         let mut hasher = Sha256::new();
         hasher.update(data);
         hasher.digest()
@@ -684,6 +689,124 @@ impl Default for Sha256 {
     fn default() -> Self {
         Sha256::new()
     }
+}
+
+/// Advances many independent SHA256 states at once, one message per lane.
+///
+/// Hashing a single message is a serial dependency chain, so no instruction set can speed it up. Independent
+/// messages do compress in parallel lanes: sixteen at a time on AVX-512, eight on AVX2. Feed at least a few
+/// kilobytes per lane per call, since shorter chunks never reach the lane-parallel path.
+///
+/// Borrows the caller's storage throughout and allocates nothing. Accepts anything that dereferences to
+/// bytes, so a `Vec<String>` or `Vec<Vec<u8>>` needs no intermediate slice-of-slices. See
+/// [`sha256_multistate_update_by`] for messages that do not sit in one contiguous slice.
+///
+/// # Errors
+///
+/// Returns [`Status::BadAlloc`] if `chunks` does not have exactly one entry per lane.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let mut states = vec![sz::Sha256::new(); 2];
+/// let heads: Vec<String> = vec!["Hello, ".into(), "Goodbye, ".into()];
+/// let tails: Vec<String> = vec!["world!".into(), "world!".into()];
+/// sz::sha256_multistate_update(&mut states, &heads).unwrap();
+/// sz::sha256_multistate_update(&mut states, &tails).unwrap();
+///
+/// let mut digests = vec![[0u8; 32]; 2];
+/// sz::sha256_multistate_digest(&states, &mut digests).unwrap();
+/// assert_eq!(digests[0], sz::Sha256::hash(b"Hello, world!"));
+/// assert_eq!(digests[1], sz::Sha256::hash(b"Goodbye, world!"));
+/// ```
+pub fn sha256_multistate_update<T: AsRef<[u8]>>(states: &mut [Sha256], chunks: &[T]) -> Result<(), Status> {
+    if chunks.len() != states.len() {
+        return Err(Status::BadAlloc);
+    }
+    sha256_multistate_update_by(states, |lane_index| chunks[lane_index].as_ref())
+}
+
+/// Advances many independent SHA256 states at once, taking each lane's next chunk from a caller-provided key.
+///
+/// # Errors
+///
+/// Returns [`Status::BadAlloc`] if `mapper` cannot serve one chunk per lane.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// struct Record { payload: &'static str }
+/// let records = [Record { payload: "alpha" }, Record { payload: "beta" }];
+///
+/// let mut states = vec![sz::Sha256::new(); 2];
+/// sz::sha256_multistate_update_by(&mut states, |lane| records[lane].payload.as_bytes()).unwrap();
+///
+/// let mut digests = vec![[0u8; 32]; 2];
+/// sz::sha256_multistate_digest(&states, &mut digests).unwrap();
+/// assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
+/// ```
+pub fn sha256_multistate_update_by<F, A>(states: &mut [Sha256], mapper: F) -> Result<(), Status>
+where
+    F: Fn(usize) -> A,
+    A: AsRef<[u8]>,
+{
+    if states.is_empty() {
+        return Ok(());
+    }
+
+    // Same adapter as `argsort_by`: relabel each borrowed chunk `'static` so it can cross the C ABI. Safe
+    // because the kernel reads the chunks only during this synchronous call.
+    let adapter = move |lane_index: usize| -> &'static [u8] {
+        let binding = mapper(lane_index);
+        let slice = binding.as_ref();
+        unsafe { core::mem::transmute(slice) }
+    };
+    _sha256_multistate_update_impl(adapter, states)
+}
+
+/// Helper that takes an adapter (with a concrete type) and performs the FFI call.
+fn _sha256_multistate_update_impl<FAdapter>(adapter: FAdapter, states: &mut [Sha256]) -> Result<(), Status>
+where
+    FAdapter: Fn(usize) -> &'static [u8],
+{
+    let wrapper = _PunnedSliceLookupView {
+        get_slice: unsafe { _get_slice_fn::<FAdapter>() },
+        data: &adapter as *const FAdapter as *const c_void,
+    };
+    let texts = _SzSequence {
+        handle: &wrapper as *const _ as *const c_void,
+        count: states.len(),
+        get_start: Some(_slice_get_start_punned),
+        get_length: Some(_slice_get_length_punned),
+    };
+    unsafe { sz_sha256_multistate_update(states.as_mut_ptr() as *mut c_void, &texts) };
+    Ok(())
+}
+
+/// Writes each lane's digest into caller-provided storage, leaving every lane able to accept more data.
+///
+/// # Errors
+///
+/// Returns [`Status::BadAlloc`] if `digests` does not have exactly one entry per lane.
+pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest]) -> Result<(), Status> {
+    if digests.len() != states.len() {
+        return Err(Status::BadAlloc);
+    }
+    if states.is_empty() {
+        return Ok(());
+    }
+    unsafe {
+        sz_sha256_multistate_digest(
+            states.as_ptr() as *const c_void,
+            states.len(),
+            digests.as_mut_ptr() as *mut u8,
+        )
+    };
+    Ok(())
 }
 
 /// Computes HMAC-SHA256 (Hash-based Message Authentication Code) for the given key and message.
@@ -2318,16 +2441,11 @@ where
     }
 }
 
-/// A helper type that holds a mapper closure which, given an index,
-/// returns the corresponding byte-slice representation.
+/// Type-punned wrapper for the slice lookup view.
 ///
-/// The closure is expected to have type `Fn(usize) -> &[u8]` so that callers
-/// can write closures like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
-struct _SliceLookupView<F: Fn(usize) -> &'static [u8]> {
-    mapper: F,
-}
-
-/// Type-punned wrapper for the slice lookup view
+/// Carries a mapper closure which, given an index, returns the corresponding byte-slice representation,
+/// alongside the monomorphized accessor that recovers the closure's concrete type. Callers write closures
+/// like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
 struct _PunnedSliceLookupView {
     get_slice: unsafe fn(*const c_void, usize) -> &'static [u8],
     data: *const c_void,
@@ -5132,6 +5250,72 @@ mod tests {
     }
 
     #[test]
+    fn sha256_multistate_matches_single() {
+        // Lane counts bracketing both vector widths, with ragged lengths and an empty lane
+        for lanes_count in [1usize, 7, 8, 9, 16, 17, 33] {
+            let messages: Vec<Vec<u8>> = (0..lanes_count)
+                .map(|lane_index| vec![b'a' + (lane_index % 26) as u8; lane_index * 137 % 5000])
+                .collect();
+
+            let mut states = vec![sz::Sha256::new(); lanes_count];
+
+            // Feed each lane in three uneven slices, so partial blocks carry across calls
+            let mut offsets = vec![0usize; lanes_count];
+            for slice_index in 0..3 {
+                let ranges: Vec<(usize, usize)> = (0..lanes_count)
+                    .map(|lane_index| {
+                        let remaining = messages[lane_index].len() - offsets[lane_index];
+                        let take = if slice_index == 2 { remaining } else { remaining / 3 };
+                        let start = offsets[lane_index];
+                        offsets[lane_index] += take;
+                        (start, start + take)
+                    })
+                    .collect();
+                sz::sha256_multistate_update_by(&mut states, |lane_index| {
+                    let (start, end) = ranges[lane_index];
+                    &messages[lane_index][start..end]
+                })
+                .expect("one chunk per lane");
+            }
+
+            let mut digests = vec![[0u8; 32]; lanes_count];
+            sz::sha256_multistate_digest(&states, &mut digests).expect("one digest per lane");
+            for lane_index in 0..lanes_count {
+                assert_eq!(digests[lane_index], sz::Sha256::hash(&messages[lane_index]));
+            }
+        }
+    }
+
+    #[test]
+    fn sha256_multistate_borrows_owned_strings() {
+        // The generic front door must take `Vec<String>` without an intermediate slice-of-slices.
+        let heads: Vec<String> = vec!["Hello, ".into(), "Goodbye, ".into()];
+        let tails: Vec<Vec<u8>> = vec![b"world!".to_vec(), b"world!".to_vec()];
+
+        let mut states = vec![sz::Sha256::new(); 2];
+        sz::sha256_multistate_update(&mut states, &heads).expect("one chunk per lane");
+        sz::sha256_multistate_update(&mut states, &tails).expect("one chunk per lane");
+
+        let mut digests = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 2];
+        sz::sha256_multistate_digest(&states, &mut digests).expect("one digest per lane");
+        assert_eq!(digests[0], sz::Sha256::hash(b"Hello, world!"));
+        assert_eq!(digests[1], sz::Sha256::hash(b"Goodbye, world!"));
+    }
+
+    #[test]
+    fn sha256_multistate_size_checks() {
+        let mut states = vec![sz::Sha256::new(); 3];
+        let too_few: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
+        assert_eq!(sz::sha256_multistate_update(&mut states, &too_few), Err(sz::Status::BadAlloc));
+
+        let mut too_few_digests = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 2];
+        assert_eq!(
+            sz::sha256_multistate_digest(&states, &mut too_few_digests),
+            Err(sz::Status::BadAlloc)
+        );
+    }
+
+    #[test]
     fn sha256_long() {
         let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
         let hash = sz::Sha256::hash(msg);
@@ -5144,7 +5328,7 @@ mod tests {
 
     #[test]
     fn hmac_sha256_basic() {
-        // Test vector from RFC 4231 (HMAC-SHA256 test case 1)
+        // Degenerate case: an empty key is zero-padded to a full block, an empty message adds nothing.
         let key = b"";
         let message = b"";
         let mac = sz::hmac_sha256(key, message);
@@ -5152,6 +5336,18 @@ mod tests {
         let expected = [
             0xb6, 0x13, 0x67, 0x9a, 0x08, 0x14, 0xd9, 0xec, 0x77, 0x2f, 0x95, 0xd7, 0x78, 0xc3, 0x5f, 0xc5, 0xff, 0x16,
             0x97, 0xc4, 0x93, 0x71, 0x56, 0x53, 0xc6, 0xc7, 0x12, 0x14, 0x42, 0x92, 0xc5, 0xad,
+        ];
+        assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_rfc4231_case1() {
+        // The published vector, so this checks against the standard rather than against ourselves.
+        let key = [0x0bu8; 20];
+        let mac = sz::hmac_sha256(&key, b"Hi There");
+        let expected = [
+            0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b, 0x88, 0x1d,
+            0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
         ];
         assert_eq!(mac, expected);
     }

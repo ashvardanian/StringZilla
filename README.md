@@ -829,10 +829,14 @@ Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads
 > § Reading materials.
 > [Stress-testing hash functions for avalance behaviour, collision bias, and distribution](https://github.com/ashvardanian/HashEvals).
 
-### SHA-256 Checksums
+### SHA-256 Digests
 
-In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic checksums.
+In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic digests.
 The implementation follows the [FIPS 180-4 specification](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) and provides multiple backends.
+
+Digesting one message is a serial dependency chain — 32 dependent `SHA256RNDS2` at 4 cycles each — so no wider instruction set can accelerate it, and the SHA-NI path already sits within 15% of that hardware floor.
+Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update` exposes.
+That lane-parallel form roughly doubles single-message SHA-NI throughput, and on an AVX-512 CPU without SHA-NI it is about ten times the scalar path.
 
 ### Random Generation
 

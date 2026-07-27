@@ -1327,6 +1327,15 @@ typedef struct sz_sequence_t {
 SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
                                                               sz_sequence_t *sequence);
 
+/**
+ *  @brief Initiates the sequence structure from an array of pointer-length pairs, like `sz_string_view_t[]`.
+ *  @param views Pointer to the array of views, which must outlive @p sequence.
+ *  @param count Number of views in the array.
+ *  @param sequence Sequence structure to initialize.
+ */
+SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                   sz_sequence_t *sequence);
+
 #pragma endregion
 
 #pragma region Helper Functions
@@ -1965,6 +1974,24 @@ SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, 
     sequence->count = count;
     sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;
     sequence->get_length = sz_sequence_from_null_terminated_strings_get_length_;
+}
+
+SZ_API_COMPTIME sz_cptr_t sz_sequence_from_string_views_get_start_(void const *handle, sz_size_t i) {
+    sz_string_view_t const *views = (sz_string_view_t const *)handle;
+    return views[i].start;
+}
+
+SZ_API_COMPTIME sz_size_t sz_sequence_from_string_views_get_length_(void const *handle, sz_size_t i) {
+    sz_string_view_t const *views = (sz_string_view_t const *)handle;
+    return views[i].length;
+}
+
+SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                   sz_sequence_t *sequence) {
+    sequence->handle = views;
+    sequence->count = count;
+    sequence->get_start = sz_sequence_from_string_views_get_start_;
+    sequence->get_length = sz_sequence_from_string_views_get_length_;
 }
 
 #pragma endregion
