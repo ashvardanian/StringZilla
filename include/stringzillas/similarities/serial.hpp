@@ -119,19 +119,59 @@ constexpr bool is_unit_cost(uniform_substitution_costs_t substituter, linear_gap
     return substituter.match == 0 && substituter.mismatch == 1 && gap_costs.open_or_extend == 1;
 }
 
-/** @brief Whether a `(query, candidate)` cell's worst-case score stays within @p reach_limit under linear gaps. */
-constexpr bool fits_reach(uniform_substitution_costs_t substituter, linear_gap_costs_t gap_costs, size_t query_length,
-                          size_t candidate_length, size_t reach_limit) noexcept {
-    size_t const magnitude = sz_max_of_two((size_t)substituter.mismatch, (size_t)gap_costs.open_or_extend);
-    return (query_length + candidate_length) * magnitude <= reach_limit;
+/**
+ *  @brief The largest magnitude a lane walker can @b materialize for a `(query, candidate)` cell.
+ *
+ *  Bounds every value the recurrence forms, not just the score: a cell, the one step added before the `min`/`max`
+ *  retires the intermediate, and under affine gaps the discarded track's `open + extend` seed plus its next-row
+ *  `extend`. Three steps cover all of them, as `open` and `extend` are each bounded by the per-character magnitude.
+ *
+ *  The span follows the objective: minimizing, a cell is reachable by substituting `min(i, j)` pairs and gapping the
+ *  rest, so `max(i, j)` bounds it; maximizing, the optimum may wander through all `i + j` steps.
+ *
+ *  Assumes non-negative costs under unsigned accumulators, and stays monotone in both lengths, as the driver sizes
+ *  its fallback arena from the longest cell alone.
+ */
+struct worst_case_reach_t {
+    size_t per_character = 1;
+    size_t steps_beyond_span = 1; // ? One retired intermediate under linear gaps, three under affine.
+    bool spans_both_sides = false;
+
+    constexpr size_t of(size_t query_length, size_t candidate_length) const noexcept {
+        return ((spans_both_sides ? query_length + candidate_length : sz_max_of_two(query_length, candidate_length)) +
+                steps_beyond_span) *
+               per_character;
+    }
+};
+
+/** @brief How far a cell can reach under linear gaps, given the costs and the objective alone. */
+template <sz_similarity_objective_t objective_, typename substituter_type_>
+constexpr worst_case_reach_t worst_case_reach(substituter_type_ const &substituter,
+                                              linear_gap_costs_t gap_costs) noexcept {
+    // A zero-cost model still consumes one accumulator slot per character, so never scale by nothing.
+    return {sz_max_of_two(sz_max_of_two((size_t)substituter.magnitude(), (size_t)gap_costs.magnitude()), (size_t)1), 1,
+            objective_ == sz_maximize_score_k};
 }
 
-/** @brief The affine sibling, where one gap opening rides on top of the per-cell magnitude. */
-constexpr bool fits_reach(uniform_substitution_costs_t substituter, affine_gap_costs_t gap_costs, size_t query_length,
-                          size_t candidate_length, size_t reach_limit) noexcept {
-    size_t const magnitude = sz_max_of_three((size_t)substituter.mismatch, (size_t)gap_costs.open,
-                                             (size_t)gap_costs.extend);
-    return (query_length + candidate_length) * magnitude + (size_t)gap_costs.open <= reach_limit;
+/** @brief The affine sibling, where the discarded gap track adds two more steps on top of the span. */
+template <sz_similarity_objective_t objective_, typename substituter_type_>
+constexpr worst_case_reach_t worst_case_reach(substituter_type_ const &substituter,
+                                              affine_gap_costs_t gap_costs) noexcept {
+    return {sz_max_of_two(sz_max_of_two((size_t)substituter.magnitude(), (size_t)gap_costs.magnitude()), (size_t)1), 3,
+            objective_ == sz_maximize_score_k};
+}
+
+/** @brief The all-gap score of a degenerate cell, where one side is empty, under linear gaps. */
+constexpr ssize_t empty_cell_score(linear_gap_costs_t gap_costs, size_t query_length,
+                                   size_t candidate_length) noexcept {
+    return (ssize_t)gap_costs.open_or_extend * (ssize_t)sz_max_of_two(query_length, candidate_length);
+}
+
+/** @brief The affine sibling: one opening plus an extension for every further character. */
+constexpr ssize_t empty_cell_score(affine_gap_costs_t gap_costs, size_t query_length,
+                                   size_t candidate_length) noexcept {
+    size_t const length = sz_max_of_two(query_length, candidate_length);
+    return length == 0 ? 0 : (ssize_t)gap_costs.open + (ssize_t)gap_costs.extend * (ssize_t)(length - 1);
 }
 
 /**
@@ -144,71 +184,11 @@ static constexpr size_t error_costs_classes_count_k = 32;
 /**
  *  @brief A @b compact error costs matrix for byte-level similarity scoring.
  *
- *  Instead of a dense (256 x 256) ~ 65'536 byte table, every input byte is first mapped to one of
- *  @b `error_costs_classes_count_k` (32) classes through `byte_to_class`, and the substitution cost
- *  between two bytes is looked up in the (32 x 32) `class_substitution_costs` table:
- *
- *      cost(a, b) = class_substitution_costs[byte_to_class[a]][byte_to_class[b]]
- *
- *  The 1 KB cost table plus the 256 byte class map fit trivially into shared memory or registers,
- *  matching bioinformatics alphabets (≤4 DNA / ≤20 amino-acid classes) and keyboard-distance pricing,
- *  while avoiding the divergent serialization of a full 256 x 256 table on the GPU.
- * 
- *  @section Biological Data
- *
- *  For proteins, a (32 x 32) matrix takes 1024 bytes, which is a steep 2.56x increase from (20 x 20) ~ 400 bytes.
- *  Still, its an acceptable tradeoff given the convenience of using ASCII arithmetic for lookups, and occasional
- *  use of special "ambiguous" characters. The 20 standard amino-acids are @b ARNDCQEGHILKMFPSTWYV. Others include:
- *  - @b U: Selenocysteine, sometimes called the 21st amino acid.
- *  - @b O: Pyrrolysine, occasionally referred to as the 22nd amino acid.
- *  - @b B: An ambiguous code representing either Aspartic acid (D) or Asparagine (N).
- *  - @b Z: An ambiguous code representing either Glutamic acid (E) or Glutamine (Q).
- *  - @b X: Used when the identity of an amino acid is unknown or unspecified.
- *  - @b *: Denotes a stop codon, signaling the end of the protein sequence during translation.
- *  This leaves @b J as the only ASCII letter not used in protein sequences and @b (*) asterisk as the the only
- *  non-letter character used.
- *
- *  For DNA and RNA sequences, often a (4 x 4) matrix can be enough, but in the general case, additional characters
- *  are used to mark ambiguous reads. For nucleic acids the standard alphabets are @b ACGT for @b DNA and @b ACGU
- *  for @b RNA. There are a lot more ambiguity codes though, where each row lists which of A, C, G, and T/U a
- *  given code can stand for:
- *
- *       Code | Can be A | Can be C | Can be G | Can be T/U
- *       A    |    X     |          |          |
- *       C    |          |    X     |          |
- *       G    |          |          |    X     |
- *       T    |          |          |          |     X
- *       R    |    X     |          |    X     |
- *       Y    |          |    X     |          |     X
- *       S    |          |    X     |    X     |
- *       W    |    X     |          |          |     X
- *       K    |          |          |    X     |     X
- *       M    |    X     |    X     |          |
- *       B    |          |    X     |    X     |     X
- *       D    |    X     |          |    X     |     X
- *       H    |    X     |    X     |          |     X
- *       V    |    X     |    X     |    X     |
- *       N    |    X     |    X     |    X     |     X
- *
- *  If the BLOSUM62 matrix is often used for proteins, the IUB or NUC.4.4 are often used for nucleic acids.
- *  Both can be easily extracted from BioPython and converted to our ASCII order:
- *
- *  @code{.py}
- *  import string
- *  from Bio.Align import substitution_matrices
- *
- *  def map_to_new_alphabet(matrix, new_alphabet: str, default_value: int = -128):
- *      old_alphabet = str(matrix.alphabet)
- *      indices = {ch: old_alphabet.find(ch) for ch in new_alphabet}
- *      return [
- *          [matrix[indices[r], indices[c]] if indices[r] != -1 and indices[c] != -1 else default_value
- *          for c in new_alphabet]
- *          for r in new_alphabet
- *      ]
- *
- *  matrix = substitution_matrices.load("BLOSUM62").astype(int) # Or "NUC.4.4"
- *  print(map_to_new_alphabet(matrix, string.ascii_uppercase))
- *  @endcode
+ *  Rather than a dense (256 x 256) table, every byte maps through `byte_to_class` to one of
+ *  @b `error_costs_classes_count_k` (32) classes, and a cost is
+ *  `class_substitution_costs[byte_to_class[a]][byte_to_class[b]]`. The 1 KB table plus the 256-byte map fit in
+ *  shared memory or registers, cover bioinformatics alphabets (<= 4 DNA, <= 20 amino-acid classes) and
+ *  keyboard-distance pricing, and avoid the divergent serialization a full table would cost on the GPU.
  */
 struct error_costs_32x32_t {
     static constexpr size_t classes_count_k = error_costs_classes_count_k;
@@ -233,6 +213,9 @@ struct error_costs_32x32_t {
 
     /**
      *  @brief BLOSUM62 substitution matrix for protein analysis in bioinformatics, folded into the compact form.
+     *
+     *  Generated from BioPython's `substitution_matrices.load("BLOSUM62")` remapped to ASCII letter order, with
+     *  `-128` marking residues the matrix leaves undefined - `from_ascii_26x26_` drops those from the class map.
      *  @see https://en.wikipedia.org/wiki/BLOSUM
      */
     static constexpr error_costs_32x32_t blosum62() noexcept {
@@ -448,7 +431,7 @@ using scratch_space_t = span<std::byte>;
  */
 struct scratch_amount_t {
     // ? Deliberately a poison default (not `SZ_CACHE_LINE_WIDTH`): an instance built without an explicit
-    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge -> `bad_alloc`/ASan),
+    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge → `bad_alloc`/ASan),
     // ? surfacing any place that forgot to propagate the alignment rather than silently assuming 64 bytes.
     size_t alignment = std::numeric_limits<size_t>::max();
     size_t total = 0; // ? The accumulated, padded byte count == the next buffer's offset.
@@ -540,17 +523,11 @@ concept gap_costs_like = requires(gap_costs_type_ costs) {
  *  @tparam capability_ The SIMD capabilities of the target architecture.
  *  @tparam enable_ Used to enable/disable the specialization.
  */
-template <                                                       //
-    typename first_iterator_type_ = char const *,                //
-    typename second_iterator_type_ = char const *,               //
-    typename score_type_ = size_t,                               //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
-    >
+template <typename first_iterator_type_ = char const *, typename second_iterator_type_ = char const *,
+          typename score_type_ = size_t, typename substituter_type_ = uniform_substitution_costs_t,
+          typename gap_costs_type_ = linear_gap_costs_t, sz_similarity_objective_t objective_ = sz_maximize_score_k,
+          sz_similarity_locality_t locality_ = sz_similarity_global_k, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
@@ -577,16 +554,11 @@ struct tile_scorer;
  *  @tparam capability_ Whether to use @b multi-threading or some form of @b SIMD vectorization, or both.
  *  @tparam enable_ Used to enable/disable the specialization.
  */
-template <                                                       //
-    typename char_or_rune_type_ = char,                          //
-    typename score_type_ = size_t,                               //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
-    >
+template <typename char_or_rune_type_ = char, typename score_type_ = size_t,
+          typename substituter_type_ = uniform_substitution_costs_t, typename gap_costs_type_ = linear_gap_costs_t,
+          sz_similarity_objective_t objective_ = sz_maximize_score_k,
+          sz_similarity_locality_t locality_ = sz_similarity_global_k, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -615,16 +587,11 @@ struct diagonal_walker;
  *  @sa For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa For bulk API, use `sz::levenshtein_distances[_utf8]`.
  */
-template <                                                       //
-    typename char_or_rune_type_ = char,                          //
-    typename score_type_ = size_t,                               //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
-    >
+template <typename char_or_rune_type_ = char, typename score_type_ = size_t,
+          typename substituter_type_ = uniform_substitution_costs_t, typename gap_costs_type_ = linear_gap_costs_t,
+          sz_similarity_objective_t objective_ = sz_maximize_score_k,
+          sz_similarity_locality_t locality_ = sz_similarity_global_k, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -637,116 +604,26 @@ struct horizontal_walker;
  *  This is the cross-product workhorse. Unlike `diagonal_walker` (which vectorizes the anti-diagonal of a single
  *  pair and therefore starves its lanes for short strings), here every lane carries an independent candidate, so
  *  there is no intra-pair left-dependency to break — a plain row walk keeps all lanes busy regardless of length.
- *  The `sz_cap_serial_k` specialization below is the scalar per-lane @b reference oracle that every SIMD/GPU
- *  candidate-lane kernel is validated against.
+ *  Only SIMD backends specialize it; the tests validate them against the dual-row baselines and the serial engines.
  *
  *  @tparam candidate_lanes_ Number of candidates packed side-by-side (64 for 8-bit cells, 32 for 16-bit).
  *  @sa `candidate_lanes_block`, `sz_packing_candidates_across_lanes_k`.
  */
-template <                                                         //
-    typename char_or_rune_type_ = char,                            //
-    typename score_type_ = size_t,                                 //
-    typename substituter_type_ = uniform_substitution_costs_t,     //
-    typename gap_costs_type_ = linear_gap_costs_t,                 //
-    sz_similarity_objective_t objective_ = sz_minimize_distance_k, //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,   //
-    sz_capability_t capability_ = sz_cap_serial_k,                 //
-    size_t candidate_lanes_ = 64,                                  //
-    typename enable_ = void                                        //
-    >
+template <typename char_or_rune_type_ = char, typename score_type_ = size_t,
+          typename substituter_type_ = uniform_substitution_costs_t, typename gap_costs_type_ = linear_gap_costs_t,
+          sz_similarity_objective_t objective_ = sz_minimize_distance_k,
+          sz_similarity_locality_t locality_ = sz_similarity_global_k, sz_capability_t capability_ = sz_cap_serial_k,
+          size_t candidate_lanes_ = 64, typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct candidate_lane_walker;
 
 /**
- *  @brief Serial reference: scalar per-lane row Dynamic Programming. Differential oracle for the SIMD/GPU
- *      candidate-lane kernels. Covers @b global alignment with @b linear gaps (Levenshtein when the substituter
- *      is uniform, Needleman-Wunsch when it is a class-cost matrix); local alignment is a separate specialization.
- */
-template <typename char_or_rune_type_, typename score_type_, typename substituter_type_,
-          sz_similarity_objective_t objective_, size_t candidate_lanes_>
-struct candidate_lane_walker<char_or_rune_type_, score_type_, substituter_type_, linear_gap_costs_t, objective_,
-                             sz_similarity_global_k, sz_cap_serial_k, candidate_lanes_, void> {
-
-    using char_t = char_or_rune_type_;
-    using score_t = score_type_;
-    using substituter_t = substituter_type_;
-    using gap_costs_t = linear_gap_costs_t;
-
-    static constexpr sz_similarity_objective_t objective_k = objective_;
-    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
-    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
-    static constexpr size_t candidate_lanes_k = candidate_lanes_;
-
-    substituter_t substituter_ {};
-    linear_gap_costs_t gap_costs_ {};
-
-    candidate_lane_walker() noexcept {}
-    candidate_lane_walker(substituter_t subs, linear_gap_costs_t gaps) noexcept
-        : substituter_(subs), gap_costs_(gaps) {}
-
-    /** @brief Scratch holds two score rows of `longest_candidate + 1` cells each. */
-    size_t scratch_space_needed(size_t longest_candidate, cpu_specs_t const &specs) const noexcept {
-        size_t const row_bytes = sizeof(score_t) * (longest_candidate + 1);
-        scratch_amount_t amount {specs.cache_line_width};
-        amount += row_bytes; // previous row
-        amount += row_bytes; // current row
-        return amount;
-    }
-
-    /**
-     *  @param[in] query The shared query; its length is the number of Dynamic Programming rows.
-     *  @param[in] candidates Transposed block of up to `candidate_lanes_` candidates (see `candidate_lanes_block`).
-     *  @param[out] result_lanes One score per live lane (`candidates.lanes_count` of them); the caller maps each
-     *      lane back to its candidate index for the strided result matrix.
-     */
-    status_t operator()(span<char_t const> query, candidate_lanes_block<char_t> candidates, score_t *result_lanes,
-                        scratch_space_t scratch_space, cpu_specs_t const &specs) const noexcept {
-        sz_unused_(specs);
-        error_cost_t const gap = gap_costs_.open_or_extend;
-        size_t const query_length = query.size();
-        size_t const row_cells = candidates.longest_candidate + 1;
-
-        // Two rows carved from the scratch byte span (the allocation is over-aligned for `score_t`).
-        score_t *previous_row = reinterpret_cast<score_t *>(scratch_space.data());
-        score_t *current_row = previous_row + row_cells;
-
-        for (size_t lane_index = 0; lane_index < candidates.lanes_count; ++lane_index) {
-            size_t const candidate_length = candidates.lengths[lane_index];
-
-            // Row 0: the empty query prefix against every candidate prefix is a run of gaps.
-            for (size_t column = 0; column <= candidate_length; ++column)
-                previous_row[column] = static_cast<score_t>(gap * column);
-
-            for (size_t query_position = 1; query_position <= query_length; ++query_position) {
-                current_row[0] = static_cast<score_t>(gap * query_position);
-                char_t const query_char = query[query_position - 1];
-                for (size_t column = 1; column <= candidate_length; ++column) {
-                    char_t const candidate_char = candidates.character_of_lane(lane_index, column - 1);
-                    error_cost_t const cost_of_substitution = substituter_(query_char, candidate_char);
-                    score_t const if_substitution = previous_row[column - 1] + cost_of_substitution;
-                    score_t const if_gap = min_or_max<objective_k>(previous_row[column], current_row[column - 1]) + gap;
-                    current_row[column] = min_or_max<objective_k>(if_substitution, if_gap);
-                }
-                trivial_swap(previous_row, current_row);
-            }
-
-            result_lanes[lane_index] = previous_row[candidate_length];
-        }
-        return status_t::success_k;
-    }
-};
-
-/**
  *  @brief Specialized Myers algorithm implementation for Levenshtein one-to-one distance.
  *      Doesn't support non-unary substitution costs or affine gaps.
  */
-template <                                         //
-    typename char_or_rune_type_ = char,            //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
-    >
+template <typename char_or_rune_type_ = char, sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
 struct levenshtein_distance_myers;
 
 /**
@@ -754,47 +631,31 @@ struct levenshtein_distance_myers;
  *      For pairs of very large strings, all cores cooperate to compute one distance maximizing
  *      cache hits. For smaller strings, each core computes its own distance.
  */
-template <                                         //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
-    >
+template <typename gap_costs_type_ = linear_gap_costs_t, typename allocator_type_ = dummy_alloc_t,
+          sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances;
 
-template <                                         //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
-    >
+template <typename gap_costs_type_ = linear_gap_costs_t, typename allocator_type_ = dummy_alloc_t,
+          sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances_utf8;
 
-template <                                            //
-    typename substituter_type_ = error_costs_32x32_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,    //
-    typename allocator_type_ = dummy_alloc_t,         //
-    sz_capability_t capability_ = sz_cap_serial_k,    //
-    typename enable_ = void                           //
-    >
+template <typename substituter_type_ = error_costs_32x32_t, typename gap_costs_type_ = linear_gap_costs_t,
+          typename allocator_type_ = dummy_alloc_t, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores;
 
-template <                                            //
-    typename substituter_type_ = error_costs_32x32_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,    //
-    typename allocator_type_ = dummy_alloc_t,         //
-    sz_capability_t capability_ = sz_cap_serial_k,    //
-    typename enable_ = void                           //
-    >
+template <typename substituter_type_ = error_costs_32x32_t, typename gap_costs_type_ = linear_gap_costs_t,
+          typename allocator_type_ = dummy_alloc_t, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -2283,7 +2144,7 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
      *      matrix and (beyond the scratch `match_masks` table) no allocation. `words_count_` is a power of two so
      *      it lines up with the Ice Lake lockstep family; trailing empty blocks stay at the boundary harmlessly.
      */
-    template <index_t words_count_> // 1, 2, 4, 8  ->  shorter <= 64, 128, 256, 512
+    template <index_t words_count_> // 1, 2, 4, 8 → shorter <= 64, 128, 256, 512
     status_t unrolled_(span<char const> shorter, span<char const> longer, size_t &result_ref,
                        scratch_space_t scratch_space) const noexcept {
         index_t const shorter_length = (index_t)shorter.size();
@@ -2453,10 +2314,10 @@ struct levenshtein_distance_myers<char, sz_cap_serial_k> {
  *  @brief Bit-parallel Myers/Hyyrö unit-cost Levenshtein for two @b UTF-32 (rune) strings on the serial backend.
  *
  *  The Myers scan (`vertical_positives` / `vertical_negatives`, the horizontal `+1`/`-1` carries, the multi-word
- *  low->high ripple and the distance probe) operates @b only on the per-symbol `match_masks` bitmask words and is therefore
+ *  low→high ripple and the distance probe) operates @b only on the per-symbol `match_masks` bitmask words and is therefore
  *  independent of the key type. The byte specialization (`levenshtein_distance_myers<char, sz_cap_serial_k>`, the
  *  byte oracle) indexes a dense 256-entry `match_masks` table by the symbol byte; a 4-byte `rune_t` key cannot index a dense
- *  table, so this specialization swaps the dense table for an @b open-addressing hash (rune -> `words_count` bitmask
+ *  table, so this specialization swaps the dense table for an @b open-addressing hash (rune → `words_count` bitmask
  *  words). The recurrence below is the same one the byte oracle runs, only the per-symbol `match_row` lookup changes:
  *  a text rune absent from the pattern hashes to an all-zero row, which is exactly correct (it matches nothing).
  */
@@ -2606,7 +2467,7 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
         for (size_t longer_position = 0; longer_position != longer_length; ++longer_position) {
             rune_t const symbol = longer[longer_position];
             // Look up the rune's bitmask row: probe to its slot, or the permanently-zero `absent_row` if the rune is
-            // not in the pattern (a text rune absent from the pattern matches nothing -> all-zero `match_masks`, correct).
+            // not in the pattern (a text rune absent from the pattern matches nothing → all-zero `match_masks`, correct).
             u64_t const *match_row = absent_row;
             for (index_t slot = hash_rune(symbol, capacity);; slot = (slot + 1) & (capacity - 1)) {
                 rune_t const key = slot_keys[slot];
@@ -2655,12 +2516,8 @@ struct levenshtein_distance_myers<rune_t, sz_cap_serial_k> {
  *  @tparam gap_costs_type_ Can be either `linear_gap_costs_t` or `affine_gap_costs_t`.
  *  @tparam capability_ Can be either `sz_cap_serial_k`, `sz_caps_sil_k`, `sz_cap_cuda_k`.
  */
-template <                                         //
-    typename char_or_rune_type_ = char,            //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
-    >
+template <typename char_or_rune_type_ = char, typename gap_costs_type_ = linear_gap_costs_t,
+          sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -2836,11 +2693,8 @@ struct levenshtein_distance {
  *  @brief Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the CPU backend.
  *  @sa `levenshtein_distance` for binary strings.
  */
-template <                                         //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
-    >
+template <typename gap_costs_type_ = linear_gap_costs_t, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -3044,13 +2898,9 @@ struct levenshtein_distance_utf8 {
  *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                            //
-    typename char_or_rune_type_ = char,               //
-    typename substituter_type_ = error_costs_32x32_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,    //
-    sz_capability_t capability_ = sz_cap_serial_k,    //
-    typename enable_ = void                           //
-    >
+template <typename char_or_rune_type_ = char, typename substituter_type_ = error_costs_32x32_t,
+          typename gap_costs_type_ = linear_gap_costs_t, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -3157,13 +3007,9 @@ struct needleman_wunsch_score {
  *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                            //
-    typename char_or_rune_type_ = char,               //
-    typename substituter_type_ = error_costs_32x32_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,    //
-    sz_capability_t capability_ = sz_cap_serial_k,    //
-    typename enable_ = void                           //
-    >
+template <typename char_or_rune_type_ = char, typename substituter_type_ = error_costs_32x32_t,
+          typename gap_costs_type_ = linear_gap_costs_t, sz_capability_t capability_ = sz_cap_serial_k,
+          typename enable_ = void>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -3283,14 +3129,8 @@ struct smith_waterman_score {
  *      @p candidates - every query against every candidate - reusing one dynamic scratch buffer. When
  *      @p is_symmetric, only the lower triangle (including the diagonal) is computed and mirrored.
  */
-template <                         //
-    typename score_type_,          //
-    typename scoring_engine_type_, //
-    typename queries_type_,        //
-    typename candidates_type_,     //
-    typename results_type_,        //
-    typename scratch_buffer_type_  //
-    >
+template <typename score_type_, typename scoring_engine_type_, typename queries_type_, typename candidates_type_,
+          typename results_type_, typename scratch_buffer_type_>
 #if SZ_HAS_CONCEPTS_
     requires score_like<score_type_>
 #endif
@@ -3346,15 +3186,8 @@ status_t cross_sequentially_( //
  *      cores cooperate on one cell maximizing cache hits; for smaller pairs, each core computes its own cell.
  *      When @p is_symmetric, only the lower triangle (including the diagonal) is computed and mirrored.
  */
-template <                                     //
-    typename score_type_,                      //
-    typename scoring_engine_type_,             //
-    typename queries_type_,                    //
-    typename candidates_type_,                 //
-    typename results_type_,                    //
-    typename scratch_buffer_type_,             //
-    typename executor_type_ = dummy_executor_t //
-    >
+template <typename score_type_, typename scoring_engine_type_, typename queries_type_, typename candidates_type_,
+          typename results_type_, typename scratch_buffer_type_, typename executor_type_ = dummy_executor_t>
 #if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && executor_like<executor_type_>
 #endif
@@ -3590,17 +3423,15 @@ SZ_INLINE int candidate_length_bucket_(size_t length) noexcept {
  *      range are scored individually through the per-pair @p fallback. The @p kernel and @p fallback are passed by
  *      reference; nothing is shared at the kernel level - per the design, only the host driver is consolidated.
  *
- *  @param fits `(query_length, candidate_length) -> bool`: whether a cell's worst-case score fits the kernel's range.
- *  @param empty_cell `(query_length, candidate_length) -> score`: the all-gap score for a degenerate (empty) cell.
+ *  The costs fix the scale, each kernel declares the `capacity_k` its accumulator represents, and the tiering is
+ *  the comparison between them - evaluated once per call here, rather than per cell by the caller.
  */
 template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
-          typename candidates_type_, typename results_type_, typename fits_narrow_type_, typename fits_wide_type_,
-          typename empty_cell_type_>
+          typename candidates_type_, typename results_type_>
 status_t cross_product_candidate_lanes_range_( //
     narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
     queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
-    cross_similarities_t cross_kind, size_t cell_begin, size_t cell_end, fits_narrow_type_ &&fits_narrow,
-    fits_wide_type_ &&fits_wide, empty_cell_type_ &&empty_cell, scratch_space_t scratch,
+    cross_similarities_t cross_kind, size_t cell_begin, size_t cell_end, scratch_space_t scratch,
     cpu_specs_t const &specs) noexcept {
 
     using narrow_t = remove_cvref<narrow_kernel_type_>;
@@ -3618,6 +3449,18 @@ status_t cross_product_candidate_lanes_range_( //
     bool const is_symmetric = cross_kind == cross_similarities_t::symmetric_k;
     size_t const candidates_count = candidates.size();
 
+    // Both tiers price cells identically, so the scale is computed once here rather than per cell - which keeps
+    // the substituter's magnitude scan off the hot path.
+    static_assert(is_same_type<typename narrow_t::substituter_t, typename wide_t::substituter_t>::value &&
+                      is_same_type<typename narrow_t::gap_costs_t, typename wide_t::gap_costs_t>::value,
+                  "Both tiers price cells identically; only the accumulator width differs.");
+    static_assert(wide_t::candidate_lanes_k <= narrow_t::candidate_lanes_k,
+                  "The narrow tier carries the most lanes; the staging arrays are sized from it.");
+    static_assert(wide_t::capacity_k <= (size_t)std::numeric_limits<u32_t>::max(),
+                  "Bucket occupancy is a 64-bit mask; a wider accumulator would admit lengths that overflow it.");
+    worst_case_reach_t const reach = worst_case_reach<narrow_t::objective_k>(narrow_kernel.substituter_,
+                                                                             narrow_kernel.gap_costs_);
+
     // Size the transpose buffer to the widest lane block (narrow kernel) and the walker arena to the larger of the
     // two kernels' needs, over the longest candidate any batchable cell can present.
     size_t longest_candidate = 0;
@@ -3626,7 +3469,8 @@ status_t cross_product_candidate_lanes_range_( //
         cross_cell_to_indices_(cell_index, candidates_count, cross_kind, query_index, candidate_index);
         size_t const query_length = to_view(queries[query_index]).size();
         size_t const candidate_length = to_view(candidates[candidate_index]).size();
-        if (query_length != 0 && candidate_length != 0 && fits_wide(query_length, candidate_length))
+        if (query_length != 0 && candidate_length != 0 &&
+            reach.of(query_length, candidate_length) <= wide_t::capacity_k)
             longest_candidate = sz_max_of_two(longest_candidate, candidate_length);
     }
     size_t const transpose_bytes = narrow_lanes_k * longest_candidate * sizeof(element_t);
@@ -3683,29 +3527,36 @@ status_t cross_product_candidate_lanes_range_( //
         return status_t::success_k;
     };
 
-    // Score every cell of the current row that belongs to one width tier (`in_tier(candidate_length)`), grouping by
-    // dyadic length bucket so each block's lanes carry similar lengths, and dispatching through `chosen_kernel`.
-    auto const run_tier = [&](auto &chosen_kernel, auto &&in_tier, size_t lane_capacity) noexcept {
-        int max_bucket = -1;
+    // Score the row's cells whose reach lands in one tier's band, grouped by dyadic length bucket so a block's
+    // lanes carry similar lengths. Only occupied buckets are walked; a uniform row would else rescan per bucket.
+    auto const run_tier = [&](auto &chosen_kernel, size_t reach_above) noexcept {
+        using chosen_t = remove_cvref<decltype(chosen_kernel)>;
+        constexpr size_t candidate_lanes = chosen_t::candidate_lanes_k;
+        auto const in_band = [&](size_t candidate_length) noexcept {
+            size_t const worst_case = reach.of(query_length, candidate_length);
+            return worst_case > reach_above && worst_case <= chosen_t::capacity_k;
+        };
+        u64_t occupied_buckets = 0;
         for (size_t r = cell_index; r != row_end; ++r) {
             size_t const candidate_length = to_view(candidates[r - row_base]).size();
-            if (candidate_length == 0 || !in_tier(candidate_length)) continue;
-            int const bucket = candidate_length_bucket_(candidate_length);
-            if (bucket > max_bucket) max_bucket = bucket;
+            if (candidate_length == 0 || !in_band(candidate_length)) continue;
+            occupied_buckets |= (u64_t)1 << candidate_length_bucket_(candidate_length);
         }
-        for (int bucket = 0; bucket <= max_bucket; ++bucket) {
+        while (occupied_buckets) {
+            int const bucket = (int)sz_u64_ctz(occupied_buckets);
+            occupied_buckets &= occupied_buckets - 1;
             size_t lanes_count = 0, block_longest = 0;
             for (size_t r = cell_index; r != row_end; ++r) {
                 size_t const candidate_index = r - row_base;
                 size_t const candidate_length = to_view(candidates[candidate_index]).size();
-                if (candidate_length == 0 || !in_tier(candidate_length)) continue;
+                if (candidate_length == 0 || !in_band(candidate_length)) continue;
                 if (candidate_length_bucket_(candidate_length) != bucket) continue;
                 block_candidates[lanes_count] = candidate_index;
                 lengths[lanes_count] = candidate_length;
                 destinations[lanes_count] = destination_for(seed_query_index, candidate_index);
                 block_longest = sz_max_of_two(block_longest, candidate_length);
                 ++lanes_count;
-                if (lanes_count == lane_capacity) {
+                if (lanes_count == candidate_lanes) {
                     if (status_t status = emit_block(chosen_kernel, lanes_count, block_longest);
                         status != status_t::success_k)
                         return status;
@@ -3735,11 +3586,14 @@ status_t cross_product_candidate_lanes_range_( //
             size_t const candidate_index = r - row_base;
             size_t const candidate_length = to_view(candidates[candidate_index]).size();
             if (query_length == 0 || candidate_length == 0) {
-                scatter(destination_for(seed_query_index, candidate_index),
-                        static_cast<value_t>(empty_cell(query_length, candidate_length)));
+                ssize_t const degenerate_score = narrow_t::locality_k == sz_similarity_local_k
+                                                     ? 0
+                                                     : empty_cell_score(narrow_kernel.gap_costs_, query_length,
+                                                                        candidate_length);
+                scatter(destination_for(seed_query_index, candidate_index), static_cast<value_t>(degenerate_score));
                 continue;
             }
-            if (!fits_wide(query_length, candidate_length)) {
+            if (reach.of(query_length, candidate_length) > wide_t::capacity_k) {
                 fallback_score_t result_score = 0;
                 if (status_t status = fallback(query, to_view(candidates[candidate_index]), result_score,
                                                fallback_scratch_space, dummy, specs);
@@ -3749,19 +3603,9 @@ status_t cross_product_candidate_lanes_range_( //
             }
         }
 
-        // Narrow tier (fits the narrow range), then the wide tier (escapes narrow but fits wide).
-        auto const fits_narrow_tier = [&](size_t candidate_length) noexcept {
-            return fits_narrow(query_length, candidate_length);
-        };
-        auto const fits_wide_tier = [&](size_t candidate_length) noexcept {
-            return !fits_narrow(query_length, candidate_length) && fits_wide(query_length, candidate_length);
-        };
-        if (status_t status = run_tier(narrow_kernel, fits_narrow_tier, narrow_t::candidate_lanes_k);
-            status != status_t::success_k)
-            return status;
-        if (status_t status = run_tier(wide_kernel, fits_wide_tier, wide_t::candidate_lanes_k);
-            status != status_t::success_k)
-            return status;
+        // Narrow tier first, then the wide one for whatever escaped it.
+        if (status_t status = run_tier(narrow_kernel, 0); status != status_t::success_k) return status;
+        if (status_t status = run_tier(wide_kernel, narrow_t::capacity_k); status != status_t::success_k) return status;
         cell_index = row_end;
     }
     return status_t::success_k;
@@ -3772,14 +3616,18 @@ status_t cross_product_candidate_lanes_range_( //
  *      the lane-walker arena for the longest candidate, or the per-pair fallback arena for the longest cell.
  */
 template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
-          typename candidates_type_, typename fits_wide_type_>
+          typename candidates_type_>
 size_t cross_product_candidate_lanes_scratch_( //
     narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
-    queries_type_ const &queries, candidates_type_ const &candidates, fits_wide_type_ &&fits_wide,
-    cpu_specs_t const &specs) noexcept {
+    queries_type_ const &queries, candidates_type_ const &candidates, cpu_specs_t const &specs) noexcept {
 
-    constexpr size_t narrow_lanes_k = remove_cvref<narrow_kernel_type_>::candidate_lanes_k;
-    using element_t = typename remove_cvref<narrow_kernel_type_>::char_t;
+    using narrow_t = remove_cvref<narrow_kernel_type_>;
+    using wide_t = remove_cvref<wide_kernel_type_>;
+    constexpr size_t narrow_lanes_k = narrow_t::candidate_lanes_k;
+    using element_t = typename narrow_t::char_t;
+    // The reach is monotone in both lengths, so the longest cell escaping the wide tier implies every cell does not.
+    worst_case_reach_t const reach = worst_case_reach<narrow_t::objective_k>(narrow_kernel.substituter_,
+                                                                             narrow_kernel.gap_costs_);
 
     size_t longest_query = 0, longest_query_index = 0, longest_candidate = 0, longest_candidate_index = 0;
     for (size_t index = 0; index < queries.size(); ++index)
@@ -3794,7 +3642,7 @@ size_t cross_product_candidate_lanes_scratch_( //
                                                       wide_kernel.scratch_space_needed(longest_candidate, specs))
                                       : 0;
     size_t fallback_scratch = 0;
-    if (queries.size() && candidates.size() && !fits_wide(longest_query, longest_candidate))
+    if (queries.size() && candidates.size() && reach.of(longest_query, longest_candidate) > wide_t::capacity_k)
         fallback_scratch = fallback.scratch_space_needed(to_view(queries[longest_query_index]),
                                                          to_view(candidates[longest_candidate_index]), specs);
     return sz_max_of_two(transpose_bytes + walker_scratch, fallback_scratch);
@@ -3805,18 +3653,16 @@ size_t cross_product_candidate_lanes_scratch_( //
  *      workers, then hands each worker a contiguous live-cell slice and its own scratch partition.
  */
 template <typename narrow_kernel_type_, typename wide_kernel_type_, typename fallback_type_, typename queries_type_,
-          typename candidates_type_, typename results_type_, typename scratch_buffer_type_, typename executor_type_,
-          typename fits_narrow_type_, typename fits_wide_type_, typename empty_cell_type_>
+          typename candidates_type_, typename results_type_, typename scratch_buffer_type_, typename executor_type_>
 status_t cross_product_candidate_lanes_parallel_( //
     narrow_kernel_type_ &narrow_kernel, wide_kernel_type_ &wide_kernel, fallback_type_ &fallback,
     queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,
     cross_similarities_t cross_kind, scratch_buffer_type_ &scratch_buffer, executor_type_ &&executor,
-    fits_narrow_type_ &&fits_narrow, fits_wide_type_ &&fits_wide, empty_cell_type_ &&empty_cell,
     cpu_specs_t const &specs) noexcept {
 
     size_t const cells_count = cross_live_cells_count_(queries.size(), candidates.size(), cross_kind);
     size_t const worker_scratch = cross_product_candidate_lanes_scratch_(narrow_kernel, wide_kernel, fallback, queries,
-                                                                         candidates, fits_wide, specs);
+                                                                         candidates, specs);
     size_t const workers = sz_max_of_two(executor.threads_count(), (size_t)1);
     if (status_t status = scratch_buffer.try_resize(worker_scratch * workers); status != status_t::success_k)
         return status;
@@ -3830,20 +3676,15 @@ status_t cross_product_candidate_lanes_parallel_( //
         scratch_space_t slice = scratch_space_t(scratch_buffer).subspan(prong.thread * worker_scratch, worker_scratch);
         status = cross_product_candidate_lanes_range_(narrow_kernel, wide_kernel, fallback, queries, candidates,
                                                       results, cross_kind, schedule_batches.batch_begin(prong.task),
-                                                      schedule_batches.batch_end(prong.task, cells_count), fits_narrow,
-                                                      fits_wide, empty_cell, slice, specs);
+                                                      schedule_batches.batch_end(prong.task, cells_count), slice,
+                                                      specs);
     });
     return status;
 }
 
 #pragma endregion Shared Candidate Lane Cross Product Driver
 
-template <                       //
-    typename gap_costs_type_,    //
-    typename allocator_type_,    //
-    sz_capability_t capability_, //
-    typename enable_             //
-    >
+template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_, typename enable_>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -3900,12 +3741,7 @@ struct levenshtein_distances {
     }
 };
 
-template <                       //
-    typename gap_costs_type_,    //
-    typename allocator_type_,    //
-    sz_capability_t capability_, //
-    typename enable_             //
-    >
+template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_, typename enable_>
 #if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
@@ -3960,13 +3796,8 @@ struct levenshtein_distances_utf8 {
     }
 };
 
-template <                       //
-    typename substituter_type_,  //
-    typename gap_costs_type_,    //
-    typename allocator_type_,    //
-    sz_capability_t capability_, //
-    typename enable_             //
-    >
+template <typename substituter_type_, typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_,
+          typename enable_>
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -4021,13 +3852,8 @@ struct needleman_wunsch_scores {
     }
 };
 
-template <                       //
-    typename substituter_type_,  //
-    typename gap_costs_type_,    //
-    typename allocator_type_,    //
-    sz_capability_t capability_, //
-    typename enable_             //
-    >
+template <typename substituter_type_, typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_,
+          typename enable_>
 #if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
