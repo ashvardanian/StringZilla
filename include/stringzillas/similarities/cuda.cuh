@@ -1628,36 +1628,27 @@ __global__ void affine_score_per_cuda_warp_(                                 //
 #pragma region Levenshtein Distance in CUDA
 
 /**
- *  @brief Wraps a single task for the CUDA-based @b byte-level "similarity" kernels.
- *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ *  @brief Max string length (chars) for which a pair runs as a register-only thread-per-pair kernel, and the
+ *         crossover into the warp tier. Tunable.
+ *
+ *  Above this the per-thread DP row spills to local memory: H100, blosum62, device-timed, 160-512 chars gives
+ *  ~60-190 GCUPS thread-per-pair against ~420-660 for the lane-split warp anti-diagonal.
  */
-/** @brief Max string length (chars) for which Levenshtein runs as a register-only thread-per-pair kernel. */
 inline static constexpr unsigned register_text_limit_k = 128;
 
 /**
- *  @brief Max string length (chars) for the NW/SW @b thread-per-pair @b batch tier (above @ref register_text_limit_k).
+ *  @brief Shorter-length at/above which a pair is promoted from the warp tier to the @b device (tiled) tier. Tunable.
  *
- *  Re-measured on H100 (device-timed, blosum62): the thread-per-pair scorer's per-thread DP row spills to local
- *  memory as soon as it exceeds the register tier, so the old wide batch tier collapsed to ~60-190 GCUPS over
- *  160-512 chars, while the lane-split warp anti-diagonal kernel sustains ~420-660 there (3-7x faster). The batch
- *  tier is therefore kept only as wide as the register tier: pairs longer than @ref register_text_limit_k route
- *  straight to the warp kernel, and only the longest (@ref tiled_promotion_min_shorter_k) reach the tiled
- *  device wavefront. Tunable.
- */
-inline static constexpr unsigned batch_text_limit_k = 128;
-
-/**
- *  @brief Shorter-length at/above which a pair is promoted from the warp tier to the @b device (tiled) tier.
- *
- *  The warp kernel runs one warp per pair down a single anti-diagonal, so its throughput collapses as the pair
- *  grows (measured saturated GCUPS: 438 @2560², 322 @4096², 170 @8192², 54 @16384²) while the multi-warp tiled
- *  device kernel stays flat at ~1050 - a 2-19x gap. The native warp-vs-device split is purely memory-fit (a pair
- *  stays on the warp tier while its diagonal fits shared), which ignores that the tiled kernel is simply faster
- *  here. `shorter >= 4096` guarantees >=32 tile-columns (good multi-warp occupancy); below it the tiled per-tile
- *  overhead isn't amortized and the warp tier (or Myers, for <=2048 unit-cost Levenshtein) is preferable. Tunable.
+ *  One warp per pair down a single anti-diagonal collapses as the pair grows - saturated GCUPS 438 @2560², 322
+ *  @4096², 170 @8192², 54 @16384² - while the multi-warp tiled kernel stays flat near 1050. This threshold also
+ *  guarantees >=32 tile-columns, below which the per-tile overhead is not amortized.
  */
 inline static constexpr size_t tiled_promotion_min_shorter_k = 4096;
 
+/**
+ *  @brief Wraps a single task for the CUDA-based @b byte-level "similarity" kernels.
+ *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ */
 template <typename char_type_>
 struct cuda_similarity_task {
     using char_t = char_type_;
@@ -1718,15 +1709,6 @@ struct cuda_similarity_task {
                shorter.size() <= register_text_limit_k && longer.size() <= register_text_limit_k;
     }
 
-    /**
-     *  @brief Whether this task belongs to the NW/SW thread-per-pair @b batch tier: longer than the register limit but
-     *         still below the tiled-wavefront crossover (@ref batch_text_limit_k) and within signed 2-byte cells.
-     *         Disjoint from @ref fits_in_registers so a partition over each leaves the tiled remainder untouched.
-     */
-    constexpr bool fits_in_batch() const noexcept {
-        return (bytes_per_cell == one_byte_per_cell_k || bytes_per_cell == two_bytes_per_cell_k) &&
-               !fits_in_registers() && shorter.size() <= batch_text_limit_k && longer.size() <= batch_text_limit_k;
-    }
 };
 
 static_assert(std::is_trivially_destructible<cuda_similarity_task<char>>::value,
@@ -1801,38 +1783,11 @@ struct cuda_cross_buffers {
  *         final contiguous tier order; a dense histogram over a transform iterator emitting the dense tier id yields
  *         the per-tier counts.
  *
- *  Five contiguous output tiers, in final order:
- *    0 myers_word1  : unit-cost linear and shorter <=  64 (register-resident single-word Myers)
- *    1 myers_generic: unit-cost linear and shorter >   64 (size-generic Myers, any length)
- *    2 register_u8  : non-myers, fits_in_registers, one-byte cells
- *    3 register_u16 : non-myers, fits_in_registers, two-byte cells
- *    4 device_rest  : non-myers, everything else
- *
- *  Packed `u64` sort key, MSB -> LSB:
- *    tier_priority   : 3 bits  [63:61]   group order (both myers tiers collapse to 0; register/device 5/6/7)
- *    shorter_length  : 13 bits [60:48]   ascending intra-myers sub-sort (splits word1 / generic at 64; also fine elsewhere)
- *    original_index  : 32 bits [47:16]   stable tiebreaker / gather source
- *    (16 low bits unused, zero)
+ *  Six contiguous output tiers, in final order - see the dense ids below.
  */
 
 /** @brief Below this shorter length the register-resident single-word Myers runs; above it, the size-generic Myers. */
 static constexpr u32_t levenshtein_myers_word1_cap_k = 64;
-
-static constexpr int levenshtein_original_index_bits_k = 32;
-static constexpr int levenshtein_shorter_length_bits_k = 13; // 8192 > the ~6000 realistic maximum
-static constexpr int levenshtein_tier_priority_bits_k = 3;
-
-static constexpr int levenshtein_original_index_shift_k = 16;
-static constexpr int levenshtein_shorter_length_shift_k = levenshtein_original_index_shift_k +
-                                                          levenshtein_original_index_bits_k; // 48
-static constexpr int levenshtein_tier_priority_shift_k = levenshtein_shorter_length_shift_k +
-                                                         levenshtein_shorter_length_bits_k; // 61
-
-/** @brief Group-order priority placed in the key MSBs (all myers tasks share priority 0). */
-static constexpr u32_t levenshtein_priority_myers_k = 0;
-static constexpr u32_t levenshtein_priority_register_u8_k = 5;
-static constexpr u32_t levenshtein_priority_register_u16_k = 6;
-static constexpr u32_t levenshtein_priority_device_k = 7;
 
 /** @brief Final dense tier ids 0..5 used for run-length counting (the myers block sorts word1 < generic < cooperative). */
 static constexpr u32_t levenshtein_tier_myers_word1_k = 0;
@@ -1884,18 +1839,7 @@ __host__ SZ_DEVICE_INLINE bool levenshtein_task_uses_myers(cuda_similarity_task<
            task.shorter.size() <= levenshtein_myers_cooperative_max_shorter_k;
 }
 
-/** @brief Group-ordering priority placed in the key MSBs for one task. */
-template <typename char_type_>
-__host__ SZ_DEVICE_INLINE u32_t levenshtein_task_tier_priority(cuda_similarity_task<char_type_> const &task,
-                                                               levenshtein_tier_mode_t mode) noexcept {
-    if (levenshtein_task_uses_myers(task, mode)) return levenshtein_priority_myers_k;
-    if (task.fits_in_registers())
-        return task.bytes_per_cell == one_byte_per_cell_k ? levenshtein_priority_register_u8_k
-                                                          : levenshtein_priority_register_u16_k;
-    return levenshtein_priority_device_k;
-}
-
-/** @brief Dense final tier id 0..4, including the Myers word1 / generic split at 64, for one task. */
+/** @brief Dense final tier id 0..5, including the Myers word1 / generic split at 64, for one task. */
 template <typename char_type_>
 __host__ SZ_DEVICE_INLINE u32_t levenshtein_task_dense_tier(cuda_similarity_task<char_type_> const &task,
                                                             levenshtein_tier_mode_t mode) noexcept {
@@ -1911,22 +1855,7 @@ __host__ SZ_DEVICE_INLINE u32_t levenshtein_task_dense_tier(cuda_similarity_task
 }
 
 /**
- *  @brief Dyadic length bucket `bit_width(length - 1)` for one task, mirroring the CPU `candidate_length_bucket_`.
- *         Two lengths in one bucket differ by less than 2x, so radix-sorting on this field (instead of the raw
- *         length) groups tasks into power-of-two length bands within a priority tier -> uniform-depth launches.
- *         Host-portable: uses `__clzll` on device and the `sz_u64_clz` SWAR/intrinsic wrapper on the host.
- */
-__host__ SZ_DEVICE_INLINE u64_t levenshtein_length_dyadic_bucket(u64_t length) noexcept {
-    if (length <= 1) return 0;
-#ifdef __CUDA_ARCH__
-    return static_cast<u64_t>(64 - __clzll(static_cast<unsigned long long>(length - 1)));
-#else
-    return static_cast<u64_t>(64 - sz_u64_clz(static_cast<sz_u64_t>(length - 1)));
-#endif
-}
-
-/**
- *  @brief Reads the dense tier id 0..7 straight from each reordered task. Driving the run-length encode off the
+ *  @brief Reads the dense tier id 0..5 straight from each reordered task. Driving the run-length encode off the
  *         reordered tasks (not the key) lets the single ascending Myers sub-sort yield the 64/128/256/512 word
  *         boundaries without a second sort.
  */
@@ -2158,6 +2087,7 @@ __global__ void similarity_materialize_tasks_(                                  
     cross_similarities_t cross_kind,                                                   //
     error_cost_magnitude_t substitute_magnitude, error_cost_magnitude_t gap_magnitude, //
     sz_similarity_gaps_t gap_type_value, bytes_per_cell_t min_bytes_per_cell,          //
+    bytes_per_cell_t widest_warp_bytes_per_cell,                                       //
     gap_costs_type_ gap_costs, gpu_specs_t specs) {
 
     using score_t = typename std::conditional<objective_ == sz_minimize_distance_k, size_t, ssize_t>::type;
@@ -2193,7 +2123,12 @@ __global__ void similarity_materialize_tasks_(                                  
     task.memory_requirement = requirement.bytes_for_diagonals;
     task.bytes_per_cell = requirement.bytes_per_cell;
     task.density = warp_tasks_density_device_(requirement.bytes_for_diagonals, specs);
-    if (task.density != infinite_warps_per_multiprocessor_k && task.shorter.size() >= tiled_promotion_min_shorter_k)
+    // Promote to the device tier when the pair is long enough that the warp kernel's single anti-diagonal stops
+    // paying, and - separately - when its cells are wider than any warp kernel we resolve. The width clause is what
+    // keeps the warp launcher's width -> shape lookup total; without it a wide pair would find an empty slot.
+    if (task.density != infinite_warps_per_multiprocessor_k &&
+        (task.shorter.size() >= tiled_promotion_min_shorter_k ||
+         requirement.bytes_per_cell > widest_warp_bytes_per_cell))
         task.density = warps_working_together_k;
     if (task.density == infinite_warps_per_multiprocessor_k) {
         if constexpr (is_local_k) { task.result = 0; }
@@ -2444,6 +2379,9 @@ struct register_levenshtein {
             }
         }
 
+        // Empty text: the distance is the gap ladder over the pattern, and the `longer_length - 1` pack index
+        // below would underflow into a huge offset past `row_cells_`.
+        if (longer_length == 0) return static_cast<u8_t>(shorter_length * gap_cost);
         unsigned const result_pack_idx = (longer_length - 1) / 4, result_lane_idx = (longer_length - 1) % 4;
         return (row_cells_[result_pack_idx].u32 >> (result_lane_idx * 8)) & 0xFF;
     }
@@ -3172,6 +3110,10 @@ struct register_levenshtein_u16_affine {
                 diagonal_carry = top_high;
             }
         }
+        // Empty text: the distance is one opened gap extended over the pattern, and the `longer_length - 1` pack
+        // index below would underflow into a huge offset past `row_cells_`.
+        if (longer_length == 0)
+            return static_cast<u16_t>(shorter_length == 0 ? 0 : open + extend * (shorter_length - 1));
         unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
         return (row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF;
     }
@@ -3484,6 +3426,13 @@ __global__ __launch_bounds__(warps_per_block_ * 32) void unit_utf8_score_across_
     score_t *const corner_frontier = corner_frontier_base + static_cast<size_t>(pair) * corner_stride;
     u32_t *const progress = progress_base + static_cast<size_t>(pair) * corner_stride;
 
+    // Empty pattern: `tile_grid_rows` is zero, so the wavefront below never runs and never writes the result. The
+    // value seeded by `similarity_materialize_tasks_` counts bytes, not runes, so recompute it for this metric.
+    if (shorter_length == 0) {
+        if (blockIdx.x == 0 && threadIdx.x == 0) *result_ptr = static_cast<final_score_type_>(longer_length * gap);
+        return;
+    }
+
     unsigned const lane_index = threadIdx.x & 31u;
     u32_t const tile_column = (blockIdx.x * blockDim.x + threadIdx.x) >> 5;
     if (tile_column >= tile_grid_columns) return;
@@ -3687,6 +3636,14 @@ __global__ void unit_utf8_score_per_cuda_warp_(                              //
         u32_t const longer_length = task.longer_runes;
         auto &result_ref = task.result;
 
+        // Empty pattern: the diagonal walk below computes nothing, yet still publishes `scores_new[0]` - an
+        // uninitialized shared cell on the first band. The value seeded by `similarity_materialize_tasks_` counts
+        // bytes, not runes, so recompute it for this metric.
+        if (shorter_length == 0) {
+            if (is_main_thread) result_ref = longer_length * gap_costs.open_or_extend;
+            continue;
+        }
+
         unsigned const shorter_dim = static_cast<unsigned>(shorter_length + 1);
         unsigned const longer_dim = static_cast<unsigned>(longer_length + 1);
         unsigned const diagonals_count = shorter_dim + longer_dim - 1;
@@ -3854,17 +3811,21 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_> &buf
 }
 
 /**
+ *  @brief Warp anti-diagonal kernels indexed by @b `log2` of the cell width, one slot per width
+ *         @ref bytes_per_cell_t can hold. An engine default-constructs the slots it has no kernel for.
+ */
+using warp_shapes_by_width_t = kernel_shape_t[log2_pow2_(eight_bytes_per_cell_k) + 1];
+
+/**
  *  @brief Warp-tier launch loop shared by every CUDA cross-product engine: one non-cooperative launch per
  *         device-built `warp_tasks_group_descriptor_t` (densest groups first by the sort order). The host reads only
  *         the small descriptor array (kernel family, density, max shared memory, task subrange) and NEVER a device
  *         task; launches go onto the stream back-to-back with no per-group synchronization. The two engine families
- *         differ only in the warp kernel-shape pair (selected by `bytes_per_cell`) and the substituter, both passed
- *         by reference. Bit-identical to the two former in-line warp loops.
+ *         differ only in their @ref warp_shapes_by_width_t table and the substituter, both passed by reference.
  */
 template <typename task_type_, typename substituter_type_, typename gap_costs_type_>
 cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_> &buffers, span<task_type_> device_level_tasks,
-                                       size_t warp_group_count, kernel_shape_t const &warp_narrow_shape,
-                                       kernel_shape_t const &warp_wide_shape, size_t wide_bytes_per_cell,
+                                       size_t warp_group_count, warp_shapes_by_width_t const &shapes_by_log2_width,
                                        substituter_type_ const &substituter, gap_costs_type_ const &gap_costs,
                                        gpu_specs_t const &specs, cuda_executor_t const &executor) noexcept {
     cuda_status_t result {status_t::success_k, cudaSuccess};
@@ -3876,8 +3837,12 @@ cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_> &buffers, 
         warp_tasks_group_descriptor_t const &descriptor = descriptors[group];
         task_type_ *tasks_begin = warp_tasks_base + descriptor.begin_offset;
         size_t const count_tasks = descriptor.count;
-        kernel_shape_t const &shape = descriptor.bytes_per_cell >= wide_bytes_per_cell ? warp_wide_shape
-                                                                                       : warp_narrow_shape;
+        // Exact width -> kernel mapping, never a nearest match: a narrower kernel would silently truncate every cell
+        // (and the boundary ladder before it), a wider one would overrun the shared carve the host sized from this
+        // descriptor's width. `similarity_materialize_tasks_` demotes anything wider than the table to the device
+        // tier, so an unmapped slot means the two disagree and must fail loudly.
+        kernel_shape_t const &shape = shapes_by_log2_width[log2_pow2_(descriptor.bytes_per_cell)];
+        if (!shape.function) return {status_t::unexpected_dimensions_k, cudaSuccess};
         auto const [optimal_density, speculative_factor] = speculation_friendly_density(descriptor.density);
         unsigned const shared_memory_per_block = static_cast<unsigned>(descriptor.max_memory_requirement *
                                                                        optimal_density);
@@ -3976,9 +3941,9 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         struct register_tier_t {
             kernel_shape_t u8, u16;
         } register_tier;
-        /** @brief Warp anti-diagonal scorers (one pair per warp). */
+        /** @brief Warp anti-diagonal scorers (one pair per warp), one shape per cell width the sizer can emit. */
         struct warp_tier_t {
-            kernel_shape_t u8, u16;
+            kernel_shape_t u8, u16, u32;
         } warp_tier;
         /** @brief Device-spanning tiled wavefront scorer + its frontier-seed kernel, per cell width. */
         struct device_tier_t {
@@ -4037,24 +4002,25 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         }
         if (status.status != status_t::success_k) return status;
 
-        // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
-        status = resolve_kernel_shape(
-            table.warp_tier.u8,
-            affine_k
-                ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
-                                                             objective_k, locality_k, capability_k>
-                : (void const *)&score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
-                                                      objective_k, locality_k, capability_k>,
-            0, (unsigned)warp_ceiling, false);
+        // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch). One shape per
+        // cell width `diagonal_memory_requirements` can emit below the device tier - the selector indexes them
+        // exactly, so a missing width would be a launch-time error rather than a silent narrowing.
+        auto const resolve_warp = [&]<typename score_t>(kernel_shape_t &shape) noexcept -> cuda_status_t {
+            return resolve_kernel_shape(
+                shape,
+                affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, score_t, score_t,
+                                                                      uniform_substitution_costs_t, objective_k,
+                                                                      locality_k, capability_k>
+                         : (void const *)&score_per_cuda_warp_<task_t, char_t, score_t, score_t,
+                                                               uniform_substitution_costs_t, objective_k, locality_k,
+                                                               capability_k>,
+                0, (unsigned)warp_ceiling, false);
+        };
+        status = resolve_warp.template operator()<u8_t>(table.warp_tier.u8);
         if (status.status != status_t::success_k) return status;
-        status = resolve_kernel_shape(
-            table.warp_tier.u16,
-            affine_k
-                ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
-                                                             objective_k, locality_k, capability_k>
-                : (void const *)&score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
-                                                      objective_k, locality_k, capability_k>,
-            0, (unsigned)warp_ceiling, false);
+        status = resolve_warp.template operator()<u16_t>(table.warp_tier.u16);
+        if (status.status != status_t::success_k) return status;
+        status = resolve_warp.template operator()<u32_t>(table.warp_tier.u32);
         if (status.status != status_t::success_k) return status;
 
         // Device tier: the tiled micro-tile scorer + its frontier-seed kernel, one shape per cell width. We only need
@@ -4289,6 +4255,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         size_t const row_stride = results.row_stride;
         size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2
                                                : queries_count * candidates_count;
+        if (!live_cells) return {status_t::success_k, cudaSuccess}; // ? An empty matrix, and a zero grid won't launch
 
         // No `clear()`: every live cell is fully overwritten by the materialization below, and a same-size
         // `try_resize` of a trivially-constructible task does zero (re-)construction - so the host never touches
@@ -4383,13 +4350,24 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
         sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
         bytes_per_cell_t min_bytes_per_cell = one_byte_per_cell_k; // Levenshtein cells start at 1 byte.
+        // The warp tier resolves `u8`/`u16`/`u32`, so wider pairs must go to the device tier instead.
+        bytes_per_cell_t widest_warp_bytes_per_cell = four_bytes_per_cell_k;
         cross_similarities_t cross_kind_copy = cross_kind;
         gap_costs_t gap_costs_copy = gap_costs_;
         gpu_specs_t specs_copy = specs;
-        void *materialize_args[13] = {(void *)&tasks_ptr,       (void *)&queries_ptr,          (void *)&candidates_ptr,
-                                      (void *)&queries_count,   (void *)&candidates_count,     (void *)&row_stride,
-                                      (void *)&cross_kind_copy, (void *)&substitute_magnitude, (void *)&gap_magnitude,
-                                      (void *)&gap_type_value,  (void *)&min_bytes_per_cell,   (void *)&gap_costs_copy,
+        void *materialize_args[14] = {(void *)&tasks_ptr,
+                                      (void *)&queries_ptr,
+                                      (void *)&candidates_ptr,
+                                      (void *)&queries_count,
+                                      (void *)&candidates_count,
+                                      (void *)&row_stride,
+                                      (void *)&cross_kind_copy,
+                                      (void *)&substitute_magnitude,
+                                      (void *)&gap_magnitude,
+                                      (void *)&gap_type_value,
+                                      (void *)&min_bytes_per_cell,
+                                      (void *)&widest_warp_bytes_per_cell,
+                                      (void *)&gap_costs_copy,
                                       (void *)&specs_copy};
         unsigned const block = 256;
         unsigned const grid = static_cast<unsigned>((live_cells + block - 1) / block);
@@ -4756,9 +4734,13 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         // Now process the remaining warp-level tasks via the shared per-descriptor launch loop: the host reads only
         // the small descriptor array (never a device task) and the launches go onto the stream back-to-back.
         if (warp_group_count) {
-            cuda_status_t const warp_status = cuda_launch_warp_groups_(
-                buffers_, device_level_tasks, warp_group_count, kernel_table.warp_tier.u8, kernel_table.warp_tier.u16,
-                sizeof(u16_t), substituter_, gap_costs_, specs, executor);
+            // Slots are indexed by `log2(bytes_per_cell)`; 8-byte cells have no warp kernel and are demoted to the
+            // device tier during materialization.
+            warp_shapes_by_width_t const warp_shapes_by_log2_width = {
+                kernel_table.warp_tier.u8, kernel_table.warp_tier.u16, kernel_table.warp_tier.u32, {}};
+            cuda_status_t const warp_status =
+                cuda_launch_warp_groups_(buffers_, device_level_tasks, warp_group_count, warp_shapes_by_log2_width,
+                                         substituter_, gap_costs_, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
 
@@ -4935,6 +4917,7 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         size_t const row_stride = results.row_stride;
         size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2
                                                : queries_count * candidates_count;
+        if (!live_cells) return {status_t::success_k, cudaSuccess}; // ? An empty matrix, and a zero grid won't launch
 
         auto &tasks = buffers_.tasks_;
         if (tasks.try_resize_uninitialized(live_cells) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
@@ -4999,13 +4982,25 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
         sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
         bytes_per_cell_t min_bytes_per_cell = two_bytes_per_cell_k; // rune cells are 2 bytes (`u16_t`).
+        // This engine routes the whole batch by rune maxima rather than per task, so the ceiling never bites; it is
+        // still passed honestly, matching what the byte engine's warp table resolves.
+        bytes_per_cell_t widest_warp_bytes_per_cell = four_bytes_per_cell_k;
         cross_similarities_t cross_kind_copy = cross_kind;
         gap_costs_t gap_costs_copy = gap_costs_;
         gpu_specs_t specs_copy = specs;
-        void *materialize_args[13] = {(void *)&tasks_ptr,       (void *)&queries_ptr,          (void *)&candidates_ptr,
-                                      (void *)&queries_count,   (void *)&candidates_count,     (void *)&row_stride,
-                                      (void *)&cross_kind_copy, (void *)&substitute_magnitude, (void *)&gap_magnitude,
-                                      (void *)&gap_type_value,  (void *)&min_bytes_per_cell,   (void *)&gap_costs_copy,
+        void *materialize_args[14] = {(void *)&tasks_ptr,
+                                      (void *)&queries_ptr,
+                                      (void *)&candidates_ptr,
+                                      (void *)&queries_count,
+                                      (void *)&candidates_count,
+                                      (void *)&row_stride,
+                                      (void *)&cross_kind_copy,
+                                      (void *)&substitute_magnitude,
+                                      (void *)&gap_magnitude,
+                                      (void *)&gap_type_value,
+                                      (void *)&min_bytes_per_cell,
+                                      (void *)&widest_warp_bytes_per_cell,
+                                      (void *)&gap_costs_copy,
                                       (void *)&specs_copy};
         unsigned const materialize_block = 256;
         unsigned const materialize_grid = static_cast<unsigned>((live_cells + materialize_block - 1) /
@@ -5385,6 +5380,9 @@ struct weighted_needleman_register_scorer {
             }
         }
         if constexpr (is_local_k) return best_score;
+        // Empty text: the score is the gap ladder over the pattern, and the `longer_length - 1` pack index below
+        // would underflow into a huge offset past `row_cells_`.
+        if (longer_length == 0) return (i16_t)(shorter_length * gap_cost);
         unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
         return (i16_t)((row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF);
     }
@@ -5502,6 +5500,9 @@ struct weighted_gotoh_register_scorer {
             }
         }
         if constexpr (is_local_k) return best_score;
+        // Empty text: the score is one opened gap extended over the pattern, and the `longer_length - 1` pack index
+        // below would underflow into a huge offset past `row_cells_`.
+        if (longer_length == 0) return (i16_t)(shorter_length == 0 ? 0 : open + extend * (shorter_length - 1));
         unsigned const result_pack_idx = (longer_length - 1) / 2, result_lane_idx = (longer_length - 1) % 2;
         return (i16_t)((row_cells_[result_pack_idx] >> (result_lane_idx * 16)) & 0xFFFF);
     }
@@ -5535,25 +5536,21 @@ __global__ __launch_bounds__(256, 1) void weighted_gotoh_per_cuda_thread_( //
 #pragma region Weighted Device Tier Router
 
 /**
- *  @brief Weighted NW/SW three-tier taxonomy fed to the shared @ref cuda_route_tasks_into_tiers_ dyadic router. In
+ *  @brief Weighted NW/SW two-tier taxonomy fed to the shared @ref cuda_route_tasks_into_tiers_ dyadic router. In
  *         final contiguous order:
  *    0 register : `fits_in_registers()` (both sides <= @ref register_text_limit_k) -> thread-per-pair register scorer
- *    1 batch    : `fits_in_batch()`     (register < L <= @ref batch_text_limit_k)  -> thread-per-pair batch scorer
- *    2 device   : everything else (warp anti-diagonal + tiled device wavefront grouping downstream)
+ *    1 device   : everything else (warp anti-diagonal + tiled device wavefront grouping downstream)
  *
- *  The packed `u64` key reuses the Levenshtein field layout — tier-priority MSBs, ascending shorter-length sub-sort,
- *  original-index tiebreaker — so the radix bits and the run-length-encode dense-id scheme are identical machinery.
+ *  Ids must stay dense from zero - the router indexes its counting-sort histogram by them.
  */
 static constexpr u32_t weighted_tier_register_k = 0;
-static constexpr u32_t weighted_tier_batch_k = 1;
-static constexpr u32_t weighted_tier_device_k = 2;
-static constexpr int weighted_tier_count_k = 3;
+static constexpr u32_t weighted_tier_device_k = 1;
+static constexpr int weighted_tier_count_k = 2;
 
-/** @brief Dense tier id 0..2 (register / batch / device) for one weighted task. */
+/** @brief Dense tier id 0..1 (register / device) for one weighted task. */
 template <typename char_type_>
 __host__ SZ_DEVICE_INLINE u32_t weighted_task_dense_tier(cuda_similarity_task<char_type_> const &task) noexcept {
     if (task.fits_in_registers()) return weighted_tier_register_k;
-    if (task.fits_in_batch()) return weighted_tier_batch_k;
     return weighted_tier_device_k;
 }
 
@@ -5575,7 +5572,7 @@ struct weighted_dense_tier_functor {
  *         decoupled from any engine struct. */
 struct weighted_kernels_t {
     struct register_tier_t {
-        kernel_shape_t score, batch_score;
+        kernel_shape_t score;
     } register_tier;
     struct warp_tier_t {
         kernel_shape_t i16, i32;
@@ -5620,18 +5617,6 @@ cuda_status_t resolve_weighted_kernels_(weighted_kernels_t &table, int device_id
             ? (void const *)&weighted_gotoh_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>
             : (void const
                    *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
-        256, 0, true);
-    if (status.status != status_t::success_k) return status;
-
-    // Batch tier: the SAME thread-per-pair kernel instantiated with the larger `batch_text_limit_k` register/local
-    // storage, covering register<L<=~512 where the measured thread-per-pair scorer still beats the tiled wavefront.
-    constexpr unsigned batch_limit_k = batch_text_limit_k;
-    status = resolve_kernel_shape(
-        table.register_tier.batch_score,
-        affine_k
-            ? (void const *)&weighted_gotoh_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>
-            : (void const
-                   *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>,
         256, 0, true);
     if (status.status != status_t::success_k) return status;
 
@@ -5831,7 +5816,6 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         // next slice, and the warp/device grouping the remaining tail. The final scatter reads `tasks_` by
         // `result_offset`, which the router preserves (it carries `result_offset` along with each reordered task).
         size_t count_register_level_tasks = 0;
-        size_t count_batch_level_tasks = 0;
         {
             size_t weighted_tier_counts[weighted_tier_count_k] = {};
             weighted_dense_tier_functor<char_t> dense_tier_functor {nullptr, 0u};
@@ -5841,7 +5825,6 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
                 weighted_tier_count_k, executor, weighted_tier_counts);
             if (router_status.status != status_t::success_k) return router_status;
             count_register_level_tasks = weighted_tier_counts[weighted_tier_register_k];
-            count_batch_level_tasks = weighted_tier_counts[weighted_tier_batch_k];
         }
         if (count_register_level_tasks) {
             kernel_shape_t const &shape = kernel_table.register_tier.score;
@@ -5857,24 +5840,8 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
                                         .launch(shape.function, thread_level_kernel_args);
             if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
         }
-        if (count_batch_level_tasks) {
-            // Thread-per-pair batch tier: same kernel, larger per-thread storage; consumes the `[register, register+batch)`
-            // prefix of the remainder. Below the measured ~512 GPU crossover this beats the tiled wavefront below.
-            kernel_shape_t const &shape = kernel_table.register_tier.batch_score;
-            task_t *tasks_ptr = tasks.data() + count_register_level_tasks;
-            void *thread_level_kernel_args[4] = {(void *)(&tasks_ptr), (void *)(&count_batch_level_tasks),
-                                                 (void *)(&device_substituter), (void *)(&gap_costs)};
-            unsigned const blocks_per_grid = shape.blocks_per_multiprocessor * specs.streaming_multiprocessors;
-            CUresult launch_error = cuda_launch_t {}
-                                        .grid(blocks_per_grid)
-                                        .block(256)
-                                        .shared(0)
-                                        .stream(executor.stream())
-                                        .launch(shape.function, thread_level_kernel_args);
-            if (launch_error != CUDA_SUCCESS) return make_cuda_status(launch_error);
-        }
 
-        size_t const count_thread_level_tasks = count_register_level_tasks + count_batch_level_tasks;
+        size_t const count_thread_level_tasks = count_register_level_tasks;
         size_t warp_group_count = 0;
         [[maybe_unused]] auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
             {tasks.data() + count_thread_level_tasks, tasks.size() - count_thread_level_tasks}, specs,
@@ -5925,9 +5892,13 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         // Now process remaining warp-level tasks via the shared per-descriptor launch loop (densest groups first by
         // the sort order): the host reads only the small descriptor array, never a device task.
         if (warp_group_count) {
-            cuda_status_t const warp_status = cuda_launch_warp_groups_(
-                buffers, device_level_tasks, warp_group_count, kernel_table.warp_tier.i16, kernel_table.warp_tier.i32,
-                sizeof(i32_t), device_substituter, gap_costs, specs, executor);
+            // Weighted cells floor at two bytes, so the one-byte slot is unused; 8-byte cells have no warp kernel and
+            // are demoted to the device tier during materialization.
+            warp_shapes_by_width_t const warp_shapes_by_log2_width = {
+                {}, kernel_table.warp_tier.i16, kernel_table.warp_tier.i32, {}};
+            cuda_status_t const warp_status =
+                cuda_launch_warp_groups_(buffers, device_level_tasks, warp_group_count, warp_shapes_by_log2_width,
+                                         device_substituter, gap_costs, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
 
@@ -5969,6 +5940,7 @@ cuda_status_t cuda_weighted_cross_(                                             
     size_t const candidates_count = candidates.size();
     size_t const row_stride = results.row_stride;
     size_t const live_cells = is_symmetric ? queries_count * (queries_count + 1) / 2 : queries_count * candidates_count;
+    if (!live_cells) return {status_t::success_k, cudaSuccess}; // ? An empty matrix, and a zero grid won't launch
 
     // No `clear()`: every live cell is fully overwritten by the materialization below, and a same-size
     // `try_resize` of a trivially-constructible task does zero (re-)construction - so the host never touches
@@ -6006,13 +5978,24 @@ cuda_status_t cuda_weighted_cross_(                                             
     error_cost_magnitude_t substitute_magnitude = substituter.magnitude(), gap_magnitude = gap_costs.magnitude();
     sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_type_>();
     bytes_per_cell_t min_bytes_per_cell = two_bytes_per_cell_k;
+    // The warp tier resolves `i16`/`i32`, so wider pairs must go to the device tier, which carries `i64`.
+    bytes_per_cell_t widest_warp_bytes_per_cell = four_bytes_per_cell_k;
     cross_similarities_t cross_kind_copy = cross_kind;
     gap_costs_type_ gap_costs_copy = gap_costs;
     gpu_specs_t specs_copy = specs;
-    void *materialize_args[13] = {(void *)&tasks_ptr,       (void *)&queries_ptr,          (void *)&candidates_ptr,
-                                  (void *)&queries_count,   (void *)&candidates_count,     (void *)&row_stride,
-                                  (void *)&cross_kind_copy, (void *)&substitute_magnitude, (void *)&gap_magnitude,
-                                  (void *)&gap_type_value,  (void *)&min_bytes_per_cell,   (void *)&gap_costs_copy,
+    void *materialize_args[14] = {(void *)&tasks_ptr,
+                                  (void *)&queries_ptr,
+                                  (void *)&candidates_ptr,
+                                  (void *)&queries_count,
+                                  (void *)&candidates_count,
+                                  (void *)&row_stride,
+                                  (void *)&cross_kind_copy,
+                                  (void *)&substitute_magnitude,
+                                  (void *)&gap_magnitude,
+                                  (void *)&gap_type_value,
+                                  (void *)&min_bytes_per_cell,
+                                  (void *)&widest_warp_bytes_per_cell,
+                                  (void *)&gap_costs_copy,
                                   (void *)&specs_copy};
     unsigned const block = 256;
     unsigned const grid = static_cast<unsigned>((live_cells + block - 1) / block);
