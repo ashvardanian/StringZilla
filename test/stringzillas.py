@@ -22,6 +22,7 @@ Add -s -vv --maxfail=1 --full-trace -k <pattern> -X faulthandler for deeper diag
 """
 
 import sys
+import threading
 
 import pytest
 
@@ -85,6 +86,65 @@ def test_device_scope():
 
     with pytest.raises(TypeError):
         szs.DeviceScope(gpu_device="invalid")
+
+
+def test_device_scope_from_another_thread():
+    """A `DeviceScope` is usable from a thread that did not create it.
+
+    A CUDA current context is per-thread state that the driver never creates implicitly, so a scope
+    scheduled on the creating thread used to leave every other thread with no context - masked only
+    because allocating happened to bind one as a side effect. This drives one scope from a worker
+    thread that never touched the device, for both the default and the explicit GPU scope."""
+
+    # Each scope needs an engine whose capability matches it: a CPU engine on a GPU scope is a mismatch by design.
+    scopes_and_capabilities = [(szs.DeviceScope(), None)]
+    if "cuda" in szs.__capabilities__:
+        try:
+            scopes_and_capabilities.append((szs.DeviceScope(gpu_device=0), ("cuda",)))
+        except RuntimeError:
+            pass  # GPU capability reported but the device would not initialize
+
+    first = Strs(["hello", "world", "abcdef"])
+    second = Strs(["hallo", "word", "abcdxf"])
+
+    for scope, capabilities in scopes_and_capabilities:
+        engine = (
+            szs.LevenshteinDistances() if capabilities is None else szs.LevenshteinDistances(capabilities=capabilities)
+        )
+        failures = []
+
+        def run_on_worker():
+            try:
+                # A cross-product matrix, so the paired distances sit on the diagonal.
+                matrix = engine(first, second, device=scope).tolist()
+                diagonal = [matrix[index][index] for index in range(len(first))]
+                assert diagonal == [1, 1, 1], f"unexpected distances: {diagonal}"
+            except BaseException as error:  # noqa: BLE001 - reported through `failures`
+                failures.append(error)
+
+        worker = threading.Thread(target=run_on_worker)
+        worker.start()
+        worker.join()
+        assert not failures, f"driving a scope from another thread failed: {failures[0]!r}"
+
+
+def test_cpu_scope_rejects_gpu_engine():
+    """A CPU-only scope cannot drive a GPU engine, and says so rather than failing opaquely.
+
+    The status a scope mismatch reports was inconsistent across engine families, so nothing could
+    rely on it; every family now reports the same one, surfaced as a `RuntimeError`."""
+
+    if "cuda" not in szs.__capabilities__:
+        pytest.skip("CUDA backend not compiled in")
+
+    cpu_scope = szs.DeviceScope(cpu_cores=2)
+    first = Strs(["hello", "world"])
+    second = Strs(["hallo", "word"])
+
+    # A CUDA-capability engine paired with a CPU scope must fail.
+    engine = szs.LevenshteinDistances(capabilities=("cuda",))
+    with pytest.raises(RuntimeError):
+        engine(first, second, device=cpu_scope)
 
 
 # endregion Unit

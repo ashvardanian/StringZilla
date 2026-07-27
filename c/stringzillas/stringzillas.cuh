@@ -296,26 +296,28 @@ struct gpu_scope_t {
 inline szs::cuda_executor_t &get_executor(gpu_scope_t &scope) noexcept { return scope.executor; }
 inline sz::gpu_specs_t get_specs(gpu_scope_t const &scope) noexcept { return scope.specs; }
 
-/** Cached default GPU context (device 0) to avoid repeated scheduling boilerplate */
-struct default_gpu_context_t {
-    szs::cuda_status_t status {sz::status_t::unknown_k, cudaSuccess};
-    szs::cuda_executor_t executor;
-    sz::gpu_specs_t specs;
+/**
+ *  @brief Lazily-scheduled, process-wide device 0 scope that @ref default_scope_t falls back to.
+ *
+ *  Unlike a caller-owned @ref gpu_scope_t, it has no dedicated stream, so it never overlaps with sibling scopes.
+ */
+struct default_gpu_scope_t {
+    gpu_scope_t scope;
+    szs::cuda_status_t status {sz::status_t::unknown_k, cudaSuccess}; ///< Result of the one-time scheduling.
 };
 
-inline default_gpu_context_t &default_gpu_context() {
-    static default_gpu_context_t ctx = [] {
-        default_gpu_context_t result;
-        szs::cuda_status_t specs_status = szs::gpu_specs_fetch(result.specs, 0);
+inline default_gpu_scope_t &default_gpu_scope() {
+    static default_gpu_scope_t shared = [] {
+        default_gpu_scope_t result;
+        szs::cuda_status_t const specs_status = szs::gpu_specs_fetch(result.scope.specs, 0);
         if (specs_status.status != sz::status_t::success_k) {
             result.status = specs_status;
             return result;
         }
-        szs::cuda_status_t exec_status = result.executor.try_scheduling(0);
-        result.status = exec_status;
+        result.status = result.scope.executor.try_scheduling(0);
         return result;
     }();
-    return ctx;
+    return shared;
 }
 #endif
 
@@ -329,6 +331,40 @@ struct device_scope_t {
     template <typename... variants_arguments_>
     device_scope_t(variants_arguments_ &&...args) noexcept : variants(std::forward<variants_arguments_>(args)...) {}
 };
+
+/** @brief Whether @p scope_type_ drives CPU engines - a @ref default_scope_t or a @ref cpu_scope_t. */
+template <typename scope_type_>
+constexpr bool is_cpu_scope() noexcept {
+    return std::is_same<scope_type_, default_scope_t>::value || std::is_same<scope_type_, cpu_scope_t>::value;
+}
+
+#if SZ_USE_CUDA
+inline gpu_scope_t &unusable_gpu_scope() noexcept {
+    // Never scheduled, so a default-constructed executor holds no stream and its destructor touches no driver.
+    static gpu_scope_t placeholder;
+    return placeholder;
+}
+
+/**
+ *  @brief Resolves the @ref gpu_scope_t that should drive a GPU engine, making its device current on this thread.
+ *
+ *  A CUDA context is current per-thread while a scope is shared, so the thread driving the engine is often not the
+ *  thread that created the scope - hence making it current here. Alternatives are tried before the shared scope is
+ *  touched, so a CPU scope initializes no CUDA. On the mismatch path the returned reference is a placeholder the
+ *  caller must not use; the status is the gate.
+ */
+inline sz::expected<gpu_scope_t &, szs::cuda_status_t> gpu_scope_for(device_scope_t &scope) noexcept {
+    if (std::holds_alternative<gpu_scope_t>(scope.variants)) {
+        gpu_scope_t &selected = std::get<gpu_scope_t>(scope.variants);
+        return {selected, selected.executor.ensure_current()};
+    }
+    if (!std::holds_alternative<default_scope_t>(scope.variants))
+        return {unusable_gpu_scope(), {sz::status_t::device_code_mismatch_k, cudaSuccess}};
+    default_gpu_scope_t &shared = default_gpu_scope();
+    if (shared.status.status != sz::status_t::success_k) return {shared.scope, shared.status};
+    return {shared.scope, shared.scope.executor.ensure_current()};
+}
+#endif
 
 struct levenshtein_backends_t {
 
@@ -534,22 +570,18 @@ sz_status_t szs_fingerprints_for_(                                      //
         auto const min_counts_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
 
-        // CPU fallback hashers can only work with CPU-compatible device scopes
-        if (std::holds_alternative<default_scope_t>(device->variants)) {
-            auto &device_scope = std::get<default_scope_t>(device->variants);
-            sz::status_t status = fallback_hashers(                //
-                texts_container, min_hashes_rows, min_counts_rows, //
-                get_executor(device_scope), get_specs(device_scope));
-            result = static_cast<sz_status_t>(status);
-        }
-        else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
-            auto &device_scope = std::get<cpu_scope_t>(device->variants);
-            sz::status_t status = fallback_hashers(                //
-                texts_container, min_hashes_rows, min_counts_rows, //
-                get_executor(device_scope), get_specs(device_scope));
-            result = static_cast<sz_status_t>(status);
-        }
-        else { result = propagate_error(sz::status_t::unknown_k, error_message); }
+        // CPU scopes differ only in the executor type they hand out, so one visitor covers both.
+        sz::status_t const status = std::visit(
+            [&](auto &scope_variant) -> sz::status_t {
+                using scope_t = std::decay_t<decltype(scope_variant)>;
+                if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
+                else
+                    return fallback_hashers(                               //
+                        texts_container, min_hashes_rows, min_counts_rows, //
+                        get_executor(scope_variant), get_specs(scope_variant));
+            },
+            device->variants);
+        result = propagate_error(status, error_message);
     };
 #if SZ_USE_CUDA
     using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
@@ -559,37 +591,23 @@ sz_status_t szs_fingerprints_for_(                                      //
         auto const min_counts_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
 
-        // GPU fallback hashers can work with GPU scope, or default scope via an ephemeral GPU executor
-        if (std::holds_alternative<gpu_scope_t>(device->variants)) {
-            auto &device_scope = std::get<gpu_scope_t>(device->variants);
-            sz::status_t status = fallback_hashers(                //
+        auto [gpu_scope, status] = gpu_scope_for(*device);
+        // Kept as `cuda_status_t` rather than narrowed, so `propagate_error` can name a driver failure.
+        if (status.status == sz::status_t::success_k)
+            status = fallback_hashers(                             //
                 texts_container, min_hashes_rows, min_counts_rows, //
-                get_executor(device_scope), get_specs(device_scope));
-            result = static_cast<sz_status_t>(status);
-        }
-        else if (std::holds_alternative<default_scope_t>(device->variants)) {
-            auto &ctx = default_gpu_context();
-            if (ctx.status.status != sz::status_t::success_k) { result = propagate_error(ctx.status, error_message); }
-            else {
-                sz::status_t status = fallback_hashers( //
-                    texts_container, min_hashes_rows, min_counts_rows, ctx.executor, ctx.specs);
-                result = propagate_error(status, error_message);
-            }
-        }
-        else { result = propagate_error(sz::status_t::unknown_k, error_message); }
+                get_executor(gpu_scope), get_specs(gpu_scope));
+        result = propagate_error(status, error_message);
     };
 #endif // SZ_USE_CUDA
 
-    // The unrolled logic is a bit more complex than `fallback_logic_cpus`, but in practice involves
-    // just one additional loop level.
     auto unrolled_logic = [&](auto &&unrolled_hashers) {
         using unrolled_hashers_t = std::decay_t<decltype(unrolled_hashers)>;
         using unrolled_hasher_t = typename unrolled_hashers_t::value_type;
         constexpr sz_capability_t engine_capability_k = unrolled_hasher_t::capability_k;
         constexpr size_t bytes_per_slice_k = fingerprint_slice_k * sizeof(sz_u32_t);
 
-        // Each engine will produce only a few dimensions so the outputs should be defined
-        // differently
+        // Each unrolled engine only produces `fingerprint_slice_k` dimensions, not the full `dims`.
         auto const min_hashes_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_hashes), fingerprint_slice_k, min_hashes_stride,
                                     texts_count};
@@ -600,67 +618,43 @@ sz_status_t szs_fingerprints_for_(                                      //
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
 #if SZ_USE_CUDA
-            if (std::holds_alternative<gpu_scope_t>(device->variants)) {
-                auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
-                    auto &engine_variant = unrolled_hashers[i];
-                    szs::cuda_status_t status = engine_variant(                                       //
-                        texts_container,                                                              //
-                        min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        get_executor(device_scope), get_specs(device_scope));
-                    result = propagate_error(status, error_message);
-                    if (result != sz_success_k) break;
-                }
+            auto [gpu_scope, scope_status] = gpu_scope_for(*device);
+            result = propagate_error(scope_status, error_message);
+            for (std::size_t i = 0; i < unrolled_hashers.size() && result == sz_success_k; ++i) {
+                auto &engine_variant = unrolled_hashers[i];
+                szs::cuda_status_t status = engine_variant(                                       //
+                    texts_container,                                                              //
+                    min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                    min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                    get_executor(gpu_scope), get_specs(gpu_scope));
+                result = propagate_error(status, error_message);
             }
-            else if (std::holds_alternative<default_scope_t>(device->variants)) {
-                auto &ctx = default_gpu_context();
-                if (ctx.status != sz::status_t::success_k) { result = propagate_error(ctx.status, error_message); }
-                else {
-                    for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
-                        auto &engine_variant = unrolled_hashers[i];
-                        szs::cuda_status_t status = engine_variant(                                       //
-                            texts_container,                                                              //
-                            min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                            min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                            ctx.executor, ctx.specs);
-                        result = propagate_error(status, error_message);
-                        if (result != sz_success_k) break;
-                    }
-                }
-            }
-            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
 #else
-            result = propagate_error(sz::status_t::unknown_k, error_message); // GPU support is not enabled
+            result = propagate_error(sz::status_t::missing_gpu_k, error_message); // GPU support is not enabled
 #endif // SZ_USE_CUDA
         }
-        // CPU backends are only compatible with CPU scopes
+        // Stops at the first failing slice, matching the GPU arm, or slice `i`'s error is overwritten by `i + 1`.
         else {
-            if (std::holds_alternative<default_scope_t>(device->variants)) {
-                auto &device_scope = std::get<default_scope_t>(device->variants);
-                for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
-                    auto &engine_variant = unrolled_hashers[i];
-                    sz::status_t status = engine_variant(                                             //
-                        texts_container,                                                              //
-                        min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        get_executor(device_scope), get_specs(device_scope));
-                    result = propagate_error(status, error_message);
-                }
-            }
-            else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
-                auto &device_scope = std::get<cpu_scope_t>(device->variants);
-                for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
-                    auto &engine_variant = unrolled_hashers[i];
-                    sz::status_t status = engine_variant(                                             //
-                        texts_container,                                                              //
-                        min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
-                        get_executor(device_scope), get_specs(device_scope));
-                    result = propagate_error(status, error_message);
-                }
-            }
-            else { result = propagate_error(sz::status_t::unknown_k, error_message); }
+            sz::status_t const status = std::visit(
+                [&](auto &scope_variant) -> sz::status_t {
+                    using scope_t = std::decay_t<decltype(scope_variant)>;
+                    if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
+                    else {
+                        sz::status_t slice_status = sz::status_t::success_k;
+                        for (std::size_t i = 0; i < unrolled_hashers.size() && slice_status == sz::status_t::success_k;
+                             ++i) {
+                            auto &engine_variant = unrolled_hashers[i];
+                            slice_status = engine_variant(                                                    //
+                                texts_container,                                                              //
+                                min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                                min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                                get_executor(scope_variant), get_specs(scope_variant));
+                        }
+                        return slice_status;
+                    }
+                },
+                device->variants);
+            result = propagate_error(status, error_message);
         }
     };
 

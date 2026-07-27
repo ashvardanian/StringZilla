@@ -66,53 +66,33 @@ sz_status_t szs_levenshtein_cross_(                                             
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
 #if SZ_USE_CUDA
-            if (std::holds_alternative<gpu_scope_t>(device->variants)) {
-                auto &device_scope = std::get<gpu_scope_t>(device->variants);
-                szs::cuda_status_t status = candidates_container != nullptr
-                                                ? engine_variant(queries_container, *candidates_container,
-                                                                 results_matrix, get_executor(device_scope),
-                                                                 get_specs(device_scope))
-                                                : engine_variant(queries_container, results_matrix, //
-                                                                 get_executor(device_scope), get_specs(device_scope));
-                result = propagate_error(status, error_message);
-            }
-            // Try ephemeral GPU on default scope (device 0)
-            else if (std::holds_alternative<default_scope_t>(device->variants)) {
-                auto &ctx = default_gpu_context();
-                szs::cuda_status_t status = ctx.status != sz::status_t::success_k ? ctx.status
-                                            : candidates_container != nullptr
-                                                ? engine_variant(queries_container, *candidates_container,
-                                                                 results_matrix, ctx.executor, ctx.specs)
-                                                : engine_variant(queries_container, results_matrix, ctx.executor,
-                                                                 ctx.specs);
-                result = propagate_error(status, error_message);
-            }
-            else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
+            auto [gpu_scope, status] = gpu_scope_for(*device);
+            if (status.status == sz::status_t::success_k)
+                status = candidates_container != nullptr
+                             ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                              get_executor(gpu_scope), get_specs(gpu_scope))
+                             : engine_variant(queries_container, results_matrix, //
+                                              get_executor(gpu_scope), get_specs(gpu_scope));
+            result = propagate_error(status, error_message);
 #else
             result = propagate_error(sz::status_t::missing_gpu_k, error_message);
 #endif // SZ_USE_CUDA
         }
-        // CPU backends are only compatible with CPU scopes
+        // CPU scopes differ only in the executor type they hand out, so one visitor covers both.
         else {
-            if (std::holds_alternative<default_scope_t>(device->variants)) {
-                auto &device_scope = std::get<default_scope_t>(device->variants);
-                sz::status_t status = candidates_container != nullptr
-                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                                           get_executor(device_scope), get_specs(device_scope))
-                                          : engine_variant(queries_container, results_matrix, //
-                                                           get_executor(device_scope), get_specs(device_scope));
-                result = propagate_error(status, error_message);
-            }
-            else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
-                auto &device_scope = std::get<cpu_scope_t>(device->variants);
-                sz::status_t status = candidates_container != nullptr
-                                          ? engine_variant(queries_container, *candidates_container, results_matrix,
-                                                           get_executor(device_scope), get_specs(device_scope))
-                                          : engine_variant(queries_container, results_matrix, //
-                                                           get_executor(device_scope), get_specs(device_scope));
-                result = propagate_error(status, error_message);
-            }
-            else { result = propagate_error(sz::status_t::device_code_mismatch_k, error_message); }
+            sz::status_t const status = std::visit(
+                [&](auto &scope_variant) -> sz::status_t {
+                    using scope_t = std::decay_t<decltype(scope_variant)>;
+                    if constexpr (!is_cpu_scope<scope_t>()) return sz::status_t::device_code_mismatch_k;
+                    else
+                        return candidates_container != nullptr
+                                   ? engine_variant(queries_container, *candidates_container, results_matrix,
+                                                    get_executor(scope_variant), get_specs(scope_variant))
+                                   : engine_variant(queries_container, results_matrix, //
+                                                    get_executor(scope_variant), get_specs(scope_variant));
+                },
+                device->variants);
+            result = propagate_error(status, error_message);
         }
     };
 
