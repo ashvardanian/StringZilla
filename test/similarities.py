@@ -141,30 +141,6 @@ def levenshtein_costs_for_mode(cost_mode: LevenshteinCostMode):
         raise ValueError(f"Unknown Levenshtein cost mode: {cost_mode}")
 
 
-def excluding_empty_vs_long_cells(corpus, long_string, shape):
-    """Boolean mask over an NxN cross-product matrix, `False` at the (empty, long) and (long, empty)
-    cells, `True` everywhere else.
-
-    These two cells hit a serial-only bug: `LevenshteinDistances` / `LevenshteinDistancesUTF8`
-    restricted to `capabilities=("serial",)` with non-unit gap costs wrap the returned score modulo 256
-    once one input is empty and the other's gap-only score `open + extend * (length - 1)` reaches 256,
-    for example `LevenshteinDistances(mismatch=3, open=2, extend=2, capabilities=("serial",))` on
-    `("", "a" * 128)` returns 0 rather than 256. The wraparound tracks `expected_score % 256` exactly,
-    vanishes the moment any SIMD backend joins the capability set, leaves the unit-cost fast path
-    unaffected past length 1200, and is not reproduced by `NeedlemanWunschScores` / `SmithWatermanScores`.
-    Root cause is the serial-only empty-input shortcut in
-    `include/stringzillas/similarities/serial.hpp`, which does not honor the widened per-cell accumulator
-    that `diagonal_memory_requirements` selects for the rest of the DP grid. The corpora keep the empty
-    and the >255-length string so every other degenerate pairing still gets the full backend and oracle
-    check; only these two cells are dropped from the non-unit-cost assertions."""
-    mask = np.ones(shape, dtype=bool)
-    empty_index = corpus.index("")
-    long_index = corpus.index(long_string)
-    mask[empty_index, long_index] = False
-    mask[long_index, empty_index] = False
-    return mask
-
-
 AlignmentCostMode = Literal["linear", "affine"]
 ALIGNMENT_COST_MODES = ["linear", "affine"]
 
@@ -724,7 +700,7 @@ LONG_PROTEIN_STRING = "ARNDCQEGHI" * 60
 # a short all-same-residue run, the full alphabet against its reverse (mismatched at nearly every
 # aligned position), an all-different-residue run paired against the all-same run above (fully
 # disjoint in the substitution-matrix sense), and a multi-KB periodic run for the wide-accumulator
-# tier. NW and SW do not reproduce the serial empty-vs-long score wraparound, so this corpus needs no masking.
+# tier.
 DEGENERATE_PROTEIN_STRINGS = [
     "",
     "A",
@@ -744,8 +720,8 @@ def test_levenshtein_distances_backend_differential_degenerate_corpus(cost_mode,
     `DEGENERATE_BYTE_STRINGS`, across unit-cost Levenshtein distance and the linear and affine custom
     gap-cost forks, plus an empty batch and empty self-similarity. The szs engines pick their SIMD
     backend at construction via `capabilities=`, so `run_across_engines` builds a fresh engine per
-    config and any divergence is a kernel bug, not a binding bug. The `excluding_empty_vs_long_cells`
-    mask drops the one serial non-unit-cost wraparound cell from the assertions."""
+    config and any divergence is a kernel bug, not a binding bug. Every cell is asserted, including the
+    empty-versus-long pairings whose all-gaps score exceeds a byte."""
 
     costs = levenshtein_costs_for_mode(cost_mode)
     queries = Strs(DEGENERATE_BYTE_STRINGS)
@@ -767,7 +743,6 @@ def test_levenshtein_distances_backend_differential_degenerate_corpus(cost_mode,
             ],
             dtype=np.uint64,
         )
-        mask = None
     else:
         oracle_matrix = np.array(
             [
@@ -785,9 +760,7 @@ def test_levenshtein_distances_backend_differential_degenerate_corpus(cost_mode,
             ],
             dtype=np.uint64,
         )
-        mask = excluding_empty_vs_long_cells(DEGENERATE_BYTE_STRINGS, LONG_BYTE_STRING, oracle_matrix.shape)
-
-    assert_engines_agree(matrices, oracle_matrix, mask=mask, context=f" (cost_mode={cost_mode}, device={device_label})")
+    assert_engines_agree(matrices, oracle_matrix, context=f" (cost_mode={cost_mode}, device={device_label})")
 
     # Degenerate empty batch: both-empty cross product and empty self-similarity. An empty `Strs([])`
     # paired with a non-empty `Strs` is not exercised because all four engines raise a confusing
@@ -799,7 +772,7 @@ def test_levenshtein_distances_backend_differential_degenerate_corpus(cost_mode,
     assert_engines_agree(empty_matrices, np.zeros((0, 0), dtype=np.uint64), context=" (empty batch)")
 
     self_similarity_matrices = run_across_engines(make_engine, queries, device=device_scope)
-    assert_engines_agree(self_similarity_matrices, mask=mask, context=" (self-similarity)")
+    assert_engines_agree(self_similarity_matrices, context=" (self-similarity)")
     assert np.array_equal(
         np.diagonal(self_similarity_matrices[0]), np.zeros(len(DEGENERATE_BYTE_STRINGS), dtype=np.uint64)
     ), "Self-similarity diagonal must be zero regardless of cost mode"
@@ -830,7 +803,6 @@ def test_levenshtein_distances_utf8_backend_differential_degenerate_corpus(cost_
             ],
             dtype=np.uint64,
         )
-        mask = None
     else:
         oracle_matrix = np.array(
             [
@@ -848,15 +820,13 @@ def test_levenshtein_distances_utf8_backend_differential_degenerate_corpus(cost_
             ],
             dtype=np.uint64,
         )
-        mask = excluding_empty_vs_long_cells(DEGENERATE_UTF8_STRINGS, LONG_UTF8_STRING, oracle_matrix.shape)
-
-    assert_engines_agree(matrices, oracle_matrix, mask=mask, context=f" (cost_mode={cost_mode}, device={device_label})")
+    assert_engines_agree(matrices, oracle_matrix, context=f" (cost_mode={cost_mode}, device={device_label})")
 
     empty_matrices = run_across_engines(make_engine, Strs([]), Strs([]), device=device_scope)
     assert_engines_agree(empty_matrices, np.zeros((0, 0), dtype=np.uint64), context=" (empty batch)")
 
     self_similarity_matrices = run_across_engines(make_engine, queries, device=device_scope)
-    assert_engines_agree(self_similarity_matrices, mask=mask, context=" (self-similarity)")
+    assert_engines_agree(self_similarity_matrices, context=" (self-similarity)")
     assert np.array_equal(
         np.diagonal(self_similarity_matrices[0]), np.zeros(len(DEGENERATE_UTF8_STRINGS), dtype=np.uint64)
     ), "Self-similarity diagonal must be zero regardless of cost mode"

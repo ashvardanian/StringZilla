@@ -513,9 +513,9 @@ static void check_similarities_fixed_(base_operator_ &&base_operator, simd_opera
     constexpr score_t signaling_score = std::numeric_limits<score_t>::max();
 
     // Old C-style for-loops are much more debuggable than range-based loops!
-    for (std::size_t pair_idx = 0; pair_idx != test_cases.size(); ++pair_idx) {
-        auto const &first = test_cases[pair_idx].first;
-        auto const &second = test_cases[pair_idx].second;
+    for (std::size_t pair_index = 0; pair_index != test_cases.size(); ++pair_index) {
+        auto const &first = test_cases[pair_index].first;
+        auto const &second = test_cases[pair_index].second;
 
         // Check if the input strings fit into our allowed characters set
         if (!allowed_chars.empty()) {
@@ -661,7 +661,7 @@ static void check_similarities_fuzzy_(base_operator_ &&base_operator, simd_opera
     arrow_strings_tape_t first_tape, second_tape;
 
     // Generate some random strings, using a small alphabet
-    for (std::size_t iteration_idx = 0; iteration_idx < iterations; ++iteration_idx) {
+    for (std::size_t iteration_index = 0; iteration_index < iterations; ++iteration_index) {
         randomize_strings(config, first_array, first_tape);
         randomize_strings(config, second_array, second_tape);
 
@@ -1032,11 +1032,11 @@ static void check_similarities_degenerate_(base_operator_ &&base_operator, simd_
                                          simd_extra_args...);
     sz_assert_(status_base == status_t::success_k);
     sz_assert_(status_simd == status_t::success_k);
-    for (std::size_t pair_idx = 0; pair_idx != degenerate_cases.size(); ++pair_idx) {
-        if (results_base[pair_idx] == results_simd[pair_idx]) continue;
-        edit_distance_log_mismatch(degenerate_cases[pair_idx].first, degenerate_cases[pair_idx].second,
-                                   results_base[pair_idx], results_simd[pair_idx]);
-        sz_assert_(results_base[pair_idx] == results_simd[pair_idx]);
+    for (std::size_t pair_index = 0; pair_index != degenerate_cases.size(); ++pair_index) {
+        if (results_base[pair_index] == results_simd[pair_index]) continue;
+        edit_distance_log_mismatch(degenerate_cases[pair_index].first, degenerate_cases[pair_index].second,
+                                   results_base[pair_index], results_simd[pair_index]);
+        sz_assert_(results_base[pair_index] == results_simd[pair_index]);
     }
 
     // Closed-form identities, independent of any O(n²) reference. With a single uniform-cost string the only
@@ -1073,6 +1073,12 @@ void test_similarities_safety() {
 
     constexpr linear_gap_costs_t unit_linear {1};
     constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+
+    // Non-unit and affine costs leave the Myers fast path, which guards empty inputs itself, and route degenerate
+    // pairs into the register scorers instead - where the result cell is read at `longer_length - 1`.
+    [[maybe_unused]] constexpr uniform_substitution_costs_t nonunit_uniform {0, 3};
+    [[maybe_unused]] constexpr linear_gap_costs_t nonunit_linear {3};
+    [[maybe_unused]] constexpr affine_gap_costs_t nonunit_affine {3, 1};
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
@@ -1111,6 +1117,30 @@ void test_similarities_safety() {
         levenshtein_baselines_t {unit_uniform, unit_linear},
         make_pairwise(levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}),
         1, cuda_executor_t {}, first_gpu_specs);
+
+    // Non-unit linear and affine costs, which the unit-cost checks above never reach: they bypass Myers and land on
+    // the register scorers, whose result read underflows on an empty text.
+    check_similarities_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {nonunit_uniform, nonunit_linear}),
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {nonunit_uniform, nonunit_linear}),
+        degenerate_config, iterations, cuda_executor_t {}, first_gpu_specs);
+    check_similarities_degenerate_<sz_size_t>( //
+        levenshtein_baselines_t {nonunit_uniform, nonunit_linear},
+        make_pairwise(
+            levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {nonunit_uniform, nonunit_linear}),
+        nonunit_linear.open_or_extend, cuda_executor_t {}, first_gpu_specs);
+
+    // Affine gets the agreement pass only: `check_similarities_degenerate_`'s closed form is `|x| * gap`, while an
+    // affine all-gaps alignment costs `open + extend * (|x| - 1)`. Equalizing the two costs to fit the identity would
+    // make `is_linear()` true and route away from the affine scorer, defeating the point.
+    check_similarities_fuzzy_<sz_size_t>( //
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {nonunit_uniform, nonunit_affine}),
+        make_pairwise(
+            levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {nonunit_uniform, nonunit_affine}),
+        degenerate_config, iterations, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
@@ -1235,6 +1265,67 @@ static void check_symmetric_cell_exact_(engine_type_ &&engine, fuzzy_config_t se
 }
 
 /**
+ *  @brief Runs the matrix shapes that must hold on @b every backend against one capability tier.
+ *
+ *  These carry no kernel geometry: a `1 x N` row, an `N x 1` column, a lone cell, a ragged square set containing
+ *  empty strings, a rectangular set, the three degenerate matrices, and the symmetric one-set matrix with its zero
+ *  diagonal. Every backend owes the same answers here regardless of its lane width, so wiring a backend in is one
+ *  call rather than a dozen copied lines - which is how `empty_set` came to be tested on the serial engine alone
+ *  while a CUDA defect in that exact shape went unnoticed.
+ *
+ *  Per-ISA tuning shapes deliberately stay in their own blocks: their batch sizes and lengths encode one kernel's
+ *  lane count or tier edge, and generalizing them would erase the reason each number was chosen.
+ *
+ *  @tparam capability_ Backend selector, such as `sz_caps_sil_k` or `sz_caps_ck_k`.
+ *  @tparam allocator_type_ `malloc_t` on the CPU tiers, `ualloc_t` on the CUDA tiers.
+ *  @param trailing_arguments Per-backend call suffix: empty on the CPU, the executor and specs on the GPU.
+ */
+template <sz_capability_t capability_, typename allocator_type_, typename... trailing_arguments_>
+void check_cross_product_universals_(trailing_arguments_ &&...trailing_arguments) {
+
+    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
+    constexpr linear_gap_costs_t unit_linear {1};
+    constexpr affine_gap_costs_t unit_affine {1, 1};
+
+    fuzzy_config_t const single_query {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const single_candidate {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const many_queries {"ABC", /* batch_size */ 7, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const many_candidates {"ABC", /* batch_size */ 5, /* min_string_length */ 1, /* max */ 24};
+    fuzzy_config_t const square_set {"ABC", /* batch_size */ 6, /* min_string_length */ 0, /* max */ 24};
+    fuzzy_config_t const empty_set {"ABC", /* batch_size */ 0, /* min_string_length */ 1, /* max */ 24};
+
+    levenshtein_baselines_t const unit_baseline {unit_uniform, unit_linear};
+    auto linear_engine = [&]() {
+        return levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_> {unit_uniform, unit_linear};
+    };
+    auto affine_engine = [&]() {
+        return levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_> {unit_uniform, unit_affine};
+    };
+
+    check_cross_product_cell_exact_<sz_size_t>( // 1xN
+        linear_engine(), unit_baseline, single_query, many_candidates, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Nx1
+        linear_engine(), unit_baseline, many_queries, single_candidate, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // 1x1, the lone cell with no lanes to fill
+        linear_engine(), unit_baseline, single_query, single_candidate, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Square and ragged, min length 0 planting empty strings
+        linear_engine(), unit_baseline, square_set, square_set, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Rectangular
+        linear_engine(), unit_baseline, many_queries, many_candidates, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Empty queries
+        linear_engine(), unit_baseline, empty_set, many_candidates, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Empty candidates
+        linear_engine(), unit_baseline, many_queries, empty_set, trailing_arguments...);
+    check_cross_product_cell_exact_<sz_size_t>( // Empty on both sides
+        linear_engine(), unit_baseline, empty_set, empty_set, trailing_arguments...);
+
+    // The zero-diagonal identity needs a zero match cost, so both variants keep `unit_uniform`; the affine one
+    // still exercises the Gotoh E/F seeding that the linear walker never touches.
+    check_symmetric_cell_exact_(linear_engine(), square_set, trailing_arguments...);
+    check_symmetric_cell_exact_(affine_engine(), square_set, trailing_arguments...);
+}
+
+/**
  *  @brief Validates the cross-product and symmetric engine overloads cell-by-cell across every backend.
  *
  *  Complements the diagonal-only agreement suites: those drive the engines pairwise, whereas this pins the full
@@ -1264,35 +1355,14 @@ void test_similarities_cross_product() {
     error_costs_32x32_t const blosum62_matrix = error_costs_32x32_t::blosum62();
 
     // Mixed-length random strings keep the alphabet small so collisions and zero-distance cells appear naturally.
-    fuzzy_config_t const single_query {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
-    fuzzy_config_t const single_candidate {"ABC", /* batch_size */ 1, /* min_string_length */ 1, /* max */ 24};
+    // The single-string shapes live in `check_cross_product_universals_`, which owns its own copies.
     fuzzy_config_t const many_queries {"ABC", /* batch_size */ 7, /* min_string_length */ 1, /* max */ 24};
     fuzzy_config_t const many_candidates {"ABC", /* batch_size */ 5, /* min_string_length */ 1, /* max */ 24};
     fuzzy_config_t const square_set {"ABC", /* batch_size */ 6, /* min_string_length */ 0, /* max */ 24};
     fuzzy_config_t const empty_set {"ABC", /* batch_size */ 0, /* min_string_length */ 1, /* max */ 24};
 
-    // Serial Levenshtein cross-product over the full set of shapes: 1xN, Nx1, square, rectangular, ragged, empty.
-    auto serial_levenshtein = [&]() {
-        return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_linear};
-    };
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, single_query,
-                                               many_candidates); // 1xN
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
-                                               single_candidate); // Nx1
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, square_set,
-                                               square_set); // square + ragged (min length 0)
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
-                                               many_candidates); // rectangular
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, empty_set,
-                                               many_candidates); // empty queries
-    check_cross_product_cell_exact_<sz_size_t>(serial_levenshtein(),
-                                               levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries,
-                                               empty_set); // empty candidates
+    // Backend-independent matrix shapes, run once per compiled-in capability tier.
+    check_cross_product_universals_<sz_cap_serial_k, malloc_t>();
 
     // Serial Needleman-Wunsch and Smith-Waterman cross-products, rectangular shape.
     check_cross_product_cell_exact_<sz_ssize_t>(
@@ -1320,19 +1390,8 @@ void test_similarities_cross_product() {
             needleman_wunsch_baselines_t {wide_matrix, wide_nw_affine}, cell_edge_queries, cell_edge_candidates);
     }
 
-    // Serial symmetric self-similarity. The diagonal-is-zero identity needs a zero match cost, so both the
-    // linear and affine variants keep `unit_uniform` (match 0) while still exercising the affine gap path.
-    constexpr affine_gap_costs_t unit_affine {1, 1};
-    check_symmetric_cell_exact_(serial_levenshtein(), square_set);
-    check_symmetric_cell_exact_(
-        levenshtein_distances<affine_gap_costs_t, malloc_t, sz_cap_serial_k> {unit_uniform, unit_affine}, square_set);
-
 #if SZ_USE_ICELAKE
-    check_cross_product_cell_exact_<sz_size_t>(
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear},
-        levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries, many_candidates);
-    check_symmetric_cell_exact_(
-        levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {unit_uniform, unit_linear}, square_set);
+    check_cross_product_universals_<sz_caps_sil_k, malloc_t>();
 
     // Ice Lake NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (32 lanes). make_pairwise non-unit is
     // 1x1, so it never fills the lanes; these many-candidate rows pin the cost-honoring recurrence cell-by-cell
@@ -1381,16 +1440,18 @@ void test_similarities_cross_product() {
     // kernel. Lengths/costs fill the 16 wide lanes and pin each new kernel cell-by-cell against the serial oracle.
     {
         // Straddle the `i16` → `i32` NW/SW tier edge, which BLOSUM62's magnitude 11 puts near a combined 2975.
-        fuzzy_config_t const tier_edge_q {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
-        fuzzy_config_t const tier_edge_c {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
+        fuzzy_config_t const tier_edge_queries {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
+        fuzzy_config_t const tier_edge_candidates {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sil_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
         fuzzy_config_t const wide_nw_queries {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
         fuzzy_config_t const wide_nw_candidates {"ABC", /* batch */ 18, /* min */ 1500, /* max */ 1500};
         check_cross_product_cell_exact_<sz_ssize_t>(
@@ -1435,9 +1496,10 @@ void test_similarities_cross_product() {
     // 1x1, so only these many-candidate rows exercise the `u32`-key compare and lane-mask recombine.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_oracle {};
-        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t q, arrow_strings_view_t c, sz_size_t *out) {
+        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t queries, arrow_strings_view_t candidates,
+                                                  sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_oracle(q, c, cell);
+            return utf8_oracle(queries, candidates, cell);
         };
         // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
         fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
@@ -1450,25 +1512,26 @@ void test_similarities_cross_product() {
         // costs). Lengths fill the rune lanes; many candidates per query pin the rune u32-compare recurrence.
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_nonunit_oracle {nonunit_uniform,
                                                                                                        nonunit_linear};
-        auto const utf8_nonunit_base = [&utf8_nonunit_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
-                                                              sz_size_t *out) {
+        auto const utf8_nonunit_baseline = [&utf8_nonunit_oracle](arrow_strings_view_t queries,
+                                                                  arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_nonunit_oracle(q, c, cell);
+            return utf8_nonunit_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sil_k> {nonunit_uniform, nonunit_linear},
-            utf8_nonunit_base, utf8_queries, utf8_candidates);
+            utf8_nonunit_baseline, utf8_queries, utf8_candidates);
 
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
-        auto const utf8_affine_base = [&utf8_affine_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
+        auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
+                                                                arrow_strings_view_t candidates,
                                                             sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_affine_oracle(q, c, cell);
+            return utf8_affine_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_caps_sil_k> {nonunit_uniform, nonunit_affine},
-            utf8_affine_base, utf8_queries, utf8_candidates);
+            utf8_affine_baseline, utf8_queries, utf8_candidates);
     }
 
     // Ice Lake `distances_8xN_` multi-word Myers: uniform rows over 512 group same-bucket cells into full 8-lane
@@ -1512,41 +1575,42 @@ void test_similarities_cross_product() {
 #endif
 
 #if SZ_USE_HASWELL
+    check_cross_product_universals_<sz_caps_sh_k, malloc_t>();
+
     // Haswell byte Levenshtein 4-lane Myers (multi-cell fills the 4 pair-lanes; the byte-Lev cross cases above use
     // icelake/serial only, and make_pairwise is 1x1). Uniform >512 also exercises distances_4xN_large_.
     {
         auto haswell_levenshtein = [&]() {
-            return levenshtein_distances<linear_gap_costs_t, malloc_t,
-                                         (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {unit_uniform,
-                                                                                                 unit_linear};
+            return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sh_k> {unit_uniform, unit_linear};
         };
-        levenshtein_baselines_t const lev_base {unit_uniform, unit_linear};
-        fuzzy_config_t const hb_small_q {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const hb_small_c {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const hb_long {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
-        check_cross_product_cell_exact_<sz_size_t>(haswell_levenshtein(), lev_base, hb_small_q, hb_small_c);
-        check_cross_product_cell_exact_<sz_size_t>(haswell_levenshtein(), lev_base, hb_long, hb_long);
+        levenshtein_baselines_t const unit_baseline {unit_uniform, unit_linear};
+        fuzzy_config_t const haswell_small_queries {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const haswell_small_candidates {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const haswell_long_pairs {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
+        check_cross_product_cell_exact_<sz_size_t>(haswell_levenshtein(), unit_baseline, haswell_small_queries,
+                                                   haswell_small_candidates);
+        check_cross_product_cell_exact_<sz_size_t>(haswell_levenshtein(), unit_baseline, haswell_long_pairs,
+                                                   haswell_long_pairs);
+
 
         // Haswell NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (16 lanes), cell-by-cell vs the
         // serial oracle. Many candidates per query fill the lanes; the symmetric case mirrors the lower triangle.
         auto haswell_nonunit_levenshtein = [&]() {
-            return levenshtein_distances<linear_gap_costs_t, malloc_t,
-                                         (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {nonunit_uniform,
-                                                                                                 nonunit_linear};
+            return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sh_k> {nonunit_uniform, nonunit_linear};
         };
-        levenshtein_baselines_t const nonunit_base {nonunit_uniform, nonunit_linear};
-        check_cross_product_cell_exact_<sz_size_t>(haswell_nonunit_levenshtein(), nonunit_base, hb_small_q, hb_small_c);
+        levenshtein_baselines_t const nonunit_baseline {nonunit_uniform, nonunit_linear};
+        check_cross_product_cell_exact_<sz_size_t>(haswell_nonunit_levenshtein(), nonunit_baseline,
+                                                   haswell_small_queries, haswell_small_candidates);
         check_symmetric_cell_exact_(haswell_nonunit_levenshtein(), square_set);
 
         // Haswell AFFINE byte Levenshtein: the new `u16` Gotoh E/F candidate-lane batch (16 lanes), cell-by-cell vs
         // the serial affine oracle. Many candidates per query fill the lanes; the symmetric case mirrors the triangle.
         auto haswell_affine_levenshtein = [&]() {
-            return levenshtein_distances<affine_gap_costs_t, malloc_t,
-                                         (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {nonunit_uniform,
-                                                                                                 nonunit_affine};
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k> {nonunit_uniform, nonunit_affine};
         };
-        levenshtein_baselines_t const affine_base {nonunit_uniform, nonunit_affine};
-        check_cross_product_cell_exact_<sz_size_t>(haswell_affine_levenshtein(), affine_base, hb_small_q, hb_small_c);
+        levenshtein_baselines_t const affine_baseline {nonunit_uniform, nonunit_affine};
+        check_cross_product_cell_exact_<sz_size_t>(haswell_affine_levenshtein(), affine_baseline,
+                                                   haswell_small_queries, haswell_small_candidates);
         check_symmetric_cell_exact_(haswell_affine_levenshtein(), square_set);
     }
 
@@ -1569,9 +1633,10 @@ void test_similarities_cross_product() {
     // Haswell UTF-8 rune candidate-lane (multi-cell, fills the 16 rune lanes) vs the serial UTF-8 oracle.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_oracle {};
-        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t q, arrow_strings_view_t c, sz_size_t *out) {
+        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t queries, arrow_strings_view_t candidates,
+                                                  sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_oracle(q, c, cell);
+            return utf8_oracle(queries, candidates, cell);
         };
         // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
         fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
@@ -1584,60 +1649,64 @@ void test_similarities_cross_product() {
         // Unit costs stay on rune Myers, so only non-unit and affine costs reach the rune lane walkers.
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_nonunit_oracle {nonunit_uniform,
                                                                                                        nonunit_linear};
-        auto const utf8_nonunit_base = [&utf8_nonunit_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
-                                                              sz_size_t *out) {
+        auto const utf8_nonunit_baseline = [&utf8_nonunit_oracle](arrow_strings_view_t queries,
+                                                                  arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_nonunit_oracle(q, c, cell);
+            return utf8_nonunit_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t,
                                        (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {nonunit_uniform,
                                                                                                nonunit_linear},
-            utf8_nonunit_base, utf8_queries, utf8_candidates);
+            utf8_nonunit_baseline, utf8_queries, utf8_candidates);
 
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
-        auto const utf8_affine_base = [&utf8_affine_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
+        auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
+                                                                arrow_strings_view_t candidates,
                                                             sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_affine_oracle(q, c, cell);
+            return utf8_affine_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<affine_gap_costs_t, malloc_t,
                                        (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k)> {nonunit_uniform,
                                                                                                nonunit_affine},
-            utf8_affine_base, utf8_queries, utf8_candidates);
+            utf8_affine_baseline, utf8_queries, utf8_candidates);
     }
 
     // Haswell WIDE tier (8-lane i32 / u32): overflow the i16/u16 narrow tier so cells route to the new wide kernels.
     {
-        constexpr sz_capability_t hcap = (sz_capability_t)(sz_cap_serial_k | sz_cap_haswell_k);
         // Straddle the `i16` → `i32` NW/SW tier edge, which BLOSUM62's magnitude 11 puts near a combined 2975.
-        fuzzy_config_t const tier_edge_q {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
-        fuzzy_config_t const tier_edge_c {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
+        fuzzy_config_t const tier_edge_queries {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
+        fuzzy_config_t const tier_edge_candidates {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
         check_cross_product_cell_exact_<sz_ssize_t>(
-            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, hcap> {blosum62_matrix,
-                                                                                              blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
+            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
-            smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, hcap> {blosum62_matrix,
-                                                                                            blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
-        fuzzy_config_t const wide_nw_q {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
-        fuzzy_config_t const wide_nw_c {"ABC", /* batch */ 12, /* min */ 1500, /* max */ 1500};
+            smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
+        fuzzy_config_t const wide_nw_queries {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
+        fuzzy_config_t const wide_nw_candidates {"ABC", /* batch */ 12, /* min */ 1500, /* max */ 1500};
         check_cross_product_cell_exact_<sz_ssize_t>(
-            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, hcap> {blosum62_matrix,
-                                                                                              blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
+            needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
-            smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, hcap> {blosum62_matrix,
-                                                                                            blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
-        fuzzy_config_t const wide_lev_q {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
-        fuzzy_config_t const wide_lev_c {"ABC", /* batch */ 16, /* min */ 700, /* max */ 700};
+            smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
+                blosum62_matrix, blosum62_affine_cost},
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
+        fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
+        fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 16, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
-            levenshtein_distances<affine_gap_costs_t, malloc_t, hcap> {wide_uniform, wide_affine},
-            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+            levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k> {wide_uniform, wide_affine},
+            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_queries, wide_lev_candidates);
 
         // Top of the `u16` affine band, where the discard seed's next-row `+ extend` grows with the length.
         // Ragged on purpose: a square shape hides it, as escaping a corrupt corner costs a losing gap run.
@@ -1645,7 +1714,7 @@ void test_similarities_cross_product() {
         fuzzy_config_t const wrap_long {"ABC", scale_iterations(16), /* min */ 109, /* max */ 130};
         fuzzy_config_t const wrap_below {"ABC", scale_iterations(16), /* min */ 100, /* max */ 108};
         auto haswell_affine = [&]() {
-            return levenshtein_distances<affine_gap_costs_t, malloc_t, hcap> {wide_uniform, wide_affine};
+            return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k> {wide_uniform, wide_affine};
         };
         check_cross_product_cell_exact_<sz_size_t>(
             haswell_affine(), levenshtein_baselines_t {wide_uniform, wide_affine}, wrap_short, wrap_long);
@@ -1657,25 +1726,30 @@ void test_similarities_cross_product() {
 #endif
 
 #if SZ_USE_NEON
+    check_cross_product_universals_<sz_caps_sn_k, malloc_t>();
+
     // NEON byte Levenshtein 2-lane Myers (multi-cell fills the 2 pair-lanes; uniform >512 hits distances_2xN_large_).
     {
         auto neon_levenshtein = [&]() {
             return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sn_k> {unit_uniform, unit_linear};
         };
-        levenshtein_baselines_t const lev_base {unit_uniform, unit_linear};
-        fuzzy_config_t const nb_small_q {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const nb_small_c {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const nb_long {"ABC", /* batch */ 4, /* min */ 700, /* max */ 700};
-        check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), lev_base, nb_small_q, nb_small_c);
-        check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), lev_base, nb_long, nb_long);
+        levenshtein_baselines_t const unit_baseline {unit_uniform, unit_linear};
+        fuzzy_config_t const neon_small_queries {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const neon_small_candidates {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const neon_long_pairs {"ABC", /* batch */ 4, /* min */ 700, /* max */ 700};
+        check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), unit_baseline, neon_small_queries,
+                                                   neon_small_candidates);
+        check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), unit_baseline, neon_long_pairs, neon_long_pairs);
+
 
         // NEON NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (8 lanes), cell-by-cell vs the serial
         // oracle. Many candidates per query fill the 8 lanes; the symmetric case mirrors the lower triangle.
         auto neon_nonunit_levenshtein = [&]() {
             return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sn_k> {nonunit_uniform, nonunit_linear};
         };
-        levenshtein_baselines_t const nonunit_base {nonunit_uniform, nonunit_linear};
-        check_cross_product_cell_exact_<sz_size_t>(neon_nonunit_levenshtein(), nonunit_base, nb_small_q, nb_small_c);
+        levenshtein_baselines_t const nonunit_baseline {nonunit_uniform, nonunit_linear};
+        check_cross_product_cell_exact_<sz_size_t>(neon_nonunit_levenshtein(), nonunit_baseline, neon_small_queries,
+                                                   neon_small_candidates);
         check_symmetric_cell_exact_(neon_nonunit_levenshtein(), square_set);
 
         // NEON AFFINE byte Levenshtein: the new `u16` Gotoh E/F candidate-lane batch (8 lanes), cell-by-cell vs the
@@ -1683,8 +1757,9 @@ void test_similarities_cross_product() {
         auto neon_affine_levenshtein = [&]() {
             return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k> {nonunit_uniform, nonunit_affine};
         };
-        levenshtein_baselines_t const affine_base {nonunit_uniform, nonunit_affine};
-        check_cross_product_cell_exact_<sz_size_t>(neon_affine_levenshtein(), affine_base, nb_small_q, nb_small_c);
+        levenshtein_baselines_t const affine_baseline {nonunit_uniform, nonunit_affine};
+        check_cross_product_cell_exact_<sz_size_t>(neon_affine_levenshtein(), affine_baseline, neon_small_queries,
+                                                   neon_small_candidates);
         check_symmetric_cell_exact_(neon_affine_levenshtein(), square_set);
     }
 
@@ -1703,9 +1778,10 @@ void test_similarities_cross_product() {
     // NEON UTF-8 rune candidate-lane (multi-cell, fills the 8 rune lanes) vs the serial UTF-8 oracle.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_oracle {};
-        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t q, arrow_strings_view_t c, sz_size_t *out) {
+        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t queries, arrow_strings_view_t candidates,
+                                                  sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_oracle(q, c, cell);
+            return utf8_oracle(queries, candidates, cell);
         };
         // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
         fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
@@ -1717,55 +1793,60 @@ void test_similarities_cross_product() {
         // Unit costs stay on rune Myers, so only non-unit and affine costs reach the rune lane walkers.
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_nonunit_oracle {nonunit_uniform,
                                                                                                        nonunit_linear};
-        auto const utf8_nonunit_base = [&utf8_nonunit_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
-                                                              sz_size_t *out) {
+        auto const utf8_nonunit_baseline = [&utf8_nonunit_oracle](arrow_strings_view_t queries,
+                                                                  arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_nonunit_oracle(q, c, cell);
+            return utf8_nonunit_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_caps_sn_k> {nonunit_uniform, nonunit_linear},
-            utf8_nonunit_base, utf8_queries, utf8_candidates);
+            utf8_nonunit_baseline, utf8_queries, utf8_candidates);
 
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
-        auto const utf8_affine_base = [&utf8_affine_oracle](arrow_strings_view_t q, arrow_strings_view_t c,
+        auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
+                                                                arrow_strings_view_t candidates,
                                                             sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_affine_oracle(q, c, cell);
+            return utf8_affine_oracle(queries, candidates, cell);
         };
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_caps_sn_k> {nonunit_uniform, nonunit_affine},
-            utf8_affine_base, utf8_queries, utf8_candidates);
+            utf8_affine_baseline, utf8_queries, utf8_candidates);
     }
 
     // NEON WIDE tier (4-lane i32 / u32): overflow the i16/u16 narrow tier so cells route to the new wide kernels.
     {
         // Straddle the `i16` → `i32` NW/SW tier edge, which BLOSUM62's magnitude 11 puts near a combined 2975.
-        fuzzy_config_t const tier_edge_q {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
-        fuzzy_config_t const tier_edge_c {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
+        fuzzy_config_t const tier_edge_queries {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
+        fuzzy_config_t const tier_edge_candidates {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
-        fuzzy_config_t const wide_nw_q {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
-        fuzzy_config_t const wide_nw_c {"ABC", /* batch */ 8, /* min */ 1500, /* max */ 1500};
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
+        fuzzy_config_t const wide_nw_queries {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
+        fuzzy_config_t const wide_nw_candidates {"ABC", /* batch */ 8, /* min */ 1500, /* max */ 1500};
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
-        fuzzy_config_t const wide_lev_q {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
-        fuzzy_config_t const wide_lev_c {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
+        fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
+        fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sn_k> {wide_uniform, wide_affine},
-            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_queries, wide_lev_candidates);
     }
 
     // Top of the `u16` affine band, where the discard seed's next-row `+ extend` grows with the length.
@@ -1789,25 +1870,30 @@ void test_similarities_cross_product() {
 #endif
 
 #if SZ_USE_RVV
+    check_cross_product_universals_<sz_caps_sr_k, malloc_t>();
+
     // RVV byte Levenshtein 2-lane Myers (multi-cell fills the 2 pair-lanes; uniform >512 hits distances_2xN_large_).
     {
         auto rvv_levenshtein = [&]() {
             return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {unit_uniform, unit_linear};
         };
-        levenshtein_baselines_t const lev_base {unit_uniform, unit_linear};
-        fuzzy_config_t const nb_small_q {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const nb_small_c {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
-        fuzzy_config_t const nb_long {"ABC", /* batch */ 4, /* min */ 700, /* max */ 700};
-        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), lev_base, nb_small_q, nb_small_c);
-        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), lev_base, nb_long, nb_long);
+        levenshtein_baselines_t const unit_baseline {unit_uniform, unit_linear};
+        fuzzy_config_t const rvv_small_queries {"ABC", /* batch */ 6, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const rvv_small_candidates {"ABC", /* batch */ 40, /* min */ 1, /* max */ 200};
+        fuzzy_config_t const rvv_long_pairs {"ABC", /* batch */ 4, /* min */ 700, /* max */ 700};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), unit_baseline, rvv_small_queries,
+                                                   rvv_small_candidates);
+        check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), unit_baseline, rvv_long_pairs, rvv_long_pairs);
+
 
         // RVV NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (8 lanes), cell-by-cell vs the serial
         // oracle. Many candidates per query fill the 8 lanes; the symmetric case mirrors the lower triangle.
         auto rvv_nonunit_levenshtein = [&]() {
             return levenshtein_distances<linear_gap_costs_t, malloc_t, sz_caps_sr_k> {nonunit_uniform, nonunit_linear};
         };
-        levenshtein_baselines_t const nonunit_base {nonunit_uniform, nonunit_linear};
-        check_cross_product_cell_exact_<sz_size_t>(rvv_nonunit_levenshtein(), nonunit_base, nb_small_q, nb_small_c);
+        levenshtein_baselines_t const nonunit_baseline {nonunit_uniform, nonunit_linear};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_nonunit_levenshtein(), nonunit_baseline, rvv_small_queries,
+                                                   rvv_small_candidates);
         check_symmetric_cell_exact_(rvv_nonunit_levenshtein(), square_set);
 
         // RVV AFFINE byte Levenshtein: the new `u16` Gotoh E/F candidate-lane batch (8 lanes), cell-by-cell vs the
@@ -1815,8 +1901,9 @@ void test_similarities_cross_product() {
         auto rvv_affine_levenshtein = [&]() {
             return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k> {nonunit_uniform, nonunit_affine};
         };
-        levenshtein_baselines_t const affine_base {nonunit_uniform, nonunit_affine};
-        check_cross_product_cell_exact_<sz_size_t>(rvv_affine_levenshtein(), affine_base, nb_small_q, nb_small_c);
+        levenshtein_baselines_t const affine_baseline {nonunit_uniform, nonunit_affine};
+        check_cross_product_cell_exact_<sz_size_t>(rvv_affine_levenshtein(), affine_baseline, rvv_small_queries,
+                                                   rvv_small_candidates);
         check_symmetric_cell_exact_(rvv_affine_levenshtein(), square_set);
     }
 
@@ -1835,9 +1922,10 @@ void test_similarities_cross_product() {
     // RVV UTF-8 rune candidate-lane (multi-cell, fills the 8 rune lanes) vs the serial UTF-8 oracle.
     {
         levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_oracle {};
-        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t q, arrow_strings_view_t c, sz_size_t *out) {
+        auto const utf8_baseline = [&utf8_oracle](arrow_strings_view_t queries, arrow_strings_view_t candidates,
+                                                  sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
-            return utf8_oracle(q, c, cell);
+            return utf8_oracle(queries, candidates, cell);
         };
         // Multi-byte characters keep these off the ASCII fast path, so the rune kernels actually run.
         fuzzy_config_t const utf8_queries {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
@@ -1851,31 +1939,35 @@ void test_similarities_cross_product() {
     // walkers, so the Levenshtein cases below score through the serial fallback, not an RVV lane kernel.
     {
         // Straddle the `i16` → `i32` NW/SW tier edge, which BLOSUM62's magnitude 11 puts near a combined 2975.
-        fuzzy_config_t const tier_edge_q {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
-        fuzzy_config_t const tier_edge_c {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
+        fuzzy_config_t const tier_edge_queries {"ABC", scale_iterations(2), /* min */ 1, /* max */ 8};
+        fuzzy_config_t const tier_edge_candidates {"ABC", scale_iterations(8), /* min */ 2950, /* max */ 3000};
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_q, tier_edge_c);
-        fuzzy_config_t const wide_nw_q {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
-        fuzzy_config_t const wide_nw_c {"ABC", /* batch */ 8, /* min */ 1500, /* max */ 1500};
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, tier_edge_queries,
+            tier_edge_candidates);
+        fuzzy_config_t const wide_nw_queries {"ABC", /* batch */ 2, /* min */ 1500, /* max */ 1500};
+        fuzzy_config_t const wide_nw_candidates {"ABC", /* batch */ 8, /* min */ 1500, /* max */ 1500};
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_q, wide_nw_c);
-        fuzzy_config_t const wide_lev_q {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
-        fuzzy_config_t const wide_lev_c {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
+            wide_nw_candidates);
+        fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
+        fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
             levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sr_k> {wide_uniform, wide_affine},
-            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_q, wide_lev_c);
+            levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_queries, wide_lev_candidates);
     }
 #endif
 
@@ -1883,14 +1975,18 @@ void test_similarities_cross_product() {
     gpu_specs_t first_gpu_specs;
     sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
 
-    // CUDA cross-product and symmetric matrices stay small so device memory remains bounded.
-    check_cross_product_cell_exact_<sz_size_t>(
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
-        levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries, many_candidates, cuda_executor_t {},
-        first_gpu_specs);
-    check_symmetric_cell_exact_(
-        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear}, square_set,
-        cuda_executor_t {}, first_gpu_specs);
+    // CUDA cross-product and symmetric matrices stay small so device memory remains bounded. The empty shapes here
+    // are the ones that used to reach `cuLaunchKernelEx` with a zero grid.
+    check_cross_product_universals_<sz_cap_cuda_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
+#endif
+
+#if SZ_USE_KEPLER
+    // Kepler had no cross-product coverage at all: its `tile_scorer` specializations were only ever driven through
+    // the pairwise suites, so the matrix overloads went unexercised on that capability.
+    check_cross_product_universals_<sz_caps_ck_k, ualloc_t>(cuda_executor_t {}, first_gpu_specs);
+#endif
+
+#if SZ_USE_CUDA
 
     // Per-query Myers `match_masks`-reuse: single-word queries (<= 64) against a non-symmetric candidate row wider
     // than a warp - the only shape that fires the reuse kernel. Min length 0 covers the empty edges.
@@ -1936,6 +2032,93 @@ void test_similarities_cross_product() {
                                                                                                  blosum62_linear_cost},
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_mixed, weighted_candidates,
         cuda_executor_t {}, first_gpu_specs);
+
+    // High-cost Levenshtein at 700 chars: past the register tier, below the tiled promotion, and wide enough that
+    // the reach needs 4-byte cells - the only shape that reaches the warp tier's `u32` kernel. Mirrors the CPU
+    // `wide_lev_*` checks above, which were the sole coverage of that band.
+    fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
+    fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {wide_uniform, wide_linear},
+        levenshtein_baselines_t {wide_uniform, wide_linear}, wide_lev_queries, wide_lev_candidates, cuda_executor_t {},
+        first_gpu_specs);
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {wide_uniform, wide_affine},
+        levenshtein_baselines_t {wide_uniform, wide_affine}, wide_lev_queries, wide_lev_candidates, cuda_executor_t {},
+        first_gpu_specs);
+
+    // Empty matrices: the cell-count-derived grid is zero, which the driver rejects outright, so this asserts the
+    // engine short-circuits instead of launching. `check_cross_product_cell_exact_` checks the status before it
+    // short-circuits on the empty shape, so no cell comparison is needed.
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
+        levenshtein_baselines_t {unit_uniform, unit_linear}, empty_set, many_candidates, cuda_executor_t {},
+        first_gpu_specs);
+    check_cross_product_cell_exact_<sz_size_t>(
+        levenshtein_distances<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {unit_uniform, unit_linear},
+        levenshtein_baselines_t {unit_uniform, unit_linear}, many_queries, empty_set, cuda_executor_t {},
+        first_gpu_specs);
+
+    // The weighted engines take a separate cross-product entry point with its own empty-matrix short-circuit, so
+    // the Levenshtein checks above say nothing about it.
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, empty_set, weighted_candidates,
+        cuda_executor_t {}, first_gpu_specs);
+    check_cross_product_cell_exact_<sz_ssize_t>(
+        smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
+                                                                                                blosum62_linear_cost},
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, empty_set,
+        cuda_executor_t {}, first_gpu_specs);
+
+    // CUDA UTF-8 rune scoring. The CPU blocks above are the only UTF-8 coverage in this file, so the GPU engine's
+    // whole-batch tier routing - which, unlike the byte engine, never consults `task.density` - was unexercised.
+    // Linear costs only: `similarities.cuh` extern-templates just that one for the GPU, and affine UTF-8 is
+    // documented as staying on the CPU.
+    {
+        levenshtein_distances_utf8<linear_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_cuda_oracle {};
+        auto const utf8_cuda_baseline = [&utf8_cuda_oracle](arrow_strings_view_t queries,
+                                                            arrow_strings_view_t candidates, sz_size_t *out) {
+            strided_rows<sz_size_t> const cell {out, 1, 1, 1};
+            return utf8_cuda_oracle(queries, candidates, cell);
+        };
+        auto cuda_utf8_levenshtein = [&]() {
+            return levenshtein_distances_utf8<linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {};
+        };
+
+        // Lengths are in runes, and the engine picks one tier for the whole batch, so each config lands the entire
+        // matrix on a different kernel: register (<= 128 runes), warp anti-diagonal, then the tiled device sweep
+        // (>= `tiled_promotion_min_shorter_k`).
+        fuzzy_config_t const utf8_register_tier {"AÉ中😀", /* batch_size */ 4, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_register_candidates {"AÉ中😀", /* batch_size */ 12, /* min */ 1, /* max */ 48};
+        fuzzy_config_t const utf8_warp_tier {"AÉ中😀", /* batch_size */ 3, /* min */ 200, /* max */ 400};
+        fuzzy_config_t const utf8_device_tier {"AÉ中😀", /* batch_size */ 2, /* min */ 4100, /* max */ 4200};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_register_tier,
+                                                   utf8_register_candidates, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_warp_tier,
+                                                   utf8_warp_tier, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_device_tier,
+                                                   utf8_device_tier, cuda_executor_t {}, first_gpu_specs);
+
+        // Empty matrices, and empty strings mixed into a non-empty batch - the shapes whose results the whole-batch
+        // router leaves to the kernels themselves, since it never separates degenerate cells out.
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, empty_set,
+                                                   utf8_register_candidates, cuda_executor_t {}, first_gpu_specs);
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_register_tier,
+                                                   empty_set, cuda_executor_t {}, first_gpu_specs);
+        fuzzy_config_t const utf8_ragged {"AÉ中😀", /* batch_size */ 6, /* min */ 0, /* max */ 300};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_ragged,
+                                                   utf8_ragged, cuda_executor_t {}, first_gpu_specs);
+
+        // ! Pairs are sorted by BYTE length, but scored in runes, and nothing re-sorts the rune counts. Four-byte
+        // ! emoji against single-byte ASCII inverts the two: the byte-shorter side carries MORE runes. A corpus
+        // ! drawing both sides from one mixed alphabet never reaches this, so it gets its own asymmetric pair.
+        fuzzy_config_t const utf8_dense_queries {"😀😁😂🤣", /* batch_size */ 4, /* min */ 30, /* max */ 40};
+        fuzzy_config_t const utf8_sparse_candidates {"ABC", /* batch_size */ 12, /* min */ 60, /* max */ 90};
+        check_cross_product_cell_exact_<sz_size_t>(cuda_utf8_levenshtein(), utf8_cuda_baseline, utf8_dense_queries,
+                                                   utf8_sparse_candidates, cuda_executor_t {}, first_gpu_specs);
+    }
 #endif
 }
 
