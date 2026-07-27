@@ -513,10 +513,20 @@ class safe_vector {
      *  `static constexpr bool host_accessible_k = false` and gets a build error here instead of a segmentation fault
      *  (see `device_alloc` in `stringzillas/types.cuh`). Allocators that say nothing - `std::allocator` included -
      *  are assumed reachable, so nothing else needs changing.
+     *
+     *  @note Detected by overload resolution rather than a `requires` expression: this header is compiled at
+     *        C++17 by the Python extension, where concepts are unavailable.
      */
+    template <typename probed_type_>
+    static constexpr bool allocator_host_accessible_(decltype(probed_type_::host_accessible_k) *) noexcept {
+        return probed_type_::host_accessible_k;
+    }
+    template <typename probed_type_>
+    static constexpr bool allocator_host_accessible_(...) noexcept {
+        return true;
+    }
     static constexpr bool allocator_reachable_from_host_() noexcept {
-        if constexpr (requires { allocator_type::host_accessible_k; }) return allocator_type::host_accessible_k;
-        else return true;
+        return allocator_host_accessible_<allocator_type>(nullptr);
     }
 
   public:
