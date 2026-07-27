@@ -33,6 +33,8 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
     impl->sha256_state_init = sz_sha256_state_init_serial;
     impl->sha256_state_update = sz_sha256_state_update_serial;
     impl->sha256_state_digest = sz_sha256_state_digest_serial;
+    impl->sha256_multistate_update = sz_sha256_multistate_update_serial;
+    impl->sha256_multistate_digest = sz_sha256_multistate_digest_serial;
 
 #if SZ_USE_WESTMERE
     if (caps & sz_cap_westmere_k) {
@@ -50,11 +52,18 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
         impl->sha256_state_init = sz_sha256_state_init_goldmont;
         impl->sha256_state_update = sz_sha256_state_update_goldmont;
         impl->sha256_state_digest = sz_sha256_state_digest_goldmont;
+        impl->sha256_multistate_update = sz_sha256_multistate_update_goldmont;
+        impl->sha256_multistate_digest = sz_sha256_multistate_digest_goldmont;
     }
 #endif
 
 #if SZ_USE_HASWELL
-    if (caps & sz_cap_haswell_k) { impl->bytesum = sz_bytesum_haswell; }
+    if (caps & sz_cap_haswell_k) {
+        impl->bytesum = sz_bytesum_haswell;
+
+        impl->sha256_multistate_update = sz_sha256_multistate_update_haswell;
+        impl->sha256_multistate_digest = sz_sha256_multistate_digest_haswell;
+    }
 #endif
 
 #if SZ_USE_SKYLAKE
@@ -65,6 +74,9 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_skylake;
         impl->hash_state_digest = sz_hash_state_digest_skylake;
         impl->fill_random = sz_fill_random_skylake;
+
+        impl->sha256_multistate_update = sz_sha256_multistate_update_skylake;
+        impl->sha256_multistate_digest = sz_sha256_multistate_digest_skylake;
     }
 #endif
 
@@ -253,6 +265,15 @@ SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t d
 
 SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
     sz_dispatch_table.sha256_state_digest(state, digest);
+}
+
+SZ_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+    sz_dispatch_table.sha256_multistate_update(states, texts);
+}
+
+SZ_API_RUNTIME void sz_sha256_multistate_digest(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                sz_u8_t *digests) {
+    sz_dispatch_table.sha256_multistate_digest(states, states_count, digests);
 }
 
 // Provide overrides for the libc mem* functions

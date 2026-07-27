@@ -1091,6 +1091,12 @@ typedef void (*sz_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, 
 /** @brief Signature of `sz_sha256_state_digest`. */
 typedef void (*sz_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *);
 
+/** @brief Signature of `sz_sha256_multistate_update`. */
+typedef void (*sz_sha256_multistate_update_t)(struct sz_sha256_state_t *, struct sz_sequence_t const *);
+
+/** @brief Signature of `sz_sha256_multistate_digest`. */
+typedef void (*sz_sha256_multistate_digest_t)(struct sz_sha256_state_t const *, sz_size_t, sz_u8_t *);
+
 /** @brief Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 
@@ -1491,6 +1497,20 @@ SZ_HELPER_AUTO int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Unde
 SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
+
+/**
+ *  @brief Returns @p pointer unchanged, hiding its origin so table reads stay memory operands.
+ *
+ *  Left visible, a `static const` table folds into immediates and every constant costs a `vpbroadcastd`
+ *  where an AVX-512 `{1toN}` embedded broadcast would have been free. No use outside x86, which has no
+ *  equivalent operand to protect.
+ */
+SZ_HELPER_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
+#if defined(__GNUC__)
+    __asm__("" : "+r"(pointer));
+#endif
+    return pointer;
+}
 
 /** @brief Reverse the 64 bits of @p value (bit `i` moves to bit `63 - i`): swap adjacent bits, then bit-pairs
  *         within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only byte-compress

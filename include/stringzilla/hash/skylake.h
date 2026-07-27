@@ -257,6 +257,420 @@ SZ_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_
     sz_fill_random_westmere(text, length, nonce);
 }
 
+/*  `vpternlogd` collapses each bitwise primitive of SHA256 to a single instruction: `choice` is the select
+ *  truth table, `majority` is the majority truth table, and the three-way exclusive or that both sigma
+ *  families need is the parity truth table. */
+
+/** @brief Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_zmm, __m512i state_f_zmm, __m512i state_g_zmm) {
+    return _mm512_ternarylogic_epi32(state_e_zmm, state_f_zmm, state_g_zmm, 0xCA);
+}
+
+/** @brief Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_zmm, __m512i state_b_zmm, __m512i state_c_zmm) {
+    return _mm512_ternarylogic_epi32(state_a_zmm, state_b_zmm, state_c_zmm, 0xE8);
+}
+
+/** @brief Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_zmm) {
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_a_zmm, 2), _mm512_ror_epi32(state_a_zmm, 13),
+                                     _mm512_ror_epi32(state_a_zmm, 22), 0x96);
+}
+
+/** @brief Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_zmm) {
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_e_zmm, 6), _mm512_ror_epi32(state_e_zmm, 11),
+                                     _mm512_ror_epi32(state_e_zmm, 25), 0x96);
+}
+
+/** @brief Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_zmm) {
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_zmm, 7), _mm512_ror_epi32(message_word_zmm, 18),
+                                     _mm512_srli_epi32(message_word_zmm, 3), 0x96);
+}
+
+/** @brief Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
+SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_zmm) {
+    return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_zmm, 17), _mm512_ror_epi32(message_word_zmm, 19),
+                                     _mm512_srli_epi32(message_word_zmm, 10), 0x96);
+}
+
+/**
+ *  @brief Transposes one 64-byte block from each of 16 lanes into word-major big-endian order.
+ *  @param lane_blocks Pointers to 16 message blocks, one per lane.
+ *  @param schedule Receives 16 registers, where `schedule[word_index]` holds that word from all 16 lanes.
+ *
+ *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit sub-lane, two sub-lane
+ *  exchange stages then move whole quarters across the register. The big-endian byte swap folds into the
+ *  initial load, so it costs nothing beyond the shuffle that would happen anyway.
+ */
+SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks, __m512i schedule_zmm[16]) {
+    __m512i const byte_swap_zmm = _mm512_set_epi8(                      //
+        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
+        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
+        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, //
+        12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+
+    __m512i lanes_zmm[16], first_stage_zmm[16], second_stage_zmm[16];
+    for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
+        lanes_zmm[lane_index] = _mm512_shuffle_epi8(_mm512_loadu_si512(lane_blocks[lane_index]), byte_swap_zmm);
+
+    for (sz_size_t butterfly_index = 0; butterfly_index != 8; ++butterfly_index) {
+        first_stage_zmm[butterfly_index * 2 + 0] = _mm512_unpacklo_epi32(lanes_zmm[butterfly_index * 2 + 0],
+                                                                         lanes_zmm[butterfly_index * 2 + 1]);
+        first_stage_zmm[butterfly_index * 2 + 1] = _mm512_unpackhi_epi32(lanes_zmm[butterfly_index * 2 + 0],
+                                                                         lanes_zmm[butterfly_index * 2 + 1]);
+    }
+    for (sz_size_t butterfly_index = 0; butterfly_index != 4; ++butterfly_index) {
+        sz_size_t const butterfly_base = butterfly_index * 4;
+        second_stage_zmm[butterfly_base + 0] = _mm512_unpacklo_epi64(first_stage_zmm[butterfly_base + 0],
+                                                                     first_stage_zmm[butterfly_base + 2]);
+        second_stage_zmm[butterfly_base + 1] = _mm512_unpackhi_epi64(first_stage_zmm[butterfly_base + 0],
+                                                                     first_stage_zmm[butterfly_base + 2]);
+        second_stage_zmm[butterfly_base + 2] = _mm512_unpacklo_epi64(first_stage_zmm[butterfly_base + 1],
+                                                                     first_stage_zmm[butterfly_base + 3]);
+        second_stage_zmm[butterfly_base + 3] = _mm512_unpackhi_epi64(first_stage_zmm[butterfly_base + 1],
+                                                                     first_stage_zmm[butterfly_base + 3]);
+    }
+    for (sz_size_t butterfly_index = 0; butterfly_index != 2; ++butterfly_index) {
+        sz_size_t const butterfly_base = butterfly_index * 8;
+        for (sz_size_t offset = 0; offset != 4; ++offset) {
+            first_stage_zmm[butterfly_base + offset] = _mm512_shuffle_i32x4(
+                second_stage_zmm[butterfly_base + offset], second_stage_zmm[butterfly_base + offset + 4], 0x88);
+            first_stage_zmm[butterfly_base + offset + 4] = _mm512_shuffle_i32x4(
+                second_stage_zmm[butterfly_base + offset], second_stage_zmm[butterfly_base + offset + 4], 0xDD);
+        }
+    }
+    for (sz_size_t offset = 0; offset != 8; ++offset) {
+        schedule_zmm[offset] = _mm512_shuffle_i32x4(first_stage_zmm[offset], first_stage_zmm[offset + 8], 0x88);
+        schedule_zmm[offset + 8] = _mm512_shuffle_i32x4(first_stage_zmm[offset], first_stage_zmm[offset + 8], 0xDD);
+    }
+}
+
+/**
+ *  @brief Extends the rolling message window by one word across 16 lanes.
+ *  @param oldest_word_zmm The word being replaced, sixteen rounds behind.
+ *  @param next_word_zmm The word one position ahead, feeding the low sigma.
+ *  @param ninth_word_zmm The word nine positions ahead.
+ *  @param fourteenth_word_zmm The word fourteen positions ahead, feeding the high sigma.
+ */
+SZ_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_zmm, __m512i next_word_zmm,
+                                                   __m512i ninth_word_zmm, __m512i fourteenth_word_zmm) {
+    return _mm512_add_epi32(_mm512_add_epi32(oldest_word_zmm, sz_sha256_small_sigma0_skylake_(next_word_zmm)),
+                            _mm512_add_epi32(ninth_word_zmm, sz_sha256_small_sigma1_skylake_(fourteenth_word_zmm)));
+}
+
+/**
+ *  @brief Applies one SHA256 round to 16 lanes, writing the two working values that change.
+ *
+ *  The eight working variables rotate by one position per round, which the callers express by passing the
+ *  same locals in a different order rather than by moving data. Only `state_d` and `state_h` are written:
+ *  `state_d` becomes the next round's `state_e`, and `state_h` is dead on entry so it receives the next
+ *  round's `state_a`.
+ */
+SZ_HELPER_INLINE void sz_sha256_round_skylake_(                                          //
+    __m512i state_a_zmm, __m512i state_b_zmm, __m512i state_c_zmm, __m512i *state_d_zmm, //
+    __m512i state_e_zmm, __m512i state_f_zmm, __m512i state_g_zmm, __m512i *state_h_zmm, //
+    __m512i message_word_zmm, sz_u32_t round_constant) {
+    __m512i const temporary_first_zmm = _mm512_add_epi32( //
+        _mm512_add_epi32(
+            _mm512_add_epi32(*state_h_zmm, sz_sha256_big_sigma1_skylake_(state_e_zmm)),
+            _mm512_add_epi32(sz_sha256_choice_skylake_(state_e_zmm, state_f_zmm, state_g_zmm), message_word_zmm)),
+        _mm512_set1_epi32((int)round_constant));
+    __m512i const temporary_second_zmm = _mm512_add_epi32(
+        sz_sha256_big_sigma0_skylake_(state_a_zmm), sz_sha256_majority_skylake_(state_a_zmm, state_b_zmm, state_c_zmm));
+    *state_d_zmm = _mm512_add_epi32(*state_d_zmm, temporary_first_zmm);
+    *state_h_zmm = _mm512_add_epi32(temporary_first_zmm, temporary_second_zmm);
+}
+
+/**
+ *  @brief Transposes and compresses one 64-byte block for each of 16 lanes into word-major hash registers.
+ *  @param hashes Eight registers of word-major hash state, updated in place.
+ *  @param lane_blocks Pointers to 16 message blocks, one per lane.
+ *
+ *  The message window is a local rather than a parameter on purpose: crossing a function boundary forces the
+ *  compiler to treat it as memory that may alias, which spills the whole window and the round constants to
+ *  the stack. Fused like this it stays in registers.
+ *
+ *  Written as one straight-line turn of sixteen rounds, then three more turns of the same shape with the
+ *  window extension folded in. Sixteen rounds return the eight working variables to their original names and
+ *  advance the window exactly one full turn, so every index below is a compile-time constant.
+ */
+SZ_HELPER_INLINE void sz_sha256_compress_skylake_(__m512i hashes_zmm[8], sz_u8_t const *const *lane_blocks) {
+    sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
+    __m512i schedule_zmm[16];
+    sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_zmm);
+
+    __m512i state_a_zmm = hashes_zmm[0], state_b_zmm = hashes_zmm[1];
+    __m512i state_c_zmm = hashes_zmm[2], state_d_zmm = hashes_zmm[3];
+    __m512i state_e_zmm = hashes_zmm[4], state_f_zmm = hashes_zmm[5];
+    __m512i state_g_zmm = hashes_zmm[6], state_h_zmm = hashes_zmm[7];
+
+    sz_sha256_round_skylake_(state_a_zmm, state_b_zmm, state_c_zmm, &state_d_zmm, state_e_zmm, state_f_zmm, state_g_zmm,
+                             &state_h_zmm, schedule_zmm[0], round_constants[0]);
+    sz_sha256_round_skylake_(state_h_zmm, state_a_zmm, state_b_zmm, &state_c_zmm, state_d_zmm, state_e_zmm, state_f_zmm,
+                             &state_g_zmm, schedule_zmm[1], round_constants[1]);
+    sz_sha256_round_skylake_(state_g_zmm, state_h_zmm, state_a_zmm, &state_b_zmm, state_c_zmm, state_d_zmm, state_e_zmm,
+                             &state_f_zmm, schedule_zmm[2], round_constants[2]);
+    sz_sha256_round_skylake_(state_f_zmm, state_g_zmm, state_h_zmm, &state_a_zmm, state_b_zmm, state_c_zmm, state_d_zmm,
+                             &state_e_zmm, schedule_zmm[3], round_constants[3]);
+    sz_sha256_round_skylake_(state_e_zmm, state_f_zmm, state_g_zmm, &state_h_zmm, state_a_zmm, state_b_zmm, state_c_zmm,
+                             &state_d_zmm, schedule_zmm[4], round_constants[4]);
+    sz_sha256_round_skylake_(state_d_zmm, state_e_zmm, state_f_zmm, &state_g_zmm, state_h_zmm, state_a_zmm, state_b_zmm,
+                             &state_c_zmm, schedule_zmm[5], round_constants[5]);
+    sz_sha256_round_skylake_(state_c_zmm, state_d_zmm, state_e_zmm, &state_f_zmm, state_g_zmm, state_h_zmm, state_a_zmm,
+                             &state_b_zmm, schedule_zmm[6], round_constants[6]);
+    sz_sha256_round_skylake_(state_b_zmm, state_c_zmm, state_d_zmm, &state_e_zmm, state_f_zmm, state_g_zmm, state_h_zmm,
+                             &state_a_zmm, schedule_zmm[7], round_constants[7]);
+    sz_sha256_round_skylake_(state_a_zmm, state_b_zmm, state_c_zmm, &state_d_zmm, state_e_zmm, state_f_zmm, state_g_zmm,
+                             &state_h_zmm, schedule_zmm[8], round_constants[8]);
+    sz_sha256_round_skylake_(state_h_zmm, state_a_zmm, state_b_zmm, &state_c_zmm, state_d_zmm, state_e_zmm, state_f_zmm,
+                             &state_g_zmm, schedule_zmm[9], round_constants[9]);
+    sz_sha256_round_skylake_(state_g_zmm, state_h_zmm, state_a_zmm, &state_b_zmm, state_c_zmm, state_d_zmm, state_e_zmm,
+                             &state_f_zmm, schedule_zmm[10], round_constants[10]);
+    sz_sha256_round_skylake_(state_f_zmm, state_g_zmm, state_h_zmm, &state_a_zmm, state_b_zmm, state_c_zmm, state_d_zmm,
+                             &state_e_zmm, schedule_zmm[11], round_constants[11]);
+    sz_sha256_round_skylake_(state_e_zmm, state_f_zmm, state_g_zmm, &state_h_zmm, state_a_zmm, state_b_zmm, state_c_zmm,
+                             &state_d_zmm, schedule_zmm[12], round_constants[12]);
+    sz_sha256_round_skylake_(state_d_zmm, state_e_zmm, state_f_zmm, &state_g_zmm, state_h_zmm, state_a_zmm, state_b_zmm,
+                             &state_c_zmm, schedule_zmm[13], round_constants[13]);
+    sz_sha256_round_skylake_(state_c_zmm, state_d_zmm, state_e_zmm, &state_f_zmm, state_g_zmm, state_h_zmm, state_a_zmm,
+                             &state_b_zmm, schedule_zmm[14], round_constants[14]);
+    sz_sha256_round_skylake_(state_b_zmm, state_c_zmm, state_d_zmm, &state_e_zmm, state_f_zmm, state_g_zmm, state_h_zmm,
+                             &state_a_zmm, schedule_zmm[15], round_constants[15]);
+
+    for (sz_size_t turn_index = 1; turn_index != 4; ++turn_index) {
+        sz_u32_t const *turn_constants = round_constants + turn_index * 16;
+        schedule_zmm[0] = sz_sha256_extend_skylake_(schedule_zmm[0], schedule_zmm[1], schedule_zmm[9],
+                                                    schedule_zmm[14]);
+        sz_sha256_round_skylake_(state_a_zmm, state_b_zmm, state_c_zmm, &state_d_zmm, state_e_zmm, state_f_zmm,
+                                 state_g_zmm, &state_h_zmm, schedule_zmm[0], turn_constants[0]);
+        schedule_zmm[1] = sz_sha256_extend_skylake_(schedule_zmm[1], schedule_zmm[2], schedule_zmm[10],
+                                                    schedule_zmm[15]);
+        sz_sha256_round_skylake_(state_h_zmm, state_a_zmm, state_b_zmm, &state_c_zmm, state_d_zmm, state_e_zmm,
+                                 state_f_zmm, &state_g_zmm, schedule_zmm[1], turn_constants[1]);
+        schedule_zmm[2] = sz_sha256_extend_skylake_(schedule_zmm[2], schedule_zmm[3], schedule_zmm[11],
+                                                    schedule_zmm[0]);
+        sz_sha256_round_skylake_(state_g_zmm, state_h_zmm, state_a_zmm, &state_b_zmm, state_c_zmm, state_d_zmm,
+                                 state_e_zmm, &state_f_zmm, schedule_zmm[2], turn_constants[2]);
+        schedule_zmm[3] = sz_sha256_extend_skylake_(schedule_zmm[3], schedule_zmm[4], schedule_zmm[12],
+                                                    schedule_zmm[1]);
+        sz_sha256_round_skylake_(state_f_zmm, state_g_zmm, state_h_zmm, &state_a_zmm, state_b_zmm, state_c_zmm,
+                                 state_d_zmm, &state_e_zmm, schedule_zmm[3], turn_constants[3]);
+        schedule_zmm[4] = sz_sha256_extend_skylake_(schedule_zmm[4], schedule_zmm[5], schedule_zmm[13],
+                                                    schedule_zmm[2]);
+        sz_sha256_round_skylake_(state_e_zmm, state_f_zmm, state_g_zmm, &state_h_zmm, state_a_zmm, state_b_zmm,
+                                 state_c_zmm, &state_d_zmm, schedule_zmm[4], turn_constants[4]);
+        schedule_zmm[5] = sz_sha256_extend_skylake_(schedule_zmm[5], schedule_zmm[6], schedule_zmm[14],
+                                                    schedule_zmm[3]);
+        sz_sha256_round_skylake_(state_d_zmm, state_e_zmm, state_f_zmm, &state_g_zmm, state_h_zmm, state_a_zmm,
+                                 state_b_zmm, &state_c_zmm, schedule_zmm[5], turn_constants[5]);
+        schedule_zmm[6] = sz_sha256_extend_skylake_(schedule_zmm[6], schedule_zmm[7], schedule_zmm[15],
+                                                    schedule_zmm[4]);
+        sz_sha256_round_skylake_(state_c_zmm, state_d_zmm, state_e_zmm, &state_f_zmm, state_g_zmm, state_h_zmm,
+                                 state_a_zmm, &state_b_zmm, schedule_zmm[6], turn_constants[6]);
+        schedule_zmm[7] = sz_sha256_extend_skylake_(schedule_zmm[7], schedule_zmm[8], schedule_zmm[0], schedule_zmm[5]);
+        sz_sha256_round_skylake_(state_b_zmm, state_c_zmm, state_d_zmm, &state_e_zmm, state_f_zmm, state_g_zmm,
+                                 state_h_zmm, &state_a_zmm, schedule_zmm[7], turn_constants[7]);
+        schedule_zmm[8] = sz_sha256_extend_skylake_(schedule_zmm[8], schedule_zmm[9], schedule_zmm[1], schedule_zmm[6]);
+        sz_sha256_round_skylake_(state_a_zmm, state_b_zmm, state_c_zmm, &state_d_zmm, state_e_zmm, state_f_zmm,
+                                 state_g_zmm, &state_h_zmm, schedule_zmm[8], turn_constants[8]);
+        schedule_zmm[9] = sz_sha256_extend_skylake_(schedule_zmm[9], schedule_zmm[10], schedule_zmm[2],
+                                                    schedule_zmm[7]);
+        sz_sha256_round_skylake_(state_h_zmm, state_a_zmm, state_b_zmm, &state_c_zmm, state_d_zmm, state_e_zmm,
+                                 state_f_zmm, &state_g_zmm, schedule_zmm[9], turn_constants[9]);
+        schedule_zmm[10] = sz_sha256_extend_skylake_(schedule_zmm[10], schedule_zmm[11], schedule_zmm[3],
+                                                     schedule_zmm[8]);
+        sz_sha256_round_skylake_(state_g_zmm, state_h_zmm, state_a_zmm, &state_b_zmm, state_c_zmm, state_d_zmm,
+                                 state_e_zmm, &state_f_zmm, schedule_zmm[10], turn_constants[10]);
+        schedule_zmm[11] = sz_sha256_extend_skylake_(schedule_zmm[11], schedule_zmm[12], schedule_zmm[4],
+                                                     schedule_zmm[9]);
+        sz_sha256_round_skylake_(state_f_zmm, state_g_zmm, state_h_zmm, &state_a_zmm, state_b_zmm, state_c_zmm,
+                                 state_d_zmm, &state_e_zmm, schedule_zmm[11], turn_constants[11]);
+        schedule_zmm[12] = sz_sha256_extend_skylake_(schedule_zmm[12], schedule_zmm[13], schedule_zmm[5],
+                                                     schedule_zmm[10]);
+        sz_sha256_round_skylake_(state_e_zmm, state_f_zmm, state_g_zmm, &state_h_zmm, state_a_zmm, state_b_zmm,
+                                 state_c_zmm, &state_d_zmm, schedule_zmm[12], turn_constants[12]);
+        schedule_zmm[13] = sz_sha256_extend_skylake_(schedule_zmm[13], schedule_zmm[14], schedule_zmm[6],
+                                                     schedule_zmm[11]);
+        sz_sha256_round_skylake_(state_d_zmm, state_e_zmm, state_f_zmm, &state_g_zmm, state_h_zmm, state_a_zmm,
+                                 state_b_zmm, &state_c_zmm, schedule_zmm[13], turn_constants[13]);
+        schedule_zmm[14] = sz_sha256_extend_skylake_(schedule_zmm[14], schedule_zmm[15], schedule_zmm[7],
+                                                     schedule_zmm[12]);
+        sz_sha256_round_skylake_(state_c_zmm, state_d_zmm, state_e_zmm, &state_f_zmm, state_g_zmm, state_h_zmm,
+                                 state_a_zmm, &state_b_zmm, schedule_zmm[14], turn_constants[14]);
+        schedule_zmm[15] = sz_sha256_extend_skylake_(schedule_zmm[15], schedule_zmm[0], schedule_zmm[8],
+                                                     schedule_zmm[13]);
+        sz_sha256_round_skylake_(state_b_zmm, state_c_zmm, state_d_zmm, &state_e_zmm, state_f_zmm, state_g_zmm,
+                                 state_h_zmm, &state_a_zmm, schedule_zmm[15], turn_constants[15]);
+    }
+
+    hashes_zmm[0] = _mm512_add_epi32(hashes_zmm[0], state_a_zmm);
+    hashes_zmm[1] = _mm512_add_epi32(hashes_zmm[1], state_b_zmm);
+    hashes_zmm[2] = _mm512_add_epi32(hashes_zmm[2], state_c_zmm);
+    hashes_zmm[3] = _mm512_add_epi32(hashes_zmm[3], state_d_zmm);
+    hashes_zmm[4] = _mm512_add_epi32(hashes_zmm[4], state_e_zmm);
+    hashes_zmm[5] = _mm512_add_epi32(hashes_zmm[5], state_f_zmm);
+    hashes_zmm[6] = _mm512_add_epi32(hashes_zmm[6], state_g_zmm);
+    hashes_zmm[7] = _mm512_add_epi32(hashes_zmm[7], state_h_zmm);
+}
+
+/**
+ *  @brief Compresses @p blocks_count whole blocks for 16 already block-aligned lanes.
+ *  @param states The 16 lane states, whose hash words are gathered on entry and scattered on exit.
+ *  @param cursors Per-lane read positions, advanced past everything consumed.
+ *  @param blocks_count Whole 64-byte blocks available in every one of the 16 lanes.
+ *
+ *  Kept apart from the lane bookkeeping so the block loop gets the whole register file to itself.
+ */
+SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_u8_t const **cursors,
+                                                         sz_size_t blocks_count) {
+    sz_u512_vec_t interleaved_vec[8];
+    __m512i hashes_zmm[8];
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
+            interleaved_vec[word_index].u32s[lane_index] = states[lane_index].hash[word_index];
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        hashes_zmm[word_index] = interleaved_vec[word_index].zmm;
+
+    for (sz_size_t block_index = 0; block_index != blocks_count; ++block_index) {
+        sz_sha256_compress_skylake_(hashes_zmm, cursors);
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) cursors[lane_index] += 64;
+    }
+
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        interleaved_vec[word_index].zmm = hashes_zmm[word_index];
+    for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
+        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+            states[lane_index].hash[word_index] = interleaved_vec[word_index].u32s[lane_index];
+        states[lane_index].total_length += blocks_count * 64;
+    }
+}
+
+SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+    sz_size_t const lanes_count = texts->count;
+    sz_size_t first_lane_index = 0;
+
+    for (; first_lane_index + 16 <= lanes_count; first_lane_index += 16) {
+        sz_u8_t const *cursors[16];
+        sz_size_t remaining[16];
+        sz_size_t shared_blocks = (sz_size_t)-1;
+
+        /*  Top up any buffered partial block first, so every lane that still holds a whole block is aligned.
+         *  A lane too short to fill its block keeps fewer than 64 bytes, which drives the shared count to
+         *  zero on its own and keeps the wide path off. */
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
+            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+            if (state->block_length != 0) {
+                sz_size_t const missing = 64 - state->block_length;
+                if (remaining[lane_index] >= missing) {
+                    sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], missing);
+                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
+                }
+            }
+            if (remaining[lane_index] / 64 < shared_blocks) shared_blocks = remaining[lane_index] / 64;
+        }
+
+        if (shared_blocks != 0) {
+            sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], cursors, shared_blocks);
+            for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) remaining[lane_index] -= shared_blocks * 64;
+        }
+
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
+            if (remaining[lane_index] != 0)
+                sz_sha256_state_update_serial(&states[first_lane_index + lane_index], (sz_cptr_t)cursors[lane_index],
+                                              remaining[lane_index]);
+    }
+
+    for (; first_lane_index != lanes_count; ++first_lane_index)
+        sz_sha256_state_update_serial(&states[first_lane_index], texts->get_start(texts->handle, first_lane_index),
+                                      texts->get_length(texts->handle, first_lane_index));
+}
+
+/**
+ *  @brief Finalizes 16 already-gathered lanes into their digests.
+ *  @param states The 16 lane states, left untouched.
+ *  @param active_lanes_count Lanes to emit, 1 to 16; the rest ride along and are discarded.
+ *  @param digests Receives `active_lanes_count` 32-byte big-endian digests.
+ *
+ *  Padding is per lane but compression is not. Both candidate blocks are built for every lane, and a k-mask
+ *  decides which lanes actually consumed the carrier block, so a lane that needed only one block keeps its
+ *  state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather stays in bounds.
+ */
+SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
+                                                               sz_size_t active_lanes_count, sz_u8_t *digests) {
+    sz_u512_vec_t carrier_vec[16], final_vec[16], interleaved_vec[8];
+    sz_u8_t const *carrier_blocks[16], *final_blocks[16];
+    __mmask16 overflow_mask = 0;
+
+    for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        sz_sha256_state_t const *const state = &states[source_lane];
+        sz_size_t const buffered = state->block_length;
+        sz_u64_t const bit_length = state->total_length * 8;
+        carrier_vec[lane_index].zmm = _mm512_setzero_si512();
+        final_vec[lane_index].zmm = _mm512_setzero_si512();
+
+        /*  The terminator lands in a carrier block whenever it would crowd out the trailing bit length. */
+        if (buffered + 1 > 56) {
+            overflow_mask |= (__mmask16)((sz_u32_t)1 << lane_index);
+            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
+                carrier_vec[lane_index].u8s[byte_index] = state->block[byte_index];
+            carrier_vec[lane_index].u8s[buffered] = 0x80;
+        }
+        else {
+            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
+                final_vec[lane_index].u8s[byte_index] = state->block[byte_index];
+            final_vec[lane_index].u8s[buffered] = 0x80;
+        }
+        for (sz_size_t byte_index = 0; byte_index != 8; ++byte_index)
+            final_vec[lane_index].u8s[56 + byte_index] = (sz_u8_t)(bit_length >> (56 - byte_index * 8));
+
+        carrier_blocks[lane_index] = carrier_vec[lane_index].u8s;
+        final_blocks[lane_index] = final_vec[lane_index].u8s;
+        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+            interleaved_vec[word_index].u32s[lane_index] = state->hash[word_index];
+    }
+
+    __m512i hashes_zmm[8];
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        hashes_zmm[word_index] = interleaved_vec[word_index].zmm;
+
+    if (overflow_mask) {
+        __m512i unchanged_zmm[8];
+        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+            unchanged_zmm[word_index] = hashes_zmm[word_index];
+        sz_sha256_compress_skylake_(hashes_zmm, carrier_blocks);
+        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+            hashes_zmm[word_index] = _mm512_mask_blend_epi32(overflow_mask, unchanged_zmm[word_index],
+                                                             hashes_zmm[word_index]);
+    }
+    sz_sha256_compress_skylake_(hashes_zmm, final_blocks);
+
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        interleaved_vec[word_index].zmm = hashes_zmm[word_index];
+    for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+        for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
+            sz_u32_t const word = interleaved_vec[word_index].u32s[lane_index];
+            sz_u8_t *const target = &digests[lane_index * 32 + word_index * 4];
+            target[0] = (sz_u8_t)(word >> 24), target[1] = (sz_u8_t)(word >> 16);
+            target[2] = (sz_u8_t)(word >> 8), target[3] = (sz_u8_t)(word >> 0);
+        }
+}
+
+SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                         sz_u8_t *digests) {
+    sz_size_t first_lane_index = 0;
+    for (; first_lane_index < states_count; first_lane_index += 16) {
+        sz_size_t const remaining = states_count - first_lane_index;
+        sz_size_t const active_lanes_count = remaining < 16 ? remaining : 16;
+        sz_sha256_multistate_digest_lanes_skylake_(&states[first_lane_index], active_lanes_count,
+                                                   &digests[first_lane_index * 32]);
+    }
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)

@@ -307,6 +307,23 @@ SZ_API_COMPTIME void sz_sha256_state_digest_goldmont(sz_sha256_state_t const *st
     }
 }
 
+/*  SHA-NI compresses one message at a time — its state layout is fixed and there is no lane-parallel form —
+ *  so this tier has no wide kernel to offer. It exists so a CPU with SHA-NI but no AVX2 still reaches the
+ *  hardware compressor for batched work instead of falling back to the serial one. */
+
+SZ_API_COMPTIME void sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+    sz_size_t const lanes_count = texts->count;
+    for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
+        sz_sha256_state_update_goldmont(&states[lane_index], texts->get_start(texts->handle, lane_index),
+                                        texts->get_length(texts->handle, lane_index));
+}
+
+SZ_API_COMPTIME void sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                          sz_u8_t *digests) {
+    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
+        sz_sha256_state_digest_goldmont(&states[lane_index], &digests[lane_index * 32]);
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)

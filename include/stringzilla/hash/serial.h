@@ -948,6 +948,19 @@ SZ_API_COMPTIME void sz_sha256_state_digest_serial(sz_sha256_state_t const *stat
     }
 }
 
+SZ_API_COMPTIME void sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                        sz_u8_t *digests) {
+    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
+        sz_sha256_state_digest_serial(&states[lane_index], &digests[lane_index * 32]);
+}
+
+SZ_API_COMPTIME void sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts) {
+    sz_size_t const lanes_count = texts->count;
+    for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
+        sz_sha256_state_update_serial(&states[lane_index], texts->get_start(texts->handle, lane_index),
+                                      texts->get_length(texts->handle, lane_index));
+}
+
 #pragma endregion // Serial SHA256 Implementation
 
 SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
