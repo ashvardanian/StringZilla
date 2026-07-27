@@ -506,6 +506,19 @@ class safe_vector {
     size_type capacity_;
     allocator_type alloc_;
 
+    /**
+     *  @brief Whether the host may dereference what @ref allocator_type hands out, which growing requires.
+     *
+     *  Growth moves live elements on the host, so an allocator over memory the host cannot touch opts out with
+     *  `static constexpr bool host_accessible_k = false` and gets a build error here instead of a segmentation fault
+     *  (see `device_alloc` in `stringzillas/types.cuh`). Allocators that say nothing - `std::allocator` included -
+     *  are assumed reachable, so nothing else needs changing.
+     */
+    static constexpr bool allocator_reachable_from_host_() noexcept {
+        if constexpr (requires { allocator_type::host_accessible_k; }) return allocator_type::host_accessible_k;
+        else return true;
+    }
+
   public:
     safe_vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
     safe_vector(allocator_type alloc) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(alloc) {}
@@ -580,6 +593,8 @@ class safe_vector {
     }
 
     status_t try_reserve(size_type new_cap) noexcept {
+        static_assert(allocator_reachable_from_host_(),
+                      "Growing host-moves live elements, so device-only storage must use `try_resize_uninitialized`");
         if (new_cap <= capacity_) return status_t::success_k;
         value_type *new_data = (value_type *)alloc_.allocate(new_cap);
         if (!new_data) return status_t::bad_alloc_k;

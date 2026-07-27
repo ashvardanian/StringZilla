@@ -1729,82 +1729,63 @@ struct cuda_similarity_task {
     }
 };
 
-// The task array lives in (eventually device) memory the host must not construct/destruct element-wise; it is
-// filled only by the materialization kernel and resized via `try_resize_uninitialized`. Trivial destructibility
-// lets `safe_vector` shrink/free it without running a host destructor over device memory.
 static_assert(std::is_trivially_destructible<cuda_similarity_task<char>>::value,
               "cuda_similarity_task must be trivially destructible (device_alloc + try_resize_uninitialized).");
 
 /**
- *  @brief Engine-owned, grow-only device buffer bundle shared by every CUDA cross-product engine — Levenshtein and
- *         the weighted NW/SW family. Allocated once and reused across calls so the host-orchestration free functions
- *         never allocate on the hot path; every radix-sort ping-pong or temporary below wraps one of these hoisted
- *         members and is launched stream-async.
+ *  @brief Engine-owned, grow-only buffer bundle shared by the Levenshtein and weighted NW/SW CUDA engines, hoisted so
+ *         the host-orchestration free functions never allocate on the hot path.
  *
- *  @tparam task_type_ The trivially-destructible @ref cuda_similarity_task instantiation, as @ref device_alloc and
- *                     @p try_resize_uninitialized require trivial destructibility.
+ *  `device_alloc` for scratch only kernels touch, `unified_alloc` for the few the host writes or reads - a property of
+ *  the algorithm rather than a caller's policy, hence no allocator parameter.
  */
-template <typename task_type_, typename allocator_type_>
+template <typename task_type_>
 struct cuda_cross_buffers {
     using task_t = task_type_;
-    using allocator_t = allocator_type_;
-    using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u64_t>;
-    using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
-    using byte_scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    using desc_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<span<char const>>;
-    using counts_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
-    using warp_size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
-    using warp_descriptor_allocator_t =
-        typename std::allocator_traits<allocator_t>::template rebind_alloc<warp_tasks_group_descriptor_t>;
 
-    allocator_t alloc_ {};
+    /** @brief O(Q·C) task array, one cell per live (query, candidate) pair. @sa tasks_spare_ */
+    safe_vector<task_t, device_alloc<task_t>> tasks_ {};
+    /** @brief Reorder target each counting sort scatters @ref tasks_ into before swapping it in. One spare serves both
+     *         passes, as the tier router finishes before the warp-group partition starts. */
+    safe_vector<task_t, device_alloc<task_t>> tasks_spare_ {};
+    /** @brief Bucket histograms + exclusive-scan cursors for the counting sorts. */
+    safe_vector<std::byte, device_alloc<std::byte>> sort_histogram_ {};
 
-    /** @brief O(Q·C) device-resident task array, one cell per live (query, candidate) pair. */
-    safe_vector<task_t, tasks_allocator_t> tasks_ {alloc_};
-    /** @brief Grow-only reordered-task ping-pong (router gather target / partition selection output). */
-    safe_vector<task_t, tasks_allocator_t> tasks_alt_ {alloc_};
-    /** @brief Grow-only device scratch for the counting sorts' bucket histograms + exclusive-scan cursors. */
-    safe_vector<std::byte, byte_scratch_allocator_t> bucket_scratch_ {alloc_};
+    /** @brief Query-side task-build descriptors. Unified because the host writes them and every materialization thread
+     *         reads them: device memory is not host-writable, and pinned would cross the bus per thread. */
+    safe_vector<span<char const>, unified_alloc<span<char const>>> query_descriptors_ {};
+    /** @brief Candidate-side counterpart of @ref query_descriptors_. */
+    safe_vector<span<char const>, unified_alloc<span<char const>>> candidate_descriptors_ {};
 
-    /** @brief Grow-only host-built device task-build descriptors for the query side. */
-    safe_vector<span<char const>, desc_allocator_t> query_descs_ {alloc_};
-    /** @brief Grow-only host-built device task-build descriptors for the candidate side. */
-    safe_vector<span<char const>, desc_allocator_t> candidate_descs_ {alloc_};
+    /*  Kernels write the buffers below and the host reads them after a stream drain - the case unified memory exists
+     *  for. They are sized to the task count but only a few words are ever read, so managed memory never faults in
+     *  the rest; pinning would page-lock it all and route the kernels' atomics over the bus.
+     */
 
-    /** @brief Device-accessible 3-slot scratch the @ref reduce_maxima3_across_cuda_device_ device-tier shape reductions write into. */
-    safe_vector<u32_t, counts_allocator_t> device_maxima_scratch_ {alloc_};
-    /** @brief Grow-only task ping-pong for the warp-grouping counting-sort scatters (device/warp/empty + group). */
-    safe_vector<task_t, tasks_allocator_t> warp_partition_scratch_ {alloc_};
-    /** @brief Device-accessible 2-slot partition selected-counts for the warp-grouping split. */
-    safe_vector<u32_t, counts_allocator_t> warp_split_counts_ {alloc_};
-    /** @brief Device-accessible unique composite group keys + run count from the warp-tier run-length-encode. */
-    safe_vector<u32_t, counts_allocator_t> warp_group_keys_ {alloc_};
-    /** @brief Device-accessible warp-group run lengths, begin offsets, and per-group max memory requirement. */
-    safe_vector<size_t, warp_size_allocator_t> warp_group_sizes_ {alloc_};
+    /** @brief 3-slot device-tier shape maxima (@ref reduce_maxima3_across_cuda_device_). */
+    safe_vector<u32_t, unified_alloc<u32_t>> shape_maxima_ {};
+    /** @brief Warp-grouping split counts, plus its scatter cursors. */
+    safe_vector<u32_t, unified_alloc<u32_t>> warp_tier_counts_ {};
+    /** @brief Unique composite group keys + run count from the warp-tier run-length-encode. */
+    safe_vector<u32_t, unified_alloc<u32_t>> warp_group_keys_ {};
+    /** @brief Warp-group run lengths, begin offsets, and per-group max memory requirement. */
+    safe_vector<size_t, unified_alloc<size_t>> warp_group_extents_ {};
     /** @brief Host-readable warp-tier launch group descriptors (one per merged group). */
-    safe_vector<warp_tasks_group_descriptor_t, warp_descriptor_allocator_t> warp_group_descriptors_ {alloc_};
+    safe_vector<warp_tasks_group_descriptor_t, unified_alloc<warp_tasks_group_descriptor_t>> warp_group_descriptors_ {};
 
-    /** @brief Grow-only `u64` frontier scratch for the tiled device-tier wavefront (carved per cell width). */
-    safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer_ {alloc_};
+    /** @brief `u64` frontier for the tiled device-tier wavefront, carved per cell width. */
+    safe_vector<u64_t, device_alloc<u64_t>> diagonals_ {};
 
-    /**
-     *  @brief Grow-only @b UTF-8 rune-offset index scratch: a per-task tile-rounded slice holding the byte offset of each
-     *         rune (a prefix scan, @ref build_rune_index_per_cuda_thread_) for the shorter then the longer side. Each
-     *         slice is `ceil(byte_len / 128) * 128 + 1` words so padded lanes of the last partial tile read in bounds.
-     *         Only the codepoint-level engine grows it; the byte engine leaves it empty.
+    /** @brief @b UTF-8 only: per-task rune byte offsets (@ref build_rune_index_per_cuda_thread_), shorter then longer
+     *         side. Slices are tile-rounded to `ceil(byte_len / 128) * 128 + 1` so partial-tile lanes read in bounds.
      */
-    safe_vector<u32_t, counts_allocator_t> rune_offsets_buffer_ {alloc_};
+    safe_vector<u32_t, device_alloc<u32_t>> rune_offsets_ {};
 
-    /**
-     *  @brief Grow-only device-resident dense results staging for the host-output (non-device-accessible) scatter
-     *         fallback: the device scatter kernel writes the full row-major matrix here, then one
-     *         `cudaMemcpy2DAsync` strides it into the caller's (host) `strided_rows`. Byte-typed since the element
-     *         width (`value_type_`) varies per call; never touched on the device-accessible fast path.
-     */
-    safe_vector<std::byte, byte_scratch_allocator_t> scatter_staging_ {alloc_};
+    /** @brief Dense results staging for the host-output scatter fallback: the kernel writes the row-major matrix here
+     *         and one `cuMemcpy2DAsync` strides it out. Byte-typed since the element width varies per call. */
+    safe_vector<std::byte, device_alloc<std::byte>> results_staging_ {};
 
     cuda_cross_buffers() noexcept = default;
-    explicit cuda_cross_buffers(allocator_t const &alloc) noexcept : alloc_(alloc) {}
 
     cuda_cross_buffers(cuda_cross_buffers const &) = delete;
     cuda_cross_buffers &operator=(cuda_cross_buffers const &) = delete;
@@ -1968,7 +1949,7 @@ struct levenshtein_dense_tier_functor {
  *         sort key — it already encodes the Myers word/generic/cooperative and register/device splits — so no packed
  *         key, 64K-bucket histogram, or gather is needed.
  *
- *  @param buffers Cross-product bundle; `tasks_` is reordered in place via the `tasks_alt_` ping-pong.
+ *  @param buffers Cross-product bundle; `tasks_` is reordered in place via the `tasks_spare_` ping-pong.
  *  @param rle_scratch Grow-only `u32` scratch: the dense per-tier counts and the scan cursors.
  *  @param dense_tier_functor Host-constructed functor mapping a task or its index to its dense tier id.
  *  @param tier_count Number of dense tiers written into @p tier_counts.
@@ -1987,10 +1968,10 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, rle_scratch_t
     for (int tier = 0; tier < tier_count; ++tier) tier_counts[tier] = 0;
     if (!count) return {status_t::success_k, cudaSuccess};
 
-    // Scratch: the dense per-tier counts + the scan cursors (`tier_count + 1`, the scan's trailing total), plus the
-    // reordered-task ping-pong.
-    if (rle_scratch.try_resize_uninitialized(2 * static_cast<size_t>(tier_count) + 1) == status_t::bad_alloc_k ||
-        buffers.tasks_alt_.try_resize_uninitialized(count) == status_t::bad_alloc_k)
+    // Dense per-tier counts + scan cursors (`tier_count + 1` for the scan's trailing total). The task spare is sized
+    // later: the single-tier fast path below returns without scattering, and at 112 B per cell that would be
+    // gigabytes nothing writes.
+    if (rle_scratch.try_resize_uninitialized(2 * static_cast<size_t>(tier_count) + 1) == status_t::bad_alloc_k)
         return {status_t::bad_alloc_k};
     u32_t *const dense_tier_counts = rle_scratch.data();
     u32_t *const bucket_cursors = dense_tier_counts + tier_count;
@@ -2020,8 +2001,11 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, rle_scratch_t
         }
     }
 
+    // Past the fast path, the sort really runs, so the spare is sized now.
+    if (buffers.tasks_spare_.try_resize_uninitialized(count) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+
     // Dense-tier counting sort: histogram the ≤ tier_count buckets (the histogram IS the per-tier counts), exclusive-sum
-    // them into scatter cursors, then scatter the tasks into ascending-tier order in `tasks_alt_` and swap it in.
+    // them into scatter cursors, then scatter the tasks into ascending-tier order in `tasks_spare_` and swap it in.
     cuda_status_t const hist_status = cuda_launch_histogram_dense_(dense_histogram_shape, tier_iterator, count,
                                                                    static_cast<u32_t>(tier_count), dense_tier_counts,
                                                                    executor.stream());
@@ -2031,9 +2015,9 @@ cuda_status_t cuda_route_tasks_into_tiers_(buffers_type_ &buffers, rle_scratch_t
     if (scan_status.status != status_t::success_k) return scan_status;
     cuda_status_t const scatter_status = cuda_launch_scatter_tasks_by_bucket_(
         router_scatter_shape, buffers.tasks_.data(), count, dense_tier_functor, bucket_cursors,
-        buffers.tasks_alt_.data(), executor.stream());
+        buffers.tasks_spare_.data(), executor.stream());
     if (scatter_status.status != status_t::success_k) return scatter_status;
-    std::swap(buffers.tasks_, buffers.tasks_alt_);
+    std::swap(buffers.tasks_, buffers.tasks_spare_);
 
     // The counts live in an engine-owned unified buffer; synchronize the stream, then copy them into the host array.
     {
@@ -2241,13 +2225,13 @@ __global__ void similarity_scatter_results_(task_type_ const *tasks, size_t task
  *         `result_offset` / `mirror_offset` stays valid), then a single strided `cudaMemcpy2DAsync` copies the valid
  *         `rows x columns` region into the caller's host `strided_rows`. Fully stream-async; staging grows-and-reuses.
  *
- *  @param buffers Engine buffer bundle holding the grow-only `scatter_staging_` device buffer (passed by reference).
+ *  @param buffers Engine buffer bundle holding the grow-only `results_staging_` device buffer (passed by reference).
  *  @param tasks Device-resident task array (already scored); read-only.
  *  @param tasks_count Number of live tasks.
  *  @param results The caller's host-side strided output matrix.
  */
-template <typename task_type_, typename value_type_, typename buffers_task_type_, typename allocator_type_>
-cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_task_type_, allocator_type_> &buffers,
+template <typename task_type_, typename value_type_, typename buffers_task_type_>
+cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_task_type_> &buffers,
                                                     task_type_ const *tasks, size_t tasks_count,
                                                     strided_rows<value_type_> const &results,
                                                     cuda_executor_t const &executor, unsigned block) noexcept {
@@ -2257,10 +2241,10 @@ cuda_status_t cuda_scatter_results_to_host_strided_(cuda_cross_buffers<buffers_t
     // Size the dense staging matrix at the caller's `row_stride` (not the tighter `columns`) so the device kernel's
     // precomputed `result_offset = query_index * row_stride + candidate_index` indexes it without any remapping.
     size_t const staging_elements = results.rows * results.row_stride;
-    if (buffers.scatter_staging_.try_resize_uninitialized(staging_elements * sizeof(value_type_)) ==
+    if (buffers.results_staging_.try_resize_uninitialized(staging_elements * sizeof(value_type_)) ==
         status_t::bad_alloc_k)
         return {status_t::bad_alloc_k};
-    value_type_ *const staging_ptr = static_cast<value_type_ *>(static_cast<void *>(buffers.scatter_staging_.data()));
+    value_type_ *const staging_ptr = static_cast<value_type_ *>(static_cast<void *>(buffers.results_staging_.data()));
 
     kernel_shape_t scatter_shape;
     cuda_status_t const scatter_resolve = resolve_kernel_shape(
@@ -3766,7 +3750,7 @@ __global__ void unit_utf8_score_per_cuda_warp_(                              //
 
 /**
  *  @brief Tiled device-tier wavefront launch shared by every CUDA cross-product engine. Reduces the device-level
- *         tasks' shape maxima, carves the (hoisted, grow-only) `diagonals_u64_buffer_` into per-cell-width frontier
+ *         tasks' shape maxima, carves the (hoisted, grow-only) `diagonals_` into per-cell-width frontier
  *         slices, and chunks the batch along `blockIdx.y`, seeding then scoring each chunk. One body covers the
  *         linear (single row frontier + corners) and affine Gotoh (M + H row frontiers + M corners) data-flows via
  *         `if constexpr (is_affine_)`; the two engine families differ only in the resolved score / init
@@ -3775,9 +3759,9 @@ __global__ void unit_utf8_score_per_cuda_warp_(                              //
  *  @param[in] init_fn,score_fn The resolved frontier-seed and tiled-score `CUfunction`s for @p score_type_.
  *  @param[in] substituter The cell-cost substituter (uniform for Levenshtein, the device 32-class map for NW/SW).
  */
-template <typename score_type_, bool is_affine_, typename task_type_, typename allocator_type_,
-          typename substituter_type_, typename gap_costs_type_>
-cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allocator_type_> &buffers,
+template <typename score_type_, bool is_affine_, typename task_type_, typename substituter_type_,
+          typename gap_costs_type_>
+cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_> &buffers,
                                              span<task_type_> device_level_tasks, u32_t row_stride, u32_t corner_stride,
                                              unsigned grid_columns_blocks, cudaFunction_t init_fn,
                                              cudaFunction_t score_fn, substituter_type_ const &substituter,
@@ -3796,10 +3780,10 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allo
                                           : chunk_pairs * (static_cast<size_t>(row_stride) + corner_stride);
     size_t const progress_words = chunk_pairs * corner_stride; // one `u32_t` progress counter per tile-column
     size_t const frontier_u64 = (score_words * sizeof(score_t) + progress_words * sizeof(u32_t)) / sizeof(u64_t) + 2;
-    buffers.diagonals_u64_buffer_.clear();
-    if (buffers.diagonals_u64_buffer_.try_resize(frontier_u64) == status_t::bad_alloc_k)
+    // Uninitialized: the frontier is device-only, so growing it must never host-move elements.
+    if (buffers.diagonals_.try_resize_uninitialized(frontier_u64) == status_t::bad_alloc_k)
         return {status_t::bad_alloc_k, cudaSuccess};
-    u64_t *const frontier_scratch = buffers.diagonals_u64_buffer_.data();
+    u64_t *const frontier_scratch = buffers.diagonals_.data();
 
     auto const launch = [&](cudaFunction_t function, unsigned bx, unsigned by, unsigned threads,
                             void **args) noexcept -> bool {
@@ -3877,13 +3861,12 @@ cuda_status_t cuda_launch_tiled_device_tier_(cuda_cross_buffers<task_type_, allo
  *         differ only in the warp kernel-shape pair (selected by `bytes_per_cell`) and the substituter, both passed
  *         by reference. Bit-identical to the two former in-line warp loops.
  */
-template <typename task_type_, typename allocator_type_, typename substituter_type_, typename gap_costs_type_>
-cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_, allocator_type_> &buffers,
-                                       span<task_type_> device_level_tasks, size_t warp_group_count,
-                                       kernel_shape_t const &warp_narrow_shape, kernel_shape_t const &warp_wide_shape,
-                                       size_t wide_bytes_per_cell, substituter_type_ const &substituter,
-                                       gap_costs_type_ const &gap_costs, gpu_specs_t const &specs,
-                                       cuda_executor_t const &executor) noexcept {
+template <typename task_type_, typename substituter_type_, typename gap_costs_type_>
+cuda_status_t cuda_launch_warp_groups_(cuda_cross_buffers<task_type_> &buffers, span<task_type_> device_level_tasks,
+                                       size_t warp_group_count, kernel_shape_t const &warp_narrow_shape,
+                                       kernel_shape_t const &warp_wide_shape, size_t wide_bytes_per_cell,
+                                       substituter_type_ const &substituter, gap_costs_type_ const &gap_costs,
+                                       gpu_specs_t const &specs, cuda_executor_t const &executor) noexcept {
     cuda_status_t result {status_t::success_k, cudaSuccess};
     void *warp_level_kernel_args[5];
     task_type_ *const warp_tasks_base = device_level_tasks.data();
@@ -3948,7 +3931,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task<char_t>;
-    using buffers_t = cuda_cross_buffers<task_t, allocator_t>;
+    using buffers_t = cuda_cross_buffers<task_t>;
     using tier_values_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<u32_t>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -3956,17 +3939,17 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
     allocator_t alloc_ {};
 
     /** @brief The cross-product device buffer bundle shared with the weighted NW/SW engines (passed by reference). */
-    buffers_t buffers_ {alloc_};
+    buffers_t buffers_ {};
 
-    /** @brief Grow-only packed `u64` radix-sort keys (DoubleBuffer A/B occupy `[0, count)` / `[count, 2*count)`). */
-    /** @brief Grow-only `u32` permutation values for the radix sort (DoubleBuffer A/B, same layout as the keys). */
-    /** @brief Device-side run-length-encode outputs: unique tier ids, run lengths, run count (`levenshtein_tier_count_k + 1`). */
+    /** @brief Dense per-tier counting-sort scratch fed to @ref cuda_route_tasks_into_tiers_ (histogram + scan
+     *         cursors). */
     safe_vector<u32_t, tier_values_allocator_t> tier_rle_ {alloc_};
     /** @brief Host-side dense per-tier counts (empty tiers absent from the RLE expand to zero). */
     size_t tier_counts_[levenshtein_tier_count_k] {};
 
-    safe_vector<u64_t, scores_allocator_t> myers_match_masks_buffer_ {
-        alloc_}; // per-thread Myers `match_masks` scratch (zeroed once)
+    /** @brief Per-thread Myers `match_masks` scratch, zeroed on the device once and never read by the host, so it is
+     *         plain device memory rather than unified - the largest such buffer the engine owns outside the bundle. */
+    safe_vector<u64_t, device_alloc<u64_t>> myers_match_masks_buffer_ {};
     /** @brief Row width of the current cross-product (for the Myers-reuse kernel). */
     size_t cross_candidates_count_ = 0;
     /** @brief Longest query this call (reuse needs every query single-word, <= 64). */
@@ -4022,18 +4005,15 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         } infra;
     };
 
-    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
-    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
-        static kernels_t table;
-        static bool resolved = false;
-        if (resolved) return {table, {}};
+    /** @brief Resolves every kernel handle for @p device_id into @p table. Split from @ref kernels so the cache lock
+     *         has one release point and each failure path just forwards a status. */
+    static cuda_status_t resolve_kernels_(kernels_t &table, int device_id) noexcept {
         constexpr unsigned text_limit_k = register_text_limit_k;
         constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
         constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
         constexpr bool affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
-        CUdevice device = 0;
+        CUdevice device = static_cast<CUdevice>(device_id);
         int warp_ceiling = 0;
-        cuCtxGetDevice(&device);
         cuDeviceGetAttribute(&warp_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device);
         cuda_status_t status {status_t::success_k, cudaSuccess};
 
@@ -4049,13 +4029,13 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 (void const
                      *)&unit_wagner_fischer_u8_per_cuda_thread_<task_t, char_t, u8_t, capability_k, text_limit_k>,
                 256, 0, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.register_tier.u16,
                 (void const *)&unit_wagner_fischer_u16_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
                 256, 0, true);
         }
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
 
         // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
         status = resolve_kernel_shape(
@@ -4066,7 +4046,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 : (void const *)&score_per_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
                                                       objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.warp_tier.u16,
             affine_k
@@ -4075,7 +4055,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 : (void const *)&score_per_cuda_warp_<task_t, char_t, u16_t, u16_t, uniform_substitution_costs_t,
                                                       objective_k, locality_k, capability_k>,
             0, (unsigned)warp_ceiling, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
 
         // Device tier: the tiled micro-tile scorer + its frontier-seed kernel, one shape per cell width. We only need
         // the resolved `CUfunction` (the launch sizes its grid from the tile-column count, not occupancy), so
@@ -4101,22 +4081,22 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
         };
         status = resolve_tiled.template operator()<u16_t>(table.device_tier.score_u16, table.device_tier.init_u16);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_tiled.template operator()<u32_t>(table.device_tier.score_u32, table.device_tier.init_u32);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_tiled.template operator()<u64_t>(table.device_tier.score_u64, table.device_tier.init_u64);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
 
         // Bit-parallel Myers fast path (linear unit-cost Levenshtein only); occupancy precomputed for grid sizing.
         if constexpr (!affine_k) {
             status = resolve_kernel_shape(
                 table.myers.singleword_thread,
                 (void const *)&unit_myers_singleword_per_cuda_thread_<task_t, char_t, 1u, capability_k>, 256, 0, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_thread,
                 (void const *)&unit_myers_multiword_per_cuda_thread_<task_t, char_t, capability_k>, 256, 0, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             // Per-query multi-word match-mask reuse kernels: each warp owns `words_count * 256` `u64_t` of shared
             // match-masks (1/2/4/8/16 words covering shorter <= 64/128/256/512/1024). Shared per block is
             // `warps_per_block * words * 256 * 8` bytes; the 1..8-word shapes run 8 warps/block (<= 128 KB), but the
@@ -4134,32 +4114,32 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 table.myers.singleword_warp,
                 (void const *)&unit_myers_singleword_per_cuda_warp_<task_t, char_t, capability_k>, 256,
                 myers_candidates_shared1_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_warp_2,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 2u>, 256,
                 myers_candidates_shared2_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_warp_4,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 4u>, 256,
                 myers_candidates_shared4_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_warp_8,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 8u>, 256,
                 myers_candidates_shared8_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_warp_16,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 16u>, 128,
                 myers_candidates_shared16_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.multiword_warp_32,
                 (void const *)&unit_myers_multiword_per_cuda_warp_<task_t, char_t, capability_k, 32u>, 64,
                 myers_candidates_shared32_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             // Warp-cooperative (lane = word) shapes: one warp scores one pair, so its shared `match_masks` is a single
             // pair's `words * 256` `u64_t`. The 8/16/32-word shapes cover shorter <= 512/1024/2048; block widths shrink
             // (8 -> 4 -> 2 warps) to keep `warps_per_block * words * 256 * 8` under the ~227 KB opt-in ceiling.
@@ -4167,17 +4147,17 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 table.myers.cooperative_warp_8,
                 (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 8u>, 256,
                 myers_candidates_shared8_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.cooperative_warp_16,
                 (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 16u>, 128,
                 myers_candidates_shared16_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
             status = resolve_kernel_shape(
                 table.myers.cooperative_warp_32,
                 (void const *)&unit_myers_multiword_cooperative_per_cuda_warp_<task_t, char_t, capability_k, 32u>, 64,
                 myers_candidates_shared32_k, true);
-            if (status.status != status_t::success_k) return {table, status};
+            if (status.status != status_t::success_k) return status;
         }
         // Device-side task materialization (all-pairs or symmetric); grid is sized from the cell count, so no
         // occupancy precompute is needed. Levenshtein is always minimize / global.
@@ -4186,7 +4166,7 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             (void const *)&similarity_materialize_tasks_<sz_minimize_distance_k, sz_similarity_global_k, affine_k,
                                                          task_t, gap_costs_t>,
             256, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
 
         // Device-wide collective primitives (driver-only replacements for `cub::Device*`). Each is resolved for the
         // exact transform-iterator type its call site builds, so the launched `CUfunction` matches the passed argument.
@@ -4199,61 +4179,77 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         status = resolve_kernel_shape(table.infra.reduce_minmax_tier,
                                       (void const *)&reduce_minmax_across_cuda_device_<u32_t, dense_iter_t>,
                                       collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.reduce_maxima3_bytes,
             (void const *)&reduce_maxima3_across_cuda_device_<tier_task_t, task_shape_maxima_extractor<char_t>>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.segmented_reduce_max,
             (void const *)&segmented_reduce_max_across_cuda_device_<size_t, memory_iter_t, size_t>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(table.infra.exclusive_sum_u32,
                                       (void const *)&exclusive_sum_across_cuda_device_<u32_t>, collective_threads_k, 0,
                                       false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(table.infra.dense_histogram,
                                       (void const *)&histogram_dense_across_cuda_device_<dense_iter_t>,
                                       collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         using tier_split_iter_t =
             transform_input_iterator<u32_t, warp_group_tier_functor_<tier_task_t>, tier_task_t const *>;
         status = resolve_kernel_shape(table.infra.tier_histogram,
                                       (void const *)&histogram_dense_across_cuda_device_<tier_split_iter_t>,
                                       collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.tier_scatter,
             (void const
                  *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_tier_functor_<tier_task_t>>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.warp_group_histogram,
             (void const
                  *)&histogram_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_key_functor_<tier_task_t>>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.warp_group_scatter,
             (void const
                  *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_key_functor_<tier_task_t>>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(table.infra.scan_compact,
                                       (void const *)&scan_and_compact_bucket_runs_across_cuda_device_<size_t>,
                                       collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_kernel_shape(
             table.infra.router_scatter,
             (void const
                  *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, levenshtein_dense_tier_functor<char_t>>,
             collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
-        resolved = true;
-        return {table, {}};
+        if (status.status != status_t::success_k) return status;
+        return {status_t::success_k, cudaSuccess};
+    }
+    /** @brief This device's kernel table, resolved on first use. Check the status before reading it - a full cache
+     *         hands back an unresolved table. @sa cuda_device_kernels */
+    static expected<kernels_t const &, cuda_status_t> kernels(int device_id) noexcept {
+        static cuda_device_kernels<kernels_t> per_device;
+        auto *entry = per_device.acquire(device_id);
+        if (!entry) return {per_device.unusable(), {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE}};
+        if (!entry->resolved) {
+            cuda_status_t const status = resolve_kernels_(entry->table, device_id);
+            if (status.status != status_t::success_k) {
+                per_device.release();
+                return {per_device.unusable(), status};
+            }
+            entry->resolved = true;
+        }
+        per_device.release();
+        return {entry->table, {}};
     }
 
     /** @brief Container-independent GPU pipeline trampoline over the packed `tasks_`; compiles once per engine. */
@@ -4320,15 +4316,15 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         // descriptors on the host and let one thread per live cell fill the O(queries*candidates) task array on
         // the GPU (the symmetric path maps the flat cell index into the lower triangle). The descriptor buffers
         // are unified, so the host writes them and the kernel reads them with no extra copy.
-        if (buffers_.query_descs_.try_resize(queries_count) == status_t::bad_alloc_k ||
-            buffers_.candidate_descs_.try_resize(candidates_count) == status_t::bad_alloc_k)
+        if (buffers_.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
+            buffers_.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
             return {status_t::bad_alloc_k};
         for (size_t query_index = 0; query_index < queries_count; ++query_index)
-            buffers_.query_descs_[query_index] = {queries[query_index].data(), queries[query_index].length()};
+            buffers_.query_descriptors_[query_index] = {queries[query_index].data(), queries[query_index].length()};
         size_t max_candidate_length = 0;
         for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
             size_t const candidate_length = candidates[candidate_index].length();
-            buffers_.candidate_descs_[candidate_index] = {candidates[candidate_index].data(), candidate_length};
+            buffers_.candidate_descriptors_[candidate_index] = {candidates[candidate_index].data(), candidate_length};
             if (candidate_length > max_candidate_length) max_candidate_length = candidate_length;
         }
 
@@ -4350,8 +4346,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                     direct_shape, (void const *)&unit_myers_singleword_direct_per_cuda_cell_<char, results_value_t>,
                     256, 0, false);
                 if (direct_resolve.status != status_t::success_k) return direct_resolve;
-                span<char const> *direct_queries = buffers_.query_descs_.data();
-                span<char const> *direct_candidates = buffers_.candidate_descs_.data();
+                span<char const> *direct_queries = buffers_.query_descriptors_.data();
+                span<char const> *direct_candidates = buffers_.candidate_descriptors_.data();
                 results_value_t *results_ptr = results.data;
                 size_t queries_count_arg = queries_count, candidates_count_arg = candidates_count,
                        row_stride_arg = row_stride;
@@ -4362,7 +4358,8 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                                         (void *)&results_ptr};
                 unsigned const direct_block = 256;
                 unsigned const direct_grid = static_cast<unsigned>((live_cells + direct_block - 1) / direct_block);
-                if (CUresult e = timer_.ensure_created(); e != CUDA_SUCCESS) return make_cuda_status(e);
+                if (CUresult e = timer_.ensure_created(executor.device_id()); e != CUDA_SUCCESS)
+                    return make_cuda_status(e);
                 if (CUresult e = timer_.record_start(executor.stream()); e != CUDA_SUCCESS) return make_cuda_status(e);
                 CUresult const direct_error = cuda_launch_t {}
                                                   .grid(direct_grid)
@@ -4377,11 +4374,11 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
             }
         }
 
-        auto [kernel_table, kernels_status] = kernels();
+        auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
 
-        span<char const> *queries_ptr = buffers_.query_descs_.data(),
-                         *candidates_ptr = buffers_.candidate_descs_.data();
+        span<char const> *queries_ptr = buffers_.query_descriptors_.data(),
+                         *candidates_ptr = buffers_.candidate_descriptors_.data();
         task_t *tasks_ptr = tasks.data();
         error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
         sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
@@ -4473,9 +4470,9 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
     [[maybe_unused]] constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
     // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
-    CUresult timer_error = timer_.ensure_created();
+    CUresult timer_error = timer_.ensure_created(executor.device_id());
     if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
-    auto [kernel_table, kernels_status] = kernels();
+    auto [kernel_table, kernels_status] = kernels(executor.device_id());
     if (kernels_status.status != status_t::success_k) return kernels_status;
     auto &tasks = buffers_.tasks_;
 
@@ -4588,7 +4585,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                 if (generic_count) {
                     device_tier_maxima_t generic_maxima {};
                     cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                        {tasks.data() + word1_count, generic_count}, buffers_.device_maxima_scratch_,
+                        {tasks.data() + word1_count, generic_count}, buffers_.shape_maxima_,
                         kernel_table.infra.reduce_maxima3_bytes, executor.stream(), generic_maxima);
                     if (maxima_status.status != status_t::success_k) return maxima_status;
                     u32_t const words_count = (generic_maxima.max_shorter + 63u) >> 6;
@@ -4599,8 +4596,9 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
                 }
                 size_t const match_masks_words_total = word1_match_masks > generic_match_masks ? word1_match_masks
                                                                                                : generic_match_masks;
-                myers_match_masks_buffer_.clear();
-                if (myers_match_masks_buffer_.try_resize(match_masks_words_total) == status_t::bad_alloc_k)
+                // Uninitialized: device-only scratch, zeroed on the device by the memset below.
+                if (myers_match_masks_buffer_.try_resize_uninitialized(match_masks_words_total) ==
+                    status_t::bad_alloc_k)
                     return {status_t::bad_alloc_k};
                 if (CUresult e = cuMemsetD8Async((CUdeviceptr)myers_match_masks_buffer_.data(), 0,
                                                  match_masks_words_total * sizeof(u64_t), executor.stream());
@@ -4637,7 +4635,7 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
             if (cooperative_count) {
                 device_tier_maxima_t cooperative_maxima {};
                 cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                    {tasks.data() + thread_myers_count, cooperative_count}, buffers_.device_maxima_scratch_,
+                    {tasks.data() + thread_myers_count, cooperative_count}, buffers_.shape_maxima_,
                     kernel_table.infra.reduce_maxima3_bytes, executor.stream(), cooperative_maxima);
                 if (maxima_status.status != status_t::success_k) return maxima_status;
                 u32_t const cooperative_words = (cooperative_maxima.max_shorter + 63u) >> 6; // 5..32
@@ -4707,8 +4705,8 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         size_t warp_group_count = 0;
         [[maybe_unused]] auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
             {tasks.data() + non_myers_register, tasks.size() - non_myers_register}, specs, executor.stream(),
-            buffers_.bucket_scratch_, buffers_.warp_partition_scratch_, buffers_.warp_split_counts_,
-            buffers_.warp_group_keys_, buffers_.warp_group_sizes_, buffers_.warp_group_descriptors_, warp_group_count,
+            buffers_.sort_histogram_, buffers_.tasks_spare_, buffers_.warp_tier_counts_, buffers_.warp_group_keys_,
+            buffers_.warp_group_extents_, buffers_.warp_group_descriptors_, warp_group_count,
             kernel_table.infra.segmented_reduce_max, kernel_table.infra.tier_histogram, kernel_table.infra.tier_scatter,
             kernel_table.infra.exclusive_sum_u32, kernel_table.infra.warp_group_histogram,
             kernel_table.infra.warp_group_scatter, kernel_table.infra.scan_compact);
@@ -4716,14 +4714,14 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         if (device_level_tasks.size()) {
             // Device tier -> the tiled register-micro-tile kernel (linear) or its Gotoh sibling (affine), batched
             // across pairs on `blockIdx.y`: one warp owns a tile-column, `gridDim.y` pairs run concurrently (the
-            // batch regime). `buffers_.diagonals_u64_buffer_` holds every pair's frontier slice padded to the batch's
+            // batch regime). `buffers_.diagonals_` holds every pair's frontier slice padded to the batch's
             // largest pair, run at the widest cell type any pair needs. Floor the device-tier cell at 32-bit: GPU
             // scalar u16 min/add promote to 32-bit anyway, so a u16 tile is ~1.3-1.4x SLOWER than u32 (measured) and
             // the narrower frontier buys nothing - the tiled kernel is compute/occupancy-bound with 0% DRAM.
             static constexpr unsigned tiled_warps_per_block_k = 8, tiled_tile_side_k = 128;
             device_tier_maxima_t maxima;
             cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                {device_level_tasks.data(), device_level_tasks.size()}, buffers_.device_maxima_scratch_,
+                {device_level_tasks.data(), device_level_tasks.size()}, buffers_.shape_maxima_,
                 kernel_table.infra.reduce_maxima3_bytes, executor.stream(), maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
             unsigned const max_bytes_per_cell = sz_max_of_two(maxima.max_bytes_per_cell,
@@ -4807,18 +4805,19 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task<char_t>;
-    using buffers_t = cuda_cross_buffers<task_t, allocator_t>;
+    using buffers_t = cuda_cross_buffers<task_t>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
     /** @brief The cross-product device buffer bundle shared with the byte Levenshtein engine (passed by reference). */
-    buffers_t buffers_ {alloc_};
+    buffers_t buffers_ {};
     cuda_timer_t timer_ {};
 
-    /** @brief Longest query/candidate @b byte length of the current call; sizes each task's tile-rounded rune-offset slice. */
+    /** @brief Longest query @b byte length this call; sizes each task's tile-rounded rune-offset slice. */
     size_t cross_max_query_length_ = 0;
+    /** @brief Candidate-side counterpart of @ref cross_max_query_length_. */
     size_t cross_max_candidate_length_ = 0;
 
     levenshtein_distances_utf8(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
@@ -4851,33 +4850,30 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         kernel_shape_t reduce_maxima3_runes;
     };
 
-    /** @brief Resolves the engine's CUDA kernel table once and returns it with the resolution status. */
-    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
-        static kernels_t table;
-        static bool resolved = false;
-        if (resolved) return {table, {}};
+    /** @brief Resolves every kernel handle for @p device_id into @p table. Split from @ref kernels so the cache lock
+     *         has one release point and each failure path just forwards a status. */
+    static cuda_status_t resolve_kernels_(kernels_t &table, int device_id) noexcept {
         constexpr unsigned text_limit_k = register_text_limit_k;
         static constexpr unsigned tiled_warps_k = 8;
         cuda_status_t status = resolve_kernel_shape(
             table.register_utf8, (void const *)&unit_utf8_per_cuda_thread_<task_t, char_t, capability_k, text_limit_k>,
             256, 0, true);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         // Rune-offset index builder (grid-stride, fixed 256-thread blocks; occupancy precomputed for grid sizing).
         status = resolve_kernel_shape(table.build_rune_index, (void const *)&build_rune_index_per_cuda_thread_<task_t>,
                                       256, 0, true);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         // Warp tier (anti-diagonal, one pair per warp). Block dims + grid are sized per launch from the batch's largest
         // rune count, so we only need the resolved `CUfunction` here - but we raise its dynamic-shared ceiling to the
         // device opt-in maximum so the per-launch three-diagonal ring can exceed the 48 KB default for mid-length pairs.
-        CUdevice warp_capable_device = 0;
+        CUdevice const warp_capable_device = static_cast<CUdevice>(device_id);
         int warp_shared_ceiling = 0;
-        cuCtxGetDevice(&warp_capable_device);
         cuDeviceGetAttribute(&warp_shared_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
                              warp_capable_device);
         status = resolve_kernel_shape(table.utf8_tier.warp,
                                       (void const *)&unit_utf8_score_per_cuda_warp_<task_t, u32_t, capability_k>, 0,
                                       static_cast<unsigned>(warp_shared_ceiling), false);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         // Device tier: the tiled rune scorer + its frontier-seed kernel, one shape per cell width. Only the resolved
         // `CUfunction` is needed (the launch sizes its grid from the tile-column count), so no occupancy precompute.
         auto const resolve_tiled = [&]<typename score_t>(kernel_shape_t &score_shape,
@@ -4891,11 +4887,11 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
         };
         status = resolve_tiled.template operator()<u16_t>(table.utf8_tier.score_u16, table.utf8_tier.init_u16);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_tiled.template operator()<u32_t>(table.utf8_tier.score_u32, table.utf8_tier.init_u32);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
         status = resolve_tiled.template operator()<u64_t>(table.utf8_tier.score_u64, table.utf8_tier.init_u64);
-        if (status.status != status_t::success_k) return {table, status};
+        if (status.status != status_t::success_k) return status;
 
         // Fused device-wide rune-count maxima reduction (shorter_runes, longer_runes in one pass).
         using tier_task_t = cuda_similarity_task<char_t>;
@@ -4903,9 +4899,25 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             table.reduce_maxima3_runes,
             (void const *)&reduce_maxima3_across_cuda_device_<tier_task_t, task_rune_maxima_extractor<char_t>>,
             cuda_device_collective_threads_k, 0, false);
-        if (status.status != status_t::success_k) return {table, status};
-        resolved = true;
-        return {table, {}};
+        if (status.status != status_t::success_k) return status;
+        return {status_t::success_k, cudaSuccess};
+    }
+    /** @brief This device's kernel table, resolved on first use. Check the status before reading it - a full cache
+     *         hands back an unresolved table. @sa cuda_device_kernels */
+    static expected<kernels_t const &, cuda_status_t> kernels(int device_id) noexcept {
+        static cuda_device_kernels<kernels_t> per_device;
+        auto *entry = per_device.acquire(device_id);
+        if (!entry) return {per_device.unusable(), {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE}};
+        if (!entry->resolved) {
+            cuda_status_t const status = resolve_kernels_(entry->table, device_id);
+            if (status.status != status_t::success_k) {
+                per_device.release();
+                return {per_device.unusable(), status};
+            }
+            entry->resolved = true;
+        }
+        per_device.release();
+        return {entry->table, {}};
     }
 
     /**
@@ -4937,22 +4949,30 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
 
         // Device-side materialization (all-pairs or symmetric): build the O(queries+candidates) descriptors on the
         // host, let one thread per live cell fill the O(queries*candidates) task array on the GPU.
-        if (buffers_.query_descs_.try_resize(queries_count) == status_t::bad_alloc_k ||
-            buffers_.candidate_descs_.try_resize(candidates_count) == status_t::bad_alloc_k)
+        if (buffers_.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
+            buffers_.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
             return {status_t::bad_alloc_k};
         cross_max_query_length_ = 0;
         cross_max_candidate_length_ = 0;
         for (size_t query_index = 0; query_index < queries_count; ++query_index) {
-            buffers_.query_descs_[query_index] = {queries[query_index].data(), queries[query_index].length()};
+            buffers_.query_descriptors_[query_index] = {queries[query_index].data(), queries[query_index].length()};
             if (queries[query_index].length() > cross_max_query_length_)
                 cross_max_query_length_ = queries[query_index].length();
         }
-        for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
-            buffers_.candidate_descs_[candidate_index] = {candidates[candidate_index].data(),
-                                                          candidates[candidate_index].length()};
-            if (candidates[candidate_index].length() > cross_max_candidate_length_)
-                cross_max_candidate_length_ = candidates[candidate_index].length();
+        // Symmetric calls pass the same sequence twice, so the second walk would rebuild identical descriptors and
+        // recompute an identical maximum.
+        if (is_symmetric) {
+            for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index)
+                buffers_.candidate_descriptors_[candidate_index] = buffers_.query_descriptors_[candidate_index];
+            cross_max_candidate_length_ = cross_max_query_length_;
         }
+        else
+            for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index) {
+                buffers_.candidate_descriptors_[candidate_index] = {candidates[candidate_index].data(),
+                                                                    candidates[candidate_index].length()};
+                if (candidates[candidate_index].length() > cross_max_candidate_length_)
+                    cross_max_candidate_length_ = candidates[candidate_index].length();
+            }
         // The materialization assigns each cell's shorter/longer as the smaller/larger of its (query, candidate) pair,
         // so either side can land in either slot. Size BOTH offset-slice strides to the global widest byte length so a
         // task's shorter and longer rune-offset slices are always large enough (over-allocation; the index over-read
@@ -4973,8 +4993,8 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             0, false);
         if (materialize_resolve.status != status_t::success_k) return materialize_resolve;
 
-        span<char const> *queries_ptr = buffers_.query_descs_.data(),
-                         *candidates_ptr = buffers_.candidate_descs_.data();
+        span<char const> *queries_ptr = buffers_.query_descriptors_.data(),
+                         *candidates_ptr = buffers_.candidate_descriptors_.data();
         task_t *tasks_ptr = tasks.data();
         error_cost_magnitude_t substitute_magnitude = substituter_.magnitude(), gap_magnitude = gap_costs_.magnitude();
         sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_t>();
@@ -4998,10 +5018,10 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
                                          .launch(materialize_shape.function, materialize_args);
         if (materialize_error != CUDA_SUCCESS) return make_cuda_status(materialize_error);
 
-        auto [kernel_table, kernels_status] = kernels();
+        auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
 
-        CUresult timer_error = timer_.ensure_created();
+        CUresult timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
         CUresult start_event_error = timer_.record_start(executor.stream());
         if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
@@ -5018,10 +5038,10 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
                 round_up_to_multiple<u32_t>(static_cast<u32_t>(cross_max_candidate_length_), tiled_tile_side_k) + 1;
             size_t const rune_offsets_words = tasks.size() *
                                               (static_cast<size_t>(shorter_offsets_stride) + longer_offsets_stride);
-            buffers_.rune_offsets_buffer_.clear();
-            if (buffers_.rune_offsets_buffer_.try_resize(rune_offsets_words) == status_t::bad_alloc_k)
+            // Uninitialized: the rune index is device-only and fully rewritten by `build_rune_index`.
+            if (buffers_.rune_offsets_.try_resize_uninitialized(rune_offsets_words) == status_t::bad_alloc_k)
                 return {status_t::bad_alloc_k};
-            u32_t *const shorter_offsets_base = buffers_.rune_offsets_buffer_.data();
+            u32_t *const shorter_offsets_base = buffers_.rune_offsets_.data();
             u32_t *const longer_offsets_base = shorter_offsets_base + tasks.size() * shorter_offsets_stride;
 
             size_t index_tasks_count = tasks.size();
@@ -5043,7 +5063,7 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             // kernel). Rune counts - not byte lengths - drive the tier choice, the cell width, and the frontier sizing.
             device_tier_maxima_t rune_maxima;
             cuda_status_t const maxima_status = reduce_device_tier_rune_maxima_<char_t>(
-                {tasks.data(), tasks.size()}, buffers_.device_maxima_scratch_, kernel_table.reduce_maxima3_runes,
+                {tasks.data(), tasks.size()}, buffers_.shape_maxima_, kernel_table.reduce_maxima3_runes,
                 executor.stream(), rune_maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
 
@@ -5057,9 +5077,10 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
             unsigned const warp_bytes_per_diagonal = round_up_to_multiple<unsigned>(
                 (rune_maxima.max_shorter + 1) * sizeof(warp_score_t), 4);
             unsigned const warp_shared_per_warp = 3u * warp_bytes_per_diagonal;
-            CUdevice warp_score_device = 0;
+            // The scope's device, not whichever context happens to be current: this gates the tier choice, so
+            // reading device 0's ceiling while running on another device would pick the wrong kernel.
+            CUdevice const warp_score_device = static_cast<CUdevice>(executor.device_id());
             int warp_shared_ceiling = 0;
-            cuCtxGetDevice(&warp_score_device);
             cuDeviceGetAttribute(&warp_shared_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
                                  warp_score_device);
             bool const fits_warp_tier = !fits_register && rune_maxima.max_shorter < tiled_promotion_min_shorter_k &&
@@ -5573,29 +5594,22 @@ struct weighted_kernels_t {
     } infra;
 };
 
-/**
- *  @brief Resolves the weighted NW/SW CUDA kernel table once per gap-cost, locality, and capability, returning it
- *         with the resolution status. A free function template that both the `needleman_wunsch_scores` and
- *         `smith_waterman_scores` GPU engines call with their own `locality_`.
- */
+/** @brief Resolves every weighted NW/SW kernel handle for @p device_id into @p table. Split from
+ *         @ref weighted_kernels_ so the cache lock has one release point and failures just forward a status. */
 template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capability_t capability_>
-expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept {
+cuda_status_t resolve_weighted_kernels_(weighted_kernels_t &table, int device_id) noexcept {
     using task_t = cuda_similarity_task<char>;
     using final_score_t = ssize_t;
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static weighted_kernels_t table;
-    static bool resolved = false;
-    if (resolved) return {table, {}};
     using char_t = char;
     using substituter_t = error_costs_classes_in_cuda_shared_memory_t;
     constexpr unsigned text_limit_k = register_text_limit_k;
     constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
     constexpr bool affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
-    CUdevice device = 0;
+    CUdevice device = static_cast<CUdevice>(device_id);
     int warp_ceiling = 0;
-    cuCtxGetDevice(&device);
     cuDeviceGetAttribute(&warp_ceiling, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device);
     cuda_status_t status {status_t::success_k, cudaSuccess};
 
@@ -5607,7 +5621,7 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
             : (void const
                    *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, text_limit_k>,
         256, 0, true);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
 
     // Batch tier: the SAME thread-per-pair kernel instantiated with the larger `batch_text_limit_k` register/local
     // storage, covering register<L<=~512 where the measured thread-per-pair scorer still beats the tiled wavefront.
@@ -5619,7 +5633,7 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
             : (void const
                    *)&weighted_needleman_per_cuda_thread_<task_t, char_t, locality_k, capability_k, batch_limit_k>,
         256, 0, true);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
 
     // Warp tier (anti-diagonal; dynamic-shared ceiling raised once, grid sized per group at launch).
     status = resolve_kernel_shape(
@@ -5629,7 +5643,7 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
                  : (void const *)&score_per_cuda_warp_<task_t, char_t, u16_t, i16_t, substituter_t, objective_k,
                                                        locality_k, capability_k>,
         0, (unsigned)warp_ceiling, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.warp_tier.i32,
         affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t, objective_k,
@@ -5637,7 +5651,7 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
                  : (void const *)&score_per_cuda_warp_<task_t, char_t, u32_t, i32_t, substituter_t, objective_k,
                                                        locality_k, capability_k>,
         0, (unsigned)warp_ceiling, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
 
     // Device tier: the tiled micro-tile scorer + its frontier-seed kernel, one shape per signed cell width. Only
     // the resolved `CUfunction` is needed (the launch sizes its grid from the tile-column count, not occupancy),
@@ -5662,19 +5676,19 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
         return resolve_kernel_shape(init_shape, init_sym, 256, 0, false);
     };
     status = resolve_tiled.template operator()<i32_t>(table.device_tier.score_i32, table.device_tier.init_i32);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_tiled.template operator()<i64_t>(table.device_tier.score_i64, table.device_tier.init_i64);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
 
     // Device-side task materialization (all-pairs or symmetric) + scatter; grid sized from the cell count.
     status = resolve_kernel_shape(
         table.infra.materialize_tasks,
         (void const *)&similarity_materialize_tasks_<objective_k, locality_k, affine_k, task_t, gap_costs_type_>, 256,
         0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(table.infra.scatter_results,
                                   (void const *)&similarity_scatter_results_<task_t, final_score_t>, 256, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
 
     // Device-wide collective primitives (driver-only replacements for `cub::Device*`), resolved for the exact
     // transform-iterator types the weighted router / warp-grouping call sites build.
@@ -5687,57 +5701,79 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
     status = resolve_kernel_shape(table.infra.reduce_minmax_tier,
                                   (void const *)&reduce_minmax_across_cuda_device_<u32_t, dense_iter_t>,
                                   collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.reduce_maxima3_bytes,
         (void const *)&reduce_maxima3_across_cuda_device_<tier_task_t, task_shape_maxima_extractor<char_t>>,
         collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.segmented_reduce_max,
         (void const *)&segmented_reduce_max_across_cuda_device_<size_t, memory_iter_t, size_t>, collective_threads_k, 0,
         false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(table.infra.exclusive_sum_u32,
                                   (void const *)&exclusive_sum_across_cuda_device_<u32_t>, collective_threads_k, 0,
                                   false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(table.infra.dense_histogram,
                                   (void const *)&histogram_dense_across_cuda_device_<dense_iter_t>,
                                   collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     using tier_split_iter_t =
         transform_input_iterator<u32_t, warp_group_tier_functor_<tier_task_t>, tier_task_t const *>;
     status = resolve_kernel_shape(table.infra.tier_histogram,
                                   (void const *)&histogram_dense_across_cuda_device_<tier_split_iter_t>,
                                   collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.tier_scatter,
         (void const *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_tier_functor_<tier_task_t>>,
         collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.warp_group_histogram,
         (void const *)&histogram_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_key_functor_<tier_task_t>>,
         collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.warp_group_scatter,
         (void const *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, warp_group_key_functor_<tier_task_t>>,
         collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(table.infra.scan_compact,
                                   (void const *)&scan_and_compact_bucket_runs_across_cuda_device_<size_t>,
                                   collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
+    if (status.status != status_t::success_k) return status;
     status = resolve_kernel_shape(
         table.infra.router_scatter,
         (void const *)&scatter_tasks_by_bucket_across_cuda_device_<tier_task_t, weighted_dense_tier_functor<char_t>>,
         collective_threads_k, 0, false);
-    if (status.status != status_t::success_k) return {table, status};
-    resolved = true;
-    return {table, {}};
+    if (status.status != status_t::success_k) return status;
+    return {status_t::success_k, cudaSuccess};
+}
+
+/**
+ *  @brief This device's weighted NW/SW kernel table, resolved once per gap-cost, locality, capability and device.
+ *         Both `needleman_wunsch_scores` and `smith_waterman_scores` call it with their own `locality_`.
+ *  @sa cuda_device_kernels
+ */
+template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capability_t capability_>
+expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_(int device_id) noexcept {
+    static cuda_device_kernels<weighted_kernels_t> per_device;
+    auto *entry = per_device.acquire(device_id);
+    if (!entry) return {per_device.unusable(), {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE}};
+    if (!entry->resolved) {
+        cuda_status_t const status = resolve_weighted_kernels_<gap_costs_type_, locality_, capability_>(entry->table,
+                                                                                                        device_id);
+        if (status.status != status_t::success_k) {
+            per_device.release();
+            return {per_device.unusable(), status};
+        }
+        entry->resolved = true;
+    }
+    per_device.release();
+    return {entry->table, {}};
 }
 
 /**
@@ -5746,14 +5782,14 @@ expected<weighted_kernels_t const &, cuda_status_t> weighted_kernels_() noexcept
  *         table.
  */
 template <typename gap_costs_type_, typename allocator_type_>
-cuda_status_t cuda_weighted_run_trampoline_(                                                                          //
-    cuda_cross_buffers<cuda_similarity_task<char>, allocator_type_> &buffers, error_costs_32x32_t const &substituter, //
-    gap_costs_type_ const &gap_costs, weighted_kernels_t const &kernel_table, cuda_timer_t &timer,                    //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,      //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                   //
-        &byte_to_class_buffer,                                                                                        //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>>   //
-        &class_substitution_costs_buffer,                                                                             //
+cuda_status_t cuda_weighted_run_trampoline_(                                                                        //
+    cuda_cross_buffers<cuda_similarity_task<char>> &buffers, error_costs_32x32_t const &substituter,                //
+    gap_costs_type_ const &gap_costs, weighted_kernels_t const &kernel_table, cuda_timer_t &timer,                  //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,    //
+    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                 //
+        &byte_to_class_buffer,                                                                                      //
+    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
+        &class_substitution_costs_buffer,                                                                           //
     cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     using char_t = char;
@@ -5763,7 +5799,7 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
     [[maybe_unused]] constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
     // Create the engine-owned timing events on first use; the kernel table is already resolved by the caller.
-    CUresult timer_error = timer.ensure_created();
+    CUresult timer_error = timer.ensure_created(executor.device_id());
     if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
     auto &tasks = buffers.tasks_;
 
@@ -5842,8 +5878,8 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         size_t warp_group_count = 0;
         [[maybe_unused]] auto [device_level_tasks, warp_level_tasks, empty_tasks] = warp_tasks_grouping<task_t>(
             {tasks.data() + count_thread_level_tasks, tasks.size() - count_thread_level_tasks}, specs,
-            executor.stream(), buffers.bucket_scratch_, buffers.warp_partition_scratch_, buffers.warp_split_counts_,
-            buffers.warp_group_keys_, buffers.warp_group_sizes_, buffers.warp_group_descriptors_, warp_group_count,
+            executor.stream(), buffers.sort_histogram_, buffers.tasks_spare_, buffers.warp_tier_counts_,
+            buffers.warp_group_keys_, buffers.warp_group_extents_, buffers.warp_group_descriptors_, warp_group_count,
             kernel_table.infra.segmented_reduce_max, kernel_table.infra.tier_histogram, kernel_table.infra.tier_scatter,
             kernel_table.infra.exclusive_sum_u32, kernel_table.infra.warp_group_histogram,
             kernel_table.infra.warp_group_scatter, kernel_table.infra.scan_compact);
@@ -5851,13 +5887,13 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         if (device_level_tasks.size()) {
             // Device tier -> the same tiled register-micro-tile kernel as Levenshtein, here in NW/SW form: maximize
             // (`sz_maximize_score_k`), the 32-class substituter, and signed results. Linear uses one row frontier +
-            // corners; affine (Gotoh) carries M + H left-edges + M corners. `buffers.diagonals_u64_buffer_` holds
+            // corners; affine (Gotoh) carries M + H left-edges + M corners. `buffers.diagonals_` holds
             // every pair's frontier slice padded to the batch's largest pair, run at the widest signed cell width.
             // NW/SW floor at i32 (GPU scalar i16 min/add promote to 32-bit anyway, so a narrower frontier buys nothing).
             static constexpr unsigned tiled_warps_per_block_k = 8, tiled_tile_side_k = 128;
             device_tier_maxima_t maxima;
             cuda_status_t const maxima_status = reduce_device_tier_maxima_<char_t>(
-                {device_level_tasks.data(), device_level_tasks.size()}, buffers.device_maxima_scratch_,
+                {device_level_tasks.data(), device_level_tasks.size()}, buffers.shape_maxima_,
                 kernel_table.infra.reduce_maxima3_bytes, executor.stream(), maxima);
             if (maxima_status.status != status_t::success_k) return maxima_status;
             unsigned const max_bytes_per_cell = sz_max_of_two(maxima.max_bytes_per_cell,
@@ -5914,15 +5950,15 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
  */
 template <typename gap_costs_type_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename allocator_type_, typename queries_type_, typename candidates_type_, typename results_type_>
-cuda_status_t cuda_weighted_cross_(                                                                                   //
-    cuda_cross_buffers<cuda_similarity_task<char>, allocator_type_> &buffers, error_costs_32x32_t const &substituter, //
-    gap_costs_type_ const &gap_costs, cuda_timer_t &timer,                                                            //
-    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,      //
-    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                   //
-        &byte_to_class_buffer,                                                                                        //
-    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>>   //
-        &class_substitution_costs_buffer,                                                                             //
-    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,                        //
+cuda_status_t cuda_weighted_cross_(                                                                                 //
+    cuda_cross_buffers<cuda_similarity_task<char>> &buffers, error_costs_32x32_t const &substituter,                //
+    gap_costs_type_ const &gap_costs, cuda_timer_t &timer,                                                          //
+    safe_vector<u32_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u32_t>> &tier_rle,    //
+    safe_vector<u8_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<u8_t>>                 //
+        &byte_to_class_buffer,                                                                                      //
+    safe_vector<error_cost_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<error_cost_t>> //
+        &class_substitution_costs_buffer,                                                                           //
+    queries_type_ const &queries, candidates_type_ const &candidates, results_type_ &&results,                      //
     cross_similarities_t cross_kind, cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
     using char_t = char;
@@ -5951,19 +5987,21 @@ cuda_status_t cuda_weighted_cross_(                                             
     // Device-side materialization for BOTH all-pairs and symmetric (one thread per live cell; the symmetric
     // path maps the flat cell index into the lower triangle). Build the O(queries+candidates) descriptors on
     // the host; the kernel reads them from unified memory. Weighted cells start at 2 bytes (signed scores).
-    if (buffers.query_descs_.try_resize(queries_count) == status_t::bad_alloc_k ||
-        buffers.candidate_descs_.try_resize(candidates_count) == status_t::bad_alloc_k)
+    if (buffers.query_descriptors_.try_resize(queries_count) == status_t::bad_alloc_k ||
+        buffers.candidate_descriptors_.try_resize(candidates_count) == status_t::bad_alloc_k)
         return {status_t::bad_alloc_k};
     for (size_t query_index = 0; query_index < queries_count; ++query_index)
-        buffers.query_descs_[query_index] = {queries[query_index].data(), queries[query_index].length()};
+        buffers.query_descriptors_[query_index] = {queries[query_index].data(), queries[query_index].length()};
     for (size_t candidate_index = 0; candidate_index < candidates_count; ++candidate_index)
-        buffers.candidate_descs_[candidate_index] = {candidates[candidate_index].data(),
-                                                     candidates[candidate_index].length()};
+        buffers.candidate_descriptors_[candidate_index] = {candidates[candidate_index].data(),
+                                                           candidates[candidate_index].length()};
 
-    auto [kernel_table, kernels_status] = weighted_kernels_<gap_costs_type_, locality_, capability_>();
+    auto [kernel_table,
+          kernels_status] = weighted_kernels_<gap_costs_type_, locality_, capability_>(executor.device_id());
     if (kernels_status.status != status_t::success_k) return kernels_status;
 
-    span<char const> *queries_ptr = buffers.query_descs_.data(), *candidates_ptr = buffers.candidate_descs_.data();
+    span<char const> *queries_ptr = buffers.query_descriptors_.data(),
+                     *candidates_ptr = buffers.candidate_descriptors_.data();
     task_t *tasks_ptr = tasks.data();
     error_cost_magnitude_t substitute_magnitude = substituter.magnitude(), gap_magnitude = gap_costs.magnitude();
     sz_similarity_gaps_t gap_type_value = gap_type<gap_costs_type_>();
@@ -6047,19 +6085,21 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task<char_t>;
-    using buffers_t = cuda_cross_buffers<task_t, allocator_t>;
+    using buffers_t = cuda_cross_buffers<task_t>;
 
     error_costs_32x32_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
     /** @brief The cross-product device buffer bundle shared with the other GPU engines (passed by reference). */
-    buffers_t buffers_ {alloc_};
+    buffers_t buffers_ {};
 
-    /** @brief Grow-only dyadic-router scratch (shared machinery with Levenshtein): radix-sort keys, permutation
-     *         values, and run-length-encode outputs feeding @ref cuda_route_tasks_into_tiers_. */
+    /** @brief Dense per-tier counting-sort scratch fed to @ref cuda_route_tasks_into_tiers_ (shared machinery with
+     *         Levenshtein). */
     safe_vector<u32_t, tier_values_allocator_t> tier_rle_ {alloc_};
+    /** @brief Device-side copy of @ref substituter_'s byte-to-class lookup. @sa class_substitution_costs_buffer_ */
     safe_vector<u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
+    /** @brief Device-side copy of @ref substituter_'s class x class substitution costs. */
     safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
     cuda_timer_t timer_ {};
 
@@ -6076,7 +6116,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
     cuda_status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                              strided_rows<value_type_> results, cuda_executor_t const &executor = {},
                              gpu_specs_t specs = {}) noexcept {
-        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
+        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k, allocator_t>(
             buffers_, substituter_, gap_costs_, timer_, tier_rle_, byte_to_class_buffer_,
             class_substitution_costs_buffer_, queries, candidates, results, cross_similarities_t::all_pairs_k, executor,
             specs);
@@ -6086,7 +6126,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, gap_costs_type_, allocator_t
     template <typename sequences_type_, typename value_type_>
     cuda_status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                              cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
-        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
+        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k, allocator_t>(
             buffers_, substituter_, gap_costs_, timer_, tier_rle_, byte_to_class_buffer_,
             class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k,
             executor, specs);
@@ -6112,19 +6152,21 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task<char_t>;
-    using buffers_t = cuda_cross_buffers<task_t, allocator_t>;
+    using buffers_t = cuda_cross_buffers<task_t>;
 
     error_costs_32x32_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
     /** @brief The cross-product device buffer bundle shared with the other GPU engines (passed by reference). */
-    buffers_t buffers_ {alloc_};
+    buffers_t buffers_ {};
 
-    /** @brief Grow-only dyadic-router scratch (shared machinery with Levenshtein): radix-sort keys, permutation
-     *         values, and run-length-encode outputs feeding @ref cuda_route_tasks_into_tiers_. */
+    /** @brief Dense per-tier counting-sort scratch fed to @ref cuda_route_tasks_into_tiers_ (shared machinery with
+     *         Levenshtein). */
     safe_vector<u32_t, tier_values_allocator_t> tier_rle_ {alloc_};
+    /** @brief Device-side copy of @ref substituter_'s byte-to-class lookup. @sa class_substitution_costs_buffer_ */
     safe_vector<u8_t, byte_to_class_allocator_t> byte_to_class_buffer_ {alloc_};
+    /** @brief Device-side copy of @ref substituter_'s class x class substitution costs. */
     safe_vector<error_cost_t, class_costs_allocator_t> class_substitution_costs_buffer_ {alloc_};
     cuda_timer_t timer_ {};
 
@@ -6141,7 +6183,7 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
     cuda_status_t operator()(queries_type_ const &queries, candidates_type_ const &candidates,
                              strided_rows<value_type_> results, cuda_executor_t const &executor = {},
                              gpu_specs_t specs = {}) noexcept {
-        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
+        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k, allocator_t>(
             buffers_, substituter_, gap_costs_, timer_, tier_rle_, byte_to_class_buffer_,
             class_substitution_costs_buffer_, queries, candidates, results, cross_similarities_t::all_pairs_k, executor,
             specs);
@@ -6151,7 +6193,7 @@ struct smith_waterman_scores<error_costs_32x32_t, gap_costs_type_, allocator_typ
     template <typename sequences_type_, typename value_type_>
     cuda_status_t operator()(sequences_type_ const &sequences, strided_rows<value_type_> results,
                              cuda_executor_t const &executor = {}, gpu_specs_t specs = {}) noexcept {
-        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k>(
+        return cuda_weighted_cross_<gap_costs_t, locality_k, capability_k, allocator_t>(
             buffers_, substituter_, gap_costs_, timer_, tier_rle_, byte_to_class_buffer_,
             class_substitution_costs_buffer_, sequences, sequences, results, cross_similarities_t::symmetric_k,
             executor, specs);

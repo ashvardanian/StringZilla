@@ -16,6 +16,8 @@
 #include "stringzilla/types.hpp"
 #include "stringzillas/types.hpp" // `bytes_per_cell_t`, `one_byte_per_cell_k`
 
+#include <forkunion/types.hpp> // `limited_array` — inline storage for the per-device caches
+
 #include <cuda.h>         // `CUresult`, `cuLaunchKernelEx`, `cuFuncSetAttribute`, `cuGetErrorName`
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
 
@@ -26,6 +28,12 @@ namespace ashvardanian {
 namespace stringzillas {
 
 using namespace stringzilla;
+
+namespace fu = ashvardanian::forkunion;
+
+/** @brief Upper bound on GPUs one process addresses; sizes the inline @ref bind_primary_context_ and
+ *         @ref cuda_device_kernels caches. A machine with more reports @ref status_t::missing_gpu_k, never aliases. */
+static constexpr size_t cuda_devices_limit_k = 16;
 
 /** @brief Minimal random-index iterator yielding `start + i` — the counting-sequence base the transform iterators and
  *         the `_across_cuda_device_` histograms/reductions index into. Only `operator[]` is used (no CUB consumers
@@ -51,26 +59,57 @@ struct transform_input_iterator {
     constexpr value_type_ operator[](size_t index) const noexcept { return op(base[index]); }
 };
 
+/** @brief One device's retained primary context, keyed by the device it belongs to. */
+struct cuda_device_context_t {
+    int device_id = -1;
+    CUcontext context = nullptr;
+};
+
 /**
- *  @brief Ensures the calling thread has a current CUDA context, returning device 0's primary context (or `nullptr`).
+ *  @brief Retains @p device_id 's primary context and makes it current on the calling thread, unconditionally.
  *
- *  The driver memory allocators (`cuMemAllocManaged`/`cuMemAlloc`/`cuMemHostAlloc`) require a current context, which -
- *  unlike the runtime's implicit lazy init behind `cudaMallocManaged` - the driver never creates on its own. Grow-only
- *  engine buffers may allocate before `cuda_executor_t::try_scheduling` retains a context, so every allocator ensures
- *  device 0's primary context here. `cuInit` + retain happen exactly once (C++ magic-static), while `cuCtxSetCurrent`
- *  is re-issued per call since the current context is per-thread and allocations may arrive on any thread.
+ *  Retained @b once per device into an inline cache: `cuDevicePrimaryCtxRetain` bumps a refcount nothing here ever
+ *  releases, so retaining per call would leak it without bound. Later calls only re-issue `cuCtxSetCurrent`.
  */
-inline CUcontext ensure_primary_context_() noexcept {
-    static CUcontext primary_context = []() -> CUcontext {
-        if (cuInit(0) != CUDA_SUCCESS) return nullptr;
+inline CUcontext bind_primary_context_(int device_id, CUresult &driver_error) noexcept {
+    static fu::limited_array<cuda_device_context_t, cuda_devices_limit_k> known_contexts;
+    static spin_mutex_t known_contexts_mutex;
+
+    driver_error = CUDA_SUCCESS;
+    CUcontext context = nullptr;
+    known_contexts_mutex.lock();
+    for (size_t index = 0; index < known_contexts.size() && !context; ++index)
+        if (known_contexts[index].device_id == device_id) context = known_contexts[index].context;
+
+    if (!context) {
+        driver_error = cuInit(0);
         CUdevice device = 0;
-        if (cuDeviceGet(&device, 0) != CUDA_SUCCESS) return nullptr;
-        CUcontext context = nullptr;
-        if (cuDevicePrimaryCtxRetain(&context, device) != CUDA_SUCCESS) return nullptr;
-        return context;
-    }();
-    if (primary_context) cuCtxSetCurrent(primary_context);
-    return primary_context;
+        if (driver_error == CUDA_SUCCESS) driver_error = cuDeviceGet(&device, device_id);
+        if (driver_error == CUDA_SUCCESS) driver_error = cuDevicePrimaryCtxRetain(&context, device);
+        if (driver_error != CUDA_SUCCESS) context = nullptr;
+        // A machine with more devices than we provisioned for is reported, never silently aliased onto another.
+        else if (!known_contexts.try_push_back({device_id, context}))
+            driver_error = CUDA_ERROR_INVALID_DEVICE, context = nullptr;
+    }
+    known_contexts_mutex.unlock();
+
+    if (!context) return nullptr;
+    driver_error = cuCtxSetCurrent(context);
+    return driver_error == CUDA_SUCCESS ? context : nullptr;
+}
+
+/**
+ *  @brief Ensures the calling thread has @b some current CUDA context, returning it (or `nullptr` on failure).
+ *
+ *  An already-current context is @b kept, never redirected - @ref cuda_executor_t::ensure_current is the authority on
+ *  which device a scope belongs to. So @p device_id only picks what to bind when the thread has nothing at all, and
+ *  the result is not guaranteed to belong to it.
+ */
+inline CUcontext ensure_primary_context_(int device_id = 0) noexcept {
+    CUcontext current_context = nullptr;
+    if (cuCtxGetCurrent(&current_context) == CUDA_SUCCESS && current_context) return current_context;
+    CUresult driver_error = CUDA_SUCCESS;
+    return bind_primary_context_(device_id, driver_error);
 }
 
 /**
@@ -100,6 +139,9 @@ struct unified_alloc {
     template <typename other_value_type_>
     constexpr unified_alloc(unified_alloc<other_value_type_> const &) noexcept {}
 
+    /** @brief Allocates @p n unified-memory elements, or `nullptr` on failure. `CU_MEM_ATTACH_GLOBAL` makes the
+     *         range reachable from every device, so a buffer grown under one scope's device stays valid under
+     *         another's. */
     value_type *allocate(size_type n) const noexcept {
         if (!ensure_primary_context_()) return nullptr;
         CUdeviceptr device_pointer = 0;
@@ -108,8 +150,11 @@ struct unified_alloc {
         return reinterpret_cast<value_type *>(device_pointer);
     }
 
+    /** @brief Frees a range returned by @ref allocate. `cuMemFree` fails without a current context, so this ensures
+     *         one first - any context, since managed memory is process-wide. */
     void deallocate(pointer p, size_type) const noexcept {
         if (!p) return;
+        [[maybe_unused]] CUcontext const context = ensure_primary_context_();
         cuMemFree(reinterpret_cast<CUdeviceptr>(p));
     }
 
@@ -136,6 +181,9 @@ struct device_alloc {
     using difference_type = ssize_t;
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
+
+    /** @brief Plain device memory: containers must not move elements through it on the host while growing. */
+    static constexpr bool host_accessible_k = false;
     template <typename other_value_type_>
     struct rebind {
         using other = device_alloc<other_value_type_>;
@@ -154,7 +202,9 @@ struct device_alloc {
         return reinterpret_cast<value_type *>(device_pointer);
     }
     void deallocate(pointer p, size_type) const noexcept {
-        if (p) cuMemFree(reinterpret_cast<CUdeviceptr>(p));
+        if (!p) return;
+        [[maybe_unused]] CUcontext const context = ensure_primary_context_();
+        cuMemFree(reinterpret_cast<CUdeviceptr>(p));
     }
     template <typename other_type_>
     bool operator==(device_alloc<other_type_> const &) const noexcept {
@@ -196,7 +246,9 @@ struct pinned_alloc {
         return result;
     }
     void deallocate(pointer p, size_type) const noexcept {
-        if (p) cuMemFreeHost(p);
+        if (!p) return;
+        [[maybe_unused]] CUcontext const context = ensure_primary_context_();
+        cuMemFreeHost(p);
     }
     template <typename other_type_>
     bool operator==(pinned_alloc<other_type_> const &) const noexcept {
@@ -213,6 +265,8 @@ using pinned_alloc_t = pinned_alloc<char>;
 /** @brief Returns `true` if the pointer refers to device-accessible memory (Device or Managed/Unified). */
 inline bool is_device_accessible_memory(void const *ptr) noexcept {
     if (!ptr) return true;
+    // Without a current context the query fails and every pointer reads back as host, including device memory.
+    [[maybe_unused]] CUcontext const context = ensure_primary_context_();
     // Driver query: `CU_POINTER_ATTRIBUTE_MEMORY_TYPE` collapses both device and managed/unified memory onto
     // `CU_MEMORYTYPE_DEVICE` - exactly the two the runtime path accepted (`cudaMemoryTypeDevice`/`Managed`) - and
     // returns an error for unregistered host pointers, so a successful `CU_MEMORYTYPE_DEVICE` is the accept
@@ -284,7 +338,12 @@ inline cuda_status_t make_cuda_status(CUresult driver_error) noexcept {
         // dimension/configuration problem, distinct from a generic unknown failure.
     case CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES:
     case CUDA_ERROR_INVALID_VALUE:
-    case CUDA_ERROR_INVALID_IMAGE: status = status_t::unexpected_dimensions_k; break;
+    case CUDA_ERROR_INVALID_IMAGE:
+        status = status_t::unexpected_dimensions_k;
+        break;
+        // Matches `gpu_specs_fetch`: a rejected or out-of-range device ordinal is a missing GPU, not `unknown_k`.
+    case CUDA_ERROR_NO_DEVICE:
+    case CUDA_ERROR_INVALID_DEVICE: status = status_t::missing_gpu_k; break;
     default: status = status_t::unknown_k; break;
     }
     return {status, cudaSuccess, driver_error};
@@ -353,40 +412,44 @@ class cuda_executor_t {
     // hold one owner and hand it to the engines by `const &`.
     cuda_executor_t(cuda_executor_t const &) = delete;
     cuda_executor_t &operator=(cuda_executor_t const &) = delete;
+    // A moved-from executor is left invalid (not device 0): it owns no stream, so `ensure_current` must not
+    // authoritatively bind some other device on its behalf.
     cuda_executor_t(cuda_executor_t &&other) noexcept : stream_(other.stream_), device_id_(other.device_id_) {
         other.stream_ = 0;
-        other.device_id_ = 0;
+        other.device_id_ = -1;
     }
     cuda_executor_t &operator=(cuda_executor_t &&other) noexcept {
         if (this != &other) {
-            if (stream_) cuStreamDestroy((CUstream)stream_);
+            destroy_stream_();
             stream_ = other.stream_;
             device_id_ = other.device_id_;
             other.stream_ = 0;
-            other.device_id_ = 0;
+            other.device_id_ = -1;
         }
         return *this;
     }
-    ~cuda_executor_t() noexcept {
-        if (stream_) cuStreamDestroy((CUstream)stream_);
+    ~cuda_executor_t() noexcept { destroy_stream_(); }
+
+    /**
+     *  @brief Makes this executor's device current on the calling thread; the authority on which device it is.
+     *
+     *  A current context is per-thread while an executor is shared, so @ref try_scheduling only bound it on the
+     *  creating thread: another thread driving this scope arrives with none, or with a sibling's device current.
+     */
+    cuda_status_t ensure_current() const noexcept {
+        if (device_id_ < 0) return {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE};
+        CUresult driver_error = CUDA_SUCCESS;
+        if (!bind_primary_context_(device_id_, driver_error)) return make_cuda_status(driver_error);
+        return {status_t::success_k, cudaSuccess};
     }
 
     cuda_status_t try_scheduling(int device_id) noexcept {
-        device_id_ = -1; // ? Invalid device ID
-        // The driver never implicitly creates a context (the runtime's `cudaSetDevice` did). Initialize the driver,
-        // retain the device's primary context, and make it current on this thread - the same context the runtime
-        // registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves against. The stream itself
-        // is then created through the driver so the whole launch/sync path is CU*.
-        CUresult init_error = cuInit(0);
-        if (init_error != CUDA_SUCCESS) return make_cuda_status(init_error);
-        CUdevice device = 0;
-        CUresult device_error = cuDeviceGet(&device, device_id);
-        if (device_error != CUDA_SUCCESS) return make_cuda_status(device_error);
-        CUcontext context = nullptr;
-        CUresult context_error = cuDevicePrimaryCtxRetain(&context, device);
-        if (context_error != CUDA_SUCCESS) return make_cuda_status(context_error);
-        CUresult current_error = cuCtxSetCurrent(context);
-        if (current_error != CUDA_SUCCESS) return make_cuda_status(current_error);
+        device_id_ = -1; // ? Invalid until both the context and the stream are in place
+        // Same context the runtime registers `__global__` kernels into, which `cudaGetFuncBySymbol` later resolves
+        // against and which @ref ensure_current re-binds per thread. The stream is created through the driver too,
+        // so the whole launch/sync path stays CU*.
+        CUresult driver_error = CUDA_SUCCESS;
+        if (!bind_primary_context_(device_id, driver_error)) return make_cuda_status(driver_error);
         CUresult creation_error = cuStreamCreate((CUstream *)&stream_, CU_STREAM_NON_BLOCKING);
         if (creation_error != CUDA_SUCCESS) return make_cuda_status(creation_error);
         device_id_ = device_id;
@@ -396,44 +459,68 @@ class cuda_executor_t {
     explicit operator bool() const noexcept { return device_id_ >= 0; }
     inline CUstream stream() const noexcept { return stream_; }
     inline int device_id() const noexcept { return device_id_; }
+
+  private:
+    /** @brief Destroys the owned stream, if any, under the context that created it (not necessarily the current
+     *         thread's). Guarded on owning a stream so default-constructed/moved-from executors touch the driver
+     *         not at all. */
+    void destroy_stream_() noexcept {
+        if (!stream_) return;
+        [[maybe_unused]] cuda_status_t const context_status = ensure_current();
+        cuStreamDestroy(stream_);
+        stream_ = 0;
+    }
 };
 
 /**
- *  @brief Pair of CUDA driver events timing a launch; created once on first use and reused across calls.
+ *  @brief Pair of CUDA driver events timing a launch; created once per device and reused across calls.
  *
- *  Events need a current context, so they are created lazily inside the first `operator()` (via `ensure_created`)
- *  rather than at construction. `CU_EVENT_BLOCKING_SYNC` lets the drain sleep the host thread instead of spinning.
+ *  An event belongs to its creating context, while @b cuEventRecord needs the event and the stream to share one. A
+ *  timer is an engine member and engines get driven by scopes on different devices, so it tracks which device it
+ *  built for and rebuilds on a mismatch. `CU_EVENT_BLOCKING_SYNC` lets the drain sleep rather than spin.
  */
 struct cuda_timer_t {
     CUevent start_event = nullptr;
     CUevent stop_event = nullptr;
+    int device_id = -1;
 
     cuda_timer_t() noexcept = default;
-    ~cuda_timer_t() noexcept {
-        if (start_event) cuEventDestroy(start_event);
-        if (stop_event) cuEventDestroy(stop_event);
-    }
+    ~cuda_timer_t() noexcept { destroy_events(); }
     cuda_timer_t(cuda_timer_t const &) = delete;
     cuda_timer_t &operator=(cuda_timer_t const &) = delete;
-    cuda_timer_t(cuda_timer_t &&other) noexcept : start_event(other.start_event), stop_event(other.stop_event) {
-        other.start_event = nullptr, other.stop_event = nullptr;
+    cuda_timer_t(cuda_timer_t &&other) noexcept
+        : start_event(other.start_event), stop_event(other.stop_event), device_id(other.device_id) {
+        other.start_event = nullptr, other.stop_event = nullptr, other.device_id = -1;
     }
     cuda_timer_t &operator=(cuda_timer_t &&other) noexcept {
         if (this != &other) {
-            if (start_event) cuEventDestroy(start_event);
-            if (stop_event) cuEventDestroy(stop_event);
-            start_event = other.start_event, stop_event = other.stop_event;
-            other.start_event = nullptr, other.stop_event = nullptr;
+            destroy_events();
+            start_event = other.start_event, stop_event = other.stop_event, device_id = other.device_id;
+            other.start_event = nullptr, other.stop_event = nullptr, other.device_id = -1;
         }
         return *this;
     }
 
-    /** @brief Creates the two events on first use; a no-op on every later call. */
-    inline CUresult ensure_created() noexcept {
-        if (start_event) return CUDA_SUCCESS;
+    /** @brief Destroys both events under a current context; a no-op when none were created. */
+    inline void destroy_events() noexcept {
+        if (!start_event && !stop_event) return;
+        [[maybe_unused]] CUcontext const context = ensure_primary_context_(device_id < 0 ? 0 : device_id);
+        if (start_event) cuEventDestroy(start_event), start_event = nullptr;
+        if (stop_event) cuEventDestroy(stop_event), stop_event = nullptr;
+        device_id = -1;
+    }
+
+    /** @brief Creates the two events for @p target_device on first use, rebuilding them if the device changed. */
+    inline CUresult ensure_created(int target_device) noexcept {
+        if (start_event && device_id == target_device) return CUDA_SUCCESS;
+        if (start_event) destroy_events();
+        if (!ensure_primary_context_(target_device)) return CUDA_ERROR_INVALID_CONTEXT;
         CUresult start_error = cuEventCreate(&start_event, CU_EVENT_BLOCKING_SYNC);
         if (start_error != CUDA_SUCCESS) return start_error;
-        return cuEventCreate(&stop_event, CU_EVENT_BLOCKING_SYNC);
+        CUresult stop_error = cuEventCreate(&stop_event, CU_EVENT_BLOCKING_SYNC);
+        if (stop_error != CUDA_SUCCESS) return stop_error;
+        device_id = target_device;
+        return CUDA_SUCCESS;
     }
 
     inline CUresult record_start(CUstream stream) noexcept { return cuEventRecord(start_event, (CUstream)stream); }
@@ -487,6 +574,9 @@ enum class tile_march_t : bool { fast_k = true, checked_k = false };
  */
 inline cuda_status_t resolve_kernel_shape(kernel_shape_t &shape, void const *kernel_symbol, unsigned threads_per_block,
                                           unsigned shared_memory_ceiling, bool precompute_occupancy) noexcept {
+    // `cuFuncSetAttribute` and the occupancy query are context-scoped; callers reach this through a per-device
+    // kernel table that binds first, so this guard only covers a thread that has no context at all.
+    if (!ensure_primary_context_()) return make_cuda_status(CUDA_ERROR_INVALID_CONTEXT);
     cudaFunction_t function = nullptr;
     // Runtime-only bridge: maps a runtime-registered `__global__` host symbol to a `CUfunction`. The driver API
     // has no equivalent for runtime-compiled/fatbin-registered kernels, so the rest of the path stays CU*.
@@ -517,6 +607,50 @@ inline cuda_status_t resolve_kernel_shape(kernel_shape_t &shape, void const *ker
     }
     return {status_t::success_k, cudaSuccess};
 }
+
+/**
+ *  @brief Per-device cache of resolved kernel tables, keyed by device id and free of allocation.
+ *
+ *  A @b CUfunction is valid only in the context it was resolved under, since the runtime instantiates a module per
+ *  context - so a table built for device 0 cannot launch on device 1. Callers hold @ref acquire 's lock across the
+ *  whole resolution, not just the lookup, as a half-published table is the race a `bool resolved` flag would leave.
+ */
+template <typename table_type_>
+class cuda_device_kernels {
+  public:
+    using table_t = table_type_;
+
+  private:
+    struct entry_t {
+        int device_id = -1;
+        bool resolved = false;
+        table_t table {};
+    };
+
+    fu::limited_array<entry_t, cuda_devices_limit_k> entries_ {};
+    spin_mutex_t entries_mutex_ {};
+    /** @brief Handed back with a failure status when no slot can be provided; never resolved, never launched. */
+    table_t unusable_ {};
+
+  public:
+    /** @brief Locks the cache and returns @p device_id 's slot, or `nullptr` when the cache is full. */
+    entry_t *acquire(int device_id) noexcept {
+        entries_mutex_.lock();
+        for (size_t index = 0; index < entries_.size(); ++index)
+            if (entries_[index].device_id == device_id) return &entries_[index];
+        if (entries_.full()) {
+            entries_mutex_.unlock();
+            return nullptr;
+        }
+        entry_t fresh;
+        fresh.device_id = device_id;
+        [[maybe_unused]] bool const pushed = entries_.try_push_back(fresh);
+        return &entries_[entries_.size() - 1];
+    }
+
+    void release() noexcept { entries_mutex_.unlock(); }
+    table_t const &unusable() const noexcept { return unusable_; }
+};
 
 /**
  *  @brief Fluent builder over `CUlaunchConfig` + `cuLaunchKernelEx`, optionally cooperative.
@@ -570,7 +704,11 @@ struct cuda_launch_t {
         config_.attrs = attributes_, config_.numAttrs = num_attributes_;
         return *this;
     }
+    /** @brief Fires the configured launch - the only @b cuLaunchKernelEx call in the library. The guard keeps an
+     *         already-current context, so a scope bound via @ref cuda_executor_t::ensure_current is never
+     *         quietly redirected here. */
     inline CUresult launch(cudaFunction_t function, void **arguments) noexcept {
+        if (!ensure_primary_context_()) return CUDA_ERROR_INVALID_CONTEXT;
         return cuLaunchKernelEx(&config_, function, arguments, nullptr);
     }
 };
@@ -1172,7 +1310,7 @@ template <typename task_type_, typename scratch_buffer_type_, typename task_buff
 warp_tasks_groups<task_type_> warp_tasks_grouping( //
     span<task_type_> tasks, gpu_specs_t const &specs, CUstream stream,
     scratch_buffer_type_ &grouping_scratch, // grow-only device bucket histogram + cursors (bytes)
-    task_buffer_type_ &partition_scratch,   // grow-only task ping-pong for the counting-sort scatters
+    task_buffer_type_ &partition_scratch,   // counting-sort ping-pong; callers pass the task array's own spare
     count_buffer_type_ &counts_scratch,     // device-accessible tier split counts + cursors
     key_buffer_type_ &group_keys_scratch,   // device-accessible unique composite keys + run count
     size_buffer_type_ &group_sizes_scratch, // device-accessible run lengths, begin offsets, per-group max memory

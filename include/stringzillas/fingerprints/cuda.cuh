@@ -484,22 +484,45 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         /** @brief Warp-per-document basic rolling-hash kernel shape. */
         kernel_shape_t warp;
     };
-    /** @brief Resolves the engine's GPU kernel table once and returns it with the resolution status. */
-    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
-        static kernels_t gpu_kernels;
-        static bool resolved = false;
-        if (resolved) return {gpu_kernels, {}};
+    /**
+     *  @brief Resolves every kernel handle for @p device_id into @p table.
+     *
+     *  Split from @ref kernels so the cache lock has one release point and each failure path just forwards a status.
+     */
+    static cuda_status_t resolve_kernels_(kernels_t &table, int device_id) noexcept {
+        sz_unused_(device_id); // ? These handles need no device attribute query, only a current context
         unsigned const threads_per_block = static_cast<unsigned>(warp_size_nvidia_k) *
                                            static_cast<unsigned>(four_warps_per_multiprocessor_k);
         cuda_status_t status = resolve_kernel_shape(
-            gpu_kernels.warp,
+            table.warp,
             (void const *)&basic_rolling_hashers_kernel_<dimensions_per_launch_k, hasher_t, min_hash_t, min_count_t,
                                                          sz_cap_cuda_k, byte_t, warp_size_nvidia_k,
                                                          four_warps_per_multiprocessor_k>,
             threads_per_block, 0, true);
-        if (status.status != status_t::success_k) return {gpu_kernels, status};
-        resolved = true;
-        return {gpu_kernels, {}};
+        if (status.status != status_t::success_k) return status;
+        return {status_t::success_k, cudaSuccess};
+    }
+    /**
+     *  @brief This device's kernel table, resolved on first use.
+     *
+     *  Keyed by device because a resolved @b CUfunction belongs to the context it came from; see
+     *  @ref cuda_device_kernels. Callers must honour the status before touching the table - a full cache hands back
+     *  an unresolved one.
+     */
+    static expected<kernels_t const &, cuda_status_t> kernels(int device_id) noexcept {
+        static cuda_device_kernels<kernels_t> per_device;
+        auto *entry = per_device.acquire(device_id);
+        if (!entry) return {per_device.unusable(), {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE}};
+        if (!entry->resolved) {
+            cuda_status_t const status = resolve_kernels_(entry->table, device_id);
+            if (status.status != status_t::success_k) {
+                per_device.release();
+                return {per_device.unusable(), status};
+            }
+            entry->resolved = true;
+        }
+        per_device.release();
+        return {entry->table, {}};
     }
 
     size_t dimensions() const noexcept { return hashers_.size(); }
@@ -616,7 +639,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
     SZ_NOINLINE cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
         // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
-        CUresult timer_error = timer_.ensure_created();
+        CUresult timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
         auto &tasks = tasks_;
 
@@ -626,7 +649,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
 
         // The rolling hash is FP64-throughput-bound, so more resident warps per multiprocessor directly improve
         // latency hiding; the grid fills the device once from the kernel's precomputed occupancy.
-        auto [kernel_table, kernels_status] = kernels();
+        auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
         kernel_shape_t const &warp_shape = kernel_table.warp;
         unsigned const threads_per_block = static_cast<unsigned>(warp_size_nvidia_k) * //
@@ -736,27 +759,50 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         kernel_shape_t warp_batch;
     };
 
-    /** @brief Resolves the engine's GPU kernel table once and returns it with the resolution status. */
-    static expected<kernels_t const &, cuda_status_t> kernels() noexcept {
-        static kernels_t gpu_kernels;
-        static bool resolved = false;
-        if (resolved) return {gpu_kernels, {}};
+    /**
+     *  @brief Resolves every kernel handle for @p device_id into @p table.
+     *
+     *  Split from @ref kernels so the cache lock has one release point and each failure path just forwards a status.
+     */
+    static cuda_status_t resolve_kernels_(kernels_t &table, int device_id) noexcept {
+        sz_unused_(device_id); // ? These handles need no device attribute query, only a current context
         cuda_status_t status = resolve_kernel_shape(
-            gpu_kernels.warp_single,
+            table.warp_single,
             (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
                                                                    warp_size_nvidia_k, one_warp_per_multiprocessor_k>,
             0, 0, false);
-        if (status.status != status_t::success_k) return {gpu_kernels, status};
+        if (status.status != status_t::success_k) return status;
         unsigned const batch_threads = static_cast<unsigned>(warp_size_nvidia_k) *
                                        static_cast<unsigned>(four_warps_per_multiprocessor_k);
         status = resolve_kernel_shape(
-            gpu_kernels.warp_batch,
+            table.warp_batch,
             (void const *)&floating_rolling_hashers_per_cuda_warp_<aligned_dimensions_k, sz_cap_cuda_k, byte_t,
                                                                    warp_size_nvidia_k, four_warps_per_multiprocessor_k>,
             batch_threads, 0, true);
-        if (status.status != status_t::success_k) return {gpu_kernels, status};
-        resolved = true;
-        return {gpu_kernels, {}};
+        if (status.status != status_t::success_k) return status;
+        return {status_t::success_k, cudaSuccess};
+    }
+    /**
+     *  @brief This device's kernel table, resolved on first use.
+     *
+     *  Keyed by device because a resolved @b CUfunction belongs to the context it came from; see
+     *  @ref cuda_device_kernels. Callers must honour the status before touching the table - a full cache hands back
+     *  an unresolved one.
+     */
+    static expected<kernels_t const &, cuda_status_t> kernels(int device_id) noexcept {
+        static cuda_device_kernels<kernels_t> per_device;
+        auto *entry = per_device.acquire(device_id);
+        if (!entry) return {per_device.unusable(), {status_t::missing_gpu_k, cudaSuccess, CUDA_ERROR_INVALID_DEVICE}};
+        if (!entry->resolved) {
+            cuda_status_t const status = resolve_kernels_(entry->table, device_id);
+            if (status.status != status_t::success_k) {
+                per_device.release();
+                return {per_device.unusable(), status};
+            }
+            entry->resolved = true;
+        }
+        per_device.release();
+        return {entry->table, {}};
     }
 
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
@@ -792,7 +838,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         sz_unused_(specs);
 
         // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
-        CUresult timer_error = timer_.ensure_created();
+        CUresult timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
 
         // Populate the tasks array with a single task for the entire device, reusing the hoisted buffer.
@@ -813,7 +859,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         CUresult start_event_error = timer_.record_start(executor.stream());
         if (start_event_error != CUDA_SUCCESS) return make_cuda_status(start_event_error);
 
-        auto [kernel_table, kernels_status] = kernels();
+        auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
 
         void *warp_level_kernel_args[5];
@@ -896,7 +942,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     SZ_NOINLINE cuda_status_t run_trampoline_(cuda_executor_t const &executor, gpu_specs_t specs) noexcept {
 
         // Create the engine-owned timing events on first use; the kernel table resolves itself on first access.
-        CUresult timer_error = timer_.ensure_created();
+        CUresult timer_error = timer_.ensure_created(executor.device_id());
         if (timer_error != CUDA_SUCCESS) return make_cuda_status(timer_error);
         auto &tasks = tasks_;
 
@@ -917,7 +963,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
         // The rolling hash is FP64-throughput-bound, so more resident warps per multiprocessor directly improve
         // latency hiding; the grid fills the device once from the kernel's precomputed occupancy.
-        auto [kernel_table, kernels_status] = kernels();
+        auto [kernel_table, kernels_status] = kernels(executor.device_id());
         if (kernels_status.status != status_t::success_k) return kernels_status;
         kernel_shape_t const &warp_shape = kernel_table.warp_batch;
         unsigned const threads_per_block = static_cast<unsigned>(warp_size_nvidia_k) * //
