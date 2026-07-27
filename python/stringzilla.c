@@ -10167,28 +10167,43 @@ static PyModuleDef stringzilla_module = {
     stringzilla_cleanup,
 };
 
+/**
+ *  @brief Every type the module readies, and the name it is exported under.
+ *
+ *  A `NULL` name means the type is readied but not exported: the UTF-8 iterators are returned by
+ *  methods and never constructed by name, so they need `tp_dict` filled but no module attribute.
+ */
+static struct {
+    char const *name;
+    PyTypeObject *type;
+} const stringzilla_types[] = {
+    {"Str", &StrType},
+    {"File", &FileType},
+    {"Strs", &StrsType},
+    {"FindSplits", &FindSplitsType},
+    {"Utf8SplitNewlines", &Utf8SplitNewlinesType},
+    {"Utf8Newlines", &Utf8NewlinesType},
+    {"Utf8SplitWhitespaces", &Utf8SplitWhitespacesType},
+    {"Utf8Whitespaces", &Utf8WhitespacesType},
+    {"Utf8SplitDelimiters", &Utf8SplitDelimitersType},
+    {"Utf8Delimiters", &Utf8DelimitersType},
+    {"Utf8Wordbreaks", &Utf8WordbreaksType},
+    {NULL, &Utf8CodepointsType},
+    {NULL, &Utf8GraphemesType},
+    {NULL, &Utf8SentencesType},
+    {NULL, &Utf8LinebreaksType},
+    {NULL, &Utf8UncasedMatchesType},
+    {"Hasher", &HasherType},
+    {"Sha256", &Sha256Type},
+    {"Sha256s", &Sha256sType},
+};
+
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
+    sz_size_t const types_count = sizeof(stringzilla_types) / sizeof(stringzilla_types[0]);
 
-    if (PyType_Ready(&StrType) < 0) return NULL;
-    if (PyType_Ready(&FileType) < 0) return NULL;
-    if (PyType_Ready(&StrsType) < 0) return NULL;
-    if (PyType_Ready(&FindSplitsType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SplitNewlinesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8NewlinesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SplitWhitespacesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8WhitespacesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SplitDelimitersType) < 0) return NULL;
-    if (PyType_Ready(&Utf8DelimitersType) < 0) return NULL;
-    if (PyType_Ready(&Utf8WordbreaksType) < 0) return NULL;
-    if (PyType_Ready(&Utf8CodepointsType) < 0) return NULL;
-    if (PyType_Ready(&Utf8GraphemesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8SentencesType) < 0) return NULL;
-    if (PyType_Ready(&Utf8LinebreaksType) < 0) return NULL;
-    if (PyType_Ready(&Utf8UncasedMatchesType) < 0) return NULL;
-    if (PyType_Ready(&HasherType) < 0) return NULL;
-    if (PyType_Ready(&Sha256Type) < 0) return NULL;
-    if (PyType_Ready(&Sha256sType) < 0) return NULL;
+    for (sz_size_t type_index = 0; type_index != types_count; ++type_index)
+        if (PyType_Ready(stringzilla_types[type_index].type) < 0) return NULL;
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
@@ -10209,11 +10224,11 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // hardcoding it. A class attribute rather than a property, as it describes the algorithm.
     {
         PyObject *digest_length = PyLong_FromSize_t(SZ_SHA256_DIGEST_LENGTH);
-        if (!digest_length) return NULL;
+        if (!digest_length) goto failed;
         int const published = PyDict_SetItemString(Sha256Type.tp_dict, "digest_length", digest_length) |
                               PyDict_SetItemString(Sha256sType.tp_dict, "digest_length", digest_length);
         Py_DECREF(digest_length);
-        if (published < 0) return NULL;
+        if (published < 0) goto failed;
     }
 
     // Define SIMD capabilities as a tuple
@@ -10226,25 +10241,20 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
         // Create a Python tuple with the capabilities
         PyObject *caps_tuple = PyTuple_New(cap_count);
-        if (!caps_tuple) {
-            Py_XDECREF(m);
-            return NULL;
-        }
+        if (!caps_tuple) goto failed;
 
         for (sz_size_t i = 0; i < cap_count; i++) {
             PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
             if (!cap_str) {
                 Py_DECREF(caps_tuple);
-                Py_XDECREF(m);
-                return NULL;
+                goto failed;
             }
             PyTuple_SET_ITEM(caps_tuple, i, cap_str);
         }
 
         if (PyModule_AddObject(m, "__capabilities__", caps_tuple) < 0) {
             Py_DECREF(caps_tuple);
-            Py_XDECREF(m);
-            return NULL;
+            goto failed;
         }
 
         // Also keep the old comma-separated string version for backward compatibility
@@ -10252,173 +10262,17 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         PyModule_AddStringConstant(m, "__capabilities_str__", caps_str);
     }
 
-    Py_INCREF(&StrType);
-    if (PyModule_AddObject(m, "Str", (PyObject *)&StrType) < 0) {
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&FileType);
-    if (PyModule_AddObject(m, "File", (PyObject *)&FileType) < 0) {
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&StrsType);
-    if (PyModule_AddObject(m, "Strs", (PyObject *)&StrsType) < 0) {
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&FindSplitsType);
-    if (PyModule_AddObject(m, "FindSplits", (PyObject *)&FindSplitsType) < 0) {
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8SplitNewlinesType);
-    if (PyModule_AddObject(m, "Utf8SplitNewlines", (PyObject *)&Utf8SplitNewlinesType) < 0) {
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8NewlinesType);
-    if (PyModule_AddObject(m, "Utf8Newlines", (PyObject *)&Utf8NewlinesType) < 0) {
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8SplitWhitespacesType);
-    if (PyModule_AddObject(m, "Utf8SplitWhitespaces", (PyObject *)&Utf8SplitWhitespacesType) < 0) {
-        Py_XDECREF(&Utf8SplitWhitespacesType);
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8WhitespacesType);
-    if (PyModule_AddObject(m, "Utf8Whitespaces", (PyObject *)&Utf8WhitespacesType) < 0) {
-        Py_XDECREF(&Utf8WhitespacesType);
-        Py_XDECREF(&Utf8SplitWhitespacesType);
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8SplitDelimitersType);
-    if (PyModule_AddObject(m, "Utf8SplitDelimiters", (PyObject *)&Utf8SplitDelimitersType) < 0) {
-        Py_XDECREF(&Utf8SplitDelimitersType);
-        Py_XDECREF(&Utf8WhitespacesType);
-        Py_XDECREF(&Utf8SplitWhitespacesType);
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8DelimitersType);
-    if (PyModule_AddObject(m, "Utf8Delimiters", (PyObject *)&Utf8DelimitersType) < 0) {
-        Py_XDECREF(&Utf8DelimitersType);
-        Py_XDECREF(&Utf8SplitDelimitersType);
-        Py_XDECREF(&Utf8WhitespacesType);
-        Py_XDECREF(&Utf8SplitWhitespacesType);
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Utf8WordbreaksType);
-    if (PyModule_AddObject(m, "Utf8Wordbreaks", (PyObject *)&Utf8WordbreaksType) < 0) {
-        Py_XDECREF(&Utf8WordbreaksType);
-        Py_XDECREF(&Utf8DelimitersType);
-        Py_XDECREF(&Utf8SplitDelimitersType);
-        Py_XDECREF(&Utf8WhitespacesType);
-        Py_XDECREF(&Utf8SplitWhitespacesType);
-        Py_XDECREF(&Utf8NewlinesType);
-        Py_XDECREF(&Utf8SplitNewlinesType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&HasherType);
-    if (PyModule_AddObject(m, "Hasher", (PyObject *)&HasherType) < 0) {
-        Py_XDECREF(&HasherType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Sha256sType);
-    if (PyModule_AddObject(m, "Sha256s", (PyObject *)&Sha256sType) < 0) {
-        Py_XDECREF(&Sha256sType);
-        Py_XDECREF(&Sha256Type);
-        Py_XDECREF(&HasherType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
-
-    Py_INCREF(&Sha256Type);
-    if (PyModule_AddObject(m, "Sha256", (PyObject *)&Sha256Type) < 0) {
-        Py_XDECREF(&Sha256sType);
-        Py_XDECREF(&Sha256Type);
-        Py_XDECREF(&HasherType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
+    for (sz_size_t type_index = 0; type_index != types_count; ++type_index) {
+        char const *const name = stringzilla_types[type_index].name;
+        if (!name) continue;
+        PyTypeObject *const type = stringzilla_types[type_index].type;
+        Py_INCREF(type);
+        // Only a successful `PyModule_AddObject` steals the reference, so undo just this one and let
+        // the dying module release the types it already owns.
+        if (PyModule_AddObject(m, name, (PyObject *)type) < 0) {
+            Py_DECREF(type);
+            goto failed;
+        }
     }
 
     // Export C API functions as a single capsule structure for StringZillas
@@ -10429,17 +10283,11 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         .sz_py_export_strings_as_u64tape = sz_py_export_strings_as_u64tape,
         .sz_py_replace_strings_allocator = sz_py_replace_strings_allocator,
     };
-    if (PyModule_AddObject(m, "_sz_py_api", PyCapsule_New(&sz_py_api, "_sz_py_api", NULL)) < 0) {
-        Py_XDECREF(&Sha256sType);
-        Py_XDECREF(&Sha256Type);
-        Py_XDECREF(&HasherType);
-        Py_XDECREF(&FindSplitsType);
-        Py_XDECREF(&StrsType);
-        Py_XDECREF(&FileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
-    }
+    if (PyModule_AddObject(m, "_sz_py_api", PyCapsule_New(&sz_py_api, "_sz_py_api", NULL)) < 0) goto failed;
 
     return m;
+
+failed:
+    Py_DECREF(m);
+    return NULL;
 }
