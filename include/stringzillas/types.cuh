@@ -587,6 +587,22 @@ struct cuda_launch_t {
 /** @brief Block dimension of every collective primitive; the block collectives need it as a compile-time constant. */
 static constexpr unsigned cuda_device_collective_threads_k = 256;
 
+/** @brief @b sz_max_of_two as a reduction operator; `cuda::maximum` needs CUDA 12.9 and `cub::Max` is deprecated. */
+struct max_of_two_t {
+    template <typename value_type_>
+    __host__ __device__ value_type_ operator()(value_type_ const &first, value_type_ const &second) const noexcept {
+        return sz_max_of_two(first, second);
+    }
+};
+
+/** @brief @b sz_min_of_two as a reduction operator; `cuda::minimum` needs CUDA 12.9 and `cub::Min` is deprecated. */
+struct min_of_two_t {
+    template <typename value_type_>
+    __host__ __device__ value_type_ operator()(value_type_ const &first, value_type_ const &second) const noexcept {
+        return sz_min_of_two(first, second);
+    }
+};
+
 /** @brief Single-block per-segment block-max: for each @p segment in [0, segment_count) reduces
  *         @p input[segment_offsets[segment], segment_offsets[segment + 1]) into @p output[segment]. */
 template <typename value_type_, typename input_iterator_, typename offset_type_>
@@ -603,7 +619,7 @@ __global__ void segmented_reduce_max_across_cuda_device_(input_iterator_ input, 
             value_type_ const value = static_cast<value_type_>(input[i]);
             local = local > value ? local : value;
         }
-        value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local, ::cuda::maximum<> {});
+        value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local, max_of_two_t {});
         if (threadIdx.x == 0) output[segment] = block_max;
         __syncthreads(); // reuse of `temp_storage` on the next segment must wait for this segment's readers
     }
@@ -649,11 +665,11 @@ __global__ void reduce_maxima3_across_cuda_device_(task_type_ const *tasks, size
         local_b = local_b > value.b ? local_b : value.b;
         local_c = local_c > value.c ? local_c : value.c;
     }
-    u32_t const block_a = block_reduce_t(temp_storage).Reduce(local_a, ::cuda::maximum<> {});
+    u32_t const block_a = block_reduce_t(temp_storage).Reduce(local_a, max_of_two_t {});
     __syncthreads();
-    u32_t const block_b = block_reduce_t(temp_storage).Reduce(local_b, ::cuda::maximum<> {});
+    u32_t const block_b = block_reduce_t(temp_storage).Reduce(local_b, max_of_two_t {});
     __syncthreads();
-    u32_t const block_c = block_reduce_t(temp_storage).Reduce(local_c, ::cuda::maximum<> {});
+    u32_t const block_c = block_reduce_t(temp_storage).Reduce(local_c, max_of_two_t {});
     if (threadIdx.x == 0) {
         atomicMax(output + 0, block_a);
         atomicMax(output + 1, block_b);
@@ -698,9 +714,9 @@ __global__ void reduce_minmax_across_cuda_device_(input_iterator_ input, size_t 
         local_min = local_min < value ? local_min : value;
         local_max = local_max > value ? local_max : value;
     }
-    value_type_ const block_min = block_reduce_t(temp_storage).Reduce(local_min, ::cuda::minimum<> {});
+    value_type_ const block_min = block_reduce_t(temp_storage).Reduce(local_min, min_of_two_t {});
     __syncthreads();
-    value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local_max, ::cuda::maximum<> {});
+    value_type_ const block_max = block_reduce_t(temp_storage).Reduce(local_max, max_of_two_t {});
     if (threadIdx.x == 0) {
         atomicMin(out_min, block_min);
         atomicMax(out_max, block_max);
