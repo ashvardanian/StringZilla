@@ -171,9 +171,9 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_ymm[8
     __m256i first_stage_ymm[8], second_stage_ymm[8];
     for (sz_size_t butterfly_index = 0; butterfly_index != 4; ++butterfly_index) {
         first_stage_ymm[butterfly_index * 2 + 0] = _mm256_unpacklo_epi32(lanes_ymm[butterfly_index * 2 + 0],
-                                                                    lanes_ymm[butterfly_index * 2 + 1]);
+                                                                         lanes_ymm[butterfly_index * 2 + 1]);
         first_stage_ymm[butterfly_index * 2 + 1] = _mm256_unpackhi_epi32(lanes_ymm[butterfly_index * 2 + 0],
-                                                                    lanes_ymm[butterfly_index * 2 + 1]);
+                                                                         lanes_ymm[butterfly_index * 2 + 1]);
     }
     second_stage_ymm[0] = _mm256_unpacklo_epi64(first_stage_ymm[0], first_stage_ymm[2]);
     second_stage_ymm[1] = _mm256_unpackhi_epi64(first_stage_ymm[0], first_stage_ymm[2]);
@@ -381,7 +381,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *stat
 
     for (sz_size_t block_index = 0; block_index != blocks_count; ++block_index) {
         sz_sha256_compress_haswell_(hashes_ymm, cursors);
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) cursors[lane_index] += 64;
+        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) cursors[lane_index] += SZ_SHA256_BLOCK_LENGTH;
     }
 
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
@@ -389,7 +389,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *stat
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
         for (sz_size_t word_index = 0; word_index != 8; ++word_index)
             states[lane_index].hash[word_index] = interleaved_vec[word_index].u32s[lane_index];
-        states[lane_index].total_length += blocks_count * 64;
+        states[lane_index].total_length += blocks_count * SZ_SHA256_BLOCK_LENGTH;
     }
 }
 
@@ -421,7 +421,8 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
 
         if (shared_blocks != 0) {
             sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], cursors, shared_blocks);
-            for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) remaining[lane_index] -= shared_blocks * 64;
+            for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
+                remaining[lane_index] -= shared_blocks * SZ_SHA256_BLOCK_LENGTH;
         }
 
         for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
@@ -444,8 +445,8 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
  *  Same two-pass shape as the Skylake path, except the lane select is a blend vector rather than a k-mask,
  *  since AVX2 has no mask registers.
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states, sz_size_t active_lanes_count,
-                                                               sz_u8_t *digests) {
+SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
+                                                               sz_size_t active_lanes_count, sz_u8_t *digests) {
     /*  A SHA256 block is 64 bytes whatever the vector width, so the staged blocks are 512-bit unions even
      *  though the lanes themselves are 256-bit wide. */
     sz_u512_vec_t carrier_vec[8], final_vec[8];
@@ -458,12 +459,12 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
         sz_sha256_state_t const *const state = &states[source_lane];
         sz_size_t const buffered = state->block_length;
         sz_u64_t const bit_length = state->total_length * 8;
-        for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
+        for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
             carrier_vec[lane_index].u8s[byte_index] = 0, final_vec[lane_index].u8s[byte_index] = 0;
         overflow_vec.u32s[lane_index] = 0;
 
         /*  The terminator lands in a carrier block whenever it would crowd out the trailing bit length. */
-        if (buffered + 1 > 56) {
+        if (buffered + 1 > SZ_SHA256_BLOCK_LENGTH - 8) {
             overflow_vec.u32s[lane_index] = 0xFFFFFFFFu, any_overflow = sz_true_k;
             for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
                 carrier_vec[lane_index].u8s[byte_index] = state->block[byte_index];
@@ -475,7 +476,8 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
             final_vec[lane_index].u8s[buffered] = 0x80;
         }
         for (sz_size_t byte_index = 0; byte_index != 8; ++byte_index)
-            final_vec[lane_index].u8s[56 + byte_index] = (sz_u8_t)(bit_length >> (56 - byte_index * 8));
+            final_vec[lane_index].u8s[SZ_SHA256_BLOCK_LENGTH - 8 + byte_index] = (sz_u8_t)(bit_length >>
+                                                                                           (56 - byte_index * 8));
 
         carrier_blocks[lane_index] = carrier_vec[lane_index].u8s;
         final_blocks[lane_index] = final_vec[lane_index].u8s;
@@ -503,7 +505,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
         for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
             sz_u32_t const word = interleaved_vec[word_index].u32s[lane_index];
-            sz_u8_t *const target = &digests[lane_index * 32 + word_index * 4];
+            sz_u8_t *const target = &digests[lane_index * SZ_SHA256_DIGEST_LENGTH + word_index * 4];
             target[0] = (sz_u8_t)(word >> 24), target[1] = (sz_u8_t)(word >> 16);
             target[2] = (sz_u8_t)(word >> 8), target[3] = (sz_u8_t)(word >> 0);
         }
@@ -515,7 +517,8 @@ SZ_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_state_t const
     for (; first_lane_index < states_count; first_lane_index += 8) {
         sz_size_t const remaining = states_count - first_lane_index;
         sz_size_t const active_lanes_count = remaining < 8 ? remaining : 8;
-        sz_sha256_multistate_digest_lanes_haswell_(&states[first_lane_index], active_lanes_count, &digests[first_lane_index * 32]);
+        sz_sha256_multistate_digest_lanes_haswell_(&states[first_lane_index], active_lanes_count,
+                                                   &digests[first_lane_index * SZ_SHA256_DIGEST_LENGTH]);
     }
 }
 

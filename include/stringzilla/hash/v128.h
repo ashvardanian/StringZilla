@@ -490,7 +490,7 @@ SZ_HELPER_INLINE v128_t sz_sha256_sigma1_lower_v128_(v128_t x) {
  *  two-phase `sigma1` and a final lane blend. The input words are loaded big-endian via one shuffle.
  */
 SZ_HELPER_AUTO void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8)],
-                                                  sz_u8_t const block[sz_at_least_(64)]) {
+                                                  sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_align_(16) sz_u32_t w[64];
 
@@ -539,10 +539,10 @@ SZ_API_COMPTIME void sz_sha256_state_init_v128(sz_sha256_state_t *state) { sz_sh
 SZ_API_COMPTIME void sz_sha256_state_update_v128(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     // Identical driver to `sz_sha256_state_update_serial`, routed through the SIMD block processor.
     sz_u8_t const *input = (sz_u8_t const *)data;
-    sz_size_t const current_block_index = state_ptr->block_length / 64;
-    sz_size_t const final_block_index = (state_ptr->block_length + length) / 64;
+    sz_size_t const current_block_index = state_ptr->block_length / SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const final_block_index = (state_ptr->block_length + length) / SZ_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->block_length + length) % 64 == 0;
+    int const fills_the_block = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH == 0;
 
     state_ptr->total_length += length;
     if (stays_in_the_block && !fills_the_block) {
@@ -550,8 +550,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_v128(sz_sha256_state_t *state_ptr, s
         return;
     }
 
-    sz_size_t const head_length = (64 - state_ptr->block_length) % 64;
-    sz_size_t const tail_length = (state_ptr->block_length + length) % 64;
+    sz_size_t const head_length = (SZ_SHA256_BLOCK_LENGTH - state_ptr->block_length) % SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const tail_length = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH;
     sz_size_t const body_length = length - head_length - tail_length;
 
     sz_align_(32) sz_u32_t hash[8];
@@ -564,7 +564,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_v128(sz_sha256_state_t *state_ptr, s
         state_ptr->block_length = 0;
         input += head_length;
     }
-    for (sz_size_t processed = 0; processed < body_length; processed += 64, input += 64)
+    for (sz_size_t processed = 0; processed < body_length;
+         processed += SZ_SHA256_BLOCK_LENGTH, input += SZ_SHA256_BLOCK_LENGTH)
         sz_sha256_process_block_v128_(hash, input);
     for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
         state_ptr->block[byte_index] = input[byte_index];
@@ -573,7 +574,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_v128(sz_sha256_state_t *state_ptr, s
     for (sz_size_t word_index = 0; word_index < 8; ++word_index) state_ptr->hash[word_index] = hash[word_index];
 }
 
-SZ_API_COMPTIME void sz_sha256_state_digest_v128(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_v128(sz_sha256_state_t const *state,
+                                                 sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
     sz_sha256_state_digest_serial(state, digest);
 }
 

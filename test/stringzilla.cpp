@@ -137,6 +137,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_hash_unit", test_hash_unit);
     failures += run_test("test_hash_all", test_hash_all);
     failures += run_test("test_hash_multiseed_all", test_hash_multiseed_all);
+    failures += run_test("test_sha256_multistate_all", test_sha256_multistate_all);
 
     std::printf("\n=== Sequence Algorithms ===\n");
     failures += run_test("test_sort_unit", test_sort_unit);

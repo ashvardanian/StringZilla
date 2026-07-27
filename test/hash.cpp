@@ -82,12 +82,12 @@ using namespace std::literals; // for ""sv
 #pragma region Helpers
 
 /** @brief Parses a 64-character lowercase-hex SHA256 digest into 32 bytes. */
-static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[32]) {
+static void sha256_digest_from_hex_(char const *hex, sz_u8_t (&digest)[SZ_SHA256_DIGEST_LENGTH]) {
     auto nibble = [](char character) -> sz_u8_t {
         if (character >= '0' && character <= '9') return (sz_u8_t)(character - '0');
         return (sz_u8_t)(character - 'a' + 10);
     };
-    for (std::size_t byte_index = 0; byte_index != 32; ++byte_index)
+    for (std::size_t byte_index = 0; byte_index != SZ_SHA256_DIGEST_LENGTH; ++byte_index)
         digest[byte_index] = (sz_u8_t)((nibble(hex[byte_index * 2]) << 4) | nibble(hex[byte_index * 2 + 1]));
 }
 
@@ -96,12 +96,40 @@ static void check_sha256_unit_(                                   //
     sz_sha256_state_init_t init, sz_sha256_state_update_t update, //
     sz_sha256_state_digest_t digest, std::string const &message, char const *expected_hex) {
     sz_sha256_state_t state;
-    sz_u8_t produced[32], expected[32];
+    sz_u8_t produced[SZ_SHA256_DIGEST_LENGTH], expected[SZ_SHA256_DIGEST_LENGTH];
     sha256_digest_from_hex_(expected_hex, expected);
     init(&state);
     update(&state, message.data(), (sz_size_t)message.size());
     digest(&state, produced);
-    assert(std::memcmp(produced, expected, 32) == 0);
+    assert(std::memcmp(produced, expected, SZ_SHA256_DIGEST_LENGTH) == 0);
+}
+
+/** @brief A message paired with the digest it must produce, for known-answer testing. */
+struct known_sha256_t {
+    char const *message;
+    char const *digest_hex;
+};
+
+/** @brief Runs one multi-state SHA256 backend over a batch of vectors and asserts every expected digest. */
+static void check_sha256_multistate_unit_(                                      //
+    sz_sha256_multistate_update_t update, sz_sha256_multistate_digest_t digest, //
+    known_sha256_t const *vectors, std::size_t vectors_count) {
+    std::vector<sz_sha256_state_t> states(vectors_count);
+    std::vector<sz_u8_t> produced(vectors_count * SZ_SHA256_DIGEST_LENGTH);
+    std::vector<sz_string_view_t> messages(vectors_count);
+    sz_u8_t expected[SZ_SHA256_DIGEST_LENGTH];
+    for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
+        sz_sha256_state_init(&states[lane_index]);
+        messages[lane_index].start = vectors[lane_index].message;
+        messages[lane_index].length = (sz_size_t)std::strlen(vectors[lane_index].message);
+    }
+    sz_sequence_t const texts = sequence_from_(messages.data(), vectors_count);
+    update(states.data(), &texts);
+    digest(states.data(), (sz_size_t)vectors_count, produced.data());
+    for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
+        sha256_digest_from_hex_(vectors[lane_index].digest_hex, expected);
+        assert(std::memcmp(&produced[lane_index * SZ_SHA256_DIGEST_LENGTH], expected, SZ_SHA256_DIGEST_LENGTH) == 0);
+    }
 }
 
 #pragma endregion // Helpers
@@ -120,10 +148,6 @@ void test_hash_unit() {
     std::printf("  - testing hashing known-answer vectors...\n");
 
     // SHA256: the three canonical FIPS 180-4 vectors (empty, "abc", and the 56-byte two-block message).
-    struct known_sha256_t {
-        char const *message;
-        char const *digest_hex;
-    };
     known_sha256_t const sha256_vectors[] = {
         {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},    //
         {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}, //
@@ -215,6 +239,15 @@ struct sha256_from_sz_ {
         update_(state, text, length);
     }
     void digest(sz_sha256_state_t *state, sz_u8_t *output) const noexcept { digest_(state, output); }
+};
+
+/** @brief Wraps a multi-state SHA256 backend (update/digest) by its kernel pointers. */
+template <sz_sha256_multistate_update_t update_, sz_sha256_multistate_digest_t digest_>
+struct sha256_multistate_from_sz_ {
+    void update(sz_sha256_state_t *states, sz_sequence_t const *texts) const noexcept { update_(states, texts); }
+    void digest(sz_sha256_state_t const *states, sz_size_t states_count, sz_u8_t *digests) const noexcept {
+        digest_(states, states_count, digests);
+    }
 };
 
 /** @brief Wraps a pseudo-random fill backend by its kernel pointer. */
@@ -409,7 +442,7 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
         randomize_string(&random_text[0], length);
 
         sz_sha256_state_t state_base, state_simd;
-        sz_u8_t digest_base_result[32], digest_simd_result[32];
+        sz_u8_t digest_base_result[SZ_SHA256_DIGEST_LENGTH], digest_simd_result[SZ_SHA256_DIGEST_LENGTH];
 
         // One-shot hashing
         reference.init(&state_base);
@@ -418,7 +451,7 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
         candidate.update(&state_simd, random_text.data(), length);
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+        assert(std::memcmp(digest_base_result, digest_simd_result, SZ_SHA256_DIGEST_LENGTH) == 0);
 
         // Incremental hashing with random chunks
         reference.init(&state_base);
@@ -429,7 +462,81 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
         });
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+        assert(std::memcmp(digest_base_result, digest_simd_result, SZ_SHA256_DIGEST_LENGTH) == 0);
+    }
+}
+
+/**
+ *  @brief Compares two multi-state SHA256 backends over batches of randomly-shaped messages.
+ *
+ *  @param reference  Reference multi-state backend, producing the expected digests.
+ *  @param candidate  Candidate multi-state backend to validate against the reference.
+ *  @param inputs     Maximum lane count (inclusive) and maximum message length to fuzz with.
+ *
+ *  Sweeps every lane count up to @p inputs, so batches that fall one lane short of a vector width take a
+ *  different path through the kernel than batches that fill it. Each batch is fed twice: once in a single
+ *  call, then again split into random per-lane slices, which is what carries a partial block across calls.
+ *  Both digest buffers keep a guard lane past the end, since a batched kernel that miscounts lanes would
+ *  otherwise corrupt the caller's memory silently.
+ */
+template <typename reference_, typename candidate_>
+void test_sha256_multistate_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+
+    for (sz_size_t lanes_count = 0; lanes_count <= inputs; ++lanes_count) {
+        std::vector<std::string> messages;
+        fuzzy_config_t config;
+        config.batch_size = (std::size_t)lanes_count;
+        config.min_string_length = 0;
+        config.max_string_length = (std::size_t)inputs;
+        randomize_strings(config, messages);
+
+        std::vector<sz_sha256_state_t> reference_states(lanes_count ? lanes_count : 1);
+        std::vector<sz_sha256_state_t> candidate_states(lanes_count ? lanes_count : 1);
+        std::vector<sz_u8_t> reference_digests((lanes_count + 1) * SZ_SHA256_DIGEST_LENGTH, 0xA5);
+        std::vector<sz_u8_t> candidate_digests((lanes_count + 1) * SZ_SHA256_DIGEST_LENGTH, 0xA5);
+        for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index)
+            sz_sha256_state_init(&reference_states[lane_index]), sz_sha256_state_init(&candidate_states[lane_index]);
+
+        // One-shot: every lane consumes its whole message in a single call
+        sz_sequence_t const texts = sequence_from_(messages);
+        reference.update(reference_states.data(), &texts);
+        candidate.update(candidate_states.data(), &texts);
+        reference.digest(reference_states.data(), lanes_count, reference_digests.data());
+        candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
+        assert(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
+               0);
+
+        // Incremental: the same messages, cut into random per-lane slices across several calls
+        for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index)
+            sz_sha256_state_init(&reference_states[lane_index]), sz_sha256_state_init(&candidate_states[lane_index]);
+        // The slices are windows into the messages the caller already holds, not copies, so the kernels see
+        // a cursor advancing through one stable buffer - the shape a real caller streams with.
+        std::vector<std::size_t> offsets(messages.size(), 0);
+        std::vector<sz_string_view_t> slices(messages.size());
+        std::size_t remaining_lanes = messages.size();
+        while (remaining_lanes != 0) {
+            remaining_lanes = 0;
+            for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index) {
+                std::size_t const left = messages[lane_index].size() - offsets[lane_index];
+                std::uniform_int_distribution<std::size_t> slice_length_distribution(0, left);
+                std::size_t const take = slice_length_distribution(global_random_generator());
+                slices[lane_index].start = messages[lane_index].data() + offsets[lane_index];
+                slices[lane_index].length = (sz_size_t)take;
+                offsets[lane_index] += take;
+                if (offsets[lane_index] != messages[lane_index].size()) ++remaining_lanes;
+            }
+            sz_sequence_t const slice_texts = sequence_from_(slices.data(), slices.size());
+            reference.update(reference_states.data(), &slice_texts);
+            candidate.update(candidate_states.data(), &slice_texts);
+        }
+        reference.digest(reference_states.data(), lanes_count, reference_digests.data());
+        candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
+        assert(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
+               0);
+
+        for (std::size_t guard_index = 0; guard_index != SZ_SHA256_DIGEST_LENGTH;
+             ++guard_index) // No overwrite past the last lane
+            assert(candidate_digests[lanes_count * SZ_SHA256_DIGEST_LENGTH + guard_index] == 0xA5);
     }
 }
 
@@ -614,6 +721,56 @@ void test_hash_multiseed_all() {
 #if SZ_USE_V128RELAXED
     test_hash_multiseed_equivalence(hash_multiseed_from_sz_<sz_hash_multiseed_v128relaxed, sz_hash_v128relaxed> {},
                                     lengths);
+#endif
+}
+
+/**
+ *  @brief Validates every multi-state SHA256 backend against per-lane single-message hashing.
+ *
+ *  Lane counts bracket both vector widths, because a batch that is one lane short of the width takes an
+ *  entirely different path through the kernel than one that fills it. Ragged and streaming shapes follow,
+ *  since uniform full-block batches would never exercise the head, tail or shared-minimum arithmetic.
+ */
+void test_sha256_multistate_all() {
+    std::printf("  - testing multi-state SHA256 against per-lane hashing...\n");
+
+    // The three canonical FIPS 180-4 vectors, batched, so the batch entry point is pinned to known digests
+    // rather than only to another implementation
+    known_sha256_t const batched_vectors[] = {
+        {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},    //
+        {"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}, //
+        {"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",                 //
+         "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"},
+    };
+    std::size_t const batched_count = sizeof(batched_vectors) / sizeof(batched_vectors[0]);
+    check_sha256_multistate_unit_(sz_sha256_multistate_update, // Dispatched (automatic kernel)
+                                  sz_sha256_multistate_digest, batched_vectors, batched_count);
+    check_sha256_multistate_unit_(sz_sha256_multistate_update_serial, // Manual: serial kernel
+                                  sz_sha256_multistate_digest_serial, batched_vectors, batched_count);
+
+    sz_size_t const multistate_inputs = (sz_size_t)scale_iterations(64);
+    using multistate_serial_t =
+        sha256_multistate_from_sz_<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial>;
+    multistate_serial_t const multistate_serial;
+    sz_unused_(multistate_serial), sz_unused_(multistate_inputs);
+
+#if SZ_USE_GOLDMONT
+    test_sha256_multistate_equivalence(
+        multistate_serial,
+        sha256_multistate_from_sz_<sz_sha256_multistate_update_goldmont, sz_sha256_multistate_digest_goldmont> {},
+        multistate_inputs);
+#endif
+#if SZ_USE_HASWELL
+    test_sha256_multistate_equivalence(
+        multistate_serial,
+        sha256_multistate_from_sz_<sz_sha256_multistate_update_haswell, sz_sha256_multistate_digest_haswell> {},
+        multistate_inputs);
+#endif
+#if SZ_USE_SKYLAKE
+    test_sha256_multistate_equivalence(
+        multistate_serial,
+        sha256_multistate_from_sz_<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake> {},
+        multistate_inputs);
 #endif
 }
 

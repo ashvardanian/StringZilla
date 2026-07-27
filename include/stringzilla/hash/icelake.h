@@ -559,7 +559,7 @@ SZ_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,
  *  @param block Pointer to 64-byte message block.
  */
 SZ_HELPER_AUTO void sz_sha256_process_block_icelake_(sz_u32_t hash[sz_at_least_(8)],
-                                                     sz_u8_t const block[sz_at_least_(64)]) {
+                                                     sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Load entire 64-byte block with single 512-bit load and byte-swap
@@ -767,10 +767,10 @@ SZ_API_COMPTIME void sz_sha256_state_init_icelake(sz_sha256_state_t *state_ptr) 
 
 SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr, sz_cptr_t data, sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
-    sz_size_t const current_block_index = state_ptr->block_length / 64;
-    sz_size_t const final_block_index = (state_ptr->block_length + length) / 64;
+    sz_size_t const current_block_index = state_ptr->block_length / SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const final_block_index = (state_ptr->block_length + length) / SZ_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state_ptr->block_length + length) % 64 == 0;
+    int const fills_the_block = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH == 0;
 
     state_ptr->total_length += length;
 
@@ -781,8 +781,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr
     }
 
     // Calculate head, body, and tail lengths
-    sz_size_t const head_length = (64 - state_ptr->block_length) % 64;
-    sz_size_t const tail_length = (state_ptr->block_length + length) % 64;
+    sz_size_t const head_length = (SZ_SHA256_BLOCK_LENGTH - state_ptr->block_length) % SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const tail_length = (state_ptr->block_length + length) % SZ_SHA256_BLOCK_LENGTH;
     sz_size_t const body_length = length - head_length - tail_length;
 
     // Copy hash to aligned local buffer
@@ -801,7 +801,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr
     }
 
     // Process body (complete aligned blocks)
-    for (sz_size_t processed = 0; processed < body_length; processed += 64, input += 64)
+    for (sz_size_t processed = 0; processed < body_length;
+         processed += SZ_SHA256_BLOCK_LENGTH, input += SZ_SHA256_BLOCK_LENGTH)
         sz_sha256_process_block_icelake_(hash, input);
 
     // Process tail (remaining bytes into block buffer)
@@ -816,7 +817,7 @@ SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr
 }
 
 SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state_ptr,
-                                                    sz_u8_t digest[sz_at_least_(32)]) {
+                                                    sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -826,7 +827,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *sta
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (state.block_length > 56) {
         // Zero remaining bytes using AVX-512 masked store
-        sz_size_t remaining = 64 - state.block_length;
+        sz_size_t remaining = SZ_SHA256_BLOCK_LENGTH - state.block_length;
         __mmask64 remaining_mask = sz_u64_clamp_mask_until_(remaining);
         _mm512_mask_storeu_epi8(&state.block[state.block_length], remaining_mask, _mm512_setzero_si512());
         sz_sha256_process_block_icelake_(state.hash, state.block);

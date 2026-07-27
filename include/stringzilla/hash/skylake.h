@@ -535,7 +535,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
 
     for (sz_size_t block_index = 0; block_index != blocks_count; ++block_index) {
         sz_sha256_compress_skylake_(hashes_zmm, cursors);
-        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) cursors[lane_index] += 64;
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) cursors[lane_index] += SZ_SHA256_BLOCK_LENGTH;
     }
 
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
@@ -543,7 +543,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
         for (sz_size_t word_index = 0; word_index != 8; ++word_index)
             states[lane_index].hash[word_index] = interleaved_vec[word_index].u32s[lane_index];
-        states[lane_index].total_length += blocks_count * 64;
+        states[lane_index].total_length += blocks_count * SZ_SHA256_BLOCK_LENGTH;
     }
 }
 
@@ -564,18 +564,20 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
             cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
             remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
             if (state->block_length != 0) {
-                sz_size_t const missing = 64 - state->block_length;
+                sz_size_t const missing = SZ_SHA256_BLOCK_LENGTH - state->block_length;
                 if (remaining[lane_index] >= missing) {
                     sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], missing);
                     cursors[lane_index] += missing, remaining[lane_index] -= missing;
                 }
             }
-            if (remaining[lane_index] / 64 < shared_blocks) shared_blocks = remaining[lane_index] / 64;
+            if (remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH < shared_blocks)
+                shared_blocks = remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH;
         }
 
         if (shared_blocks != 0) {
             sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], cursors, shared_blocks);
-            for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) remaining[lane_index] -= shared_blocks * 64;
+            for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
+                remaining[lane_index] -= shared_blocks * SZ_SHA256_BLOCK_LENGTH;
         }
 
         for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
@@ -614,7 +616,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t
         final_vec[lane_index].zmm = _mm512_setzero_si512();
 
         /*  The terminator lands in a carrier block whenever it would crowd out the trailing bit length. */
-        if (buffered + 1 > 56) {
+        if (buffered + 1 > SZ_SHA256_BLOCK_LENGTH - 8) {
             overflow_mask |= (__mmask16)((sz_u32_t)1 << lane_index);
             for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
                 carrier_vec[lane_index].u8s[byte_index] = state->block[byte_index];
@@ -626,7 +628,8 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t
             final_vec[lane_index].u8s[buffered] = 0x80;
         }
         for (sz_size_t byte_index = 0; byte_index != 8; ++byte_index)
-            final_vec[lane_index].u8s[56 + byte_index] = (sz_u8_t)(bit_length >> (56 - byte_index * 8));
+            final_vec[lane_index].u8s[SZ_SHA256_BLOCK_LENGTH - 8 + byte_index] = (sz_u8_t)(bit_length >>
+                                                                                           (56 - byte_index * 8));
 
         carrier_blocks[lane_index] = carrier_vec[lane_index].u8s;
         final_blocks[lane_index] = final_vec[lane_index].u8s;
@@ -654,7 +657,7 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
         for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
             sz_u32_t const word = interleaved_vec[word_index].u32s[lane_index];
-            sz_u8_t *const target = &digests[lane_index * 32 + word_index * 4];
+            sz_u8_t *const target = &digests[lane_index * SZ_SHA256_DIGEST_LENGTH + word_index * 4];
             target[0] = (sz_u8_t)(word >> 24), target[1] = (sz_u8_t)(word >> 16);
             target[2] = (sz_u8_t)(word >> 8), target[3] = (sz_u8_t)(word >> 0);
         }
@@ -667,7 +670,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const
         sz_size_t const remaining = states_count - first_lane_index;
         sz_size_t const active_lanes_count = remaining < 16 ? remaining : 16;
         sz_sha256_multistate_digest_lanes_skylake_(&states[first_lane_index], active_lanes_count,
-                                                   &digests[first_lane_index * 32]);
+                                                   &digests[first_lane_index * SZ_SHA256_DIGEST_LENGTH]);
     }
 }
 

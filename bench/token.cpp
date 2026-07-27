@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_token.cpp
+ *  @file bench/token.cpp
  *  @brief Benchmarks token-level operations like hashing, equality, ordering, and copies.
  *         The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *         validating the SIMD-accelerated backends against the serial baselines.
@@ -478,7 +478,7 @@ struct sha256_stream_from_sz {
         sz_sha256_state_t state;
         init_(&state);
         stream_(&state, s.data(), s.size());
-        sz_u8_t digest[32];
+        sz_u8_t digest[SZ_SHA256_DIGEST_LENGTH];
         fold_(&state, digest);
         // Use first 8 bytes of digest as check value
         sz_u64_t check = 0;
@@ -487,6 +487,102 @@ struct sha256_stream_from_sz {
         return {s.size(), static_cast<check_value_t>(check), 1};
     }
 };
+
+/** @brief Number of independent messages driven through one multi-state SHA256 call. */
+enum : std::size_t { multistate_lanes_k = 16 };
+
+/** @brief Baseline: digests a batch of tokens through independent single-state SHA256 calls. */
+struct sha256_multistate_loop_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        sz_sha256_state_t states[multistate_lanes_k];
+        sz_u8_t digests[multistate_lanes_k * SZ_SHA256_DIGEST_LENGTH];
+        std::size_t bytes_passed = 0;
+        for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
+            std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            sz_sha256_state_init(&states[lane_index]);
+            sz_sha256_state_update(&states[lane_index], token.data(), token.size());
+            sz_sha256_state_digest(&states[lane_index], &digests[lane_index * SZ_SHA256_DIGEST_LENGTH]);
+            bytes_passed += token.size();
+        }
+        // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane ordering is
+        // exactly what a batched kernel gets wrong.
+        sz_u64_t mixed = 0;
+        for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
+            sz_u64_t lane_word;
+            std::memcpy(&lane_word, &digests[lane_index * SZ_SHA256_DIGEST_LENGTH], sizeof(sz_u64_t));
+            mixed = mixed * 31u + lane_word;
+        }
+        do_not_optimize(mixed);
+        call_result_t result;
+        result.bytes_passed = bytes_passed;
+        result.check_value = static_cast<check_value_t>(mixed);
+        result.operations = multistate_lanes_k;
+        result.inputs_processed = multistate_lanes_k;
+        return result;
+    }
+};
+
+/** @brief Digests a batch of tokens through one `sz_sha256_multistate_update` call. */
+template <sz_sha256_multistate_update_t update_>
+struct sha256_multistate_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        sz_string_view_t lanes[multistate_lanes_k];
+        sz_sha256_state_t states[multistate_lanes_k];
+        sz_u8_t digests[multistate_lanes_k * SZ_SHA256_DIGEST_LENGTH];
+        std::size_t bytes_passed = 0;
+        for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
+            std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            lanes[lane_index].start = token.data();
+            lanes[lane_index].length = token.size();
+            sz_sha256_state_init(&states[lane_index]);
+            bytes_passed += token.size();
+        }
+        sz_sequence_t const texts = sequence_from_(lanes, multistate_lanes_k);
+        update_(states, &texts);
+        sz_sha256_multistate_digest(states, multistate_lanes_k, digests);
+        // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane ordering is
+        // exactly what a batched kernel gets wrong.
+        sz_u64_t mixed = 0;
+        for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
+            sz_u64_t lane_word;
+            std::memcpy(&lane_word, &digests[lane_index * SZ_SHA256_DIGEST_LENGTH], sizeof(sz_u64_t));
+            mixed = mixed * 31u + lane_word;
+        }
+        do_not_optimize(mixed);
+        call_result_t result;
+        result.bytes_passed = bytes_passed;
+        result.check_value = static_cast<check_value_t>(mixed);
+        result.operations = multistate_lanes_k;
+        result.inputs_processed = multistate_lanes_k;
+        return result;
+    }
+};
+
+void bench_sha256_multistate(environment_t const &env) {
+
+    // Baseline is the realistic status quo: one dispatched single-state hash per message, so the reported
+    // speedup isolates the structural batch win rather than a backend-versus-serial difference.
+    auto validator = sha256_multistate_loop_from_sz {env};
+    bench_result_t base = bench_unary(env, "sz_sha256_multistate_loop", validator).log();
+
+    bench_unary(env, "sz_sha256_multistate_serial", validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_serial> {env})
+        .log(base);
+#if SZ_USE_HASWELL
+    bench_unary(env, "sz_sha256_multistate_haswell", validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_haswell> {env})
+        .log(base);
+#endif
+#if SZ_USE_SKYLAKE
+    bench_unary(env, "sz_sha256_multistate_skylake", validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_skylake> {env})
+        .log(base);
+#endif
+}
 
 void bench_sha256(environment_t const &env) {
 
@@ -747,6 +843,7 @@ int main(int argc, char const **argv) {
     bench_hashing_multiseed(env);
     bench_stream_hashing(env);
     bench_sha256(env);
+    bench_sha256_multistate(env);
 
     // Binary operations
     bench_comparing_equality(env);

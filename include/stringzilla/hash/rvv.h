@@ -525,7 +525,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_rvv(sz_sha256_state_t *state_ptr, sz
     sz_sha256_state_update_serial(state_ptr, data, length);
 }
 
-SZ_API_COMPTIME void sz_sha256_state_digest_rvv(sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_rvv(sz_sha256_state_t const *state_ptr,
+                                                sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
     sz_sha256_state_digest_serial(state_ptr, digest);
 }
 

@@ -29,7 +29,7 @@ extern "C" {
  *  @param block Pointer to 64-byte message block.
  */
 SZ_HELPER_AUTO void sz_sha256_process_block_neon_(sz_u32_t hash[sz_at_least_(8)],
-                                                  sz_u8_t const block[sz_at_least_(64)]) {
+                                                  sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
     // Pre-load all round constants using multi-vector loads (4x16 = 64 bytes per load)
@@ -208,10 +208,10 @@ SZ_API_COMPTIME void sz_sha256_state_init_neonsha(sz_sha256_state_t *state) {
 
 SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *input_cursor = (sz_u8_t const *)text;
-    sz_size_t const current_block_index = state->block_length / 64;
-    sz_size_t const final_block_index = (state->block_length + length) / 64;
+    sz_size_t const current_block_index = state->block_length / SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const final_block_index = (state->block_length + length) / SZ_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
-    int const fills_the_block = (state->block_length + length) % 64 == 0;
+    int const fills_the_block = (state->block_length + length) % SZ_SHA256_BLOCK_LENGTH == 0;
 
     state->total_length += length;
 
@@ -223,8 +223,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz
     }
 
     // Calculate head, body, and tail lengths
-    sz_size_t const head_length = (64 - state->block_length) % 64;
-    sz_size_t const tail_length = (state->block_length + length) % 64;
+    sz_size_t const head_length = (SZ_SHA256_BLOCK_LENGTH - state->block_length) % SZ_SHA256_BLOCK_LENGTH;
+    sz_size_t const tail_length = (state->block_length + length) % SZ_SHA256_BLOCK_LENGTH;
     sz_size_t const body_length = length - head_length - tail_length;
 
     // Copy hash to aligned local buffer
@@ -242,7 +242,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz
     }
 
     // Process body (complete aligned blocks)
-    for (sz_size_t processed = 0; processed < body_length; processed += 64, input_cursor += 64)
+    for (sz_size_t processed = 0; processed < body_length;
+         processed += SZ_SHA256_BLOCK_LENGTH, input_cursor += SZ_SHA256_BLOCK_LENGTH)
         sz_sha256_process_block_neon_(hash, input_cursor);
 
     // Process tail (remaining bytes into block buffer)
@@ -255,7 +256,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz
     vst1q_u32(&state->hash[4], vld1q_u32(&hash[4]));
 }
 
-SZ_API_COMPTIME void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *state,
+                                                    sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t local_state = *state;
 
@@ -265,7 +267,7 @@ SZ_API_COMPTIME void sz_sha256_state_digest_neonsha(sz_sha256_state_t const *sta
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (local_state.block_length > 56) {
         // Zero remaining bytes using vectorized writes
-        sz_size_t remaining = 64 - local_state.block_length;
+        sz_size_t remaining = SZ_SHA256_BLOCK_LENGTH - local_state.block_length;
         sz_size_t vec_bytes = (remaining / 16) * 16;
         uint8x16_t zeros_u8x16 = vdupq_n_u8(0);
         for (sz_size_t byte_index = 0; byte_index < vec_bytes; byte_index += 16)
