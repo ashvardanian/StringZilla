@@ -501,7 +501,7 @@ enum {
     sz_utf8_sentence_break_haswell_astral_stage3_hi_count_k = 1344,
     sz_utf8_sentence_break_haswell_astral_leaf_groups_k = 15,
 };
-static const sz_u8_t sz_utf8_sentence_break_bmp_page_lut_[256] = {
+sz_align_(64) static const sz_u8_t sz_utf8_sentence_break_bmp_page_lut_[256] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 17, 21, 22, 23, 24, 25, 26, 27,
     28, 29, 30, 31, 32, 33, 34, 35, 33, 33, 36, 33, 37, 33, 33, 38, 39, 40, 33, 41, 42, 33, 33, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 43, 17, 17, 17, 17, 17, 17, 17, 17, 17,

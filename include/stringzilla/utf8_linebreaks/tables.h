@@ -878,7 +878,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[256] = {
  *  # Leaf ids exceed 255, so stage2/stage3 are split into lo/hi byte planes; stage3/stage4 group by (leaf>>4).
  *  @endcode
  */
-static const sz_u8_t sz_utf8_line_break_bmp_page_lut_[256] = {
+sz_align_(64) static const sz_u8_t sz_utf8_line_break_bmp_page_lut_[256] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 1,  18, 19, 1,  20, 21, 22, 23, 24, 25, 26,
     27, 1,  28, 29, 30, 31, 32, 1,  33, 34, 35, 36, 37, 1,  38, 39, 40, 41, 42, 43, 44, 45, 46, 46, 46, 46, 46, 46, 46,
     46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 47, 46, 46, 46, 46, 46, 46, 46, 46, 46,

@@ -766,7 +766,7 @@ static const sz_u8_t sz_utf8_word_break_astral_cls_[476] = {
  *  @endcode
  */
 #if SZ_USE_HASWELL || SZ_USE_NEON || SZ_USE_RVV || SZ_USE_V128 || SZ_USE_LASX || SZ_USE_POWERVSX
-static const sz_u8_t sz_utf8_word_break_bmp_page_lut_[256] = {
+sz_align_(64) static const sz_u8_t sz_utf8_word_break_bmp_page_lut_[256] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 1,  17, 18, 19, 1,  20, 21, 22, 23, 24, 25, 26,
     27, 1,  28, 29, 30, 31, 31, 32, 31, 31, 31, 31, 31, 31, 31, 33, 34, 35, 31, 36, 37, 38, 39, 31, 31, 31, 31, 31, 31,
     31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
