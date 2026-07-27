@@ -945,9 +945,12 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
                 auto thread_local_minimums = span<rolling_hash_t> {rolling_minimums.data() + thread_index * dims, dims};
                 auto thread_local_counts = span<min_count_t> {rolling_counts.data() + thread_index * dims, dims};
 
-                // Clear the thread-local buffers & run the rolling fingerprinting API
+                // Clear the thread-local buffers & run the rolling fingerprinting API. The counts are an
+                // accumulator the backends read on entry, and this scratch is reused across texts, so leaving them
+                // stale would fold one text's counts into the next.
                 for (auto &state : thread_local_states) state = rolling_state_t(0);
                 for (auto &minimum : thread_local_minimums) minimum = skipped_rolling_hash_k;
+                for (auto &count : thread_local_counts) count = min_count_t(0);
                 fingerprint_chunk<SZ_SIZE_MAX>(thread_local_text, thread_local_states, thread_local_minimums, {},
                                                thread_local_counts);
             });
@@ -1055,8 +1058,11 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
             rolling_state_t thread_local_states[dimensions_k];
             rolling_state_t thread_local_minimums[dimensions_k];
             min_count_t thread_local_counts[dimensions_k];
+            // ! The counts are an accumulator the backends read on entry, and a chunk shorter than the window
+            // ! completes no hash and so never overwrites them - leaving stack garbage for the gather below.
             for (size_t dim = 0; dim < dimensions_k; ++dim)
-                thread_local_states[dim] = 0, thread_local_minimums[dim] = skipped_rolling_hash_k;
+                thread_local_states[dim] = 0, thread_local_minimums[dim] = skipped_rolling_hash_k,
+                thread_local_counts[dim] = 0;
             engine.fingerprint_chunk(thread_local_text, thread_local_states, thread_local_minimums, {},
                                      thread_local_counts);
 

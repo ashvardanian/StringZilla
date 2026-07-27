@@ -31,6 +31,7 @@ namespace scripts {
 // StringZillas library symbols available on every backend:
 using ashvardanian::stringzillas::basic_rolling_hashers;
 using ashvardanian::stringzillas::buz_rolling_hasher;
+using ashvardanian::stringzillas::dummy_executor_t;
 using ashvardanian::stringzillas::floating_rolling_hasher;
 using ashvardanian::stringzillas::floating_rolling_hashers;
 using ashvardanian::stringzillas::multiplying_rolling_hasher;
@@ -457,6 +458,61 @@ void test_rolling_hashers_equivalence_against_baseline( //
     }
 }
 
+/**
+ *  @brief Compares the @b batched `operator()` against the per-text `try_fingerprint` results.
+ *
+ *  The rest of this suite only ever calls `try_fingerprint`, which handles one text at a time. The batched
+ *  `operator()` is a separate code path that either spreads whole texts across threads or, once a text exceeds
+ *  `specs.l2_bytes * executor.threads_count()`, splits that one text into overlapping chunks and merges the
+ *  per-chunk minima afterwards. Shrinking @p specs is what reaches the second branch without a thread pool or a
+ *  multi-megabyte corpus, and the corpus below deliberately includes a text shorter than the window, where a chunk
+ *  can end without ever completing one.
+ */
+template <std::size_t dims_, typename hasher_type_>
+void test_rolling_hashers_batched_against_per_text_(hasher_type_ &hasher, std::size_t window_width, cpu_specs_t specs) {
+
+    constexpr std::size_t dims_k = dims_;
+    using min_hashes_t = safe_array<u32_t, dims_k>;
+    using min_counts_t = safe_array<u32_t, dims_k>;
+
+    std::vector<std::string> texts;
+    texts.emplace_back(window_width / 2, 'a');     // ? Shorter than the window - no hash ever completes
+    texts.emplace_back(window_width, 'b');         // ? Exactly one window
+    texts.emplace_back(window_width * 8, 'c');     // ? Several windows
+    texts.emplace_back(window_width * 8 + 3, 'd'); // ? Several windows plus a ragged tail
+    for (std::size_t repeat = 0; repeat < 3; ++repeat) texts.emplace_back(window_width * 4 + repeat, 'a' + repeat);
+
+    arrow_strings_tape_t texts_tape;
+    sz_assert_(texts_tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+
+    unified_vector<min_hashes_t> per_text_hashes(texts.size()), batched_hashes(texts.size());
+    unified_vector<min_counts_t> per_text_counts(texts.size()), batched_counts(texts.size());
+
+    for (std::size_t text_index = 0; text_index != texts.size(); ++text_index)
+        sz_assert_(hasher.try_fingerprint(texts_tape[text_index].template cast<byte_t const>(),
+                                          per_text_hashes[text_index],
+                                          per_text_counts[text_index]) == status_t::success_k);
+
+    sz_assert_(hasher(texts_tape, batched_hashes, batched_counts, dummy_executor_t {}, specs) == status_t::success_k);
+
+    for (std::size_t text_index = 0; text_index != texts.size(); ++text_index) {
+        min_hashes_t const &expected_hashes = per_text_hashes[text_index];
+        min_hashes_t const &produced_hashes = batched_hashes[text_index];
+        min_counts_t const &expected_counts = per_text_counts[text_index];
+        min_counts_t const &produced_counts = batched_counts[text_index];
+        for (std::size_t dimension = 0; dimension != dims_k; ++dimension) {
+            if (expected_hashes[dimension] != produced_hashes[dimension] ||
+                expected_counts[dimension] != produced_counts[dimension])
+                std::printf("Batched fingerprint mismatch, text %zu of length %zu, dimension %zu: " //
+                            "per-text (%u, %u) vs batched (%u, %u)\n",                              //
+                            text_index, texts[text_index].size(), dimension, expected_hashes[dimension],
+                            expected_counts[dimension], produced_hashes[dimension], produced_counts[dimension]);
+            sz_assert_(expected_hashes[dimension] == produced_hashes[dimension]);
+            sz_assert_(expected_counts[dimension] == produced_counts[dimension]);
+        }
+    }
+}
+
 /** @brief Compares every compiled SIMD/CUDA `floating_rolling_hashers` backend to the serial and scalar baselines. */
 template <std::size_t window_width_, std::size_t dims_>
 void test_rolling_hashers_equivalence_for_width(      //
@@ -479,6 +535,15 @@ void test_rolling_hashers_equivalence_for_width(      //
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_serial);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_serial);
 
+    // The batched entry point on both sides of its large-text threshold. Default specs keep every text below it;
+    // a one-byte `l2_bytes` puts every text above it, which is the only way to reach the chunk-and-merge branch.
+    // `floating_rolling_hashers_in_parallel_` is shared by all CPU backends, so this covers them together.
+    cpu_specs_t whole_text_specs;
+    cpu_specs_t chunked_specs;
+    chunked_specs.l2_bytes = 1;
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_serial, window_width_k, whole_text_specs);
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_serial, window_width_k, chunked_specs);
+
 #if SZ_USE_HASWELL
     using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, dims_k>;
     rolling_haswell_t rolling_haswell;
@@ -486,6 +551,8 @@ void test_rolling_hashers_equivalence_for_width(      //
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_haswell);
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_haswell, window_width_k, whole_text_specs);
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_haswell, window_width_k, chunked_specs);
 #endif
 
 #if SZ_USE_SKYLAKE
@@ -495,6 +562,8 @@ void test_rolling_hashers_equivalence_for_width(      //
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_skylake);
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_skylake, window_width_k, whole_text_specs);
+    test_rolling_hashers_batched_against_per_text_<dims_k>(rolling_skylake, window_width_k, chunked_specs);
 #endif
 
 #if SZ_USE_CUDA
