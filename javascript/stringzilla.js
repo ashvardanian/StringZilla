@@ -211,6 +211,29 @@ export default {
     Utf8UncasedNeedle: compiled.Utf8UncasedNeedle,
 
     /**
+     *  Counts the Unicode codepoints in a UTF-8 buffer.
+     *
+     *  JavaScript strings are UTF-16, so `String.prototype.length` counts code units and
+     *  disagrees with this for anything outside the Basic Multilingual Plane.
+     *
+     *  @param {Buffer} buffer - UTF-8 encoded input
+     *  @returns {bigint} Number of codepoints
+     */
+    utf8Count: compiled.utf8Count,
+
+    /**
+     *  Resolves a codepoint index to a byte offset in a UTF-8 buffer.
+     *
+     *  Every offset the other exports return is a byte offset, so this is the bridge between
+     *  those and codepoint-indexed positions.
+     *
+     *  @param {Buffer} buffer - UTF-8 encoded input
+     *  @param {number|bigint} index - Zero-based codepoint index
+     *  @returns {bigint} Byte offset of that codepoint, or -1n if the buffer holds fewer
+     */
+    utf8Seek: compiled.utf8Seek,
+
+    /**
      *  Unicode normalization form constants for `utf8Norm` and `utf8FindDenormalized`.
      */
     Utf8NormalForm: { NFD: 0, NFC: 1, NFKD: 2, NFKC: 3 },

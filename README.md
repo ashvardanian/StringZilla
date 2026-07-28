@@ -70,13 +70,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>.casefold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.05</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.48</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.16</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.76</b> GB/s
     </td>
     <td align="center">
       <code>sz.utf8_uncased_fold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.82</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>14.41</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.86</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.81</b> GB/s
     </td>
   </tr>
   <!-- Unicode uncased search -->
@@ -88,13 +88,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>icu.StringSearch</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.04</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.10</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.15</b> GB/s
     </td>
     <td align="center">
       <code>utf8_uncased_search</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>12.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>6.9</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>12.4</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>9.3</b> GB/s
     </td>
   </tr>
   <!-- Substrings, normal order -->
@@ -104,22 +104,22 @@ __Who is this for?__
   <tr>
     <td align="center">
       <code>strstr</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>23.7</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>21.3</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>3.5</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>8.6</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>13.5</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>9.1</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>10.9</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.9</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>2.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.1</b> GB/s
     </td>
     <td align="center">
       <code>sz_find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>23.3</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>21.0</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>33.4</b> GB/s
     </td>
   </tr>
@@ -132,16 +132,16 @@ __Who is this for?__
     <td align="center">
       <code>.rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.34</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.03</b> GB/s
+      <span style="color:#ABABAB;">arm:</span> <b>0.07</b> GB/s
     </td>
     <td align="center">
       <code>.rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.9</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>3.3</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
     </td>
     <td align="center">
       <code>sz_rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>19.3</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>21.6</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>32.8</b> GB/s
     </td>
   </tr>
@@ -152,23 +152,23 @@ __Who is this for?__
   <tr>
     <td align="center">
       <code>strcspn</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>4.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.9</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>9.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.8</b> GB/s
     </td>
     <td align="center">
       <code>.find_first_of</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.4</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.2</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>4.1</b> GB/s
     </td>
     <td align="center">
       <code>re.finditer</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.16</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.33</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.32</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.64</b> GB/s
     </td>
     <td align="center">
       <code>sz_find_byteset</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>4.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>8.7</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>13.8</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>23.7</b> GB/s
     </td>
   </tr>
   <!-- Mapping characters with lookup table transforms -->
@@ -179,18 +179,18 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>std::transform</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.2</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>3.3</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>5.6</b> GB/s
     </td>
     <td align="center">
       <code>bytes.translate</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>638.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4,135.0</b> MB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1,614.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>4,153.0</b> MB/s
     </td>
     <td align="center">
       <code>sz_lookup</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>26.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>14.63</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>25.6</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>14.7</b> GB/s
     </td>
   </tr>
   <!-- Sorting -->
@@ -200,66 +200,67 @@ __Who is this for?__
   <tr>
     <td align="center">
       <code>qsort_r</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>2.79</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.33</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>3.53</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.50</b> s
     </td>
     <td align="center">
       <code>std::sort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.42</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.34</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>4.07</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.35</b> s
     </td>
     <td align="center">
       <code>numpy.argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>8.14</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>5.58</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>7.34</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>5.40</b> s
     </td>
     <td align="center">
       <code>sz_sequence_argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.70</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.26</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>1.05</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.35</b> s
     </td>
   </tr>
   <!-- Edit Distance -->
   <tr>
-    <td colspan="4" align="center">Levenshtein edit distance, DNA strings ≅ 1 KB long</td>
+    <td colspan="4" align="center">Levenshtein edit distance, DNA strings ≅ 100 bytes long, one core</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      <code>rapidfuzz</code>, best of many<br/>
-      <span style="color:#ABABAB;">x86:</span> <b>15,720</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>12,960</b> MCUPS
+      via <code>rapidfuzz</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>4,970</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>18,370</b> MCUPS
     </td>
     <td align="center">
       <code>szs_levenshtein_distances_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>141,800</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>322,600</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>6,237,990</b> MCUPS
+      <span style="color:#ABABAB;">x86:</span> <b>17,130</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>22,930</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>5,980,110</b> MCUPS
     </td>
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4" align="center">Needleman-Wunsch alignment scores, DNA strings ≅ 1 KB long</td>
+    <td colspan="4" align="center">Needleman-Wunsch alignment scores, DNA strings ≅ 1 KB long, one core</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
       via <code>biopython</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>444</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>890</b> MCUPS
+      <span style="color:#ABABAB;">x86:</span> <b>430</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1,060</b> MCUPS
     </td>
     <td align="center">
       <code>szs_needleman_wunsch_scores_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>90,450</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>16,600</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>10,730</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>16,570</b> &centerdot;
       <span style="color:#ABABAB;">cuda:</span> <b>701,760</b> MCUPS
     </td>
   </tr>
 </table>
 
 > Treat these as a first impression, not a benchmark suite.
+> The search, Unicode, lookup, and sorting rows run on a 128 MB slice of multilingual XLSum; the similarity rows on 1 KB DNA strings.
 > x86 is a Sapphire Rapids Xeon with GCC and `glibc`, Arm an 18-core Apple M5 Pro with Apple clang and `libc++`, CUDA an H100 — so the `strstr`, `.rfind`, and `bytes.translate` rows differ in standard library as much as in ISA, while the StringZilla cells build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
 
@@ -342,7 +343,7 @@ Consider contributing if you need a feature that's not yet implemented.
 | TR29 Sentence Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |
 | UAX14 Line-Break Detection     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |
 | Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |   ✅   |
+| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
 |                                |          |       |       |        |       |       |       |       |       |       |
 | Parallel Similarity Scoring    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
 | Parallel Rolling Fingerprints  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |

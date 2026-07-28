@@ -1012,6 +1012,76 @@ napi_value byteSumAPI(napi_env env, napi_callback_info info) {
     return js_result;
 }
 
+napi_value utf8CountAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    // Get buffer info for data (zero-copy)
+    void *buffer_data;
+    size_t buffer_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &buffer_data, &buffer_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "Argument must be a Buffer");
+        return NULL;
+    }
+
+    // Count the UTF-8 codepoints using `sz_utf8_count`
+    sz_size_t codepoints = sz_utf8_count((sz_cptr_t)buffer_data, buffer_length);
+
+    // Convert to JavaScript BigInt and return
+    napi_value js_result;
+    napi_create_bigint_uint64(env, (uint64_t)codepoints, &js_result);
+
+    return js_result;
+}
+
+napi_value utf8SeekAPI(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+
+    // Get buffer info for data (zero-copy)
+    void *buffer_data;
+    size_t buffer_length;
+    napi_status status = napi_get_buffer_info(env, args[0], &buffer_data, &buffer_length);
+    if (status != napi_ok) {
+        napi_throw_error(env, NULL, "First argument must be a Buffer");
+        return NULL;
+    }
+
+    // The codepoint index accepts both Number and BigInt, matching the other offset-taking exports
+    int64_t codepoint_index = 0;
+    napi_valuetype index_type;
+    napi_typeof(env, args[1], &index_type);
+    if (index_type == napi_bigint) {
+        bool lossless;
+        napi_get_value_bigint_int64(env, args[1], &codepoint_index, &lossless);
+    }
+    else {
+        double as_double;
+        if (napi_get_value_double(env, args[1], &as_double) != napi_ok) {
+            napi_throw_error(env, NULL, "Second argument must be a number or BigInt");
+            return NULL;
+        }
+        codepoint_index = (int64_t)as_double;
+    }
+    if (codepoint_index < 0) {
+        napi_throw_error(env, NULL, "Codepoint index must not be negative");
+        return NULL;
+    }
+
+    // Resolve the codepoint index to a byte offset, or -1 when the text is too short
+    sz_cptr_t start = (sz_cptr_t)buffer_data;
+    sz_cptr_t found = sz_utf8_seek(start, buffer_length, (sz_size_t)codepoint_index);
+
+    napi_value js_result;
+    if (found == NULL) napi_create_bigint_int64(env, -1, &js_result);
+    else napi_create_bigint_uint64(env, (uint64_t)(found - start), &js_result);
+
+    return js_result;
+}
+
 napi_value Init(napi_env env, napi_value exports) {
 
     // Create Hasher class constructor
@@ -1074,6 +1144,8 @@ napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor utf8UncasedFoldDesc = {"utf8UncasedFold", 0, utf8UncasedFoldAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8UncasedFindDesc = {"utf8UncasedFind", 0, utf8UncasedFindAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8NormDesc = {"utf8Norm", 0, utf8NormAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8CountDesc = {"utf8Count", 0, utf8CountAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor utf8SeekDesc = {"utf8Seek", 0, utf8SeekAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor utf8FindDenormalizedDesc = {"utf8FindDenormalized", 0, utf8FindDenormalizedAPI, 0, 0, 0,
                                                          napi_default,           0};
     napi_property_descriptor utf8WordsDesc = {"Utf8Wordbreaks", 0, 0, 0, 0, utf8WordbreaksClass, napi_default, 0};
@@ -1106,6 +1178,8 @@ napi_value Init(napi_env env, napi_value exports) {
         utf8UncasedFoldDesc,
         utf8UncasedFindDesc,
         utf8NormDesc,
+        utf8CountDesc,
+        utf8SeekDesc,
         utf8FindDenormalizedDesc,
         utf8WordsDesc,
         utf8GraphemesDesc,

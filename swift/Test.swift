@@ -19,6 +19,35 @@ class StringZillaTests: XCTestCase {
         XCTAssertEqual(testString.utf8.count, 42)
     }
 
+    func testCountRunes() {
+        // The waving hand is astral, so codepoints and UTF-8 bytes disagree.
+        XCTAssertEqual(testString.countRunes(), testString.unicodeScalars.count)
+        XCTAssertEqual(testString.countRunes(), 39)
+        XCTAssertEqual("".countRunes(), 0)
+        XCTAssertEqual("abc".countRunes(), 3)
+    }
+
+    func testIndexOfRune() {
+        // "aé中𝄞b" occupies 1, 2, 3, 4 and 1 bytes respectively.
+        let mixed = "aé中𝄞b"
+        XCTAssertEqual(mixed.countRunes(), 5)
+        XCTAssertEqual(mixed.utf8.count, 11)
+        XCTAssertEqual(mixed.index(ofRune: 0), mixed.startIndex)
+        XCTAssertEqual(mixed[mixed.index(ofRune: 2)!...], "中𝄞b")
+        XCTAssertEqual(mixed[mixed.index(ofRune: 3)!...], "𝄞b")
+        XCTAssertEqual(mixed[mixed.index(ofRune: 4)!...], "b")
+        XCTAssertNil(mixed.index(ofRune: 5))
+        XCTAssertNil(mixed.index(ofRune: 99))
+        XCTAssertNil(mixed.index(ofRune: -1))
+    }
+
+    func testIndexOfRuneMatchesUnicodeScalars() {
+        for (offset, _) in testString.unicodeScalars.enumerated() {
+            let expected = testString.unicodeScalars.index(testString.unicodeScalars.startIndex, offsetBy: offset)
+            XCTAssertEqual(testString.index(ofRune: offset), expected.samePosition(in: testString))
+        }
+    }
+
     func testFindFirstSubstring() {
         let index = testString.findFirst(substring: "world")!
         XCTAssertEqual(testString[index...], "world! Welcome to StringZilla. 👋")

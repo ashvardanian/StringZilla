@@ -207,6 +207,32 @@ extension StringZillaViewable {
         }
     }
 
+    /// Counts the Unicode codepoints in the receiver's UTF-8 bytes.
+    /// - Returns: The number of codepoints, matching `unicodeScalars.count` on well-formed input.
+    @_specialize(where Self == String)
+    @_specialize(where Self == String.UTF8View)
+    public func countRunes() -> Int {
+        return withStringZillaScope { pointer, length in
+            Int(sz_utf8_count(pointer, length))
+        }
+    }
+
+    /// Resolves a zero-based codepoint index to a position in the receiver.
+    /// - Parameter runeIndex: The zero-based codepoint index to resolve.
+    /// - Returns: The index of that codepoint, or `nil` if the receiver holds fewer.
+    @_specialize(where Self == String)
+    @_specialize(where Self == String.UTF8View)
+    public func index(ofRune runeIndex: Int) -> Index? {
+        guard runeIndex >= 0 else { return nil }
+        var result: Index?
+        withStringZillaScope { pointer, length in
+            if let runePointer = sz_utf8_seek(pointer, length, sz_size_t(runeIndex)) {
+                result = self.stringZillaByteOffset(forByte: runePointer, after: pointer)
+            }
+        }
+        return result
+    }
+
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
