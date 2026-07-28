@@ -142,7 +142,7 @@ endif ()
 
 # ISA capability probes: which SIMD tiers can this toolchain COMPILE, and which can this machine RUN. The probe sources
 # under `probes/` are shared with the Cargo build (`build.rs`); the model and the helper macros are documented in
-# `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_CAN_COMPILE_<TIER>` results and the `SZ_ISA_TIERS` list.
+# `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_COMPILABLE_TIERS` set and the `SZ_ISA_TIERS` list.
 if (SZ_IS_64BIT_X86_)
     include(cmake/sz_x86_isa_probes.cmake)
 elseif (SZ_IS_64BIT_ARM_)
@@ -168,10 +168,10 @@ else ()
 endif ()
 
 # SIMD tier verdicts: fold the probe results, the machine answer, and any `-D SZ_USE_<TIER>=0/1` overrides into two
-# verdicts per tier:
-#   SZ_USE_<TIER>_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
-#   SZ_USE_<TIER>_TO_RUN     → comptime-dispatched tests & benchmarks (the picked tier must also run HERE)
-# When a verdict set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
+# tier sets:
+#   SZ_TIERS_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
+#   SZ_TIERS_TO_RUN     → comptime-dispatched tests & benchmarks (the picked tier must also run HERE)
+# When a tier set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
 # `SZ_*_TIERS_KNOWN` flag stays 0, targets get no explicit definitions, and `types.h` auto-detection under their own
 # flags decides, as it did before the probes existed.
 sz_runtime_detectable_()
@@ -184,12 +184,10 @@ if (SZ_RUNTIME_DETECTABLE)
         string(REPLACE "," ";" sz_machine_tokens_ "${SZ_MACHINE_CAPABILITIES}")
     endif ()
 endif ()
-set(sz_tiers_to_compile_ "")
-set(sz_tiers_to_run_ "")
+set(SZ_TIERS_TO_COMPILE "")
+set(SZ_TIERS_TO_RUN "")
 foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
-    # Normalize every truthy source to a strict 1/0 - `check_c_source_compiles` caches an EMPTY string on
-    # failure, and overrides may arrive as ON/OFF, either of which would produce an invalid `SZ_USE_X=`.
-    if (SZ_CAN_COMPILE_${sz_tier_})
+    if (sz_tier_ IN_LIST SZ_COMPILABLE_TIERS)
         set(sz_to_compile_ 1)
     else ()
         set(sz_to_compile_ 0)
@@ -203,6 +201,9 @@ foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
         set(sz_to_run_ 0)
     endif ()
     if (DEFINED SZ_USE_${sz_tier_}) # The user override wins both verdicts, except past a failed compile probe.
+        # A command-line `-D SZ_USE_X` becomes a cache entry that outlives its command line, so every
+        # configure names the overrides in effect - a stale one is visible instead of silently sticky.
+        message(STATUS "SZ_USE_${sz_tier_} override in effect: ${SZ_USE_${sz_tier_}}")
         if (SZ_USE_${sz_tier_} AND NOT sz_to_compile_)
             message(WARNING "SZ_USE_${sz_tier_}=1 requested, but its probe does not compile here; ignoring")
         elseif (SZ_USE_${sz_tier_})
@@ -213,20 +214,18 @@ foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
             set(sz_to_run_ 0)
         endif ()
     endif ()
-    set(SZ_USE_${sz_tier_}_TO_COMPILE ${sz_to_compile_})
-    set(SZ_USE_${sz_tier_}_TO_RUN ${sz_to_run_})
     if (sz_to_compile_)
-        list(APPEND sz_tiers_to_compile_ ${sz_tier_})
+        list(APPEND SZ_TIERS_TO_COMPILE ${sz_tier_})
     endif ()
     if (sz_to_run_)
-        list(APPEND sz_tiers_to_run_ ${sz_tier_})
+        list(APPEND SZ_TIERS_TO_RUN ${sz_tier_})
     endif ()
 endforeach ()
 if (SZ_COMPILE_TIERS_KNOWN)
-    message(STATUS "SIMD tiers to compile: [${sz_tiers_to_compile_}]")
+    message(STATUS "SIMD tiers to compile: [${SZ_TIERS_TO_COMPILE}]")
 endif ()
 if (SZ_RUN_TIERS_KNOWN)
-    message(STATUS "SIMD tiers to run here: [${sz_tiers_to_run_}]")
+    message(STATUS "SIMD tiers to run here: [${SZ_TIERS_TO_RUN}]")
 endif ()
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
@@ -433,73 +432,57 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     endif ()
 
-    # Set optimization options for different compilers differently
+    # Set optimization options for different compilers differently. Everything keys on `$<CONFIG:...>`
+    # generator expressions rather than `CMAKE_BUILD_TYPE`, which is empty under multi-config generators
+    # like Visual Studio - string comparisons there would silently strip every optimization and debug flag.
     if (compiler_id MATCHES "MSVC")
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-            target_compile_options(${target} PRIVATE "/Od;/Zi")
-            if (NOT target_type STREQUAL "SHARED_LIBRARY")
-                target_compile_options(${target} PRIVATE "/RTC1")
-            endif ()
-        elseif (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "/O2;/Zi")
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/Od;/Zi>")
+        if (NOT target_type STREQUAL "SHARED_LIBRARY")
+            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/RTC1>")
         endif ()
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Release,RelWithDebInfo>:/O2;/Zi>")
     elseif (
         compiler_id STREQUAL "GNU"
         OR compiler_id STREQUAL "Clang"
         OR compiler_id STREQUAL "AppleClang"
     )
-        if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O0;-g")
-        endif ()
-        if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O2")
-        endif ()
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:-O0;-g>")
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:RelWithDebInfo>:-O2;-g>")
+        target_compile_options(${target} PRIVATE "$<$<CONFIG:Release>:-O2>")
     elseif (compiler_id STREQUAL "NVIDIA")
         if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-                target_compile_options(
-                    ${target}
-                    PRIVATE "-G" # Device debug symbols
-                            "-no-compress" # No compression of debug info
-                            "-Xcompiler=/Zi" # Host debugging symbols
-                            "-Xcompiler=/Oy-" # Frame pointers for stack traces
-                            "-Xcompiler=/Ob0" # Prevent host inlining
-                            "-maxrregcount=0" # No register count limits
-                )
-            endif ()
-            if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-                target_compile_options(
-                    ${target}
-                    PRIVATE "-O2" # NVCC optimizations
-                            "-Xptxas=-O2" # PTX assembler optimizations
-                            "-Xcompiler=/O2" # Host optimizations
-                )
-            endif ()
+            set(sz_nvcc_debug_ "-G" # Device debug symbols
+                               "-no-compress" # No compression of debug info
+                               "-Xcompiler=/Zi" # Host debugging symbols
+                               "-Xcompiler=/Oy-" # Frame pointers for stack traces
+                               "-Xcompiler=/Ob0" # Prevent host inlining
+                               "-maxrregcount=0" # No register count limits
+            )
+            set(sz_nvcc_release_ "-O2" # NVCC optimizations
+                                 "-Xptxas=-O2" # PTX assembler optimizations
+                                 "-Xcompiler=/O2" # Host optimizations
+            )
         else ()
             target_compile_options(
                 ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
                                   "-Xcompiler=-Wextra" # Extra warnings (host)
             )
-            if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-                target_compile_options(
-                    ${target}
-                    PRIVATE "-G" # Device debug symbols
-                            "-no-compress" # No compression of debug info
-                            "-Xcompiler=-g" # Host debugging symbols explicitly
-                            "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                            "-Xcompiler=-fno-inline" # Prevent host inlining
-                            "-maxrregcount=0" # No register count limits
-                )
-            endif ()
-            if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-                target_compile_options(
-                    ${target}
-                    PRIVATE "-O2" # NVCC optimizations
-                            "-Xptxas=-O2" # PTX assembler optimizations
-                            "-Xcompiler=-O2" # Host optimizations
-                )
-            endif ()
+            set(sz_nvcc_debug_ "-G" # Device debug symbols
+                               "-no-compress" # No compression of debug info
+                               "-Xcompiler=-g" # Host debugging symbols explicitly
+                               "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+                               "-Xcompiler=-fno-inline" # Prevent host inlining
+                               "-maxrregcount=0" # No register count limits
+            )
+            set(sz_nvcc_release_ "-O2" # NVCC optimizations
+                                 "-Xptxas=-O2" # PTX assembler optimizations
+                                 "-Xcompiler=-O2" # Host optimizations
+            )
         endif ()
+        target_compile_options(
+            ${target} PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:${sz_nvcc_debug_}>"
+                              "$<$<CONFIG:Release,RelWithDebInfo>:${sz_nvcc_release_}>"
+        )
     endif ()
 
     # If available, enable Position Independent Code
@@ -610,22 +593,18 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     target_compile_definitions(${target} PRIVATE "SZ_IS_BIG_ENDIAN_=${SZ_IS_BIG_ENDIAN_}")
 
     # Sanitizer options for Debug mode
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${target} PRIVATE "SZ_DEBUG=1")
-        if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
-            if (compiler_id MATCHES "MSVC")
-                target_compile_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
-                target_link_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
-            elseif (compiler_id STREQUAL "NVIDIA")
-                # ! NVCC can't handle sanitizers?!
-                # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
-            else ()
-                target_compile_options(${target} PRIVATE "-fsanitize=address" "-fsanitize=undefined")
-                target_link_options(${target} PRIVATE "-fsanitize=address" "-fsanitize=undefined")
-            endif ()
+    target_compile_definitions(${target} PRIVATE "$<IF:$<CONFIG:Debug>,SZ_DEBUG=1,SZ_DEBUG=0>")
+    if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
+        if (compiler_id MATCHES "MSVC")
+            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address;/fsanitize=leak>")
+            target_link_options(${target} PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address;/fsanitize=leak>")
+        elseif (compiler_id STREQUAL "NVIDIA")
+            # ! NVCC can't handle sanitizers?!
+            # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
+        else ()
+            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:-fsanitize=address;-fsanitize=undefined>")
+            target_link_options(${target} PRIVATE "$<$<CONFIG:Debug>:-fsanitize=address;-fsanitize=undefined>")
         endif ()
-    else ()
-        target_compile_definitions(${target} PRIVATE "SZ_DEBUG=0")
     endif ()
 
     if (STRINGZILLA_BUILD_COVERAGE AND (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang"))
@@ -652,7 +631,7 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${source})
     set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
-    target_compile_definitions(${exec_name} PRIVATE "SZ_USE_CUDA=1")
+    target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
     set_target_properties(${exec_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_include_directories(
         ${exec_name} PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
@@ -681,11 +660,26 @@ function (set_architecture_simd_definitions target mode)
     else ()
         target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
     endif ()
-    if (NOT SZ_${mode}_TIERS_KNOWN)
-        return() # No verdicts here — `types.h` auto-detection under the target's own flags decides.
+    if (mode STREQUAL "COMPILE")
+        set(sz_selected_tiers_ "${SZ_TIERS_TO_COMPILE}")
+        set(sz_tiers_known_ "${SZ_COMPILE_TIERS_KNOWN}")
+    elseif (mode STREQUAL "RUN")
+        set(sz_selected_tiers_ "${SZ_TIERS_TO_RUN}")
+        set(sz_tiers_known_ "${SZ_RUN_TIERS_KNOWN}")
+    else ()
+        message(FATAL_ERROR "set_architecture_simd_definitions: mode must be COMPILE or RUN, got `${mode}`")
     endif ()
+    # Without verdicts, `types.h` auto-detection under the target's own flags decides — except for an
+    # explicit `-D SZ_USE_<TIER>`, the one signal that outranks auto-detection.
     foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
-        target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=${SZ_USE_${sz_tier_}_TO_${mode}}")
+        if (NOT sz_tiers_known_ AND NOT DEFINED SZ_USE_${sz_tier_})
+            continue()
+        endif ()
+        if (sz_tier_ IN_LIST sz_selected_tiers_)
+            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=1")
+        else ()
+            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=0")
+        endif ()
     endforeach ()
 endfunction ()
 
@@ -806,6 +800,11 @@ if (STRINGZILLA_BUILD_SHARED)
     endif ()
 endif ()
 
+# Definitions every StringZillas translation unit shares.
+set(STRINGZILLAS_COMMON_DEFINITIONS "SZ_DYNAMIC_DISPATCH=1" "SZ_AVOID_LIBC=0"
+                                    "$<IF:$<CONFIG:Debug>,SZ_DEBUG=1,SZ_DEBUG=0>"
+)
+
 # Helper function used for `stringzillas_cpus_shared`, `stringzillas_cuda_shared`, and `stringzillas_rocm_shared`
 # targets
 function (define_stringzillas_shared target source_file backend_flags)
@@ -832,11 +831,7 @@ function (define_stringzillas_shared target source_file backend_flags)
     # Compile settings for the library's own translation units (the OBJECT compilation).
     target_include_directories(${objects} PRIVATE include)
     target_link_libraries(${objects} PRIVATE forkunion::header)
-    target_compile_definitions(${objects} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
-    target_compile_definitions(${objects} PRIVATE "SZ_AVOID_LIBC=0")
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${objects} PRIVATE "SZ_DEBUG=0")
-    endif ()
+    target_compile_definitions(${objects} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
     foreach (flag ${backend_flags})
         target_compile_definitions(${objects} PRIVATE ${flag})
     endforeach ()
@@ -844,6 +839,7 @@ function (define_stringzillas_shared target source_file backend_flags)
         ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O2;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
     )
     set_architecture_simd_definitions(${objects} COMPILE)
+    set_baseline_architecture_flags(${objects} "${CMAKE_CXX_COMPILER_ID}")
 
     # Usage requirements seen by consumers (tests and benchmarks linking the library). Defining `SZ_DYNAMIC_DISPATCH=1`
     # makes a consumer extern, rather than re-instantiate, the engines; `forkunion::static` brings the ForkUnion
@@ -890,12 +886,7 @@ function (define_stringzillas_cuda_objects name gpu_archs)
         ${name} SYSTEM PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
                                $<$<BOOL:${STRINGZILLA_CCCL_INCLUDE_DIR}>:${STRINGZILLA_CCCL_INCLUDE_DIR}>
     )
-    target_compile_definitions(
-        ${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0"
-    )
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
-    endif ()
+    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
     target_compile_options(${name} PRIVATE "--expt-relaxed-constexpr" "-Xfatbin=--compress-all")
     set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CUDA_COMPILER_ID}")
@@ -953,10 +944,7 @@ function (define_stringzillas_cpus_objects name)
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
     target_include_directories(${name} PRIVATE include)
     target_link_libraries(${name} PRIVATE forkunion::header)
-    target_compile_definitions(${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0")
-    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
-    endif ()
+    target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
     set_architecture_simd_definitions(${name} COMPILE)
     set_baseline_architecture_flags(${name} "${CMAKE_CXX_COMPILER_ID}")
 endfunction ()
@@ -993,10 +981,6 @@ if (STRINGZILLAS_BUILD_SHARED)
         stringzillas_cpus_shared "${STRINGZILLAS_API_CPP_SOURCES};${STRINGZILLAS_CPUS_SOURCES}"
         "SZ_USE_CUDA=0;SZ_USE_ROCM=0"
     )
-
-    # Set the baseline architecture on the OBJECT compilation; the per-ISA SIMD cores carry per-function target
-    # attributes, so this conservative baseline covers all tiers.
-    set_baseline_architecture_flags(stringzillas_cpus_objects "${CMAKE_CXX_COMPILER_ID}")
 endif ()
 
 # Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static library is for local

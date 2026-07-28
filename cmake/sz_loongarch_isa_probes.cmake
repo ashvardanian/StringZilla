@@ -6,6 +6,6 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(SZ_CAN_COMPILE_LASX SOURCE probes/loongarch_lasx.c)
+sz_isa_probe_(LASX SOURCE probes/loongarch_lasx.c)
 
 set(SZ_ISA_TIERS "LASX")

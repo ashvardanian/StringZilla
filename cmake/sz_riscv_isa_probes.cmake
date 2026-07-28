@@ -6,7 +6,7 @@
 
 include(cmake/sz_isa_probe.cmake)
 
-sz_isa_probe_(SZ_CAN_COMPILE_RVVCRYPTO SOURCE probes/riscv_rvvcrypto.c)
-sz_isa_probe_(SZ_CAN_COMPILE_RVV SOURCE probes/riscv_rvv.c)
+sz_isa_probe_(RVVCRYPTO SOURCE probes/riscv_rvvcrypto.c)
+sz_isa_probe_(RVV SOURCE probes/riscv_rvv.c)
 
 set(SZ_ISA_TIERS "RVVCRYPTO;RVV")

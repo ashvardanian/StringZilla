@@ -4,24 +4,39 @@
 # compilable and trust the load-time dispatch table; comptime-dispatched targets require a tier to pass
 # both probes. Per-architecture modules declare the tiers and set `SZ_ISA_TIERS`, newest first.
 
-# Try-compile one tier's probe into the cached `<result>`, conventionally `SZ_CAN_COMPILE_<TIER>`:
+# Probe verdicts are cached, but they answer for one set of compiler flags: changing them in the same
+# build tree must re-ask every question, or the wrong kernels get enabled with no message.
+set(sz_probe_key_ "${CMAKE_C_COMPILER}|${CMAKE_C_FLAGS}|${CMAKE_TOOLCHAIN_FILE}")
+if (NOT "${SZ_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
+    if (DEFINED SZ_PROBE_KEY)
+        message(STATUS "Toolchain changed - re-running the ISA probes")
+    endif ()
+    unset(SZ_PROBED_TIERS CACHE)
+    unset(SZ_COMPILABLE_TIERS CACHE)
+    unset(SZ_RUNTIME_DETECTABLE CACHE)
+    unset(SZ_MACHINE_CAPABILITIES CACHE)
+    set(SZ_PROBE_KEY "${sz_probe_key_}" CACHE INTERNAL "Toolchain the cached probe verdicts answer for")
+endif ()
+
+# Try-compile one tier's probe, recording the verdict in two cached tier sets - `SZ_PROBED_TIERS` holds
+# every tier already asked, `SZ_COMPILABLE_TIERS` the subset whose probe compiled:
 #
-#   sz_isa_probe_(<result> SOURCE <probes/file.c> [GNU_FLAGS <flags...>] [MSVC_FLAGS <flags...>])
+#   sz_isa_probe_(<TIER> SOURCE <probes/file.c> [GNU_FLAGS <flags...>] [MSVC_FLAGS <flags...>])
 #
 # `GNU_FLAGS` reach GCC and Clang, both `GNU` frontend variants in CMake terms; only the wasm tiers need
 # any. The probe file is compiled as-is, byte-identical to what `build.rs` sees: a string round-trip
 # would swallow the backslash line-continuations inside multi-line pragmas and mis-fail the probe. The
 # Release configuration pin is function-scoped, so Debug-only sanitizer runtimes cannot interfere.
-function (sz_isa_probe_ result_)
-    if (DEFINED ${result_})
+function (sz_isa_probe_ tier_)
+    if (tier_ IN_LIST SZ_PROBED_TIERS)
         return()
     endif ()
     cmake_parse_arguments(PARSE_ARGV 1 sz_arg "" "SOURCE" "GNU_FLAGS;MSVC_FLAGS")
     if (NOT sz_arg_SOURCE)
-        message(FATAL_ERROR "sz_isa_probe_(${result_}) requires SOURCE <probes/file.c>")
+        message(FATAL_ERROR "sz_isa_probe_(${tier_}) requires SOURCE <probes/file.c>")
     endif ()
     if (sz_arg_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "sz_isa_probe_(${result_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}")
+        message(FATAL_ERROR "sz_isa_probe_(${tier_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}")
     endif ()
     if (MSVC)
         set(sz_probe_flags_ "${sz_arg_MSVC_FLAGS}")
@@ -30,19 +45,19 @@ function (sz_isa_probe_ result_)
     endif ()
     set(CMAKE_TRY_COMPILE_CONFIGURATION "Release")
     try_compile(
-        ${result_} ${CMAKE_BINARY_DIR}/sz_probes
+        sz_probe_succeeded_ ${CMAKE_BINARY_DIR}/sz_probes
         ${CMAKE_CURRENT_SOURCE_DIR}/${sz_arg_SOURCE}
         COMPILE_DEFINITIONS "${sz_probe_flags_}" C_STANDARD 99
         OUTPUT_VARIABLE sz_probe_output_
     )
-    set(${result_}
-        ${${result_}}
-        CACHE INTERNAL "The toolchain compiles ${sz_arg_SOURCE}"
-    )
-    if (${result_})
-        message(STATUS "Performing Test ${result_} - Success")
+    set(sz_probed_tiers_ ${SZ_PROBED_TIERS} ${tier_})
+    set(SZ_PROBED_TIERS "${sz_probed_tiers_}" CACHE INTERNAL "Tiers whose compile probe already ran")
+    if (sz_probe_succeeded_)
+        set(sz_compilable_tiers_ ${SZ_COMPILABLE_TIERS} ${tier_})
+        set(SZ_COMPILABLE_TIERS "${sz_compilable_tiers_}" CACHE INTERNAL "Tiers whose compile probe succeeded")
+        message(STATUS "Performing ISA probe ${tier_} - Success")
     else ()
-        message(STATUS "Performing Test ${result_} - Failed")
+        message(STATUS "Performing ISA probe ${tier_} - Failed")
     endif ()
 endfunction ()
 
