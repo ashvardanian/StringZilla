@@ -1,8 +1,8 @@
 # cmake/sz_isa_probe.cmake — shared ISA probe infrastructure over the checked-in `probes/` sources, the
-# same files the Cargo build compiles. A per-tier compile probe asks what the toolchain can emit; one
-# executed machine probe asks what this machine can run. Runtime-dispatched targets enable everything
-# compilable and trust the load-time dispatch table; comptime-dispatched targets require a tier to pass
-# both probes. Per-architecture modules declare the tiers and set `SZ_ISA_TIERS`, newest first.
+# same files the Cargo build compiles. A per-capability compile probe asks what the toolchain can emit;
+# one executed machine probe asks what this machine can run. Runtime-dispatched targets enable everything
+# compilable and trust the load-time dispatch table; comptime-dispatched targets require a capability to
+# pass both probes. Per-architecture modules declare `SZ_ISA_CAPABILITIES`, newest first.
 
 # Probe verdicts are cached, but they answer for one set of compiler flags: changing them in the same
 # build tree must re-ask every question, or the wrong kernels get enabled with no message.
@@ -11,32 +11,32 @@ if (NOT "${SZ_PROBE_KEY}" STREQUAL "${sz_probe_key_}")
     if (DEFINED SZ_PROBE_KEY)
         message(STATUS "Toolchain changed - re-running the ISA probes")
     endif ()
-    unset(SZ_PROBED_TIERS CACHE)
-    unset(SZ_COMPILABLE_TIERS CACHE)
+    unset(SZ_PROBED_CAPABILITIES CACHE)
+    unset(SZ_COMPILABLE_CAPABILITIES CACHE)
     unset(SZ_RUNTIME_DETECTABLE CACHE)
     unset(SZ_MACHINE_CAPABILITIES CACHE)
     set(SZ_PROBE_KEY "${sz_probe_key_}" CACHE INTERNAL "Toolchain the cached probe verdicts answer for")
 endif ()
 
-# Try-compile one tier's probe, recording the verdict in two cached tier sets - `SZ_PROBED_TIERS` holds
-# every tier already asked, `SZ_COMPILABLE_TIERS` the subset whose probe compiled:
+# Try-compile one capability's probe, recording the verdict in two cached sets - `SZ_PROBED_CAPABILITIES`
+# holds every capability already asked, `SZ_COMPILABLE_CAPABILITIES` the subset whose probe compiled:
 #
 #   sz_isa_probe_(<TIER> SOURCE <probes/file.c> [GNU_FLAGS <flags...>] [MSVC_FLAGS <flags...>])
 #
-# `GNU_FLAGS` reach GCC and Clang, both `GNU` frontend variants in CMake terms; only the wasm tiers need
-# any. The probe file is compiled as-is, byte-identical to what `build.rs` sees: a string round-trip
+# `GNU_FLAGS` reach GCC and Clang, both `GNU` frontend variants in CMake terms; only the wasm capabilities
+# need any. The probe file is compiled as-is, byte-identical to what `build.rs` sees: a string round-trip
 # would swallow the backslash line-continuations inside multi-line pragmas and mis-fail the probe. The
 # Release configuration pin is function-scoped, so Debug-only sanitizer runtimes cannot interfere.
-function (sz_isa_probe_ tier_)
-    if (tier_ IN_LIST SZ_PROBED_TIERS)
+function (sz_isa_probe_ capability_)
+    if (capability_ IN_LIST SZ_PROBED_CAPABILITIES)
         return()
     endif ()
     cmake_parse_arguments(PARSE_ARGV 1 sz_arg "" "SOURCE" "GNU_FLAGS;MSVC_FLAGS")
     if (NOT sz_arg_SOURCE)
-        message(FATAL_ERROR "sz_isa_probe_(${tier_}) requires SOURCE <probes/file.c>")
+        message(FATAL_ERROR "sz_isa_probe_(${capability_}) requires SOURCE <probes/file.c>")
     endif ()
     if (sz_arg_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "sz_isa_probe_(${tier_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}")
+        message(FATAL_ERROR "sz_isa_probe_(${capability_}) got unexpected arguments: ${sz_arg_UNPARSED_ARGUMENTS}")
     endif ()
     if (MSVC)
         set(sz_probe_flags_ "${sz_arg_MSVC_FLAGS}")
@@ -50,21 +50,21 @@ function (sz_isa_probe_ tier_)
         COMPILE_DEFINITIONS "${sz_probe_flags_}" C_STANDARD 99
         OUTPUT_VARIABLE sz_probe_output_
     )
-    set(sz_probed_tiers_ ${SZ_PROBED_TIERS} ${tier_})
-    set(SZ_PROBED_TIERS "${sz_probed_tiers_}" CACHE INTERNAL "Tiers whose compile probe already ran")
+    set(sz_probed_capabilities_ ${SZ_PROBED_CAPABILITIES} ${capability_})
+    set(SZ_PROBED_CAPABILITIES "${sz_probed_capabilities_}" CACHE INTERNAL "Tiers whose compile probe already ran")
     if (sz_probe_succeeded_)
-        set(sz_compilable_tiers_ ${SZ_COMPILABLE_TIERS} ${tier_})
-        set(SZ_COMPILABLE_TIERS "${sz_compilable_tiers_}" CACHE INTERNAL "Tiers whose compile probe succeeded")
-        message(STATUS "Performing ISA probe ${tier_} - Success")
+        set(sz_compilable_capabilities_ ${SZ_COMPILABLE_CAPABILITIES} ${capability_})
+        set(SZ_COMPILABLE_CAPABILITIES "${sz_compilable_capabilities_}" CACHE INTERNAL "Tiers whose compile probe succeeded")
+        message(STATUS "Performing ISA probe ${capability_} - Success")
     else ()
-        message(STATUS "Performing ISA probe ${tier_} - Failed")
+        message(STATUS "Performing ISA probe ${capability_} - Failed")
     endif ()
 endfunction ()
 
 # Compile-probe `probes/runtime_detection.c` into the cached `SZ_RUNTIME_DETECTABLE`: whether the built
 # library performs real runtime capability detection, the header-owned
 # `SZ_CAPABILITIES_RUNTIME_DETECTABLE_`. Without it, dispatch tables mirror the compile-time mask and
-# tier selection must stay with the toolchain flags and `types.h` auto-detection.
+# capability selection must stay with the toolchain flags and `types.h` auto-detection.
 function (sz_runtime_detectable_)
     if (DEFINED SZ_RUNTIME_DETECTABLE)
         return()
@@ -86,11 +86,11 @@ function (sz_runtime_detectable_)
             0
             CACHE INTERNAL "Runtime capability detection exists for this target"
         )
-        message(STATUS "No runtime capability detection for this target; SIMD tiers follow the toolchain flags")
+        message(STATUS "No runtime capability detection for this target; capabilities follow the toolchain flags")
     endif ()
 endfunction ()
 
-# Compile and run `probes/run_capabilities.c`, caching the machine's comma-separated tier tokens in
+# Compile and run `probes/run_capabilities.c`, caching the machine's comma-separated capability tokens in
 # `SZ_MACHINE_CAPABILITIES`, for example "serial,neon,neonaes". Left empty when the answer is
 # unknowable, like cross-compiling without an emulator or any probe failure; callers then fall back to
 # `types.h` auto-detection under the target's own `-march` flags.

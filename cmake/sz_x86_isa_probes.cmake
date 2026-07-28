@@ -12,4 +12,4 @@ sz_isa_probe_(HASWELL SOURCE probes/x86_haswell.c)
 sz_isa_probe_(GOLDMONT SOURCE probes/x86_goldmont.c)
 sz_isa_probe_(WESTMERE SOURCE probes/x86_westmere.c)
 
-set(SZ_ISA_TIERS "ICELAKE;SKYLAKE;HASWELL;GOLDMONT;WESTMERE")
+set(SZ_ISA_CAPABILITIES "ICELAKE;SKYLAKE;HASWELL;GOLDMONT;WESTMERE")

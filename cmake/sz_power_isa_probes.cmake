@@ -8,4 +8,4 @@ include(cmake/sz_isa_probe.cmake)
 
 sz_isa_probe_(POWERVSX SOURCE probes/power_vsx.c)
 
-set(SZ_ISA_TIERS "POWERVSX")
+set(SZ_ISA_CAPABILITIES "POWERVSX")

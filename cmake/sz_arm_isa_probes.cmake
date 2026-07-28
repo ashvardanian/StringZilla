@@ -13,4 +13,4 @@ sz_isa_probe_(NEONSHA SOURCE probes/arm_neonsha.c)
 sz_isa_probe_(NEONAES SOURCE probes/arm_neonaes.c)
 sz_isa_probe_(NEON SOURCE probes/arm_neon.c)
 
-set(SZ_ISA_TIERS "SVE2AES;SVE2;SVE;NEONSHA;NEONAES;NEON")
+set(SZ_ISA_CAPABILITIES "SVE2AES;SVE2;SVE;NEONSHA;NEONAES;NEON")

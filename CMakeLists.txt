@@ -65,8 +65,6 @@ set(CMAKE_CXX_STANDARD 11)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_COMPILE_WARNING_AS_ERROR)
-set(DEV_USER_NAME $ENV{USER})
 
 message(STATUS "C Compiler ID: ${CMAKE_C_COMPILER_ID}")
 message(STATUS "C Compiler Version: ${CMAKE_C_COMPILER_VERSION}")
@@ -140,9 +138,9 @@ else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
 endif ()
 
-# ISA capability probes: which SIMD tiers can this toolchain COMPILE, and which can this machine RUN. The probe sources
-# under `probes/` are shared with the Cargo build (`build.rs`); the model and the helper macros are documented in
-# `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_COMPILABLE_TIERS` set and the `SZ_ISA_TIERS` list.
+# ISA capability probes: which SIMD capabilities can this toolchain COMPILE, and which can this machine RUN. The probe
+# sources under `probes/` are shared with the Cargo build (`build.rs`); the model and the helper macros are documented
+# in `cmake/sz_isa_probe.cmake`. Each module fills the cached `SZ_COMPILABLE_CAPABILITIES` set and `SZ_ISA_CAPABILITIES`.
 if (SZ_IS_64BIT_X86_)
     include(cmake/sz_x86_isa_probes.cmake)
 elseif (SZ_IS_64BIT_ARM_)
@@ -160,53 +158,53 @@ elseif (
 )
     include(cmake/sz_wasm_isa_probes.cmake)
 else ()
-    # Unknown architecture: no SIMD tier probes, but the shared probe module must still load so the
+    # Unknown architecture: no SIMD capability probes, but the shared probe module must still load so the
     # `sz_runtime_detectable_` / `sz_machine_capabilities_` calls below resolve and configuration
     # degrades to a serial-only build instead of failing.
     include(cmake/sz_isa_probe.cmake)
-    set(SZ_ISA_TIERS "")
+    set(SZ_ISA_CAPABILITIES "")
 endif ()
 
-# SIMD tier verdicts: fold the probe results, the machine answer, and any `-D SZ_USE_<TIER>=0/1` overrides into two
-# tier sets:
-#   SZ_TIERS_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
-#   SZ_TIERS_TO_RUN     → comptime-dispatched tests & benchmarks (the picked tier must also run HERE)
-# When a tier set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
-# `SZ_*_TIERS_KNOWN` flag stays 0, targets get no explicit definitions, and `types.h` auto-detection under their own
-# flags decides, as it did before the probes existed.
+# SIMD capability verdicts: fold the probe results, the machine answer, and any `-D SZ_USE_<X>=0/1` overrides into two
+# capability sets:
+#   SZ_CAPABILITIES_TO_COMPILE → runtime-dispatched libraries (the load-time table masks what the CPU lacks)
+#   SZ_CAPABILITIES_TO_RUN     → comptime-dispatched tests & benchmarks (the picked capability must also run HERE)
+# When a set is unknowable — no runtime detection on this platform, or a machine we cannot probe — the matching
+# `SZ_*_CAPABILITIES_KNOWN` flag stays 0, targets get no explicit definitions, and `types.h` auto-detection under
+# their own flags decides, as it did before the probes existed.
 sz_runtime_detectable_()
-set(SZ_COMPILE_TIERS_KNOWN ${SZ_RUNTIME_DETECTABLE})
-set(SZ_RUN_TIERS_KNOWN 0)
+set(SZ_COMPILE_CAPABILITIES_KNOWN ${SZ_RUNTIME_DETECTABLE})
+set(SZ_RUN_CAPABILITIES_KNOWN 0)
 if (SZ_RUNTIME_DETECTABLE)
     sz_machine_capabilities_()
     if (NOT "${SZ_MACHINE_CAPABILITIES}" STREQUAL "")
-        set(SZ_RUN_TIERS_KNOWN 1)
+        set(SZ_RUN_CAPABILITIES_KNOWN 1)
         string(REPLACE "," ";" sz_machine_tokens_ "${SZ_MACHINE_CAPABILITIES}")
     endif ()
 endif ()
-set(SZ_TIERS_TO_COMPILE "")
-set(SZ_TIERS_TO_RUN "")
-foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
-    if (sz_tier_ IN_LIST SZ_COMPILABLE_TIERS)
+set(SZ_CAPABILITIES_TO_COMPILE "")
+set(SZ_CAPABILITIES_TO_RUN "")
+foreach (sz_capability_ IN LISTS SZ_ISA_CAPABILITIES)
+    if (sz_capability_ IN_LIST SZ_COMPILABLE_CAPABILITIES)
         set(sz_to_compile_ 1)
     else ()
         set(sz_to_compile_ 0)
     endif ()
     set(sz_to_run_ ${sz_to_compile_})
-    string(TOLOWER "${sz_tier_}" sz_token_)
+    string(TOLOWER "${sz_capability_}" sz_token_)
     if (sz_to_run_
-        AND SZ_RUN_TIERS_KNOWN
+        AND SZ_RUN_CAPABILITIES_KNOWN
         AND NOT sz_token_ IN_LIST sz_machine_tokens_
     )
         set(sz_to_run_ 0)
     endif ()
-    if (DEFINED SZ_USE_${sz_tier_}) # The user override wins both verdicts, except past a failed compile probe.
+    if (DEFINED SZ_USE_${sz_capability_}) # The user override wins both verdicts, except past a failed compile probe.
         # A command-line `-D SZ_USE_X` becomes a cache entry that outlives its command line, so every
         # configure names the overrides in effect - a stale one is visible instead of silently sticky.
-        message(STATUS "SZ_USE_${sz_tier_} override in effect: ${SZ_USE_${sz_tier_}}")
-        if (SZ_USE_${sz_tier_} AND NOT sz_to_compile_)
-            message(WARNING "SZ_USE_${sz_tier_}=1 requested, but its probe does not compile here; ignoring")
-        elseif (SZ_USE_${sz_tier_})
+        message(STATUS "SZ_USE_${sz_capability_} override in effect: ${SZ_USE_${sz_capability_}}")
+        if (SZ_USE_${sz_capability_} AND NOT sz_to_compile_)
+            message(WARNING "SZ_USE_${sz_capability_}=1 requested, but its probe does not compile here; ignoring")
+        elseif (SZ_USE_${sz_capability_})
             set(sz_to_compile_ 1)
             set(sz_to_run_ 1)
         else ()
@@ -215,18 +213,22 @@ foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
         endif ()
     endif ()
     if (sz_to_compile_)
-        list(APPEND SZ_TIERS_TO_COMPILE ${sz_tier_})
+        list(APPEND SZ_CAPABILITIES_TO_COMPILE ${sz_capability_})
     endif ()
     if (sz_to_run_)
-        list(APPEND SZ_TIERS_TO_RUN ${sz_tier_})
+        list(APPEND SZ_CAPABILITIES_TO_RUN ${sz_capability_})
     endif ()
 endforeach ()
-if (SZ_COMPILE_TIERS_KNOWN)
-    message(STATUS "SIMD tiers to compile: [${SZ_TIERS_TO_COMPILE}]")
+if (SZ_COMPILE_CAPABILITIES_KNOWN)
+    message(STATUS "SIMD capabilities to compile: [${SZ_CAPABILITIES_TO_COMPILE}]")
 endif ()
-if (SZ_RUN_TIERS_KNOWN)
-    message(STATUS "SIMD tiers to run here: [${SZ_TIERS_TO_RUN}]")
+if (SZ_RUN_CAPABILITIES_KNOWN)
+    message(STATUS "SIMD capabilities to run here: [${SZ_CAPABILITIES_TO_RUN}]")
 endif ()
+unset(sz_to_compile_)
+unset(sz_to_run_)
+unset(sz_token_)
+unset(sz_machine_tokens_)
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
@@ -289,10 +291,11 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
-    # Fallback for any CUDA target that does not set its own `CUDA_ARCHITECTURES`; the shipping libraries and the
-    # test/bench launchers override this with their per-tier sets below. Ampere+Hopper real SASS (the DPX kernels need
-    # only sm_90, not the H100-locked sm_90a).
-    set(CMAKE_CUDA_ARCHITECTURES 80-real 90-real)
+    # Real SASS for the supported datacenter generations - Ampere sm_80 and Hopper sm_90 (the DPX kernels need only
+    # sm_90, not the H100-locked sm_90a). One constant serves the fallback below, the static library's base tier, and
+    # the GPU launchers; per-tier targets override it with their own sets.
+    set(STRINGZILLA_CUDA_ARCHS "80-real;90-real")
+    set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHS})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     # CUDA 13+ / CCCL 3.x ships CUB, Thrust, and libcudacxx under include/cccl/
@@ -310,18 +313,9 @@ if (STRINGZILLA_BUILD_CUDA)
     message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 endif ()
 
-# Includes
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
-include(ExternalProject)
-include(CheckCSourceCompiles)
-
-# Allow CMake 3.13+ to override options when using FetchContent / add_subdirectory
-if (POLICY CMP0077)
-    cmake_policy(SET CMP0077 NEW)
-endif ()
-
 # Configuration
 include(GNUInstallDirs)
+include(CheckCXXCompilerFlag)
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
 
@@ -339,287 +333,17 @@ if (MSVC)
     string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif ()
 
-# Function to set the default compiler-specific flags
-function (set_compiler_flags target cpp_standard target_arch compiler_id)
-    get_target_property(target_type ${target} TYPE)
+include(cmake/sz_compiler_flags.cmake)
 
-    target_include_directories(${target} PRIVATE test bench)
-    target_link_libraries(${target} PRIVATE forkunion::header)
-
-    # Set output directory for single-configuration generators (like Make)
-    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
-    set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
-
-    # Set output directory for multi-configuration generators (like Visual Studio)
-    foreach (config IN LISTS CMAKE_CONFIGURATION_TYPES)
-        string(TOUPPER ${config} config_upper)
-        set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
-        set_target_properties(${target} PROPERTIES ARCHIVE_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>)
-    endforeach ()
-
-    # Set the C++ standard
-    if (NOT cpp_standard STREQUAL "")
-        if (compiler_id STREQUAL "NVIDIA")
-            set_target_properties(${target} PROPERTIES CUDA_STANDARD ${cpp_standard})
-        elseif (compiler_id MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts. MSVC has no
-            # `/std:c++23`; its newest standard is exposed as `/std:c++latest`, so map 23+ onto it.
-            if (cpp_standard GREATER_EQUAL 23)
-                target_compile_options(${target} PRIVATE "/std:c++latest")
-            else ()
-                target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
-            endif ()
-        else ()
-            set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
-        endif ()
-    endif ()
-
-    # Use the `/Zc:__cplusplus` flag to correctly define the `__cplusplus` macro in MSVC
-    if (compiler_id MATCHES "MSVC")
-        target_compile_options(${target} PRIVATE "/Zc:__cplusplus")
-    endif ()
-
-    # Make sure CUDA C++ allows calling `constexpr` from device code
-    if (compiler_id STREQUAL "NVIDIA")
-        target_compile_options(${target} PRIVATE "--expt-relaxed-constexpr")
-    endif ()
-
-    # Maximum warnings level & warnings as error.
-    #
-    # MSVC uses numeric values: > 4068 for "unknown pragmas". > 4146 for "unary minus operator applied to unsigned type,
-    # result still unsigned". We also specify `/utf-8` to properly UTF-8 symbols in tests.
-    if (compiler_id STREQUAL "GNU")
-        # `-Wno-error=array-bounds`: GCC 12+ false-positives on StringZilla's intentional wide reads (u32/u64/ vector
-        # loads near a buffer end) when an ISA kernel is inlined into a string-literal-sized caller. Keep it a visible
-        # warning, not a build-breaking error.
-        target_compile_options(
-            ${target}
-            PRIVATE
-                "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion;-Wno-error=array-bounds"
-        )
-        target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
-    elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
-        target_compile_options(
-            ${target} PRIVATE "-Wall;-Wextra;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion"
-        )
-    elseif (compiler_id MATCHES "MSVC")
-        target_compile_options(
-            ${target}
-            PRIVATE "/Bt" # Display build timings
-                    "/wd4068" # Disable warning: unknown pragma
-                    "/wd5030" # Disable warning: attribute is not recognized
-                    "/wd5051" # Disable warning: attribute requires a newer standard (e.g. [[maybe_unused]] in C++11/14)
-                    "/wd4146" # Disable warning: unary minus operator applied to unsigned type
-                    "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
-                    "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
-                    "/wd4267" # Disable warning: conversion from 'size_t' to smaller type, possible loss of data
-                    "/utf-8" # Set source and execution character sets to UTF-8
-                    "/WX" # Treat warnings as errors
-        )
-    elseif (compiler_id STREQUAL "NVIDIA")
-        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            target_compile_options(
-                ${target}
-                PRIVATE
-                    "-Xcompiler=/Zc:preprocessor;-Xcompiler=/Zc:__cplusplus;-Xcompiler=/W3;-Xcompiler=/WX;-Xcompiler=/wd4068;-Xcompiler=/wd5030;-Xcompiler=/wd5051;-Xcompiler=/wd4146;-Xcompiler=/wd4996;-Xcompiler=/wd4244;-Xcompiler=/wd4267;-Xcompiler=/utf-8"
-            )
-        else ()
-            target_compile_options(
-                ${target}
-                PRIVATE
-                    "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Xcompiler=-Wno-error=array-bounds;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
-            )
-        endif ()
-    endif ()
-
-    # Set optimization options for different compilers differently. Everything keys on `$<CONFIG:...>`
-    # generator expressions rather than `CMAKE_BUILD_TYPE`, which is empty under multi-config generators
-    # like Visual Studio - string comparisons there would silently strip every optimization and debug flag.
-    if (compiler_id MATCHES "MSVC")
-        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/Od;/Zi>")
-        if (NOT target_type STREQUAL "SHARED_LIBRARY")
-            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/RTC1>")
-        endif ()
-        target_compile_options(${target} PRIVATE "$<$<CONFIG:Release,RelWithDebInfo>:/O2;/Zi>")
-    elseif (
-        compiler_id STREQUAL "GNU"
-        OR compiler_id STREQUAL "Clang"
-        OR compiler_id STREQUAL "AppleClang"
-    )
-        target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:-O0;-g>")
-        target_compile_options(${target} PRIVATE "$<$<CONFIG:RelWithDebInfo>:-O2;-g>")
-        target_compile_options(${target} PRIVATE "$<$<CONFIG:Release>:-O2>")
-    elseif (compiler_id STREQUAL "NVIDIA")
-        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=/Zi" # Host debugging symbols
-                               "-Xcompiler=/Oy-" # Frame pointers for stack traces
-                               "-Xcompiler=/Ob0" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
-            )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=/O2" # Host optimizations
-            )
-        else ()
-            target_compile_options(
-                ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
-                                  "-Xcompiler=-Wextra" # Extra warnings (host)
-            )
-            set(sz_nvcc_debug_ "-G" # Device debug symbols
-                               "-no-compress" # No compression of debug info
-                               "-Xcompiler=-g" # Host debugging symbols explicitly
-                               "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                               "-Xcompiler=-fno-inline" # Prevent host inlining
-                               "-maxrregcount=0" # No register count limits
-            )
-            set(sz_nvcc_release_ "-O2" # NVCC optimizations
-                                 "-Xptxas=-O2" # PTX assembler optimizations
-                                 "-Xcompiler=-O2" # Host optimizations
-            )
-        endif ()
-        target_compile_options(
-            ${target} PRIVATE "$<$<CONFIG:Debug,RelWithDebInfo>:${sz_nvcc_debug_}>"
-                              "$<$<CONFIG:Release,RelWithDebInfo>:${sz_nvcc_release_}>"
-        )
-    endif ()
-
-    # If available, enable Position Independent Code
-    get_target_property(target_pic ${target} POSITION_INDEPENDENT_CODE)
-    if (target_pic)
-        target_compile_definitions(${target} PRIVATE "SZ_PIC")
-    endif ()
-
-    # Avoid builtin functions where we know what we are doing.
-    if (compiler_id MATCHES "MSVC")
-        target_compile_options(${target} PRIVATE "/Oi-")
-    elseif (compiler_id STREQUAL "NVIDIA")
-        if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-            target_compile_options(${target} PRIVATE "-Xcompiler=/Oi-")
-        else ()
-            target_compile_options(
-                ${target} PRIVATE "-Xcompiler=-fno-builtin-memcmp" "-Xcompiler=-fno-builtin-memchr"
-                                  "-Xcompiler=-fno-builtin-memcpy" "-Xcompiler=-fno-builtin-memset"
-            )
-        endif ()
-    else ()
-        target_compile_options(${target} PRIVATE "-fno-builtin-memcmp")
-        target_compile_options(${target} PRIVATE "-fno-builtin-memchr")
-        target_compile_options(${target} PRIVATE "-fno-builtin-memcpy")
-        target_compile_options(${target} PRIVATE "-fno-builtin-memset")
-    endif ()
-
-    # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++. AppleClang
-    # automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
-    if (CMAKE_SYSTEM_NAME MATCHES "Darwin"
-        AND compiler_id STREQUAL "Clang"
-        AND NOT compiler_id STREQUAL "AppleClang"
-    )
-        if (NOT target_type STREQUAL "SHARED_LIBRARY")
-            target_compile_options(${target} PRIVATE "-stdlib=libc++")
-            target_link_options(${target} PRIVATE "-stdlib=libc++")
-            # Find and link the C++ standard library from the compiler's installation Homebrew LLVM stores libc++ in
-            # lib/c++ subdirectory
-            get_filename_component(COMPILER_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
-            get_filename_component(COMPILER_ROOT ${COMPILER_DIR} DIRECTORY)
-            if (EXISTS "${COMPILER_ROOT}/lib/c++/libc++.dylib")
-                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib/c++")
-                target_link_libraries(${target} PRIVATE c++abi)
-            elseif (EXISTS "${COMPILER_ROOT}/lib/libc++.dylib")
-                target_link_options(${target} PRIVATE "-L${COMPILER_ROOT}/lib")
-            endif ()
-        endif ()
-    endif ()
-
-    # Check for ${target_arch} and set it or use the current system if not defined
-    if ("${target_arch}" STREQUAL "")
-        # Only use the current system if we are not cross compiling
-        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES
-                                                            ${CMAKE_HOST_SYSTEM_PROCESSOR})
-        )
-            if (compiler_id STREQUAL "NVIDIA")
-                # For NVCC, pass architecture flag to host compiler
-                if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-                    if (SZ_IS_64BIT_ARM_)
-                        target_compile_options(${target} PRIVATE "-Xcompiler=/arch:armv8.0")
-                    else ()
-                        target_compile_options(${target} PRIVATE "-Xcompiler=/arch:AVX2")
-                    endif ()
-                else ()
-                    include(CheckCXXCompilerFlag)
-                    check_cxx_compiler_flag("-march=native" supports_march_native)
-                    if (supports_march_native)
-                        target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
-                    endif ()
-                endif ()
-            elseif (NOT (compiler_id MATCHES "MSVC"))
-                include(CheckCXXCompilerFlag)
-                check_cxx_compiler_flag("-march=native" supports_march_native)
-                if (supports_march_native)
-                    target_compile_options(${target} PRIVATE "-march=native")
-                endif ()
-            else ()
-                # MSVC does not have a direct equivalent to -march=native
-                if (SZ_IS_64BIT_ARM_)
-                    target_compile_options(${target} PRIVATE "/arch:armv8.0")
-                else ()
-                    target_compile_options(${target} PRIVATE "/arch:AVX2")
-                endif ()
-            endif ()
-        endif ()
-    else ()
-        if (compiler_id MATCHES "MSVC")
-            target_compile_options(${target} PRIVATE "/arch:${target_arch}")
-        elseif (compiler_id STREQUAL "NVIDIA")
-            # NVCC handles CPU architecture through host compiler flags
-            if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-                target_compile_options(${target} PRIVATE "-Xcompiler=/arch:${target_arch}")
-            else ()
-                target_compile_options(${target} PRIVATE "-Xcompiler=-march=${target_arch}")
-            endif ()
-        else ()
-            target_compile_options(${target} PRIVATE "-march=${target_arch}")
-        endif ()
-    endif ()
-
-    # Define SZ_IS_BIG_ENDIAN_ macro based on system byte order
-    if (CMAKE_C_BYTE_ORDER STREQUAL "BIG_ENDIAN")
-        set(SZ_IS_BIG_ENDIAN_ 1)
-    else ()
-        set(SZ_IS_BIG_ENDIAN_ 0)
-    endif ()
-
-    target_compile_definitions(${target} PRIVATE "SZ_IS_BIG_ENDIAN_=${SZ_IS_BIG_ENDIAN_}")
-
-    # Sanitizer options for Debug mode
-    target_compile_definitions(${target} PRIVATE "$<IF:$<CONFIG:Debug>,SZ_DEBUG=1,SZ_DEBUG=0>")
-    if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
-        if (compiler_id MATCHES "MSVC")
-            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address;/fsanitize=leak>")
-            target_link_options(${target} PRIVATE "$<$<CONFIG:Debug>:/fsanitize=address;/fsanitize=leak>")
-        elseif (compiler_id STREQUAL "NVIDIA")
-            # ! NVCC can't handle sanitizers?!
-            # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
-        else ()
-            target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:-fsanitize=address;-fsanitize=undefined>")
-            target_link_options(${target} PRIVATE "$<$<CONFIG:Debug>:-fsanitize=address;-fsanitize=undefined>")
-        endif ()
-    endif ()
-
-    if (STRINGZILLA_BUILD_COVERAGE AND (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang"))
-        target_compile_options(${target} PRIVATE "-fprofile-instr-generate" "-fcoverage-mapping")
-        target_link_options(${target} PRIVATE "-fprofile-instr-generate" "-fcoverage-mapping")
-    endif ()
-endfunction ()
-
-function (define_launcher exec_name source cpp_standard target_arch)
+function (define_launcher exec_name cpp_standard target_arch)
     add_executable(${exec_name})
-    target_sources(${exec_name} PRIVATE ${source})
+    target_sources(${exec_name} PRIVATE ${ARGN})
+    target_include_directories(${exec_name} PRIVATE test bench)
+    target_link_libraries(${exec_name} PRIVATE forkunion::header)
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
-    # Launchers dispatch at compile time, so a tier must be BOTH compilable by this toolchain AND runnable on this
-    # machine — the intersection the RUN verdicts encode. When the caller pins an explicit `target_arch`, that `-march`
-    # (plus `types.h` auto-detection) is the tier request, so the machine gate must not override it.
+    # Launchers dispatch at compile time, so a capability must be BOTH compilable by this toolchain AND runnable on
+    # this machine — the intersection the RUN verdicts encode. When the caller pins an explicit `target_arch`, that
+    # `-march` (plus `types.h` auto-detection) is the capability request, so the machine gate must not override it.
     if ("${target_arch}" STREQUAL "")
         set_architecture_simd_definitions(${exec_name} RUN)
     endif ()
@@ -627,10 +351,12 @@ function (define_launcher exec_name source cpp_standard target_arch)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
 
-function (define_gpu_launcher exec_name source cuda_standard target_arch)
+function (define_gpu_launcher exec_name cuda_standard target_arch)
     add_executable(${exec_name})
-    target_sources(${exec_name} PRIVATE ${source})
-    set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
+    target_sources(${exec_name} PRIVATE ${ARGN})
+    set_source_files_properties(${ARGN} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CUDA)
+    target_include_directories(${exec_name} PRIVATE test bench)
+    target_link_libraries(${exec_name} PRIVATE forkunion::header)
     target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
     set_target_properties(${exec_name} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_include_directories(
@@ -639,9 +365,9 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
     )
     set_compiler_flags(${exec_name} ${cuda_standard} "${target_arch}" "${CMAKE_CUDA_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE CUDA::cudart CUDA::cuda_driver)
-    # Match the StringZillas CUDA static library's base tier (real SASS for Ampere sm_80 and Hopper sm_90), so the test
-    # harness and the precompiled engines it links target the same GPUs.
-    set_property(TARGET ${exec_name} PROPERTY CUDA_ARCHITECTURES "80-real;90-real")
+    # Match the StringZillas CUDA static library's base tier, so the test harness and the precompiled
+    # engines it links target the same GPUs.
+    set_property(TARGET ${exec_name} PROPERTY CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHS}")
     target_link_libraries(${exec_name} PRIVATE stringzilla_header)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
@@ -649,61 +375,6 @@ endfunction ()
 # Tests and benchmarks are defined after the libraries (below), so the StringZillas consumers can link the precompiled
 # static archives instead of recompiling the engines header-only.
 
-# Stamps the architecture id and the per-tier `SZ_USE_*` verdicts onto a target. `mode` is `COMPILE` for
-# runtime-dispatched libraries and `RUN` for comptime-dispatched executables; the verdicts themselves are resolved once
-# at configure time, in the "SIMD tier verdicts" block right after the probe includes.
-function (set_architecture_simd_definitions target mode)
-    if (SZ_IS_64BIT_X86_)
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
-    elseif (SZ_IS_64BIT_ARM_)
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=1")
-    else ()
-        target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=0")
-    endif ()
-    if (mode STREQUAL "COMPILE")
-        set(sz_selected_tiers_ "${SZ_TIERS_TO_COMPILE}")
-        set(sz_tiers_known_ "${SZ_COMPILE_TIERS_KNOWN}")
-    elseif (mode STREQUAL "RUN")
-        set(sz_selected_tiers_ "${SZ_TIERS_TO_RUN}")
-        set(sz_tiers_known_ "${SZ_RUN_TIERS_KNOWN}")
-    else ()
-        message(FATAL_ERROR "set_architecture_simd_definitions: mode must be COMPILE or RUN, got `${mode}`")
-    endif ()
-    # Without verdicts, `types.h` auto-detection under the target's own flags decides — except for an
-    # explicit `-D SZ_USE_<TIER>`, the one signal that outranks auto-detection.
-    foreach (sz_tier_ IN LISTS SZ_ISA_TIERS)
-        if (NOT sz_tiers_known_ AND NOT DEFINED SZ_USE_${sz_tier_})
-            continue()
-        endif ()
-        if (sz_tier_ IN_LIST sz_selected_tiers_)
-            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=1")
-        else ()
-            target_compile_definitions(${target} PRIVATE "SZ_USE_${sz_tier_}=0")
-        endif ()
-    endforeach ()
-endfunction ()
-
-# Apply the conservative baseline architecture (`-march`/`-mcpu`) that lets one shared/OBJECT compilation host every
-# per-ISA SIMD tier: the per-function target attributes inside the kernels pick the actual instruction set, so the
-# baseline only has to be old enough for every tier's intrinsics headers to parse. Cross-compiled targets (RISC-V,
-# LoongArch, POWER) get their arch from the toolchain file's `CMAKE_<LANG>_FLAGS_INIT`, so they pass an empty arch.
-function (set_baseline_architecture_flags target compiler_id)
-    if (SZ_IS_64BIT_X86_)
-        if (MSVC)
-            set_compiler_flags(${target} "" "SSE2" "${compiler_id}")
-        else ()
-            set_compiler_flags(${target} "" "ivybridge" "${compiler_id}")
-        endif ()
-    elseif (SZ_IS_64BIT_ARM_)
-        if (MSVC)
-            set_compiler_flags(${target} "" "armv8.0" "${compiler_id}")
-        else ()
-            set_compiler_flags(${target} "" "armv8-a" "${compiler_id}")
-        endif ()
-    else ()
-        set_compiler_flags(${target} "" "" "${compiler_id}")
-    endif ()
-endfunction ()
 
 # Define our libraries, first the header-only version
 add_library(stringzilla_header INTERFACE)
@@ -745,10 +416,10 @@ function (define_stringzilla_shared target)
                    POSITION_INDEPENDENT_CODE ON
     )
 
-    # Set the baseline architecture; the dynamic-dispatch core selects each SIMD tier at runtime.
+    # Set the baseline architecture; the dynamic-dispatch core selects each SIMD capability at runtime.
     set_baseline_architecture_flags(${target} "${CMAKE_CXX_COMPILER_ID}")
 
-    # Enable every tier the toolchain can compile; the runtime dispatch table masks what the CPU lacks.
+    # Enable every capability the toolchain can compile; the runtime dispatch table masks what the CPU lacks.
     set_architecture_simd_definitions(${target} COMPILE)
 
 endfunction ()
@@ -807,17 +478,18 @@ set(STRINGZILLAS_COMMON_DEFINITIONS "SZ_DYNAMIC_DISPATCH=1" "SZ_AVOID_LIBC=0"
 
 # Helper function used for `stringzillas_cpus_shared`, `stringzillas_cuda_shared`, and `stringzillas_rocm_shared`
 # targets
-function (define_stringzillas_shared target source_file backend_flags)
-    # Compile the translation units once into an OBJECT library, then expose a SHARED and a STATIC variant that reuse
-    # those objects. Tests and benchmarks link the STATIC variant and inherit `SZ_DYNAMIC_DISPATCH=1` (set INTERFACE
-    # below), so the heavy precompiled engine instantiations are linked rather than recompiled. The objects are linked
-    # PRIVATE into each variant (baked into the `.so`/`.a`) to avoid the OBJECT-library transitive duplicate-symbol
-    # gotcha; consumer-facing usage requirements are declared explicitly on the variants' INTERFACE.
-    string(REPLACE "_shared" "" base "${target}")
+function (define_stringzillas_shared base)
+    # Compile the ARGN translation units once into `<base>_objects`, then expose `<base>_shared` and
+    # `<base>_static` variants that reuse those objects. Tests and benchmarks link the STATIC variant and
+    # inherit `SZ_DYNAMIC_DISPATCH=1` (set INTERFACE below), so the heavy precompiled engine instantiations
+    # are linked rather than recompiled. The objects are linked PRIVATE into each variant (baked into the
+    # `.so`/`.a`) to avoid the OBJECT-library transitive duplicate-symbol gotcha; consumer-facing usage
+    # requirements are declared explicitly on the variants' INTERFACE.
     set(objects "${base}_objects")
+    set(target "${base}_shared")
     set(static "${base}_static")
 
-    add_library(${objects} OBJECT ${source_file})
+    add_library(${objects} OBJECT ${ARGN})
     add_library(${target} SHARED)
     add_library(${static} STATIC)
     add_library(${PROJECT_NAME}::${target} ALIAS ${target})
@@ -828,13 +500,11 @@ function (define_stringzillas_shared target source_file backend_flags)
     set_target_properties(${objects} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
     set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
 
-    # Compile settings for the library's own translation units (the OBJECT compilation).
+    # Compile settings for the library's own translation units (the OBJECT compilation). A future ROCm
+    # backend declares its own `SZ_USE_*` pair here.
     target_include_directories(${objects} PRIVATE include)
     target_link_libraries(${objects} PRIVATE forkunion::header)
-    target_compile_definitions(${objects} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS})
-    foreach (flag ${backend_flags})
-        target_compile_definitions(${objects} PRIVATE ${flag})
-    endforeach ()
+    target_compile_definitions(${objects} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=0" "SZ_USE_ROCM=0")
     target_compile_options(
         ${objects} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O2;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
     )
@@ -977,10 +647,7 @@ endfunction ()
 if (STRINGZILLAS_BUILD_SHARED)
 
     # Define StringZillas CPU shared + static libraries (sharing one OBJECT compilation)
-    define_stringzillas_shared(
-        stringzillas_cpus_shared "${STRINGZILLAS_API_CPP_SOURCES};${STRINGZILLAS_CPUS_SOURCES}"
-        "SZ_USE_CUDA=0;SZ_USE_ROCM=0"
-    )
+    define_stringzillas_shared(stringzillas_cpus ${STRINGZILLAS_API_CPP_SOURCES} ${STRINGZILLAS_CPUS_SOURCES})
 endif ()
 
 # Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static library is for local
@@ -990,7 +657,7 @@ endif ()
 # superseded by Hopper on sm_90, so it ships sm_80 SASS only; the Hopper DPX tier exists only from sm_90.
 if (STRINGZILLAS_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
     find_package(Threads REQUIRED)
-    define_stringzillas_cuda_library(stringzillas_cuda_static STATIC "80-real;90-real" "80-real" "90-real")
+    define_stringzillas_cuda_library(stringzillas_cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "80-real" "90-real")
     define_stringzillas_cuda_library(
         stringzillas_cuda_shared SHARED "80-real;90-real;90-virtual" "80-real;80-virtual" "90-real;90-virtual"
     )
@@ -1000,27 +667,27 @@ endif ()
 # (which carry the engine instantiations and export SZ_DYNAMIC_DISPATCH=1 on their interface) instead of recompiling the
 # engines header-only.
 if (STRINGZILLA_BUILD_BENCHMARK)
-    define_launcher(stringzilla_bench_find_cpp20 bench/find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_sequence_cpp20 bench/sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_token_cpp20 bench/token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_uncased_cpp20 bench/utf8_uncased.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_traverse_cpp20 bench/utf8_traverse.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_scan_cpp20 bench/utf8_scan.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_segment_cpp20 bench/utf8_segment.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_utf8_norm_cpp20 bench/utf8_norm.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_container_cpp20 bench/container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_memory_cpp20 bench/memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_find_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/find.cpp)
+    define_launcher(stringzilla_bench_sequence_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/sequence.cpp)
+    define_launcher(stringzilla_bench_token_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/token.cpp)
+    define_launcher(stringzilla_bench_utf8_uncased_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_uncased.cpp)
+    define_launcher(stringzilla_bench_utf8_traverse_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_traverse.cpp)
+    define_launcher(stringzilla_bench_utf8_scan_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_scan.cpp)
+    define_launcher(stringzilla_bench_utf8_segment_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_segment.cpp)
+    define_launcher(stringzilla_bench_utf8_norm_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_norm.cpp)
+    define_launcher(stringzilla_bench_container_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/container.cpp)
+    define_launcher(stringzilla_bench_memory_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/memory.cpp)
 
     # Parallel benchmarks link the precompiled static libraries when those are built.
-    define_launcher(stringzillas_bench_similarities_cpp20 bench/similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzillas_bench_fingerprints_cpp20 bench/fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_bench_similarities_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cpp)
+    define_launcher(stringzillas_bench_fingerprints_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cpp)
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_bench_similarities_cpp20 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzillas_bench_similarities_cu20 bench/similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}")
-        define_gpu_launcher(stringzillas_bench_fingerprints_cu20 bench/fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringzillas_bench_similarities_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cu)
+        define_gpu_launcher(stringzillas_bench_fingerprints_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cu)
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzillas_cuda_static)
@@ -1057,34 +724,34 @@ if (STRINGZILLA_BUILD_TEST)
     )
 
     # Make sure compilation passes for different C++ standards; MSVC only supports C++11 and newer.
-    define_launcher(stringzilla_test_cpp11 "${STRINGZILLA_TEST_SOURCES}" 11 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp14 "${STRINGZILLA_TEST_SOURCES}" 14 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp17 "${STRINGZILLA_TEST_SOURCES}" 17 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp20 "${STRINGZILLA_TEST_SOURCES}" 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp11 11 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
+    define_launcher(stringzilla_test_cpp14 14 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
+    define_launcher(stringzilla_test_cpp17 17 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
+    define_launcher(stringzilla_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
 
     # Test parallel algorithms separately; link the static archive when the libraries are built. StringZillas requires
     # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We also test
     # C++23 to validate forward compatibility, but only where the toolchain actually advertises support for it — older
     # MSVC and nvcc releases lack a C++23 dialect, and forcing it there silently decays to an earlier standard or hard
     # errors at configure time.
-    define_launcher(stringzillas_test_cpp20 test/stringzillas.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cpp)
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_test_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
     if ("cxx_std_23" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-        define_launcher(stringzillas_test_cpp23 test/stringzillas.cpp 23 "${STRINGZILLA_TARGET_ARCH}")
+        define_launcher(stringzillas_test_cpp23 23 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cpp)
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_test_cpp23 PRIVATE stringzillas_cpus_static)
         endif ()
     endif ()
 
     if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzillas_test_cu20 test/stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringzillas_test_cu20 20 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cu)
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_test_cu20 PRIVATE stringzillas_cuda_static)
         endif ()
         if ("cuda_std_23" IN_LIST CMAKE_CUDA_COMPILE_FEATURES)
-            define_gpu_launcher(stringzillas_test_cu23 test/stringzillas.cu 23 "${STRINGZILLA_TARGET_ARCH}")
+            define_gpu_launcher(stringzillas_test_cu23 23 "${STRINGZILLA_TARGET_ARCH}" test/stringzillas.cu)
             if (STRINGZILLAS_BUILD_SHARED)
                 target_link_libraries(stringzillas_test_cu23 PRIVATE stringzillas_cuda_static)
             endif ()
@@ -1092,8 +759,7 @@ if (STRINGZILLA_BUILD_TEST)
     endif ()
 endif ()
 
-# TODO: Define StringZillas ROCm shared library when ROCm support is added if (ENABLE_ROCM)
-# define_stringzillas_shared(stringzillas_rocm_shared "SZ_USE_CUDA=0;SZ_USE_ROCM=1") endif ()
+# TODO: Define a `stringzillas_rocm` library via `define_stringzillas_shared` when ROCm support is added.
 
 if (STRINGZILLA_INSTALL)
     # The header-only target is the package's heart: export it, so `find_package(stringzilla)` works
@@ -1122,65 +788,24 @@ if (STRINGZILLA_INSTALL)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
     )
 
-    if (TARGET stringzilla_shared)
-        install(
-            TARGETS stringzilla_shared
-            ARCHIVE
-            BUNDLE
-            FRAMEWORK
-            LIBRARY
-            OBJECTS
-            PRIVATE_HEADER
-            PUBLIC_HEADER
-            RESOURCE
-            RUNTIME
-        )
-    endif ()
-    if (TARGET stringzilla_bare)
-        install(
-            TARGETS stringzilla_bare
-            ARCHIVE
-            BUNDLE
-            FRAMEWORK
-            LIBRARY
-            OBJECTS
-            PRIVATE_HEADER
-            PUBLIC_HEADER
-            RESOURCE
-            RUNTIME
-        )
-    endif ()
-
-    # Install StringZillas shared libraries if they were built
-    if (TARGET stringzillas_cpus_shared)
-        install(
-            TARGETS stringzillas_cpus_shared
-            ARCHIVE
-            BUNDLE
-            FRAMEWORK
-            LIBRARY
-            OBJECTS
-            PRIVATE_HEADER
-            PUBLIC_HEADER
-            RESOURCE
-            RUNTIME
-        )
-    endif ()
-
-    if (TARGET stringzillas_cuda_shared)
-        install(
-            TARGETS stringzillas_cuda_shared
-            ARCHIVE
-            BUNDLE
-            FRAMEWORK
-            LIBRARY
-            OBJECTS
-            PRIVATE_HEADER
-            PUBLIC_HEADER
-            RESOURCE
-            RUNTIME
-        )
-    endif ()
+    foreach (sz_library_ IN ITEMS stringzilla_shared stringzilla_bare stringzillas_cpus_shared
+                                  stringzillas_cuda_shared
+    )
+        if (TARGET ${sz_library_})
+            install(
+                TARGETS ${sz_library_}
+                ARCHIVE
+                BUNDLE
+                FRAMEWORK
+                LIBRARY
+                OBJECTS
+                PRIVATE_HEADER
+                PUBLIC_HEADER
+                RESOURCE
+                RUNTIME
+            )
+        endif ()
+    endforeach ()
 
     install(DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR} DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
     install(DIRECTORY c/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)

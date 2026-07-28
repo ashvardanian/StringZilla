@@ -8,4 +8,4 @@ include(cmake/sz_isa_probe.cmake)
 
 sz_isa_probe_(LASX SOURCE probes/loongarch_lasx.c)
 
-set(SZ_ISA_TIERS "LASX")
+set(SZ_ISA_CAPABILITIES "LASX")
