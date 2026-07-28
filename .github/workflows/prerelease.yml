@@ -57,6 +57,8 @@ jobs:
             javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
             CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
             CITATION.cff:^version: (\d+\.\d+\.\d+)
+            StringZilla.csproj:<Version>(\d+\.\d+\.\d+)</Version>
+            pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+)</version>
           update-major-version-in: |
             include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
           update-minor-version-in: |

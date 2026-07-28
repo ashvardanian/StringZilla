@@ -15,7 +15,7 @@
     <AssemblyName>StringZilla</AssemblyName>
     <RootNamespace>StringZilla</RootNamespace>
     <PackageId>StringZilla</PackageId>
-    <Version>4.6.2</Version>
+    <Version>5.0.3</Version>
     <Authors>Ash Vardanian</Authors>
     <Description>Zero-copy .NET bindings for StringZilla: SIMD-accelerated search, compare, and hash over UTF-8 byte spans.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
