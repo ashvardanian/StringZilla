@@ -9333,28 +9333,28 @@ static char const doc_Strs_sample[] =                                           
     "  >>> len(sz.Strs(['a', 'b', 'c', 'd']).sample(2))\n"                                 //
     "  2";
 
-static char const doc_Strs_intersect[] =                                                          //
-    "intersect(other, *, seed=0) -> tuple[tuple[int, ...], tuple[int, ...]]\n"                    //
-    "\n"                                                                                          //
-    "Return the positions of strings present in both collections.\n"                              //
-    "Each distinct shared value is matched exactly once, even if either side has duplicates.\n"   //
-    "\n"                                                                                          //
-    "Args:\n"                                                                                     //
-    "  other (Strs): The collection to intersect with.\n"                                         //
-    "  seed (int, optional): Seed for the hash table to avoid attacks. Defaults to 0.\n"          //
-    "Returns:\n"                                                                                  //
-    "  tuple[tuple[int, ...], tuple[int, ...]]: Parallel position tuples - `result[0][i]` in\n"   //
-    "  this collection and `result[1][i]` in `other` point to equal strings.\n"                   //
-    "Example:\n"                                                                                  //
+static char const doc_Strs_intersect[] =                                                                     //
+    "intersect(other, *, seed=0) -> tuple[tuple[int, ...], tuple[int, ...]]\n"                               //
+    "\n"                                                                                                     //
+    "Return the positions of strings present in both collections.\n"                                         //
+    "Each distinct shared value is matched exactly once, even if either side has duplicates.\n"              //
+    "\n"                                                                                                     //
+    "Args:\n"                                                                                                //
+    "  other (Strs): The collection to intersect with.\n"                                                    //
+    "  seed (int, optional): Seed for the hash table to avoid attacks. Defaults to 0.\n"                     //
+    "Returns:\n"                                                                                             //
+    "  tuple[tuple[int, ...], tuple[int, ...]]: Parallel position tuples - `result[0][i]` in\n"              //
+    "  this collection and `result[1][i]` in `other` point to equal strings.\n"                              //
+    "Example:\n"                                                                                             //
     "  >>> ours, theirs = sz.Strs(['banana', 'apple', 'cherry']).intersect(sz.Strs(['cherry', 'banana']))\n" //
-    "  >>> sorted(ours)\n"                                                                        //
+    "  >>> sorted(ours)\n"                                                                                   //
     "  [0, 2]";
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, doc_Strs_shuffled}, //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, doc_sorted},            //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},         //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},       //
+    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, doc_Strs_shuffled},    //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, doc_sorted},               //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, doc_argsort},            //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, doc_Strs_sample},          //
     {"intersect", Strs_intersect, SZ_METHOD_FLAGS, doc_Strs_intersect}, //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
@@ -9457,9 +9457,14 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
     }
     Py_DECREF(seq);
 
-    // Intersect with hardware capabilities for safety
+    // An empty request or one entirely outside this machine's reach is a configuration error; silently
+    // degrading to serial would hide it.
     *result = requested_caps & sz_capabilities();
-    if (*result == 0) { *result = sz_cap_serial_k; }
+    if (*result == 0) {
+        PyErr_Format(PyExc_ValueError, "No requested capability is available here; available: %s",
+                     sz_capabilities_to_string_implementation_(sz_capabilities()));
+        return -1;
+    }
     return 0;
 }
 
@@ -9467,7 +9472,7 @@ static char const doc_reset_capabilities[] =                                    
     "reset_capabilities(names) -> None\n\n"                                          //
     "Sets the active SIMD/backend capabilities for this module and updates the\n"    //
     "runtime dispatch table. The provided names are intersected with hardware\n"     //
-    "capabilities; if the result is empty, falls back to 'serial'.\n\n"              //
+    "capabilities; raises ValueError if none of them is available.\n\n"              //
     "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.\n" //
     "\n"                                                                             //
     "Example:\n"                                                                     //
