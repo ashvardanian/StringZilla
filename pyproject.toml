@@ -1,35 +1,44 @@
-# This file configures wheels compilation for `cibuildwheel` for StringZilla CPython bindings.
-# On a good day it will produce:
-#   - `manylinux` and `musllinux` wheels for Linux on x86_64, aarch64, i686, ppc64le, s390x;
-#   - `macos` wheels for x86_64 and arm64 (no universal2);
-#   - `windows` wheels for AMD64, x86, and ARM64.
-#   - for Python versions from 3.10 to 3.14.
-#   - running over 30,000 tests on each wheel.
-#   = meaning 15 platforms * 5 Python versions = 75 builds.
-#   = meaning over 2,250,000 tests.
+# This file configures wheels compilation for `cibuildwheel` for the StringZilla CPython bindings.
+# One `SZ_TARGET` env var selects which of the three packages a build produces, and the release
+# workflow drives a different platform set for each - the widest for the header-only core, narrower
+# for the parallel engines, narrowest for CUDA:
+#
+#   stringzilla        CPython 3.10-3.14 and 3.14t (free-threaded)
+#                      Linux `manylinux` + `musllinux` on x86_64, aarch64, i686, ppc64le, s390x,
+#                      armv7l, riscv64; macOS x86_64 + arm64; Windows AMD64, x86, ARM64.
+#   stringzillas-cpus  same Python versions; Linux x86_64 + aarch64 only (the C++ engines are too
+#                      slow to build and test under QEMU); macOS x86_64 + arm64; Windows AMD64 and
+#                      ARM64. 32-bit Windows is skipped deliberately - a parallel batch engine has
+#                      little use there and no CI compiles the C++ stack for 32-bit anywhere.
+#   stringzillas-cuda  same Python versions; Linux x86_64 + aarch64, and Windows AMD64. NVIDIA
+#                      ships no CUDA Toolkit for Windows-on-Arm, and no musl toolchain at all, so
+#                      that job selects `manylinux` explicitly.
+#
+# Every wheel runs the full suite on the interpreter it was built for, except the Windows CUDA
+# wheels, which cannot be imported on a driver-less runner - see the note in `release.yml`.
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "build_backend"
 backend-path = ["."]
+build-backend = "build_backend"
+requires = ["setuptools>=61", "wheel"]
 
 [tool.pytest.ini_options]
 minversion = "6.0"
 # `test/` is a package (test/__init__.py) so the prefix-less modules namespace as `test.string` etc. and
 # never shadow stdlib modules (e.g. `string`); `python_files` collects the `test_`-free filenames.
-testpaths = ["test"]
-python_files = ["*.py"]
 addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-xfail_strict = true
 filterwarnings = ["error"]
+python_files = ["*.py"]
+testpaths = ["test"]
+xfail_strict = true
 
 [tool.black]
 line-length = 120
 
 [tool.cibuildwheel]
-test-requires = ["pytest", "pytest-repeat"]
 before-test = ["python {project}/build_backend.py pull-deps {project}"]
-test-command = "python {project}/build_backend.py run-tests {project}"
 build-verbosity = 0
+test-command = "python {project}/build_backend.py run-tests {project}"
+test-requires = ["pytest", "pytest-repeat"]
 
 # We need to build for all platforms:
 # - on Linux: x86_64, aarch64, i686, ppc64le, s390x
@@ -56,109 +65,101 @@ repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 # You can keep track of the most recent images on Quay:
 # - for `manylinux`: https://quay.io/search?q=manylinux
 # - for `musllinux`: https://quay.io/search?q=musllinux
-manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-manylinux-s390x-image = "manylinux_2_28"
 manylinux-ppc64le-image = "manylinux_2_28"
-musllinux-x86_64-image = "musllinux_1_2"
+manylinux-s390x-image = "manylinux_2_28"
+manylinux-x86_64-image = "manylinux_2_28"
 musllinux-aarch64-image = "musllinux_1_2"
-musllinux-s390x-image = "musllinux_1_2"
-musllinux-ppc64le-image = "musllinux_1_2"
 musllinux-i686-image = "musllinux_1_2"
+musllinux-ppc64le-image = "musllinux_1_2"
+musllinux-s390x-image = "musllinux_1_2"
+musllinux-x86_64-image = "musllinux_1_2"
 
 # Different manylinux images use different package managers.
 # Try yum (CentOS/RHEL), dnf (Fedora), or apt-get (Debian/Ubuntu).
-before-all = ["""
+before-all = [
+  """
     (yum update -y && yum install -y glibc-devel wget python3-devel) || \
     (dnf update -y && dnf install -y glibc-devel wget python3-devel) || \
     (apt-get update && apt-get install -y libc6-dev wget python3-dev)
-    """]
+    """,
+]
 
 # With `musl` builds, we obviously don't need the `glibc` and can't use `yum`.
 # This may also be handy for using custom dependencies for different Python versions:
 # https://cibuildwheel.readthedocs.io/en/stable/options/#overrides
 [[tool.cibuildwheel.overrides]]
-select = "*-musllinux*"
 before-all = "apk add --update wget python3-dev"
+select = "*-musllinux*"
 
 [tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
 before-build = ["rm -rf {project}/build"]
 repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
-archs = ["x86_64", "arm64"]
 
 [tool.cibuildwheel.windows]
 before-build = ["rd /s /q {project}\\build || echo Done"]
 
 # Detect x86 64-bit builds
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "0"
+environment.SZ_IS_64BIT_X86_ = "1"
+inherit.environment = "append"
 select = "*-win_amd64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "1"
-environment.SZ_IS_64BIT_ARM_ = "0"
 
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "0"
+environment.SZ_IS_64BIT_X86_ = "1"
+inherit.environment = "append"
 select = "*-manylinux*_x86_64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "1"
-environment.SZ_IS_64BIT_ARM_ = "0"
 
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "0"
+environment.SZ_IS_64BIT_X86_ = "1"
+inherit.environment = "append"
 select = "*-musllinux*_x86_64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "1"
-environment.SZ_IS_64BIT_ARM_ = "0"
-
-[[tool.cibuildwheel.overrides]]
-select = "*-macos*_x86_64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "1"
-environment.SZ_IS_64BIT_ARM_ = "0"
 
 # Detect ARM 64-bit builds
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "1"
+environment.SZ_IS_64BIT_X86_ = "0"
+inherit.environment = "append"
 select = "*-win_arm64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "0"
-environment.SZ_IS_64BIT_ARM_ = "1"
 
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "1"
+environment.SZ_IS_64BIT_X86_ = "0"
+inherit.environment = "append"
 select = "*-manylinux*_aarch64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "0"
-environment.SZ_IS_64BIT_ARM_ = "1"
 
 [[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "1"
+environment.SZ_IS_64BIT_X86_ = "0"
+inherit.environment = "append"
 select = "*-musllinux*_aarch64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "0"
-environment.SZ_IS_64BIT_ARM_ = "1"
 
+# macOS: both arches share an 11.0 floor. The release jobs already force
+# `MACOSX_DEPLOYMENT_TARGET=11.0`, so the x86_64 wheels were built against 11.0 while declaring
+# 10.13 - this makes the declaration match what actually ships. Big Sur is also the first release
+# to run on Apple Silicon, so a single number covers both arches without narrowing Intel support.
 [[tool.cibuildwheel.overrides]]
-select = "*-macos*_arm64"
-inherit.environment = "append"
-environment.SZ_IS_64BIT_X86_ = "0"
-environment.SZ_IS_64BIT_ARM_ = "1"
-
-# Detect MacOS Universal2 builds
-## Per-arch macOS deployment target
-[[tool.cibuildwheel.overrides]]
-select = "*-macos*_x86_64"
-inherit.environment = "append"
-environment.MACOSX_DEPLOYMENT_TARGET = "10.13"
-environment.SZ_IS_64BIT_X86_ = "1"
-environment.SZ_IS_64BIT_ARM_ = "0"
-
-[[tool.cibuildwheel.overrides]]
-select = "*-macos*_arm64"
-inherit.environment = "append"
 environment.MACOSX_DEPLOYMENT_TARGET = "11.0"
-environment.SZ_IS_64BIT_X86_ = "0"
+environment.SZ_IS_64BIT_ARM_ = "0"
+environment.SZ_IS_64BIT_X86_ = "1"
+inherit.environment = "append"
+select = "*-macos*_x86_64"
+
+[[tool.cibuildwheel.overrides]]
+environment.MACOSX_DEPLOYMENT_TARGET = "11.0"
 environment.SZ_IS_64BIT_ARM_ = "1"
+environment.SZ_IS_64BIT_X86_ = "0"
+inherit.environment = "append"
+select = "*-macos*_arm64"
 
 [tool.ruff]
-target-version = "py310"
-line-length = 120
 extend-select = [
-    "E", # pycodestyle errors
-    "F", # pyflakes
+  "E", # pycodestyle errors
+  "F", # pyflakes
 ]
+line-length = 120
+target-version = "py310"

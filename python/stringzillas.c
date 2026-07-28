@@ -2595,6 +2595,13 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     m = PyModule_Create(&stringzillas_module);
     if (m == NULL) return NULL;
 
+#ifdef Py_GIL_DISABLED
+    // Declare that this module is safe for free-threaded Python. Every engine serializes its own
+    // scratch buffers through the per-object `PyMutex` in `SZS_LOCK_`, and `DeviceScope` hands out
+    // its executor by value, so concurrent calls never share mutable kernel state.
+    PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
+
     // Add version metadata
     {
         char version_str[50];

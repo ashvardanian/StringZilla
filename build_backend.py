@@ -16,6 +16,9 @@ CLI Commands
     -   run-tests [PROJECT_DIR]: runs the serial `test/` suite (minus the
         StringZillas modules) for the `stringzilla` target, and the
         StringZillas modules for the parallel targets.
+    -   check-wheels [--wheel-dir DIR] SUBSTRING...: fails when no wheel matches
+        one of the named platform substrings, so a release cannot silently
+        degrade to sdist-only when a wheel job breaks.
 """
 
 import os
@@ -190,6 +193,35 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
     subprocess.check_call([sys.executable, "-m", "pytest", "-s", "-x", *tests])  # noqa: S603
 
 
+def cli_check_wheels(wheel_dir: str, required: List[str]) -> None:
+    """Refuse a release that lost a core platform, while tolerating the long tail.
+
+    The publish jobs run on `always()` so one flaky emulated leg cannot hold a release. That also
+    means a wheel job failing outright would publish an sdist-only package with nothing going red.
+
+    - Emulated arches, `musllinux` and Windows-on-Arm are expendable and may be missing.
+    - Every glob in `required` must match at least one wheel filename, or this raises.
+
+    Globs rather than substrings because the platform tag carries a version the caller should not
+    have to spell out: a `manylinux` x86 wheel is tagged `manylinux_2_17_x86_64`, so the pattern
+    has to be `*manylinux*_x86_64*`. Quote them in the shell, or they expand before we see them.
+    """
+    from fnmatch import fnmatch
+
+    wheels = sorted(Path(wheel_dir).glob("*.whl"))
+    missing = []
+    for pattern in required:
+        matched = [w.name for w in wheels if fnmatch(w.name, pattern)]
+        if matched:
+            print(f"ok: {len(matched)} wheel(s) matching {pattern!r}")
+        else:
+            print(f"::error::no wheel matching {pattern!r} - refusing to publish a partial release")
+            missing.append(pattern)
+    print(f"total wheels: {len(wheels)}")
+    if missing:
+        raise SystemExit(f"missing core platforms: {', '.join(missing)}")
+
+
 def _main(argv: List[str]) -> int:
     import argparse
 
@@ -208,6 +240,12 @@ def _main(argv: List[str]) -> int:
     parser_sdists = sub.add_parser("build-sdists", help="Build sdists for all targets with correct metadata")
     parser_sdists.add_argument("--outdir", default="dist", help="Output directory for sdists (default: dist)")
 
+    parser_check = sub.add_parser("check-wheels", help="Fail if a core platform produced no wheel")
+    parser_check.add_argument("--wheel-dir", default="dist", help="Directory holding the wheels (default: dist)")
+    parser_check.add_argument(
+        "required", nargs="+", help="Globs a wheel filename must match, e.g. '*win_amd64*' (quote them)"
+    )
+
     namespace = parser.parse_args(argv)
     if namespace.cmd == "pull-deps":
         cli_prepare_tests(namespace.project_dir)
@@ -217,6 +255,9 @@ def _main(argv: List[str]) -> int:
         return 0
     if namespace.cmd == "build-sdists":
         cli_build_sdists(namespace.outdir)
+        return 0
+    if namespace.cmd == "check-wheels":
+        cli_check_wheels(namespace.wheel_dir, namespace.required)
         return 0
     return 2
 

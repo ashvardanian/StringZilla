@@ -104,7 +104,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -137,7 +137,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -170,7 +170,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Setup QEMU
@@ -206,7 +206,7 @@ jobs:
                   submodules: recursive
 
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -239,7 +239,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -273,7 +273,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -299,14 +299,14 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ["310", "311", "312", "313", "314"]
+                python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -333,14 +333,14 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ["310", "311", "312", "313", "314"]
+                python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -366,7 +366,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ["310", "311", "312", "313", "314"]
+                python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
@@ -374,7 +374,7 @@ jobs:
                   submodules: recursive
 
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -401,14 +401,14 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ["310", "311", "312", "313", "314"]
+                python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -435,14 +435,14 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                python-version: ["311", "312", "313", "314"]
+                python-version: ["311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -468,7 +468,7 @@ jobs:
             fail-fast: false
             matrix:
                 os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
-                python-version: ["310", "311", "312", "313", "314"]
+                python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
             - uses: actions/checkout@v7
               with:
@@ -476,7 +476,7 @@ jobs:
                   submodules: recursive
 
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Install cibuildwheel
@@ -484,7 +484,11 @@ jobs:
             - name: Build wheels
               run: cibuildwheel --output-dir wheelhouse
               env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
+                  # `manylinux` only. A bare `cp3XX-*` would also select `musllinux`, whose Alpine base has `apk`
+                  # rather than `dnf` - and `CIBW_BEFORE_ALL_LINUX` below overrides the `pyproject.toml` override
+                  # that would otherwise swap the package manager, so the `dnf` script ran on Alpine and exited 127.
+                  # CUDA ships no musl toolchain anyway, so there is nothing to build there.
+                  CIBW_BUILD: cp${{ matrix.python-version }}-manylinux*
                   # Build only the runner's native architecture (x86_64 on ubuntu-24.04, aarch64 on ubuntu-24.04-arm), so the
                   # CUDA toolchain runs natively instead of under QEMU - the old cross-arch emulation is what made this job
                   # take hours and flake.
@@ -523,6 +527,56 @@ jobs:
                   path: ./wheelhouse/*.whl
                   overwrite: true
 
+    # AMD64 only: NVIDIA ships no CUDA Toolkit for Windows-on-Arm, so there is no `windows-11-arm`
+    # counterpart to this job the way there is for the CPU wheels.
+    build_wheels_stringzillas_cuda_windows:
+        name: Build StringZillas-CUDA ${{ matrix.python-version }} for Windows
+        runs-on: windows-2022
+        needs: versioning
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ["310", "311", "312", "313", "314", "314t"]
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: "main"
+                  submodules: recursive
+
+            - name: Set up Python
+              uses: actions/setup-python@v7
+              with:
+                  python-version: 3.x
+              # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB and
+              # nothing here needs the profiler, the samples or cuDNN. Exports `CUDA_PATH`, which
+              # `setup.py` already honors alongside `CUDA_HOME`.
+            - name: Install CUDA Toolkit
+              uses: Jimver/cuda-toolkit@v0.2.35
+              with:
+                  cuda: "12.9.1"
+                  method: "network"
+                  sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+            - name: Install cibuildwheel
+              run: python -m pip install cibuildwheel==3.4.1
+            - name: Build wheels
+              run: cibuildwheel --output-dir wheelhouse
+              env:
+                  CIBW_BUILD: cp${{ matrix.python-version }}-*
+                  CIBW_ARCHS_WINDOWS: AMD64
+                  # Windows links the toolkit's real `cuda.lib` import library, which resolves against
+                  # the driver's `nvcuda.dll` at load time. A GitHub runner has no driver, so importing
+                  # the built module would fail here - unlike Linux, where the toolkit ships a
+                  # `libcuda.so` stub the test phase can load. Skip the test phase until the extension
+                  # delay-loads `nvcuda.dll`, at which point `cuInit` fails cleanly like it does on Linux.
+                  CIBW_TEST_SKIP: "*-win_amd64"
+                  SZ_TARGET: stringzillas-cuda
+            - name: Upload wheels
+              uses: actions/upload-artifact@v7
+              with:
+                  name: cibw-wheels-stringzillas-cuda-windows-${{ strategy.job-index }}
+                  path: ./wheelhouse/*.whl
+                  overwrite: true
+
     build_sdist_stringzilla:
         name: Build StringZilla Source Distribution
         runs-on: ubuntu-24.04
@@ -533,7 +587,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Build source distribution
@@ -558,7 +612,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Build source distribution
@@ -583,7 +637,7 @@ jobs:
                   ref: "main"
                   submodules: recursive
             - name: Set up Python
-              uses: actions/setup-python@v7.0.0
+              uses: actions/setup-python@v7
               with:
                   python-version: 3.x
             - name: Build source distribution
@@ -616,6 +670,10 @@ jobs:
             name: pypi-stringzilla
             url: https://pypi.org/p/stringzilla
         steps:
+              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            - uses: actions/checkout@v7
+              with:
+                  ref: "main"
             - name: Prepare dist directory
               run: mkdir -p dist
 
@@ -626,13 +684,18 @@ jobs:
                   pattern: cibw-wheels-stringzilla-*
                   path: dist
                   merge-multiple: true
-                  if-no-artifact-found: ignore
 
             - name: Download source distribution
               uses: actions/download-artifact@v8
               with:
                   name: sdist-stringzilla
                   path: dist
+
+            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
+            # Windows-on-Arm legs flake and must never hold a release. Losing a core
+            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            - name: Require wheels for the core platforms
+              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
 
             - name: Publish to PyPI
               uses: pypa/gh-action-pypi-publish@release/v1
@@ -665,6 +728,10 @@ jobs:
         permissions: {}
 
         steps:
+              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            - uses: actions/checkout@v7
+              with:
+                  ref: "main"
             - name: Prepare dist directory
               run: mkdir -p dist
 
@@ -675,13 +742,18 @@ jobs:
                   pattern: cibw-wheels-stringzillas-cpus-*
                   path: dist
                   merge-multiple: true
-                  if-no-artifact-found: ignore
 
             - name: Download source distribution
               uses: actions/download-artifact@v8
               with:
                   name: sdist-stringzillas-cpus
                   path: dist
+
+            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
+            # Windows-on-Arm legs flake and must never hold a release. Losing a core
+            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            - name: Require wheels for the core platforms
+              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
 
             - name: Publish to PyPI
               uses: pypa/gh-action-pypi-publish@release/v1
@@ -700,6 +772,7 @@ jobs:
             [
                 publish_pypi_stringzilla,
                 build_wheels_stringzillas_cuda_linux,
+                build_wheels_stringzillas_cuda_windows,
                 build_sdist_stringzillas_cuda,
             ]
         if: ${{ always() }}
@@ -708,6 +781,10 @@ jobs:
             name: pypi-stringzillas-cuda
             url: https://pypi.org/p/stringzillas-cuda
         steps:
+              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            - uses: actions/checkout@v7
+              with:
+                  ref: "main"
             - name: Prepare dist directory
               run: mkdir -p dist
 
@@ -718,13 +795,18 @@ jobs:
                   pattern: cibw-wheels-stringzillas-cuda-*
                   path: dist
                   merge-multiple: true
-                  if-no-artifact-found: ignore
 
             - name: Download source distribution
               uses: actions/download-artifact@v8
               with:
                   name: sdist-stringzillas-cuda
                   path: dist
+
+            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
+            # Windows-on-Arm legs flake and must never hold a release. Losing a core
+            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            - name: Require wheels for the core platforms
+              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*'
 
             - name: Publish to PyPI
               uses: pypa/gh-action-pypi-publish@release/v1
@@ -788,7 +870,7 @@ jobs:
               with:
                   ref: "main"
             - name: Setup Node.js
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@v7
               with:
                   node-version: "22"
             - name: Set up MSVC ARM64 cross-compiler
@@ -848,7 +930,7 @@ jobs:
               with:
                   ref: "main"
             - name: Setup Node.js
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@v7
               with:
                   node-version: "24"
                   registry-url: "https://registry.npmjs.org"
@@ -880,7 +962,7 @@ jobs:
               with:
                   ref: "main"
             - name: Setup Node.js
-              uses: actions/setup-node@v6
+              uses: actions/setup-node@v7
               with:
                   node-version: "24"
                   registry-url: "https://registry.npmjs.org"
@@ -1094,6 +1176,7 @@ jobs:
             - build_wheels_stringzilla_windows_arm
             - build_wheels_stringzillas_cpus_windows_x86
             - build_wheels_stringzillas_cpus_windows_arm
+            - build_wheels_stringzillas_cuda_windows
             - create_windows_dll_library
         if: ${{ always() }}
         runs-on: ubuntu-24.04
@@ -1105,11 +1188,13 @@ jobs:
                   echo "build_wheels_stringzilla_windows_arm: ${{ needs.build_wheels_stringzilla_windows_arm.result }}"
                   echo "build_wheels_stringzillas_cpus_windows_x86: ${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}"
                   echo "build_wheels_stringzillas_cpus_windows_arm: ${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}"
+                  echo "build_wheels_stringzillas_cuda_windows: ${{ needs.build_wheels_stringzillas_cuda_windows.result }}"
                   echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
                   if [ "${{ needs.build_wheels_stringzilla_windows_x86.result }}" != "success" ] || \
                      [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ] || \
                      [ "${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}" != "success" ] || \
                      [ "${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}" != "success" ] || \
+                     [ "${{ needs.build_wheels_stringzillas_cuda_windows.result }}" != "success" ] || \
                      [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
                     echo "One or more Windows dependencies failed.";
                     exit 1;
