@@ -871,9 +871,9 @@ endfunction ()
 # tier gets its own architecture floor (base SIMT and Kepler from sm_70, Hopper DPX from sm_90), and the static library
 # (local testing) and shared library (distribution) request different architecture sets, so this helper is invoked once
 # per (tier, variant) combination.
-function (define_stringzillas_cuda_objects name sources gpu_archs)
-    add_library(${name} OBJECT ${sources})
-    set_source_files_properties(${sources} TARGET_DIRECTORY ${name} PROPERTIES LANGUAGE CUDA)
+function (define_stringzillas_cuda_objects name gpu_archs)
+    add_library(${name} OBJECT ${ARGN})
+    set_source_files_properties(${ARGN} TARGET_DIRECTORY ${name} PROPERTIES LANGUAGE CUDA)
     set_target_properties(
         ${name}
         PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -901,18 +901,23 @@ function (define_stringzillas_cuda_objects name sources gpu_archs)
     set_baseline_architecture_flags(${name} "${CMAKE_CUDA_COMPILER_ID}")
 endfunction ()
 
-# The parallel shim is split into one translation unit per algorithm, so each engine (and its CUDA kernels) compiles
-# independently and in parallel. Each `.cpp`/`.cu` is a thin wrapper around the matching `c/szs_<algorithm>.cuh`, which
-# includes the shared `c/stringzillas/stringzillas.cuh` scaffolding.
-set(STRINGZILLAS_CPU_SOURCES
+# StringZillas C-API entry units, compiled once per library - as C++ into the CPU one, as CUDA into the GPU one.
+set(STRINGZILLAS_API_CPP_SOURCES
     c/stringzillas/runtime.cpp
     c/stringzillas/levenshtein.cpp
     c/stringzillas/needleman_wunsch.cpp
     c/stringzillas/smith_waterman.cpp
     c/stringzillas/fingerprints.cpp
-    # Per-capability instantiation units: each emits one ISA's heavy single-pair anti-diagonal SIMD core so the
-    # algorithm entry TUs above only declare them (`extern template`) and compile in parallel. Each file is internally
-    # guarded by its `SZ_USE_*` macro, so the off-platform ones compile to empty objects.
+)
+set(STRINGZILLAS_API_CU_SOURCES
+    c/stringzillas/runtime.cu
+    c/stringzillas/levenshtein.cu
+    c/stringzillas/needleman_wunsch.cu
+    c/stringzillas/smith_waterman.cu
+    c/stringzillas/fingerprints.cu
+)
+# Per-ISA CPU instantiation units, host C++ in every library; off-platform files compile to empty objects.
+set(STRINGZILLAS_CPUS_SOURCES
     c/stringzillas/levenshtein_serial.cpp
     c/stringzillas/levenshtein_icelake.cpp
     c/stringzillas/levenshtein_haswell.cpp
@@ -929,34 +934,45 @@ set(STRINGZILLAS_CPU_SOURCES
     c/stringzillas/smith_waterman_neon.cpp
     c/stringzillas/smith_waterman_rvv.cpp
 )
-# CUDA translation units are grouped by their architecture floor. The C-API entry units, the base SIMT providers and the
-# Kepler video-SIMD providers run from sm_70, so they live in the "base" group. The Hopper DPX providers
-# (`__viaddmax_s16x2`, `__vimax3`, `__reduce_max_sync`) need sm_90, so they form a separate group with its own floor.
-set(STRINGZILLAS_CUDA_BASE_SOURCES
-    c/stringzillas/runtime.cu
-    c/stringzillas/levenshtein.cu
-    c/stringzillas/needleman_wunsch.cu
-    c/stringzillas/smith_waterman.cu
-    c/stringzillas/fingerprints.cu
+# Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
+# from the base set.
+set(STRINGZILLAS_CUDA_SOURCES
     c/stringzillas/levenshtein_cuda.cu
-    c/stringzillas/levenshtein_kepler.cu
     c/stringzillas/needleman_wunsch_cuda.cu
     c/stringzillas/smith_waterman_cuda.cu
 )
-set(STRINGZILLAS_CUDA_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzillas/needleman_wunsch_hopper.cu
-                                     c/stringzillas/smith_waterman_hopper.cu
+set(STRINGZILLAS_KEPLER_SOURCES c/stringzillas/levenshtein_kepler.cu)
+set(STRINGZILLAS_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzillas/needleman_wunsch_hopper.cu
+                                c/stringzillas/smith_waterman_hopper.cu
 )
 
-# Assemble one StringZillas CUDA library variant from per-tier OBJECT libraries. The base tier (C-API entry units, base
-# SIMT and Kepler providers) and the Hopper DPX tier each compile once for the requested architecture set, then link
-# into the named variant. The static and shared variants pass different architecture sets (real SASS only versus real
-# SASS plus forward-compatible PTX), so this is invoked once per variant.
-function (define_stringzillas_cuda_library target kind base_archs hopper_archs)
-    define_stringzillas_cuda_objects(${target}_base "${STRINGZILLAS_CUDA_BASE_SOURCES}" "${base_archs}")
-    define_stringzillas_cuda_objects(${target}_hopper "${STRINGZILLAS_CUDA_HOPPER_SOURCES}" "${hopper_archs}")
+# The per-ISA CPU instantiation units stay host C++ even inside the CUDA library: NVCC's frontend cannot
+# parse the CPU SIMD headers.
+function (define_stringzillas_cpus_objects name)
+    add_library(${name} OBJECT ${ARGN})
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+    target_include_directories(${name} PRIVATE include)
+    target_link_libraries(${name} PRIVATE forkunion::header)
+    target_compile_definitions(${name} PRIVATE "SZ_DYNAMIC_DISPATCH=1" "SZ_USE_CUDA=1" "SZ_USE_ROCM=0" "SZ_AVOID_LIBC=0")
+    if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_compile_definitions(${name} PRIVATE "SZ_DEBUG=0")
+    endif ()
+    set_architecture_simd_definitions(${name} COMPILE)
+    set_baseline_architecture_flags(${name} "${CMAKE_CXX_COMPILER_ID}")
+endfunction ()
+
+# Assemble one StringZillas CUDA library variant from four groups of object files, one per (compiler,
+# architecture-set) pair; the static and shared variants pass different architecture sets.
+function (define_stringzillas_cuda_library target kind cuda_archs kepler_archs hopper_archs)
+    define_stringzillas_cuda_objects(
+        ${target}_cuda "${cuda_archs}" ${STRINGZILLAS_API_CU_SOURCES} ${STRINGZILLAS_CUDA_SOURCES}
+    )
+    define_stringzillas_cuda_objects(${target}_kepler "${kepler_archs}" ${STRINGZILLAS_KEPLER_SOURCES})
+    define_stringzillas_cuda_objects(${target}_hopper "${hopper_archs}" ${STRINGZILLAS_HOPPER_SOURCES})
+    define_stringzillas_cpus_objects(${target}_cpus ${STRINGZILLAS_CPUS_SOURCES})
 
     add_library(${target} ${kind})
-    target_link_libraries(${target} PRIVATE ${target}_base ${target}_hopper)
+    target_link_libraries(${target} PRIVATE ${target}_cuda ${target}_kepler ${target}_hopper ${target}_cpus)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON LINKER_LANGUAGE CUDA)
     if (kind STREQUAL "SHARED")
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
@@ -973,7 +989,10 @@ endfunction ()
 if (STRINGZILLAS_BUILD_SHARED)
 
     # Define StringZillas CPU shared + static libraries (sharing one OBJECT compilation)
-    define_stringzillas_shared(stringzillas_cpus_shared "${STRINGZILLAS_CPU_SOURCES}" "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
+    define_stringzillas_shared(
+        stringzillas_cpus_shared "${STRINGZILLAS_API_CPP_SOURCES};${STRINGZILLAS_CPUS_SOURCES}"
+        "SZ_USE_CUDA=0;SZ_USE_ROCM=0"
+    )
 
     # Set the baseline architecture on the OBJECT compilation; the per-ISA SIMD cores carry per-function target
     # attributes, so this conservative baseline covers all tiers.
@@ -981,14 +1000,16 @@ if (STRINGZILLAS_BUILD_SHARED)
 endif ()
 
 # Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static library is for local
-# testing and benchmarking, so it ships real SASS for the current and older compatible datacenter GPUs (Ampere sm_80 and
-# Hopper sm_90) and runs without any load-time JIT. The shared library is for distribution, so on top of that real SASS
-# it also packages forward-compatible PTX (the `-virtual` entries) that the driver JITs on newer GPUs. The Hopper DPX
-# tier exists only from sm_90, so it never carries an sm_80 entry.
+# testing and benchmarking, so it ships real SASS only and runs without any load-time JIT. The shared library is for
+# distribution, so on top of that real SASS it also packages forward-compatible PTX (the `-virtual` entries) that the
+# driver JITs on newer GPUs. The base tier executes natively on both supported generations; the Kepler tier is
+# superseded by Hopper on sm_90, so it ships sm_80 SASS only; the Hopper DPX tier exists only from sm_90.
 if (STRINGZILLAS_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
     find_package(Threads REQUIRED)
-    define_stringzillas_cuda_library(stringzillas_cuda_static STATIC "80-real;90-real" "90-real")
-    define_stringzillas_cuda_library(stringzillas_cuda_shared SHARED "80-real;90-real;90-virtual" "90-real;90-virtual")
+    define_stringzillas_cuda_library(stringzillas_cuda_static STATIC "80-real;90-real" "80-real" "90-real")
+    define_stringzillas_cuda_library(
+        stringzillas_cuda_shared SHARED "80-real;90-real;90-virtual" "80-real;80-virtual" "90-real;90-virtual"
+    )
 endif ()
 
 # Tests and benchmarks come after the libraries so the StringZillas consumers can link the precompiled static archives

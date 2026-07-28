@@ -60,19 +60,25 @@ def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
 
 
 # CUDA architecture partition, kept in lockstep with the CMake build (`define_stringzillas_cuda_library` in
-# CMakeLists.txt) and build.rs. Two tiers: the base group (C-API entry TUs + base-SIMT + Kepler providers) ships
-# sm_80 and sm_90 real SASS; the Hopper DPX group (`*_hopper.cu`) is sm_90 only. Both add forward-compatible PTX
-# (`-virtual`) for the distributed wheel, which the driver JITs on newer GPUs. sm_80/sm_90 are valid on CUDA 12.x
-# and 13.x alike (13.x dropped the older floors), so the set needs no per-toolkit probing.
-_CUDA_BASE_ARCHES: Final = ["80-real", "90-real", "90-virtual"]
-_CUDA_HOPPER_ARCHES: Final = ["90-real", "90-virtual"]
+# CMakeLists.txt) and build.rs. The base tier executes natively on both supported generations (it is the only
+# implementation for some ops even on sm_90), so it ships SASS for both plus forward PTX. The Kepler tier is
+# superseded by Hopper on sm_90, so it ships sm_80 SASS only, with PTX covering forced-tier corners. The Hopper
+# DPX tier starts at sm_90. sm_80/sm_90 are valid on CUDA 12.x and 13.x alike, so no per-toolkit probing.
+_CUDA_ARCHES: Final = ["80-real", "90-real", "90-virtual"]
+_KEPLER_ARCHES: Final = ["80-real", "80-virtual"]
+_HOPPER_ARCHES: Final = ["90-real", "90-virtual"]
 
 
 def _cuda_gencode_flags(cuda_source: str) -> List[str]:
-    """`-gencode` flags for one `.cu`, by tier so the Hopper providers carry no dead sm_80 cubin. Mirrors the CMake
+    """`-gencode` flags for one `.cu`, by tier so no group carries dead SASS. Mirrors the CMake
     `<x>-real` / `<x>-virtual` arch lists: `-real` emits SASS (`code=sm_x`), `-virtual` emits PTX (`code=compute_x`)."""
     stem = os.path.splitext(os.path.basename(cuda_source))[0]
-    arches = _CUDA_HOPPER_ARCHES if stem.endswith("_hopper") else _CUDA_BASE_ARCHES
+    if stem.endswith("_hopper"):
+        arches = _HOPPER_ARCHES
+    elif stem.endswith("_kepler"):
+        arches = _KEPLER_ARCHES
+    else:
+        arches = _CUDA_ARCHES
     flags = []
     for arch in arches:
         number, kind = arch.split("-")
@@ -586,50 +592,56 @@ STRINGZILLA_CORE_SOURCES = [
     "c/stringzilla/utf8_uncased_fold.c",
     "c/stringzilla/utf8_uncased.c",
 ]
-STRINGZILLAS_PARALLEL_STEMS = ["runtime", "levenshtein", "needleman_wunsch", "smith_waterman", "fingerprints"]
-# Per-capability instantiation units: each emits one ISA's (CPU) or tier's (CUDA) heavy engine code exactly once, so
-# the algorithm entry TUs above only declare them `extern` and link against them. Off-platform files compile to empty
-# objects via their internal SZ_USE_* guards. These lists mirror the CMake STRINGZILLAS_*_SOURCES.
-STRINGZILLAS_CPU_PROVIDER_STEMS = [
-    "levenshtein_serial",
-    "levenshtein_icelake",
-    "levenshtein_haswell",
-    "levenshtein_neon",
-    "levenshtein_rvv",
-    "needleman_wunsch_serial",
-    "needleman_wunsch_icelake",
-    "needleman_wunsch_haswell",
-    "needleman_wunsch_neon",
-    "needleman_wunsch_rvv",
-    "smith_waterman_serial",
-    "smith_waterman_icelake",
-    "smith_waterman_haswell",
-    "smith_waterman_neon",
-    "smith_waterman_rvv",
+# StringZillas C-API entry units, compiled once per wheel - as C++ into the CPU one, as CUDA into the GPU one.
+STRINGZILLAS_API_CPP_SOURCES = [
+    "c/stringzillas/runtime.cpp",
+    "c/stringzillas/levenshtein.cpp",
+    "c/stringzillas/needleman_wunsch.cpp",
+    "c/stringzillas/smith_waterman.cpp",
+    "c/stringzillas/fingerprints.cpp",
 ]
-STRINGZILLAS_CUDA_PROVIDER_STEMS = [
-    "levenshtein_cuda",
-    "levenshtein_kepler",
-    "levenshtein_hopper",
-    "needleman_wunsch_cuda",
-    "needleman_wunsch_hopper",
-    "smith_waterman_cuda",
-    "smith_waterman_hopper",
+STRINGZILLAS_API_CU_SOURCES = [
+    "c/stringzillas/runtime.cu",
+    "c/stringzillas/levenshtein.cu",
+    "c/stringzillas/needleman_wunsch.cu",
+    "c/stringzillas/smith_waterman.cu",
+    "c/stringzillas/fingerprints.cu",
 ]
-# The compiled ForkUnion runtime rides along in every StringZillas extension as a host C++ translation unit;
-# `ParallelBuildExt` splits sources by extension, so it never reaches `nvcc`. `FU_WITH_TOPOLOGY=0` keeps the
-# wheels on the flat thread pool: measured on a 2-socket Sapphire Rapids, the topology-aware pool runs small
-# 16-thread jobs 1.8x slower and larger ones at parity, so the single-domain pool is the better default until
-# ForkUnion picks the pool kind from the requested thread count.
+# Per-ISA CPU instantiation units, host C++ in every wheel; off-platform files compile to empty objects.
+STRINGZILLAS_CPUS_SOURCES = [
+    "c/stringzillas/levenshtein_serial.cpp",
+    "c/stringzillas/levenshtein_icelake.cpp",
+    "c/stringzillas/levenshtein_haswell.cpp",
+    "c/stringzillas/levenshtein_neon.cpp",
+    "c/stringzillas/levenshtein_rvv.cpp",
+    "c/stringzillas/needleman_wunsch_serial.cpp",
+    "c/stringzillas/needleman_wunsch_icelake.cpp",
+    "c/stringzillas/needleman_wunsch_haswell.cpp",
+    "c/stringzillas/needleman_wunsch_neon.cpp",
+    "c/stringzillas/needleman_wunsch_rvv.cpp",
+    "c/stringzillas/smith_waterman_serial.cpp",
+    "c/stringzillas/smith_waterman_icelake.cpp",
+    "c/stringzillas/smith_waterman_haswell.cpp",
+    "c/stringzillas/smith_waterman_neon.cpp",
+    "c/stringzillas/smith_waterman_rvv.cpp",
+]
+# Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
+# from the base set.
+STRINGZILLAS_CUDA_SOURCES = [
+    "c/stringzillas/levenshtein_cuda.cu",
+    "c/stringzillas/needleman_wunsch_cuda.cu",
+    "c/stringzillas/smith_waterman_cuda.cu",
+]
+STRINGZILLAS_KEPLER_SOURCES = [
+    "c/stringzillas/levenshtein_kepler.cu",
+]
+STRINGZILLAS_HOPPER_SOURCES = [
+    "c/stringzillas/levenshtein_hopper.cu",
+    "c/stringzillas/needleman_wunsch_hopper.cu",
+    "c/stringzillas/smith_waterman_hopper.cu",
+]
+# The compiled ForkUnion runtime rides along in every StringZillas extension as one more host C++ unit.
 STRINGZILLAS_RUNTIME_SOURCES = ["forkunion/c/forkunion.cpp"]
-STRINGZILLAS_CPU_SOURCES = [
-    f"c/stringzillas/{stem}.cpp" for stem in STRINGZILLAS_PARALLEL_STEMS + STRINGZILLAS_CPU_PROVIDER_STEMS
-] + STRINGZILLAS_RUNTIME_SOURCES
-STRINGZILLAS_CUDA_SOURCES = (
-    [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_PARALLEL_STEMS]
-    + [f"c/stringzillas/{stem}.cu" for stem in STRINGZILLAS_CUDA_PROVIDER_STEMS]
-    + STRINGZILLAS_RUNTIME_SOURCES
-)
 
 ext_modules = []
 entry_points = {}
@@ -657,7 +669,10 @@ elif sz_target == "stringzillas-cpus":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c"] + STRINGZILLAS_CPU_SOURCES,
+            ["python/stringzillas.c"]
+            + STRINGZILLAS_API_CPP_SOURCES
+            + STRINGZILLAS_CPUS_SOURCES
+            + STRINGZILLAS_RUNTIME_SOURCES,
             include_dirs=["include", "c/stringzillas", "forkunion/include"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
@@ -691,7 +706,13 @@ elif sz_target == "stringzillas-cuda":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c"] + STRINGZILLAS_CUDA_SOURCES,
+            ["python/stringzillas.c"]
+            + STRINGZILLAS_API_CU_SOURCES
+            + STRINGZILLAS_CPUS_SOURCES
+            + STRINGZILLAS_CUDA_SOURCES
+            + STRINGZILLAS_KEPLER_SOURCES
+            + STRINGZILLAS_HOPPER_SOURCES
+            + STRINGZILLAS_RUNTIME_SOURCES,
             include_dirs=["include", "c/stringzillas", "forkunion/include", f"{cuda_home}/include"],
             extra_compile_args=compile_args,
             extra_link_args=cuda_link_args,

@@ -44,8 +44,9 @@ namespace stringzillas {
 
 // The per-ISA `.cpp` providers emit each single-pair scorer's SIMD core once; here we only `extern` it so consumers
 // link rather than recompile, pinned to the two executors the C-API passes (`dummy_executor_t`, `forkunion_executor_t`).
-// Gated on `!SZ_USE_CUDA` because the CUDA library keeps the CPU engines inline in its `.cu` entry TUs.
-#if SZ_DYNAMIC_DISPATCH && !SZ_USE_CUDA
+// The CUDA library links the same providers on every architecture: CPU SIMD is host code, so it reaches the entry
+// units as linked symbols and never as source for NVCC's frontend to parse.
+#if SZ_DYNAMIC_DISPATCH
 namespace ashvardanian {
 namespace stringzillas {
 
@@ -305,6 +306,6 @@ extern template status_t smith_waterman_score<char, error_costs_32x32_t, affine_
 
 } // namespace stringzillas
 } // namespace ashvardanian
-#endif // SZ_DYNAMIC_DISPATCH && !SZ_USE_CUDA
+#endif // SZ_DYNAMIC_DISPATCH
 
 #endif // STRINGZILLAS_SIMILARITIES_HPP_

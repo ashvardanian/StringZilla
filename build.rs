@@ -655,6 +655,56 @@ fn stringzillas_base_build(serial_flags: &HashMap<String, bool>) -> cc::Build {
     build
 }
 
+/// StringZillas C-API entry units, compiled once per backend - as C++ into the CPU one, as CUDA into the GPU one.
+const STRINGZILLAS_API_CPP_SOURCES: [&str; 5] = [
+    "c/stringzillas/runtime.cpp",
+    "c/stringzillas/levenshtein.cpp",
+    "c/stringzillas/needleman_wunsch.cpp",
+    "c/stringzillas/smith_waterman.cpp",
+    "c/stringzillas/fingerprints.cpp",
+];
+const STRINGZILLAS_API_CU_SOURCES: [&str; 5] = [
+    "c/stringzillas/runtime.cu",
+    "c/stringzillas/levenshtein.cu",
+    "c/stringzillas/needleman_wunsch.cu",
+    "c/stringzillas/smith_waterman.cu",
+    "c/stringzillas/fingerprints.cu",
+];
+
+/// Per-ISA CPU instantiation units, host C++ in every backend - NVCC forwards `.cpp` straight to the host
+/// compiler, keeping CPU SIMD out of its frontend; off-platform files compile to empty objects.
+const STRINGZILLAS_CPUS_SOURCES: [&str; 15] = [
+    "c/stringzillas/levenshtein_serial.cpp",
+    "c/stringzillas/levenshtein_icelake.cpp",
+    "c/stringzillas/levenshtein_haswell.cpp",
+    "c/stringzillas/levenshtein_neon.cpp",
+    "c/stringzillas/levenshtein_rvv.cpp",
+    "c/stringzillas/needleman_wunsch_serial.cpp",
+    "c/stringzillas/needleman_wunsch_icelake.cpp",
+    "c/stringzillas/needleman_wunsch_haswell.cpp",
+    "c/stringzillas/needleman_wunsch_neon.cpp",
+    "c/stringzillas/needleman_wunsch_rvv.cpp",
+    "c/stringzillas/smith_waterman_serial.cpp",
+    "c/stringzillas/smith_waterman_icelake.cpp",
+    "c/stringzillas/smith_waterman_haswell.cpp",
+    "c/stringzillas/smith_waterman_neon.cpp",
+    "c/stringzillas/smith_waterman_rvv.cpp",
+];
+
+/// Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
+/// from the base set.
+const STRINGZILLAS_CUDA_SOURCES: [&str; 3] = [
+    "c/stringzillas/levenshtein_cuda.cu",
+    "c/stringzillas/needleman_wunsch_cuda.cu",
+    "c/stringzillas/smith_waterman_cuda.cu",
+];
+const STRINGZILLAS_KEPLER_SOURCES: [&str; 1] = ["c/stringzillas/levenshtein_kepler.cu"];
+const STRINGZILLAS_HOPPER_SOURCES: [&str; 3] = [
+    "c/stringzillas/levenshtein_hopper.cu",
+    "c/stringzillas/needleman_wunsch_hopper.cu",
+    "c/stringzillas/smith_waterman_hopper.cu",
+];
+
 /// Build the NVIDIA CUDA backend (the `.cu` sources via nvcc). Returns `Err` if the toolkit is missing or the
 /// sources fail to compile; the driver-API link directive is emitted only on success.
 fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(), cc::Error> {
@@ -670,9 +720,9 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
     // initializers), so set nvcc's own device standard too — as the CMake build does.
     build.flag("-std=c++20").flag("--expt-relaxed-constexpr");
     // Coverage-parity with the CMake build and setup.py: Ampere (sm_80) and Hopper (sm_90) real SASS plus forward PTX.
-    // Those two link loose objects and give the Hopper-only DPX TUs a narrower sm_90 set; the `cc` crate emits one
-    // static archive (per-tier splitting would need non-portable linker grouping), so every TU shares this union set -
-    // the Hopper providers' extra sm_80 cubin is their guarded scalar fallback, which `--compress-all` erases.
+    // Those two give each GPU tier its own narrower set; the `cc` crate emits one static archive (per-tier splitting
+    // would need non-portable linker grouping), so every TU shares this union set - the Hopper providers' extra sm_80
+    // cubin and the Kepler provider's extra sm_90 cubin are dead weight that `--compress-all` erases.
     for gencode in [
         "-gencode=arch=compute_80,code=sm_80",
         "-gencode=arch=compute_90,code=sm_90",
@@ -685,22 +735,11 @@ fn try_build_stringzillas_cuda(serial_flags: &HashMap<String, bool>) -> Result<(
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(format!("-Xcompiler={flag}"));
     }
-    build.files([
-        // C-API entry translation units.
-        "c/stringzillas/runtime.cu",
-        "c/stringzillas/levenshtein.cu",
-        "c/stringzillas/needleman_wunsch.cu",
-        "c/stringzillas/smith_waterman.cu",
-        "c/stringzillas/fingerprints.cu",
-        // Per-capability providers that emit each tier's kernels once (the entry TUs above only declare them).
-        "c/stringzillas/levenshtein_cuda.cu",
-        "c/stringzillas/levenshtein_kepler.cu",
-        "c/stringzillas/levenshtein_hopper.cu",
-        "c/stringzillas/needleman_wunsch_cuda.cu",
-        "c/stringzillas/needleman_wunsch_hopper.cu",
-        "c/stringzillas/smith_waterman_cuda.cu",
-        "c/stringzillas/smith_waterman_hopper.cu",
-    ]);
+    build.files(STRINGZILLAS_API_CU_SOURCES);
+    build.files(STRINGZILLAS_CPUS_SOURCES);
+    build.files(STRINGZILLAS_CUDA_SOURCES);
+    build.files(STRINGZILLAS_KEPLER_SOURCES);
+    build.files(STRINGZILLAS_HOPPER_SOURCES);
     build.try_compile("stringzillas")?;
     // Only demand libcuda once the build actually linked: the kernels use the driver API (cuLaunchKernel,
     // cuEventElapsedTime, cuFuncSetAttribute) on top of the cudart that `build.cuda(true)` already links. On a
@@ -724,13 +763,7 @@ fn try_build_stringzillas_rocm(serial_flags: &HashMap<String, bool>) -> Result<(
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(flag);
     }
-    build.files([
-        "c/stringzillas/runtime.cu",
-        "c/stringzillas/levenshtein.cu",
-        "c/stringzillas/needleman_wunsch.cu",
-        "c/stringzillas/smith_waterman.cu",
-        "c/stringzillas/fingerprints.cu",
-    ]);
+    build.files(STRINGZILLAS_API_CU_SOURCES);
     build.try_compile("stringzillas")
 }
 
@@ -743,31 +776,8 @@ fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(
     for flag in msvc_cxx_flags().iter().chain(no_builtin_flags()) {
         build.flag(flag);
     }
-    build.files([
-        // C-API entry translation units.
-        "c/stringzillas/runtime.cpp",
-        "c/stringzillas/levenshtein.cpp",
-        "c/stringzillas/needleman_wunsch.cpp",
-        "c/stringzillas/smith_waterman.cpp",
-        "c/stringzillas/fingerprints.cpp",
-        // Per-capability providers that emit each ISA's single-pair SIMD core once (the entry TUs above only
-        // declare them). The off-platform files compile to empty objects via their internal SZ_USE_* guards.
-        "c/stringzillas/levenshtein_serial.cpp",
-        "c/stringzillas/levenshtein_icelake.cpp",
-        "c/stringzillas/levenshtein_haswell.cpp",
-        "c/stringzillas/levenshtein_neon.cpp",
-        "c/stringzillas/levenshtein_rvv.cpp",
-        "c/stringzillas/needleman_wunsch_serial.cpp",
-        "c/stringzillas/needleman_wunsch_icelake.cpp",
-        "c/stringzillas/needleman_wunsch_haswell.cpp",
-        "c/stringzillas/needleman_wunsch_neon.cpp",
-        "c/stringzillas/needleman_wunsch_rvv.cpp",
-        "c/stringzillas/smith_waterman_serial.cpp",
-        "c/stringzillas/smith_waterman_icelake.cpp",
-        "c/stringzillas/smith_waterman_haswell.cpp",
-        "c/stringzillas/smith_waterman_neon.cpp",
-        "c/stringzillas/smith_waterman_rvv.cpp",
-    ]);
+    build.files(STRINGZILLAS_API_CPP_SOURCES);
+    build.files(STRINGZILLAS_CPUS_SOURCES);
     build.try_compile("stringzillas")
 }
 

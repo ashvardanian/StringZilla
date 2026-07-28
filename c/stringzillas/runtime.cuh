@@ -27,14 +27,10 @@ SZ_API_RUNTIME sz_capability_t szs_capabilities_comptime(void) {
 SZ_API_RUNTIME sz_capability_t szs_capabilities_runtime(void) {
     sz_capability_t caps = sz_capabilities_runtime_implementation_();
 
-    // A single-core box can host the pool but gains nothing from it, so it is not a parallel machine.
-    // The core count comes from Fork Union's C API, the same one this file's other entry points export
-    // through, so the capability answer never depends on a C++ executor being instantiable.
-    fu_topology_t topology = fu_topology_new();
-    if (topology) {
-        if (fu_logical_cores_count(topology) > 1) caps = static_cast<sz_capability_t>(caps | sz_cap_parallel_k);
-        fu_topology_delete(topology);
-    }
+    // The Fork Union pool is linked in, so every machine can run the parallel engines. How many cores to
+    // give them is a sizing question the device scopes answer - `szs_device_scope_init_cpu_cores` already
+    // folds a one-core request back onto the serial scope - so no topology is harvested here.
+    caps = static_cast<sz_capability_t>(caps | sz_cap_parallel_k);
 
 #if SZ_USE_CUDA
     // Every way a GPU can be unavailable - absent, driver-less, stubbed, version-mismatched - means the
