@@ -2,8 +2,8 @@
 
 ![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla-v5.png?raw=true)
 
-Strings are the first fundamental data type every programming language implements in software rather than hardware — no CPU ships a dedicated "find substring" or "compute string hash" instruction.
-So most string-processing code still looks like `for (i = 0; i < length; ++i) if (text[i] == 'x') …` — a tangle of loops, branches, and per-character lookups, where the surrounding control flow is easily 10-100x more expensive than the character-level logic itself, whether the text is ASCII or UTF-8 encoded Unicode.
+Strings are the first fundamental data type every programming language implements in software rather than hardware — the closest CPUs come to a "find substring" instruction is x86's `PCMPISTRI`, which is too slow and too narrow to build a library on, and nothing ships a "compute string hash" instruction at all.
+So most string-processing code still looks like `for (i = 0; i < length; ++i) if (text[i] == 'x') …` — a tangle of loops, branches, and per-character lookups, where the surrounding control flow often costs more than the character-level logic itself, whether the text is ASCII or UTF-8 encoded Unicode.
 Worse, chewing through one byte or codepoint at a time squanders the hardware: a modern CPU carries dozens of 16-64 byte architectural registers, and hundreds of physical ones to feed out-of-order execution.
 StringZilla reaches for those [SIMD][faq-simd] and [SWAR][faq-swar] instructions directly, offering one of the widest, fastest, and most portable collections of text-processing primitives anywhere.
 
@@ -20,10 +20,10 @@ Consider enabling them later.
 
 StringZilla is the GodZilla of string libraries, accelerating exact and fuzzy matching, hashing, edit distances, sorting, segmentation, and even random-string generation, with allocation-free lazily-evaluated iterators throughout.
 
-- It can be __3x faster than LibC__, the C standard library, doing substring search on Arm.
-- It can be __10-70x faster than ICU__ for C and its C rewrite in UTF-8 handling, case folding, segmentation, and tokenization.
-- It can be __100x faster than NVIDIA's own libraries__ for on-GPU Levenshtein, NW, and SW edit distances.
-- It comes with built-in custom __WebAssembly__ backend for sandboxed browser, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM mainframes, __LoongArch__ for Chinese domestic chips, and more!
+- It can be __3x faster than LibC__ doing substring search on Arm servers, and __9x on Apple Silicon__, where the system `strstr` is weaker.
+- It can be __10-70x faster than ICU__, both ICU4C and its Rust successor ICU4X, in UTF-8 handling, case folding, segmentation, and tokenization.
+- It can be __over 10x faster than NVIDIA's own libraries__ for on-GPU Levenshtein, NW, and SW edit distances.
+- It comes with built-in custom __WebAssembly__ backend for sandboxed browser, DBMS, & LLM environments, custom __RVV__ backend for RISC-V CPUs, __PowerPC__ backend for IBM Power servers, __LoongArch__ for Chinese domestic chips, and more!
 
 Reach for it from your language of choice:
 
@@ -70,13 +70,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>.casefold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.4</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.4</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.05</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.48</b> GB/s
     </td>
     <td align="center">
       <code>sz.utf8_uncased_fold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.8</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.82</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>14.41</b> GB/s
     </td>
   </tr>
   <!-- Unicode uncased search -->
@@ -88,13 +88,13 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>icu.StringSearch</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.02</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.07</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.04</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.10</b> GB/s
     </td>
     <td align="center">
-      <code>utf8_uncased_find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
+      <code>utf8_uncased_search</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>12.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>6.9</b> GB/s
     </td>
   </tr>
   <!-- Substrings, normal order -->
@@ -103,24 +103,24 @@ __Who is this for?__
   </tr>
   <tr>
     <td align="center">
-      <code>strstr</code> <sup>1</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>7.4</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
+      <code>strstr</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>23.7</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.5</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>2.9</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.1</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>8.6</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>13.5</b> GB/s
     </td>
     <td align="center">
       <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.9</b> GB/s
     </td>
     <td align="center">
       <code>sz_find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>10.6</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>10.9</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>23.3</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>33.4</b> GB/s
     </td>
   </tr>
   <!-- Substrings, reverse order -->
@@ -131,208 +131,145 @@ __Who is this for?__
     <td align="center">⚪</td>
     <td align="center">
       <code>.rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.34</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.03</b> GB/s
     </td>
     <td align="center">
       <code>.rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.9</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>2.7</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1.9</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.1</b> GB/s
     </td>
     <td align="center">
       <code>sz_rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>10.8</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>9.3</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>19.3</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>32.8</b> GB/s
     </td>
   </tr>
   <!-- Characters, normal order -->
   <tr>
-    <td colspan="4" align="center">split lines separated by <code>\n</code> or <code>\r</code> <sup>2</sup></td>
+    <td colspan="4" align="center">split lines separated by <code>\n</code> or <code>\r</code></td>
   </tr>
   <tr>
     <td align="center">
-      <code>strcspn</code> <sup>1</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>5.42</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.4</b> GB/s
+      <code>strcspn</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>4.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.9</b> GB/s
     </td>
     <td align="center">
       <code>.find_first_of</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.59</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>1.4</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.2</b> GB/s
     </td>
     <td align="center">
       <code>re.finditer</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.32</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.16</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.33</b> GB/s
     </td>
     <td align="center">
       <code>sz_find_byteset</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>4.08</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.3</b> GB/s
-    </td>
-  </tr>
-  <!-- Characters, reverse order -->
-  <tr>
-    <td colspan="4" align="center">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>.find_last_of</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
-    </td>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>sz_rfind_byteset</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.4</b> GB/s
-    </td>
-  </tr>
-  <!-- Random Generation -->
-  <tr>
-    <td colspan="4" align="center">Random string from a given alphabet, 20 bytes long <sup>3</sup></td>
-  </tr>
-  <tr>
-    <td align="center">
-      <code>rand() % n</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>18.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>169.0</b> MB/s
-    </td>
-    <td align="center">
-      <code>uniform_int_distribution</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>201.0</b> MB/s
-    </td>
-    <td align="center">
-      <code>join(random.choices(x))</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>13.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>17.0</b> MB/s
-    </td>
-    <td align="center">
-      <code>sz_fill_random</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>56.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>678.0</b> MB/s
+      <span style="color:#ABABAB;">x86:</span> <b>4.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>8.7</b> GB/s
     </td>
   </tr>
   <!-- Mapping characters with lookup table transforms -->
   <tr>
-    <td colspan="4" align="center">Mapping characters with lookup table transforms</td>
+    <td colspan="4" align="center">Mapping characters with lookup table transforms, 1 MB buffer</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">
       <code>std::transform</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>3.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>5.6</b> GB/s
     </td>
     <td align="center">
-      <code>str.translate</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>260.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>78.0</b> MB/s
+      <code>bytes.translate</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>638.0</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>4,135.0</b> MB/s
     </td>
     <td align="center">
       <code>sz_lookup</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>21.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>7.9</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>26.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>14.63</b> GB/s
     </td>
   </tr>
   <!-- Sorting -->
   <tr>
-    <td colspan="4" align="center">Get sorted order, ≅ 8 million English words <sup>4</sup></td>
+    <td colspan="4" align="center">Get sorted order, ≅ 8 million English words</td>
   </tr>
   <tr>
     <td align="center">
       <code>qsort_r</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.55</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.48</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>2.79</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.33</b> s
     </td>
     <td align="center">
       <code>std::sort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>2.79</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.50</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>3.42</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.34</b> s
     </td>
     <td align="center">
       <code>numpy.argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>7.58</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>14.59</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>8.14</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>5.58</b> s
     </td>
     <td align="center">
       <code>sz_sequence_argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.91</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.92</b> s
+      <span style="color:#ABABAB;">x86:</span> <b>0.70</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.26</b> s
     </td>
   </tr>
   <!-- Edit Distance -->
   <tr>
-    <td colspan="4" align="center">Levenshtein edit distance, text lines ≅ 100 bytes long</td>
+    <td colspan="4" align="center">Levenshtein edit distance, DNA strings ≅ 1 KB long</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>NLTK</code> <sup>5</sup> and <code>CuDF</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1,615,306</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1,349,980</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>6,532,411,354</b> CUPS
+      <code>rapidfuzz</code>, best of many<br/>
+      <span style="color:#ABABAB;">x86:</span> <b>15,720</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>12,960</b> MCUPS
     </td>
     <td align="center">
       <code>szs_levenshtein_distances_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3,434,427,548</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1,605,340,403</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>93,662,026,653</b> CUPS
+      <span style="color:#ABABAB;">x86:</span> <b>141,800</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>322,600</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>6,237,990</b> MCUPS
     </td>
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4" align="center">Needleman-Wunsch alignment scores, proteins ≅ 1 K amino acids long</td>
+    <td colspan="4" align="center">Needleman-Wunsch alignment scores, DNA strings ≅ 1 KB long</td>
   </tr>
   <tr>
     <td align="center">⚪</td>
     <td align="center">⚪</td>
     <td align="center">
-      via <code>biopython</code> <sup>6</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>575,981,513</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>436,350,732</b> CUPS
+      via <code>biopython</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>444</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>890</b> MCUPS
     </td>
     <td align="center">
       <code>szs_needleman_wunsch_scores_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>452,629,942</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>520,170,239</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>9,017,327,818</b> CUPS
+      <span style="color:#ABABAB;">x86:</span> <b>90,450</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>16,600</b> &centerdot;
+      <span style="color:#ABABAB;">cuda:</span> <b>701,760</b> MCUPS
     </td>
   </tr>
 </table>
 
+> Treat these as a first impression, not a benchmark suite.
+> x86 is a Sapphire Rapids Xeon with GCC and `glibc`, Arm an 18-core Apple M5 Pro with Apple clang and `libc++`, CUDA an H100 — so the `strstr`, `.rfind`, and `bytes.translate` rows differ in standard library as much as in ISA, while the StringZilla cells build from the same source on both.
+> These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
+
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
 Grab them from `./scripts`, and see [`CONTRIBUTING.md`](CONTRIBUTING.md), [`test/README.md`](test/README.md), and [`bench/README.md`](bench/README.md) for instructions.
-On CPUs that permit misaligned loads, even the 64-bit SWAR baseline outruns both libc and the STL.
 For wider head-to-heads against Rust and Python favorites, browse the __[StringWars][stringwars]__ repository.
 To inspect collision resistance and distribution shapes for our hashers, see __[HashEvals][hashevals]__.
 
 [stringwars]: https://github.com/ashvardanian/StringWars
 [hashevals]: https://github.com/ashvardanian/HashEvals
-
-> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
-> The code was compiled with GCC 12, using `glibc` v2.35.
-> The Arm numbers were refreshed on an AWS Graviton5 `c9g` instance (Neoverse-V3); the x86 numbers are from `r7iz` Intel Sapphire Rapids.
-> Most modern Arm-based 64-bit CPUs will have similar relative speedups.
-> Variance within x86 CPUs will be larger.
-> For CUDA benchmarks, the Nvidia H100 GPUs were used.
-> <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
-> <sup>2</sup> Six whitespaces in the ASCII set are: ` \t\n\v\f\r`. Python's and other standard libraries have specialized functions for those.
-> <sup>3</sup> All modulo operations were conducted with `uint8_t` to allow compilers more optimization opportunities.
-> The C++ STL and StringZilla benchmarks used a 64-bit [Mersenne Twister][faq-mersenne-twister] as the generator.
-> For C, C++, and StringZilla, an in-place update of the string was used.
-> In Python every string had to be allocated as a new object, which makes it less fair.
-> <sup>4</sup> Contrary to the popular opinion, Python's default `sorted` function works faster than the C and C++ standard libraries.
-> That holds for large lists or tuples of strings, but fails as soon as you need more complex logic, like sorting dictionaries by a string key, or producing the "sorted order" permutation.
-> The latter is very common in database engines and is most similar to `numpy.argsort`.
-> The current StringZilla solution can be at least 4x faster without loss of generality.
-> <sup>5</sup> Most Python libraries for strings are also implemented in C.
-> <sup>6</sup> Unlike the rest of BioPython, the alignment score computation is [implemented in C](https://github.com/biopython/biopython/blob/master/Bio/Align/_pairwisealigner.c).
-
-[faq-mersenne-twister]: https://en.wikipedia.org/wiki/Mersenne_Twister
 
 ## Why StringZilla
 
@@ -508,7 +445,7 @@ The cgo module exposes byte-level search, counting, checksums, SHA-256, and UTF-
 
 ### C#
 
-`dotnet add package StringZilla` &centerdot; guide: [`csharp/README.md`](csharp/README.md)
+Build from source &centerdot; guide: [`csharp/README.md`](csharp/README.md) &centerdot; __not yet on NuGet__
 
 ```csharp
 using StringZilla;
@@ -522,7 +459,7 @@ Exposes search, hashing, SHA-256, UTF-8 segmentation, case-folding, normalizatio
 
 ### Java
 
-Maven `com.github.ashvardanian:stringzilla` &centerdot; guide: [`java/README.md`](java/README.md)
+Build from source with `mvn` &centerdot; guide: [`java/README.md`](java/README.md) &centerdot; __not yet on Maven Central__
 
 ```java
 import com.stringzilla.StringZilla;
@@ -541,7 +478,7 @@ StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
-Where vectorization stops being effective, parallelism takes over with the new layered cake architecture:
+Where vectorization stops being effective, parallelism takes over, across two layers:
 
 - StringZilla C library w/out dependencies
 - StringZillas parallel extensions:
@@ -566,9 +503,9 @@ On mid-length needles, bit-parallel algorithms are effective, as the character m
 Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch every CPU cache line.
 So the only way to improve performance is to reduce the number of comparisons.
 
-> For 2-byte needles, see `sz_find_2byte_serial_` in `include/stringzilla/find.h`:
+> For 2-byte needles, see `sz_find_2byte_serial_` in `include/stringzilla/find/serial.h`:
 
-https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L422-L463
+https://github.com/ashvardanian/StringZilla/blob/a6402dd71d01a8967a62bcc45a900477e0232f60/include/stringzilla/find/serial.h#L231-L273
 
 Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice.
 It has two tables: the good-suffix shift and the bad-character shift.
@@ -576,9 +513,9 @@ Common choice is to use the simplified BMH algorithm, which only uses the bad-ch
 We do the same for mid-length needles up to 256 bytes long.
 That way the stack-allocated shift table remains small.
 
-> For mid-length needles (≤256 bytes), see `sz_find_horspool_upto_256bytes_serial_` in `include/stringzilla/find.h`:
+> For mid-length needles (≤256 bytes), see `sz_find_horspool_upto_256bytes_serial_` in `include/stringzilla/find/serial.h`:
 
-https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L620-L667
+https://github.com/ashvardanian/StringZilla/blob/a6402dd71d01a8967a62bcc45a900477e0232f60/include/stringzilla/find/serial.h#L449-L500
 
 In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
 Before comparing the entire string, it matches the first, last, and the middle character.
@@ -586,16 +523,16 @@ Very practical, but can be slow for repetitive characters.
 Both SWAR and SIMD backends of StringZilla have a cheap pre-processing step, where we locate unique characters.
 This makes the library a lot more practical when dealing with non-English corpora.
 
-> The offset selection heuristic is implemented in `sz_locate_needle_anomalies_` in `include/stringzilla/find.h`:
+> The offset selection heuristic is implemented in `sz_locate_needle_anomalies_` in `include/stringzilla/find/serial.h`:
 
-https://github.com/ashvardanian/StringZilla/blob/e1966de91600298d3c5cf4fe7be40d434f0f405e/include/stringzilla/find.h#L244-L305
+https://github.com/ashvardanian/StringZilla/blob/a6402dd71d01a8967a62bcc45a900477e0232f60/include/stringzilla/find/serial.h#L35-L96
 
 All those, still, have $O(hn)$ worst case complexity.
 To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
-Preprocessing phase is $O(n+sigma)$ in time and space.
+Preprocessing phase is $O(n + \sigma)$ in time and space.
 On traversal, performs from $(h/n)$ to $(3h/2)$ comparisons.
 It however, isn't practical on modern CPUs.
-A simpler idea, the Galil-rule might be a more relevant optimizations, if many matches must be found.
+The Galil rule is a simpler and more relevant optimization, if many matches must be found.
 
 Other algorithms previously considered and deprecated:
 
@@ -624,6 +561,9 @@ The naive implementation, however:
 
 There are several ways to improve the original algorithm.
 One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
+
+StringZilla does not ship an Aho-Corasick automaton today.
+For multi-pattern workloads, the rolling-fingerprint machinery described below covers the near-duplicate and candidate-filtering cases, and [hyperscan](https://github.com/intel/hyperscan) or [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) remain the better fit for large literal dictionaries.
 
 ### Levenshtein Edit Distance
 
@@ -761,58 +701,29 @@ The algorithm can be expressed in pseudocode as:
 
 ```
 function sz_hash(text: u8[], length: usize, seed: u64) -> u64:
-    # 1024 bits worth of π constants
-    pi: u64[16] = [
-        0x243F6A8885A308D3, 0x13198A2E03707344, 0xA4093822299F31D0, 0x082EFA98EC4E6C89,
-        0x452821E638D01377, 0xBE5466CF34E90C6C, 0xC0AC29B7C97C50DD, 0x3F84D5B5B5470917,
-        0x9216D5D98979FB1B, 0xD1310BA698DFB5AC, 0x2FFD72DBD01ADFB7, 0xB8E1AFED6A267E96,
-        0xBA7C9045F12C7F99, 0x24A19947B3916CF7, 0x0801F2E2858EFC16, 0x636920D871574E69]
+    pi: u64[16] = [0x243F6A8885A308D3, 0x13198A2E03707344, 0xA4093822299F31D0, 0x082EFA98EC4E6C89, 0x452821E638D01377, 0xBE5466CF34E90C6C, 0xC0AC29B7C97C50DD, 0x3F84D5B5B5470917,
+                   0x9216D5D98979FB1B, 0xD1310BA698DFB5AC, 0x2FFD72DBD01ADFB7, 0xB8E1AFED6A267E96, 0xBA7C9045F12C7F99, 0x24A19947B3916CF7, 0x0801F2E2858EFC16, 0x636920D871574E69]
+    shuffle: u8[16] = [0x04, 0x0b, 0x09, 0x06, 0x08, 0x0d, 0x0f, 0x05, 0x0e, 0x03, 0x01, 0x0c, 0x00, 0x07, 0x0a, 0x02]   # Permutation order for the sum state
 
-    # Permutation order for the sum state
-    shuffle_pattern: u8[16] = [
-        0x04, 0x0b, 0x09, 0x06, 0x08, 0x0d, 0x0f, 0x05,
-        0x0e, 0x03, 0x01, 0x0c, 0x00, 0x07, 0x0a, 0x02]
+    # Both states are `lanes` × 128 bits wide: one lane for short inputs, four for long ones. The AES half seeds
+    # from the low 512 bits of π, the sum half from the high 512 bits, each XOR-ed against the seed.
+    lanes: usize = 1 if length ≤ 64 else 4
+    aes: u128[lanes] = [seed ⊕ pi[2*lane], seed ⊕ pi[2*lane + 1] for lane in 0..lanes-1]
+    sum: u128[lanes] = [seed ⊕ pi[2*lane + 8], seed ⊕ pi[2*lane + 9] for lane in 0..lanes-1]
 
-    # Initialize key and states
-    keys_u64s: u64[2] = [seed, seed]
-    aes_u64s: u64[2] = [seed ⊕ pi[0], seed ⊕ pi[1]]
-    sum_u64s: u64[2] = [seed ⊕ pi[8], seed ⊕ pi[9]]
+    # One AES round and one shuffle-add per 16-byte block. Short inputs are zero-padded to 1-4 blocks;
+    # long inputs stream 64-byte chunks, one block per lane, so the four lanes stay independent.
+    for each chunk: u8[16 * lanes] in split_into_chunks(text, length, 16 * lanes):
+        for lane in 0..lanes-1:
+            aes[lane] = AESENC(aes[lane], chunk[lane])
+            sum[lane] = SHUFFLE(sum[lane], shuffle) + chunk[lane]
 
-    if length ≤ 64:
-        # Small input: process 1-4 zero-padded blocks of 16 bytes each
-        blocks_u8s: u8[16][] = split_into_blocks(text, length, 16)
-        for each block_u8s: u8[16] in blocks_u8s:
-            aes_u64s = AESENC(aes_u64s, block_u8s)
-            sum_u64s = SHUFFLE(sum_u64s, shuffle_pattern) + block_u8s
-    else:
-        # Large input: use 4× wider 512-bits states
-        aes_u64s: u64[8] = [
-            seed ⊕ pi[0], seed ⊕ pi[1], seed ⊕ pi[2], seed ⊕ pi[3],
-            seed ⊕ pi[4], seed ⊕ pi[5], seed ⊕ pi[6], seed ⊕ pi[7]]
-        sum_u64s: u64[8] = [
-            seed ⊕ pi[8], seed ⊕ pi[9], seed ⊕ pi[10], seed ⊕ pi[11],
-            seed ⊕ pi[12], seed ⊕ pi[13], seed ⊕ pi[14], seed ⊕ pi[15]]
+    if lanes > 1: aes, sum = fold_to_one_lane(aes), fold_to_one_lane(sum)    # Collapse the 512-bit states back to 128
 
-        # Process 64-byte chunks (4×16-byte blocks)
-        for each chunk_u8s: u8[64] in text:
-            blocks_u8s: u8[16][4] = split_chunk_into_4_blocks(chunk_u8s)
-            for i in 0..3:
-                offset: usize = i * 2  # Each lane stores two u64s
-                aes_u64s[offset:offset+1] = AESENC(aes_u64s[offset:offset+1], blocks_u8s[i])
-                sum_u64s[offset:offset+1] = SHUFFLE(sum_u64s[offset:offset+1], shuffle_pattern) + blocks_u8s[i]
-
-        # Fold 8×u64 state back to 2×u64 for finalization
-        aes_u64s: u64[2] = fold_to_2u64(aes_u64s)
-        sum_u64s: u64[2] = fold_to_2u64(sum_u64s)
-
-    # Finalization: mix length into key
-    key_with_length: u64[2] = [keys_u64s[0] + length, keys_u64s[1]]
-
-    # Multiple AES rounds for SMHasher compliance
-    mixed_u64s: u64[2] = AESENC(sum_u64s, aes_u64s)
-    result_u64s: u64[2] = AESENC(AESENC(mixed_u64s, key_with_length), mixed_u64s)
-
-    return result_u64s[0]  # Extract low 64 bits
+    # Finalization: mix the length into the key, then AES-mix the two states together for SMHasher compliance
+    key: u128 = [seed + length, seed]
+    mixed: u128 = AESENC(sum, aes)
+    return low_u64(AESENC(AESENC(mixed, key), mixed))
 ```
 
 This allows us to balance several design trade-offs.
@@ -833,8 +744,11 @@ Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads
 
 ### SHA-256 Checksums
 
-In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic checksums.
-The implementation follows the [FIPS 180-4 specification](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) and provides multiple backends.
+In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic checksums, following the [FIPS 180-4 specification](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf).
+Where the AES hash leans on the AES round instructions, SHA-256 leans on the dedicated SHA extensions: `SHA256RNDS2` and `SHA256MSG1`/`SHA256MSG2` on x86 from Goldmont onward, and the `SHA256H`/`SHA256SU0` family on Arm, with SWAR, LASX, RVV, and WebAssembly fallbacks rounding out the set.
+
+The API is a three-call streaming state — `sz_sha256_state_init`, `sz_sha256_state_update`, `sz_sha256_state_digest` — so arbitrarily long inputs can be absorbed in chunks without buffering the whole message.
+Each backend is also exposed under its own suffix, like `sz_sha256_state_update_neonsha`, for the same manual-dispatch reasons as the rest of the library.
 
 ### Random Generation
 
@@ -861,10 +775,11 @@ In some cases, like edit-distance computation, the result of byte-level evaluati
 - `szs_levenshtein_distances_utf8("αβγδ", "αγδ") == 1` — one unicode symbol.
 - `szs_levenshtein_distances("αβγδ", "αγδ") == 2` — one unicode symbol is two bytes long.
 
-Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF-32 or variable-length UTF-8.
-This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
-StringZilla uses proper 32-bit "runes" to represent unpacked Unicode codepoints, ensuring correct results in all operations.
-Moreover, it implements the Unicode 17.0 standard, being practically the only library besides ICU and PCRE2 to do so, but with order(s) of magnitude better performance.
+Java, JavaScript, Python 2, C#, and Objective-C, however, expose strings as UTF-16 — a variable-length encoding whose code units are two bytes, so anything outside the Basic Multilingual Plane takes two of them.
+Because those languages index by code unit rather than by codepoint, this leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
+StringZilla's own bindings for those languages sidestep the problem entirely by operating on the UTF-8 bytes directly, and internally it uses proper 32-bit "runes" to represent unpacked Unicode codepoints, ensuring correct results in all operations.
+If you need to transcode between UTF-8, UTF-16, and UTF-32 at the boundary, [simdutf](https://github.com/simdutf/simdutf) is the right tool.
+Moreover, StringZilla implements the Unicode 17.0 standard, being practically the only library besides ICU and PCRE2 to do so, but with order(s) of magnitude better performance.
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
 
@@ -885,7 +800,9 @@ For example, searching for `"STRASSE"` (7 bytes) in `"Straße"` (7 bytes: 53 74 
 Note that Turkish `İ` and ASCII `I` are distinct: `İstanbul` case-folds to `i̇stanbul` (with combining dot), while `ISTANBUL` case-folds to `istanbul` (without).
 They will not match each other — this is correct Unicode behavior for Turkish locale handling.
 
-For wide-character environments (Java, JavaScript, Python 2, C#), consider transcoding with [simdutf](https://github.com/simdutf/simdutf).
+Under the hood, folding uses register-resident lookup tables for the common single-codepoint folds and dedicated expansion paths for the multi-byte ones.
+Uncased search folds on the fly, so the haystack is never pre-folded into a second buffer; the matcher tracks the byte-length mismatch whenever a folded form differs in length from its source, returning offsets into the original text.
+The folding paths live in the `utf8_uncased*` files.
 
 ### UTF-8 Decoding and Unicode Segmentation
 
@@ -898,15 +815,11 @@ UAX-29 word, grapheme, and sentence boundaries, together with UAX-14 line-break 
 Each codepoint is classified against register-resident property tables and the boundary rules are applied directly, so combining marks, emoji zero-width-joiner sequences, and regional-indicator flags are all handled without a second traversal.
 The segmenters live in the `utf8_wordbreaks*`, `utf8_graphemes*`, `utf8_sentences*`, and `utf8_linebreaks*` files.
 
-### Unicode Normalization and Case Folding
+### Unicode Normalization
 
 Normalization implements the UAX-15 NFC, NFD, NFKC, and NFKD forms through canonical and compatibility decomposition, canonical-combining-class reordering, and recomposition.
 Quick-check flags short-circuit the work, so text that is already in the requested form is passed through without the expensive decomposition and reordering passes.
 The normalizers live in the `utf8_norm*` files.
-
-Case folding uses register-resident lookup tables for the common single-codepoint folds and dedicated expansion paths for the multi-byte ones, such as `ß` folding to `ss` and the `ﬃ` ligature folding to `ffi`.
-Uncased search folds on the fly, so the haystack is never pre-folded into a second buffer; the matcher tracks the byte-length mismatch whenever a folded form differs in length from its source, returning offsets into the original text.
-The folding paths live in the `utf8_uncased*` files.
 
 ### Set Intersection
 
@@ -936,7 +849,7 @@ Use it to guarantee constant performance, or to explore how different algorithms
 
 ```c
 sz_find(text, length, pattern, 3);          // Auto-dispatch
-sz_find_westmere(text, length, pattern, 3);  // Intel Westmere+ SSE4.2
+sz_find_westmere(text, length, pattern, 3); // Intel Westmere+ SSE4.2
 sz_find_haswell(text, length, pattern, 3);  // Intel Haswell+ AVX2
 sz_find_skylake(text, length, pattern, 3);  // Intel Skylake+ AVX-512
 sz_find_neon(text, length, pattern, 3);     // Arm NEON 128-bit
