@@ -1335,8 +1335,8 @@ void check_cross_product_universals_(trailing_arguments_ &&...trailing_arguments
 void test_similarities_cross_product() {
     std::printf("  - testing cross-product and symmetric similarity matrices...\n");
 
-    constexpr uniform_substitution_costs_t unit_uniform {0, 1};
-    constexpr linear_gap_costs_t unit_linear {1};
+    [[maybe_unused]] constexpr uniform_substitution_costs_t unit_uniform {0, 1}; // used only in SIMD #if blocks
+    [[maybe_unused]] constexpr linear_gap_costs_t unit_linear {1};
 
     // Non-unit uniform costs (mismatch != 1, gap != 1) skip the Myers fast path and exercise the `u16` candidate-lane
     // batch; lengths stay small so the worst-case distance fits the `u16` reach bound and the long tail is not taken.
@@ -1355,11 +1355,10 @@ void test_similarities_cross_product() {
     error_costs_32x32_t const blosum62_matrix = error_costs_32x32_t::blosum62();
 
     // Mixed-length random strings keep the alphabet small so collisions and zero-distance cells appear naturally.
-    // The single-string shapes live in `check_cross_product_universals_`, which owns its own copies.
     fuzzy_config_t const many_queries {"ABC", /* batch_size */ 7, /* min_string_length */ 1, /* max */ 24};
     fuzzy_config_t const many_candidates {"ABC", /* batch_size */ 5, /* min_string_length */ 1, /* max */ 24};
-    fuzzy_config_t const square_set {"ABC", /* batch_size */ 6, /* min_string_length */ 0, /* max */ 24};
-    fuzzy_config_t const empty_set {"ABC", /* batch_size */ 0, /* min_string_length */ 1, /* max */ 24};
+    [[maybe_unused]] fuzzy_config_t const square_set {"ABC", /* batch */ 6, /* min */ 0, /* max */ 24};
+    [[maybe_unused]] fuzzy_config_t const empty_set {"ABC", /* batch */ 0, /* min */ 1, /* max */ 24};
 
     // Backend-independent matrix shapes, run once per compiled-in capability tier.
     check_cross_product_universals_<sz_cap_serial_k, malloc_t>();
