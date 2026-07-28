@@ -16,27 +16,46 @@ SZ_API_RUNTIME int szs_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR;
 SZ_API_RUNTIME int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_API_RUNTIME int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 
-SZ_API_RUNTIME sz_capability_t szs_capabilities(void) {
-    // Preserve the static capabilities
-    static sz_capability_t static_caps = sz_caps_none_k;
-    if (static_caps == sz_caps_none_k) {
-        sz_capability_t cpu_caps = (sz_capability_t)(sz_capabilities_comptime_implementation_() &
-                                                     sz_capabilities_runtime_implementation_());
-#if SZ_USE_CUDA
-        sz_capability_t gpu_caps = sz_caps_none_k;
-        sz::gpu_specs_t first_gpu_specs;
-        auto specs_status = static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs));
-        if (specs_status == sz::status_t::missing_gpu_k) { return cpu_caps; }        // No GPUs available
-        else if (specs_status != sz::status_t::success_k) { return sz_caps_none_k; } // Some bug
-        gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_cuda_k);
-        if (first_gpu_specs.sm_code >= 30) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_kepler_k);
-        if (first_gpu_specs.sm_code >= 90) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_hopper_k);
-        static_caps = static_cast<sz_capability_t>(cpu_caps | gpu_caps);
-#else
-        static_caps = cpu_caps;
-#endif // SZ_USE_CUDA
+SZ_API_RUNTIME sz_capability_t szs_capabilities_comptime(void) {
+    return (sz_capability_t)(sz_capabilities_comptime_implementation_() | // Serial & the CPU SIMD tiers
+                             sz_cap_parallel_k |                          // Fork Union is always linked in
+                             (sz_cap_cuda_k * SZ_USE_CUDA) |              //
+                             (sz_cap_kepler_k * SZ_USE_KEPLER) |          //
+                             (sz_cap_hopper_k * SZ_USE_HOPPER));
+}
+
+SZ_API_RUNTIME sz_capability_t szs_capabilities_runtime(void) {
+    sz_capability_t caps = sz_capabilities_runtime_implementation_();
+
+    // A single-core box can host the pool but gains nothing from it, so it is not a parallel machine.
+    // The core count comes from Fork Union's C API, the same one this file's other entry points export
+    // through, so the capability answer never depends on a C++ executor being instantiable.
+    fu_topology_t topology = fu_topology_new();
+    if (topology) {
+        if (fu_logical_cores_count(topology) > 1) caps = static_cast<sz_capability_t>(caps | sz_cap_parallel_k);
+        fu_topology_delete(topology);
     }
 
+#if SZ_USE_CUDA
+    // Every way a GPU can be unavailable - absent, driver-less, stubbed, version-mismatched - means the
+    // same thing here, so the failure needs no taxonomy: it contributes no bits and leaves the CPU alone.
+    sz::gpu_specs_t first_gpu_specs;
+    if (static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs)) == sz::status_t::success_k) {
+        caps = static_cast<sz_capability_t>(caps | sz_cap_cuda_k);
+        if (first_gpu_specs.sm_code >= 30) caps = static_cast<sz_capability_t>(caps | sz_cap_kepler_k);
+        if (first_gpu_specs.sm_code >= 90) caps = static_cast<sz_capability_t>(caps | sz_cap_hopper_k);
+    }
+#endif // SZ_USE_CUDA
+
+    return caps;
+}
+
+SZ_API_RUNTIME sz_capability_t szs_capabilities(void) {
+    // Both sides always carry `sz_cap_serial_k`, so a settled answer is never `sz_caps_none_k` and that
+    // value doubles as the "not yet probed" sentinel without a second flag to keep in sync.
+    static sz_capability_t static_caps = sz_caps_none_k;
+    if (static_caps == sz_caps_none_k)
+        static_caps = (sz_capability_t)(szs_capabilities_comptime() & szs_capabilities_runtime());
     return static_caps;
 }
 

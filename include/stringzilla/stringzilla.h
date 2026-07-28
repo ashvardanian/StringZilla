@@ -319,9 +319,6 @@ SZ_API_COMPTIME sz_capability_t sz_capabilities_comptime_implementation_(void) {
         (sz_cap_haswell_k * SZ_USE_HASWELL) |         //
         (sz_cap_skylake_k * SZ_USE_SKYLAKE) |         //
         (sz_cap_icelake_k * SZ_USE_ICELAKE) |         //
-        (sz_cap_cuda_k * SZ_USE_CUDA) |               //
-        (sz_cap_kepler_k * SZ_USE_KEPLER) |           //
-        (sz_cap_hopper_k * SZ_USE_HOPPER) |           //
         (sz_cap_v128_k * SZ_USE_V128) |               //
         (sz_cap_v128relaxed_k * SZ_USE_V128RELAXED) | //
         (sz_cap_rvv_k * SZ_USE_RVV) |                 //

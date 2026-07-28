@@ -48,7 +48,23 @@ SZ_API_RUNTIME int szs_version_minor(void);
 SZ_API_RUNTIME int szs_version_patch(void);
 
 /**
- *  @brief Get hardware capabilities mask for current system.
+ *  @brief What this binary @b ships: StringZilla's CPU kernels, the Fork Union pool, and the GPU tiers
+ *         the CUDA toolkit was able to compile.
+ *  @sa sz_capabilities_comptime
+ */
+SZ_API_RUNTIME sz_capability_t szs_capabilities_comptime(void);
+
+/**
+ *  @brief What this machine @b offers: the CPU's ISA, its usable core count, and the first GPU's tier.
+ *  @note A GPU that cannot be enumerated - for any driver reason at all - simply contributes no GPU
+ *        bits. It never speaks for the CPU, so the answer degrades instead of collapsing.
+ *  @sa sz_capabilities_runtime
+ */
+SZ_API_RUNTIME sz_capability_t szs_capabilities_runtime(void);
+
+/**
+ *  @brief Get hardware capabilities mask for current system, as the intersection of what this binary
+ *         ships and what this machine offers.
  *  @sa sz_capabilities
  */
 SZ_API_RUNTIME sz_capability_t szs_capabilities(void);

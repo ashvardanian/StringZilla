@@ -293,6 +293,16 @@
 #include <stdlib.h> // `EXIT_FAILURE`
 #endif
 
+/*  The toolkit version behind the Nvidia GPU tiers below. No compiler macro can report the toolkit from
+ *  a host-compiled unit - NVCC's implicit `cuda_runtime.h` reaches `.cu` files only - so the question is
+ *  put to the include path itself. A build that never configured CUDA cannot see the header and pays
+ *  nothing for asking. */
+#if defined(__has_include)
+#if __has_include(<cuda_runtime_api.h>)
+#include <cuda_runtime_api.h> // `CUDART_VERSION`
+#endif
+#endif
+
 /*  Compile-time hardware features detection.
  *  All of those can be controlled by the user.
  */
@@ -431,32 +441,31 @@
 #define SZ_CLANG_HAS_EVEX512_ (0)
 #endif
 
+/*  Whether a CUDA layer exists at all is a build-wide switch both build systems stamp explicitly; this
+ *  fallback only serves header-only use. It keys on `__CUDACC__` rather than `__NVCC__` so that Clang's
+ *  CUDA mode - which defines the former and not the latter - is recognized as a CUDA compilation too. */
 #if !defined(SZ_USE_CUDA)
-#if defined(__NVCC__)
+#if defined(__CUDACC__)
 #define SZ_USE_CUDA (1)
 #else
 #define SZ_USE_CUDA (0)
 #endif
 #endif
 
-/**
- *  Kepler-generation logic requires SM30+ (i.e. `__CUDA_ARCH__ >= 300`).
- *  For dynamic dispatch, however, it's more sensible to check the CUDA version (i.e. `__CUDACC_VER_MAJOR__ >= 11`).
- */
+/*  Kepler-generation logic requires SM30+, but the tier is reached through `__shfl_sync` & friends,
+ *  which replaced the un-suffixed warp shuffles in CUDA 9.0. */
 #if !defined(SZ_USE_KEPLER)
-#if defined(__NVCC__) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 3)
+#if SZ_USE_CUDA && defined(CUDART_VERSION) && (CUDART_VERSION >= 9000)
 #define SZ_USE_KEPLER (1)
 #else
 #define SZ_USE_KEPLER (0)
 #endif
 #endif
 
-/**
- *  Hopper-generation logic requires SM90+ (i.e. `__CUDA_ARCH__ >= 900`).
- *  For dynamic dispatch, however, it's more sensible to check the CUDA version (i.e. `__CUDACC_VER_MAJOR__ >= 11`).
- */
+/*  Hopper-generation logic requires SM90+, which arrives together with the DPX intrinsics it is built
+ *  from (`__viaddmax_s16x2`, `__vimax3`, `__reduce_max_sync`) in CUDA 11.8. */
 #if !defined(SZ_USE_HOPPER)
-#if defined(__NVCC__) && defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
+#if SZ_USE_CUDA && defined(CUDART_VERSION) && (CUDART_VERSION >= 11080)
 #define SZ_USE_HOPPER (1)
 #else
 #define SZ_USE_HOPPER (0)
