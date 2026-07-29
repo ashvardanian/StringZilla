@@ -54,214 +54,47 @@ __Who is this for?__
 
 ## Performance
 
-<table>
-  <tr>
-    <th align="center" width="25%">C</th>
-    <th align="center" width="25%">C++</th>
-    <th align="center" width="25%">Python</th>
-    <th align="center" width="25%">StringZilla</th>
-  </tr>
-  <!-- Unicode case-folding -->
-  <tr>
-    <td colspan="4" align="center">Unicode case-folding, expanding characters like <code>ß</code> → <code>ss</code></td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>.casefold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.16</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.76</b> GB/s
-    </td>
-    <td align="center">
-      <code>sz.utf8_uncased_fold</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.86</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.81</b> GB/s
-    </td>
-  </tr>
-  <!-- Unicode uncased search -->
-  <tr>
-    <td colspan="4" align="center">Unicode uncased substring search</td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>icu.StringSearch</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.15</b> GB/s
-    </td>
-    <td align="center">
-      <code>utf8_uncased_search</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>12.4</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>9.3</b> GB/s
-    </td>
-  </tr>
-  <!-- Substrings, normal order -->
-  <tr>
-    <td colspan="4" align="center">find the first occurrence of a random word from text, ≅ 5 bytes long</td>
-  </tr>
-  <tr>
-    <td align="center">
-      <code>strstr</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>21.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.5</b> GB/s
-    </td>
-    <td align="center">
-      <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>9.1</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>10.9</b> GB/s
-    </td>
-    <td align="center">
-      <code>.find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>2.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.1</b> GB/s
-    </td>
-    <td align="center">
-      <code>sz_find</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>21.0</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>33.4</b> GB/s
-    </td>
-  </tr>
-  <!-- Substrings, reverse order -->
-  <tr>
-    <td colspan="4" align="center">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>.rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.34</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.07</b> GB/s
-    </td>
-    <td align="center">
-      <code>.rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.0</b> GB/s
-    </td>
-    <td align="center">
-      <code>sz_rfind</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>21.6</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>32.8</b> GB/s
-    </td>
-  </tr>
-  <!-- Characters, normal order -->
-  <tr>
-    <td colspan="4" align="center">split lines separated by <code>\n</code> or <code>\r</code></td>
-  </tr>
-  <tr>
-    <td align="center">
-      <code>strcspn</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>9.2</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>3.8</b> GB/s
-    </td>
-    <td align="center">
-      <code>.find_first_of</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4.1</b> GB/s
-    </td>
-    <td align="center">
-      <code>re.finditer</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.32</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.64</b> GB/s
-    </td>
-    <td align="center">
-      <code>sz_find_byteset</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>13.8</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>23.7</b> GB/s
-    </td>
-  </tr>
-  <!-- Mapping characters with lookup table transforms -->
-  <tr>
-    <td colspan="4" align="center">Mapping characters with lookup table transforms, 1 MB buffer</td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">
-      <code>std::transform</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.3</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>5.6</b> GB/s
-    </td>
-    <td align="center">
-      <code>bytes.translate</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1,614.5</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>4,153.0</b> MB/s
-    </td>
-    <td align="center">
-      <code>sz_lookup</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>25.6</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>14.7</b> GB/s
-    </td>
-  </tr>
-  <!-- Sorting -->
-  <tr>
-    <td colspan="4" align="center">Get sorted order, ≅ 8 million English words</td>
-  </tr>
-  <tr>
-    <td align="center">
-      <code>qsort_r</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>3.53</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.50</b> s
-    </td>
-    <td align="center">
-      <code>std::sort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>4.07</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1.35</b> s
-    </td>
-    <td align="center">
-      <code>numpy.argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>7.34</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>5.40</b> s
-    </td>
-    <td align="center">
-      <code>sz_sequence_argsort</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>1.05</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.35</b> s
-    </td>
-  </tr>
-  <!-- Edit Distance -->
-  <tr>
-    <td colspan="4" align="center">Levenshtein edit distance, DNA strings ≅ 100 bytes long, one core</td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">⚪</td>
-    <td align="center">
-      via <code>rapidfuzz</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>4,970</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>18,370</b> MCUPS
-    </td>
-    <td align="center">
-      <code>szs_levenshtein_distances_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>17,130</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>22,930</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>5,980,110</b> MCUPS
-    </td>
-  </tr>
-  <!-- Alignment Score -->
-  <tr>
-    <td colspan="4" align="center">Needleman-Wunsch alignment scores, DNA strings ≅ 1 KB long, one core</td>
-  </tr>
-  <tr>
-    <td align="center">⚪</td>
-    <td align="center">⚪</td>
-    <td align="center">
-      via <code>biopython</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>430</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>1,060</b> MCUPS
-    </td>
-    <td align="center">
-      <code>szs_needleman_wunsch_scores_t</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>10,730</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>16,570</b> &centerdot;
-      <span style="color:#ABABAB;">cuda:</span> <b>701,760</b> MCUPS
-    </td>
-  </tr>
-</table>
+Throughput and timings on two CPUs and one GPU, grouped by operation.
+Only the languages that ship a counterpart appear under each heading.
+`StringZilla.C` is the C kernel called directly; `StringZilla.Py` is the same kernel through the CPython binding, so the gap between them is the cost of crossing the interpreter boundary.
+
+```
+                                                      Xeon4    M5 Pro        H100
+─────────────────────────────────────────────────────────────────────────────────
+Unicode case-insensitive substring search  (GB/s)
+  Python          icu.StringSearch                     0.06      0.15
+  StringZilla.C   sz_utf8_uncased_search              13.16      9.30
+  StringZilla.Py  sz.utf8_uncased_search              12.40      9.19
+
+Find the first occurrence of a random word, ≅ 5 bytes  (GB/s)
+  LibC            strstr                               21.3       3.5
+  STL C++         std::string::find                     9.1      10.9
+  Python          str.find                              2.5       3.1
+  StringZilla.C   sz_find                              21.0      37.1
+  StringZilla.Py  sz.find                              18.6      33.4
+
+Split lines separated by \n or \r  (GB/s)
+  LibC            strcspn                               9.2       3.8
+  STL C++         std::string::find_first_of            1.1       4.1
+  Python          re.finditer                          0.32      0.64
+  StringZilla.C   sz_find_byteset                      13.8      23.7
+  StringZilla.Py  sz.split_byteset_iter                11.2      21.7
+
+Levenshtein distances, ≅ 100 byte DNA, one core  (MCUPS)
+  Python          rapidfuzz.process.cdist             4,970    18,370
+  StringZilla.C   szs_levenshtein_distances          15,680    22,844   5,980,110
+  StringZilla.Py  szs.LevenshteinDistances           14,130    21,930   4,074,700
+
+Needleman-Wunsch scores, ≅ 1 KB DNA, one core  (MCUPS)
+  Python          Bio.Align.PairwiseAligner.score       430       870
+  StringZilla.C   szs_needleman_wunsch_scores        12,000     1,267     701,760
+  StringZilla.Py  szs.NeedlemanWunschScores          10,730     1,060     700,900
+```
 
 > Treat these as a first impression, not a benchmark suite.
-> The search, Unicode, lookup, and sorting rows run on a 128 MB slice of multilingual XLSum; the similarity rows on 1 KB DNA strings.
-> x86 is a Sapphire Rapids Xeon with GCC and `glibc`, Arm an 18-core Apple M5 Pro with Apple clang and `libc++`, CUDA an H100 — so the `strstr`, `.rfind`, and `bytes.translate` rows differ in standard library as much as in ISA, while the StringZilla cells build from the same source on both.
+> The Unicode numbers were obtained on a 128 MB slice of multilingual XLSum; the similarity rows on synthetic DNA strings.
+> `Xeon4` is an Intel Sapphire Rapids with GCC and `glibc`, `M5 Pro` an 18-core Apple Silicon with Apple clang and `libc++`, `H100` an Nvidia Hopper GPU.
+> The two CPUs therefore differ in standard library as much as in ISA, which is most of the gap in the `strstr`, `std::string::rfind`, and `bytes.translate` rows; the StringZilla rows build from the same source on both.
 > These will not reproduce exactly; the links below carry the methodology and the per-library breakdowns.
 
 Most StringZilla modules ship ready-to-run benchmarks for C, C++, Python, and more.
@@ -274,36 +107,30 @@ To inspect collision resistance and distribution shapes for our hashers, see __[
 
 ## Why StringZilla
 
-StringZilla replaces a stack of specialized libraries with one portable dependency, and outpaces each on its own turf.
-
-| Alternative                           | Scope It Covers                           | StringZilla Edge                                                                                                  |
-| :------------------------------------ | :---------------------------------------- | :---------------------------------------------------------------------------------------------------------------- |
-| libc, via `strstr`/`memmem`/`memcpy`  | byte search and memory operations         | bidirectional search, hashing, sorting, and sets too, up to 3x faster on Arm                                      |
-| ICU and ICU4X                         | Unicode case, segmentation, normalization | stable C ABI, no hidden allocations, 10-70x faster on folding and segmentation                                    |
-| RapidFuzz and edit-distance libraries | fuzzy matching and Levenshtein            | batched on CPU cores, and 100x faster than NVIDIA's libraries on GPUs                                             |
-| xxHash, aHash, and other fast hashers | non-cryptographic hashing                 | an AES-based hash on par or faster on single hashes, and far ahead with `hash_multiseed` for sketches and filters |
-| `std::string` and `std::sort`         | general strings and sorting               | an SSO container, lazy allocation-free views, and allocator-routed sorting                                        |
+There are several other excellent libraries with overlapping subsets of operations and somewhat different design philosophies.
+LibC obviously provides a good baseline for basic memory operations, but its APIs vary widely in quality, and its Arm implementations often trail its x86 ones.
+ICU and ICU4X implement the Unicode standard to a letter, but don't exploit hidden invariants in the Unicode ruleset to vectorize those operations.
+RapidFuzz comes with a very good set of string-similarity algorithms and is already well vectorized on CPUs, but leaves batched cross-products symmetries and massive GPU speedups on the table.
+xxHash and aHash provide great non-cryptographic hashes, but may not cover all of the hashing use cases, or leverage the wider AES and predicated instructions available on modern CPUs.
 
 Because StringZilla mirrors the familiar standard APIs, adoption is mostly a search-and-replace.
 
-In Python:
+```
+                           Standard                  StringZilla
+─────────────────────────────────────────────────────────────────────────────────
+Python
+  Find a substring         "...".find(x)             sz.find("...", x)
+  Sort strings             sorted(items)             sz.Strs(items).sorted()
+  Split on a separator     "...".split(sep)          sz.Str("...").split(sep)
+  Case-fold for matching   "...".casefold()          sz.utf8_uncased_fold("...")
+  Streaming SHA-256        hashlib.sha256()          sz.Sha256()
 
-| Operation              | Standard           | StringZilla                   |
-| :--------------------- | :----------------- | :---------------------------- |
-| Find a substring       | `"...".find(x)`    | `sz.find("...", x)`           |
-| Sort strings           | `sorted(items)`    | `sz.Strs(items).sorted()`     |
-| Split on a separator   | `"...".split(sep)` | `sz.Str("...").split(sep)`    |
-| Case-fold for matching | `"...".casefold()` | `sz.utf8_uncased_fold("...")` |
-| Streaming SHA-256      | `hashlib.sha256()` | `sz.Sha256()`                 |
-
-In C++:
-
-| Operation                 | Standard                             | StringZilla                                                  |
-| :------------------------ | :----------------------------------- | :----------------------------------------------------------- |
-| Find a substring          | `std::string::find`                  | `sz::string::find`                                           |
-| Sort a collection         | `std::sort` of indices               | `sz::argsort`                                                |
-| Hash map with string keys | `std::unordered_map<std::string, V>` | `std::unordered_map<std::string, V, sz::hash, sz::equal_to>` |
-| Intersect two string sets | `std::set_intersection`              | `sz::try_intersect`                                          |
+C++
+  Find a substring         std::string::find         sz::string::find
+  Sort a collection        std::sort of indices      sz::argsort
+  Intersect string sets    std::set_intersection     sz::try_intersect
+  Hash map, string keys    std::unordered_map<K, V>  sz::hash + sz::equal_to
+```
 
 ## Functionality
 
