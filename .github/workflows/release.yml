@@ -556,6 +556,11 @@ jobs:
                   cuda: "12.9.1"
                   method: "network"
                   sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+              # `nvcc` shells out to `cl.exe` for the host pass, and it is only on `PATH` inside a developer
+              # environment. Without this every CUDA translation unit dies with `nvcc fatal : Cannot find
+              # compiler 'cl.exe' in PATH`.
+            - name: Set up MSVC developer environment
+              uses: ilammy/msvc-dev-cmd@v1
             - name: Install cibuildwheel
               run: python -m pip install cibuildwheel==3.4.1
             - name: Build wheels
@@ -670,7 +675,7 @@ jobs:
             name: pypi-stringzilla
             url: https://pypi.org/p/stringzilla
         steps:
-              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
             - uses: actions/checkout@v7
               with:
                   ref: "main"
@@ -728,7 +733,7 @@ jobs:
         permissions: {}
 
         steps:
-              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
             - uses: actions/checkout@v7
               with:
                   ref: "main"
@@ -781,7 +786,7 @@ jobs:
             name: pypi-stringzillas-cuda
             url: https://pypi.org/p/stringzillas-cuda
         steps:
-              # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
             - uses: actions/checkout@v7
               with:
                   ref: "main"

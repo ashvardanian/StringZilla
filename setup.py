@@ -14,6 +14,15 @@ def _max_compile_workers() -> int:
     return max(1, min(os.cpu_count() or 1, 8))
 
 
+def _available_memory_gb() -> str:
+    """Memory this machine reports, or `unknown` off POSIX. Logged beside the worker count so a runner killed
+    mid-compile leaves behind the one number needed to tell a real shortage from an infrastructure failure."""
+    try:
+        return f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1024**3:.1f}"
+    except (AttributeError, ValueError, OSError):
+        return "unknown"
+
+
 def _depfile_prerequisites(dep_path: str):
     """Parse a `-MMD/-MF` makefile fragment into its list of prerequisite paths, or `None` if absent."""
     try:
@@ -350,7 +359,10 @@ class CudaBuildExtension(NumpyBuildExt):
             nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
 
         if nvcc_jobs:
-            print(f"Compiling {len(nvcc_jobs)} CUDA source(s) with nvcc ({_max_compile_workers()} parallel workers)...")
+            print(
+                f"Compiling {len(nvcc_jobs)} CUDA source(s) with nvcc ({_max_compile_workers()} parallel workers, "
+                f"{_available_memory_gb()} GB available)..."
+            )
         _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers())
 
         # Update extension: remove .cu sources, add compiled objects
