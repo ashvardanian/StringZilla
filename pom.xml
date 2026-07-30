@@ -6,7 +6,7 @@
 
   <groupId>com.github.ashvardanian</groupId>
   <artifactId>stringzilla</artifactId>
-  <version>5.0.5</version>
+  <version>5.0.6</version>
   <packaging>jar</packaging>
 
   <name>StringZilla</name>

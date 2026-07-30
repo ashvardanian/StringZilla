@@ -1,6 +1,6 @@
 {
   "name": "@stringzilla/win32-x64",
-  "version": "5.0.5",
+  "version": "5.0.6",
   "description": "Windows x64 native binary for StringZilla",
   "repository": {
     "type": "git",
