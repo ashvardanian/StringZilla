@@ -38,7 +38,7 @@ line-length = 120
 before-test = ["python {project}/build_backend.py pull-deps {project}"]
 build-verbosity = 0
 test-command = "python {project}/build_backend.py run-tests {project}"
-test-requires = ["pytest", "pytest-repeat"]
+test-requires = ["pytest", "pytest-repeat", "pytest-run-parallel"]
 
 # We need to build for all platforms:
 # - on Linux: x86_64, aarch64, i686, ppc64le, s390x
