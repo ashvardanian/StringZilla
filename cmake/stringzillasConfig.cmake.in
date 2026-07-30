@@ -1,0 +1,32 @@
+@PACKAGE_INIT@
+
+# `forkunion::static` is PUBLIC on every StringZillas library, so its imported targets must exist before the export
+# references them. StringZilla installs it into the same prefix.
+include(CMakeFindDependencyMacro)
+find_dependency(forkunion)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/stringzillasTargets.cmake")
+
+# The export defines `stringzillas::cpus_shared`, plus `cuda_shared` from a CUDA build. Add the longer
+# `stringzilla::`-namespaced names back; see `stringzillaConfig.cmake.in` for why 3.18 gates this.
+if (NOT CMAKE_VERSION VERSION_LESS 3.18)
+    if (TARGET stringzillas::cpus_shared AND NOT TARGET stringzilla::stringzillas_cpus_shared)
+        add_library(stringzilla::stringzillas_cpus_shared ALIAS stringzillas::cpus_shared)
+    endif ()
+
+    if (TARGET stringzillas::cuda_shared AND NOT TARGET stringzilla::stringzillas_cuda_shared)
+        add_library(stringzilla::stringzillas_cuda_shared ALIAS stringzillas::cuda_shared)
+    endif ()
+endif ()
+
+# Flavors as components: a CPU-only install must reject `COMPONENTS cuda_shared` and accept `cpus_shared`.
+if (TARGET stringzillas::cpus_shared)
+    set(stringzillas_cpus_shared_FOUND TRUE)
+endif ()
+if (TARGET stringzillas::cuda_shared)
+    set(stringzillas_cuda_shared_FOUND TRUE)
+endif ()
+
+# No `stringzillas_VERSION` here, for the reason spelled out in `stringzillaConfig.cmake.in`.
+check_required_components(stringzillas)

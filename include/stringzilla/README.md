@@ -44,7 +44,7 @@ Each family can also be included on its own when you only need a slice of the AP
 
 ### CMake, Header Only
 
-With CMake 3.14 or newer, pull the project in with `FetchContent` and link the interface target `stringzilla::stringzilla_header`, which only adds `include/` to your search path.
+With CMake 3.14 or newer, pull the project in with `FetchContent` and link the interface target `stringzilla::header`, which only adds `include/` to your search path.
 
 ```cmake
 include(FetchContent)
@@ -54,26 +54,40 @@ FetchContent_Declare(
     GIT_TAG main)
 FetchContent_MakeAvailable(stringzilla)
 
-target_link_libraries(your_app PRIVATE stringzilla::stringzilla_header)
+target_link_libraries(your_app PRIVATE stringzilla::header)
 ```
 
 `add_subdirectory(stringzilla)` works the same way.
 Pulled in as a subproject, `STRINGZILLA_BUILD_SHARED` defaults to off, so only the header target is configured and nothing is compiled.
+The longer `stringzilla::stringzilla_header` spelling still resolves, as do the equivalents for every target below.
 
 ### CMake, Precompiled Library
 
-For a single binary that resolves the best backend at __runtime__, turn on `STRINGZILLA_BUILD_SHARED` and link the shared target `stringzilla::stringzilla_shared`.
+For a single binary that resolves the best backend at __runtime__, turn on `STRINGZILLA_BUILD_SHARED` and link the shared target `stringzilla::shared`.
 
 ```cmake
 set(STRINGZILLA_BUILD_SHARED ON)
 FetchContent_MakeAvailable(stringzilla)
 
-target_link_libraries(your_app PRIVATE stringzilla::stringzilla_shared)
+target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
 `stringzilla_shared` compiles every backend and initializes the dispatch table once at load, so one artifact runs optimally on any CPU.
-On Linux a libc-free variant `stringzilla_bare` is built alongside it with `SZ_AVOID_LIBC=1`.
-Configure with `-DSTRINGZILLA_INSTALL=ON` to install the headers and libraries system-wide.
+On Linux a libc-free variant `stringzilla::bare` is built alongside it with `SZ_AVOID_LIBC=1`.
+
+### CMake, Installed Package
+
+Configure with `-DSTRINGZILLA_INSTALL=ON` to install the headers and libraries system-wide, then find them from an unrelated project.
+The header-only path needs no submodules and compiles nothing, so it works straight out of a release tarball:
+
+```cmake
+find_package(stringzilla REQUIRED)
+
+target_link_libraries(your_app PRIVATE stringzilla::header)
+```
+
+`stringzilla::shared` and `stringzilla::bare` join the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
+The parallel engines are a separate package - see [`include/stringzillas/README.md`](../stringzillas/README.md).
 
 ### Build Knobs
 

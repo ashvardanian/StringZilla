@@ -13,6 +13,14 @@
 #   current and older compatible GPUs; the shared library (for distribution) also packages forward-compatible PTX.
 # * stringzillas_rocm_shared: A shared library with the StringZillas parallel algorithms for ROCm-capable GPUs (TODO).
 #
+# Consumers link the same namespaced spellings whether pulled in with `add_subdirectory` or found with `find_package`:
+#
+# * stringzilla::header, stringzilla::shared, stringzilla::bare - from `find_package(stringzilla)`.
+# * stringzillas::cpus_shared, stringzillas::cuda_shared - from `find_package(stringzillas)`. The `cpus_static` and
+#   `cuda_static` siblings are in-tree only; see the install rules below.
+#
+# The longer spellings (stringzilla::stringzilla_header and the rest) stay available as aliases.
+#
 # Tests for different C++ standards:
 #
 # * stringzilla_test_cpp11: C++11 baseline support.
@@ -258,10 +266,22 @@ option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavior
 # adding the vendored copy on top would collide on target names. The vendored copy is only the
 # fallback, and an unpopulated nested submodule fails with an actionable message instead of a
 # cryptic `add_subdirectory` error.
-if (NOT TARGET forkunion_header)
+#
+# Only the StringZillas libraries and the launchers need ForkUnion - the header-only target does not, and a
+# submodule-less tree is exactly what a release tarball, a vcpkg port, and a Conan recipe unpack. Tests and benchmarks
+# count because `define_launcher` links `forkunion::header` into every executable.
+set(STRINGZILLA_NEEDS_FORKUNION ${STRINGZILLAS_BUILD_SHARED})
+if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCHMARK)
+    set(STRINGZILLA_NEEDS_FORKUNION ON)
+endif ()
+
+if (STRINGZILLA_NEEDS_FORKUNION AND NOT TARGET forkunion_header)
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/forkunion/CMakeLists.txt")
         message(FATAL_ERROR "The `forkunion` submodule is not populated - run: git submodule update --init --recursive")
     endif ()
+    # `forkunion::static` is PUBLIC on the StringZillas libraries, so `find_dependency(forkunion)` needs it installed
+    # alongside. ForkUnion's own default is top-level-only, which would leave the export dangling.
+    set(FORKUNION_INSTALL ${STRINGZILLA_INSTALL})
     add_subdirectory(forkunion)
 endif ()
 
@@ -375,10 +395,14 @@ endfunction ()
 # Tests and benchmarks are defined after the libraries (below), so the StringZillas consumers can link the precompiled
 # static archives instead of recompiling the engines header-only.
 
-
-# Define our libraries, first the header-only version
+# Define our libraries, first the header-only version.
+#
+# Published as `stringzilla::header`: the namespace already says "stringzilla". The target keeps the long name, since a
+# bare `header` would be a poor global one, and `EXPORT_NAME` advertises the short spelling to installed consumers.
 add_library(stringzilla_header INTERFACE)
+add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 add_library(${PROJECT_NAME}::stringzilla_header ALIAS stringzilla_header)
+set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
     stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}> $<INSTALL_INTERFACE:include>
 )
@@ -405,14 +429,20 @@ set(STRINGZILLA_SHIM_SOURCES
 )
 
 # Helper function used for `stringzilla_shared` and `stringzilla_bare` targets
-function (define_stringzilla_shared target)
+function (define_stringzilla_shared target public_name)
     add_library(${target} SHARED ${STRINGZILLA_SHIM_SOURCES})
-    add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
+    # `stringzilla_shared` is published as `stringzilla::shared`. Both spellings resolve, in-tree and installed.
+    add_library(${PROJECT_NAME}::${public_name} ALIAS ${target})
+    add_library(${PROJECT_NAME}::${target} ALIAS ${target})
+    set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_name})
+
+    # `SOVERSION` carries the major alone - the only break the C ABI admits - so it tracks the project rather than
+    # sitting at a literal that stopped matching four majors ago.
     set_target_properties(
         ${target}
         PROPERTIES VERSION ${PROJECT_VERSION}
-                   SOVERSION 1
+                   SOVERSION ${PROJECT_VERSION_MAJOR}
                    POSITION_INDEPENDENT_CODE ON
     )
 
@@ -426,7 +456,7 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_SHARED)
 
-    define_stringzilla_shared(stringzilla_shared)
+    define_stringzilla_shared(stringzilla_shared shared)
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(
@@ -448,7 +478,7 @@ if (STRINGZILLA_BUILD_SHARED)
     # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS
     # machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
     if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-        define_stringzilla_shared(stringzilla_bare)
+        define_stringzilla_shared(stringzilla_bare bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(
@@ -478,7 +508,7 @@ set(STRINGZILLAS_COMMON_DEFINITIONS "SZ_DYNAMIC_DISPATCH=1" "SZ_AVOID_LIBC=0"
 
 # Helper function used for `stringzillas_cpus_shared`, `stringzillas_cuda_shared`, and `stringzillas_rocm_shared`
 # targets
-function (define_stringzillas_shared base)
+function (define_stringzillas_shared base public_base)
     # Compile the ARGN translation units once into `<base>_objects`, then expose `<base>_shared` and
     # `<base>_static` variants that reuse those objects. Tests and benchmarks link the STATIC variant and
     # inherit `SZ_DYNAMIC_DISPATCH=1` (set INTERFACE below), so the heavy precompiled engine instantiations
@@ -492,13 +522,21 @@ function (define_stringzillas_shared base)
     add_library(${objects} OBJECT ${ARGN})
     add_library(${target} SHARED)
     add_library(${static} STATIC)
+
+    # StringZillas is its own installed package, so its targets live under `stringzillas::`. The `_shared`/`_static`
+    # suffix stays on the leaf: which one a consumer links is a real choice, not noise.
+    add_library(stringzillas::${public_base}_shared ALIAS ${target})
+    add_library(stringzillas::${public_base}_static ALIAS ${static})
     add_library(${PROJECT_NAME}::${target} ALIAS ${target})
+    set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_base}_shared)
+    set_target_properties(${static} PROPERTIES EXPORT_NAME ${public_base}_static)
+
     target_link_libraries(${target} PRIVATE ${objects})
     target_link_libraries(${static} PRIVATE ${objects})
 
     set_target_properties(${objects} ${target} ${static} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(${objects} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
-    set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
+    set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
 
     # Compile settings for the library's own translation units (the OBJECT compilation). A future ROCm
     # backend declares its own `SZ_USE_*` pair here.
@@ -564,18 +602,12 @@ endfunction ()
 
 # StringZillas C-API entry units, compiled once per library - as C++ into the CPU one, as CUDA into the GPU one.
 set(STRINGZILLAS_API_CPP_SOURCES
-    c/stringzillas/runtime.cpp
-    c/stringzillas/levenshtein.cpp
-    c/stringzillas/needleman_wunsch.cpp
-    c/stringzillas/smith_waterman.cpp
-    c/stringzillas/fingerprints.cpp
+    c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/needleman_wunsch.cpp
+    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp
 )
 set(STRINGZILLAS_API_CU_SOURCES
-    c/stringzillas/runtime.cu
-    c/stringzillas/levenshtein.cu
-    c/stringzillas/needleman_wunsch.cu
-    c/stringzillas/smith_waterman.cu
-    c/stringzillas/fingerprints.cu
+    c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/needleman_wunsch.cu
+    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu
 )
 # Per-ISA CPU instantiation units, host C++ in every library; off-platform files compile to empty objects.
 set(STRINGZILLAS_CPUS_SOURCES
@@ -597,10 +629,8 @@ set(STRINGZILLAS_CPUS_SOURCES
 )
 # Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
 # from the base set.
-set(STRINGZILLAS_CUDA_SOURCES
-    c/stringzillas/levenshtein_cuda.cu
-    c/stringzillas/needleman_wunsch_cuda.cu
-    c/stringzillas/smith_waterman_cuda.cu
+set(STRINGZILLAS_CUDA_SOURCES c/stringzillas/levenshtein_cuda.cu c/stringzillas/needleman_wunsch_cuda.cu
+                              c/stringzillas/smith_waterman_cuda.cu
 )
 set(STRINGZILLAS_KEPLER_SOURCES c/stringzillas/levenshtein_kepler.cu)
 set(STRINGZILLAS_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzillas/needleman_wunsch_hopper.cu
@@ -611,7 +641,12 @@ set(STRINGZILLAS_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzil
 # parse the CPU SIMD headers.
 function (define_stringzillas_cpus_objects name)
     add_library(${name} OBJECT ${ARGN})
-    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+    set_target_properties(
+        ${name}
+        PROPERTIES POSITION_INDEPENDENT_CODE ON
+                   CXX_STANDARD 20
+                   CXX_STANDARD_REQUIRED ON
+    )
     target_include_directories(${name} PRIVATE include)
     target_link_libraries(${name} PRIVATE forkunion::header)
     target_compile_definitions(${name} PRIVATE ${STRINGZILLAS_COMMON_DEFINITIONS} "SZ_USE_CUDA=1" "SZ_USE_ROCM=0")
@@ -621,7 +656,15 @@ endfunction ()
 
 # Assemble one StringZillas CUDA library variant from four groups of object files, one per (compiler,
 # architecture-set) pair; the static and shared variants pass different architecture sets.
-function (define_stringzillas_cuda_library target kind cuda_archs kepler_archs hopper_archs)
+function (
+    define_stringzillas_cuda_library
+    target
+    public_name
+    kind
+    cuda_archs
+    kepler_archs
+    hopper_archs
+)
     define_stringzillas_cuda_objects(
         ${target}_cuda "${cuda_archs}" ${STRINGZILLAS_API_CU_SOURCES} ${STRINGZILLAS_CUDA_SOURCES}
     )
@@ -632,14 +675,22 @@ function (define_stringzillas_cuda_library target kind cuda_archs kepler_archs h
     add_library(${target} ${kind})
     target_link_libraries(${target} PRIVATE ${target}_cuda ${target}_kepler ${target}_hopper ${target}_cpus)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON LINKER_LANGUAGE CUDA)
+
+    # Same `stringzillas::` publishing as the CPU variants; the static archive needs a name too.
+    add_library(stringzillas::${public_name} ALIAS ${target})
+    set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_name})
     if (kind STREQUAL "SHARED")
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
-        set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
+        set_target_properties(${target} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
     endif ()
 
     # Consumers (tests/benches) extern the engines and link cudart themselves; the static archive does not resolve
-    # cudart, so expose it (plus the dynamic-dispatch macro and headers) on the variant's interface.
-    target_include_directories(${target} PUBLIC include)
+    # cudart, so expose it (plus the dynamic-dispatch macro and headers) on the variant's interface. The include path is
+    # split like the CPU variants': a bare source path would be baked into the export, pointing at this build tree.
+    target_include_directories(
+        ${target} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
     target_compile_definitions(${target} INTERFACE "SZ_DYNAMIC_DISPATCH=1")
     target_link_libraries(${target} PUBLIC forkunion::static CUDA::cudart Threads::Threads)
 endfunction ()
@@ -647,7 +698,7 @@ endfunction ()
 if (STRINGZILLAS_BUILD_SHARED)
 
     # Define StringZillas CPU shared + static libraries (sharing one OBJECT compilation)
-    define_stringzillas_shared(stringzillas_cpus ${STRINGZILLAS_API_CPP_SOURCES} ${STRINGZILLAS_CPUS_SOURCES})
+    define_stringzillas_shared(stringzillas_cpus cpus ${STRINGZILLAS_API_CPP_SOURCES} ${STRINGZILLAS_CPUS_SOURCES})
 endif ()
 
 # Define StringZillas CUDA shared + static libraries (only if CUDA is available). The static library is for local
@@ -657,9 +708,12 @@ endif ()
 # superseded by Hopper on sm_90, so it ships sm_80 SASS only; the Hopper DPX tier exists only from sm_90.
 if (STRINGZILLAS_BUILD_SHARED AND STRINGZILLA_BUILD_CUDA)
     find_package(Threads REQUIRED)
-    define_stringzillas_cuda_library(stringzillas_cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "80-real" "90-real")
     define_stringzillas_cuda_library(
-        stringzillas_cuda_shared SHARED "80-real;90-real;90-virtual" "80-real;80-virtual" "90-real;90-virtual"
+        stringzillas_cuda_static cuda_static STATIC "${STRINGZILLA_CUDA_ARCHS}" "80-real" "90-real"
+    )
+    define_stringzillas_cuda_library(
+        stringzillas_cuda_shared cuda_shared SHARED "80-real;90-real;90-virtual" "80-real;80-virtual"
+        "90-real;90-virtual"
     )
 endif ()
 
@@ -762,21 +816,31 @@ endif ()
 # TODO: Define a `stringzillas_rocm` library via `define_stringzillas_shared` when ROCm support is added.
 
 if (STRINGZILLA_INSTALL)
-    # The header-only target is the package's heart: export it, so `find_package(stringzilla)` works
-    # after installation and consumers link `stringzilla::stringzilla_header` - mirroring ForkUnion's
-    # packaging story.
+    include(CMakePackageConfigHelpers)
+
+    # Two packages, not one. `find_package(stringzilla)` always resolves; `find_package(stringzillas)` exists only where
+    # the parallel engines were built, so a header-only prefix advertises no empty package. Every installed library
+    # belongs to an `EXPORT` set - a `.so` with no imported target leaves consumers hand-rolling `find_library`.
+    #
+    # Destinations come from the `GNUInstallDirs` defaults, so each call names only its target and export set.
     install(TARGETS stringzilla_header EXPORT stringzillaTargets)
+    if (TARGET stringzilla_shared)
+        install(TARGETS stringzilla_shared EXPORT stringzillaTargets)
+    endif ()
+    if (TARGET stringzilla_bare)
+        install(TARGETS stringzilla_bare EXPORT stringzillaTargets)
+    endif ()
+
     install(
         EXPORT stringzillaTargets
         FILE stringzillaTargets.cmake
         NAMESPACE stringzilla::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
     )
-    include(CMakePackageConfigHelpers)
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/stringzillaConfigVersion.cmake"
         VERSION ${PROJECT_VERSION}
-        COMPATIBILITY AnyNewerVersion
+        COMPATIBILITY SameMajorVersion
     )
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stringzillaConfig.cmake.in"
@@ -788,25 +852,46 @@ if (STRINGZILLA_INSTALL)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzilla
     )
 
-    foreach (sz_library_ IN ITEMS stringzilla_shared stringzilla_bare stringzillas_cpus_shared
-                                  stringzillas_cuda_shared
-    )
-        if (TARGET ${sz_library_})
-            install(
-                TARGETS ${sz_library_}
-                ARCHIVE
-                BUNDLE
-                FRAMEWORK
-                LIBRARY
-                OBJECTS
-                PRIVATE_HEADER
-                PUBLIC_HEADER
-                RESOURCE
-                RUNTIME
-            )
+    # Shared variants only: the static archives consume the `_objects` OBJECT libraries, and CMake will not export a
+    # target whose object library is not exported too - that would ship every `.o`. The `_static` aliases remain for
+    # `add_subdirectory` consumers, whose objects are in the same build tree.
+    if (TARGET stringzillas_cpus_shared OR TARGET stringzillas_cuda_shared)
+        if (TARGET stringzillas_cpus_shared)
+            install(TARGETS stringzillas_cpus_shared EXPORT stringzillasTargets)
         endif ()
-    endforeach ()
+        if (TARGET stringzillas_cuda_shared)
+            install(TARGETS stringzillas_cuda_shared EXPORT stringzillasTargets)
+        endif ()
 
-    install(DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR} DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
+        install(
+            EXPORT stringzillasTargets
+            FILE stringzillasTargets.cmake
+            NAMESPACE stringzillas::
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzillas
+        )
+        write_basic_package_version_file(
+            "${CMAKE_CURRENT_BINARY_DIR}/stringzillasConfigVersion.cmake"
+            VERSION ${PROJECT_VERSION}
+            COMPATIBILITY SameMajorVersion
+        )
+        configure_package_config_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stringzillasConfig.cmake.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/stringzillasConfig.cmake"
+            INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzillas
+        )
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stringzillasConfig.cmake"
+                      "${CMAKE_CURRENT_BINARY_DIR}/stringzillasConfigVersion.cmake"
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stringzillas
+        )
+    endif ()
+
+    # SwiftPM reads `module.modulemap` from the source tree, via `publicHeadersPath` in `Package.swift`. At an installed
+    # include root it is a hazard: Clang treats whichever one it finds there as authoritative for the whole prefix.
+    install(
+        DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR}
+        DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR}
+        PATTERN "module.modulemap" EXCLUDE
+    )
     install(DIRECTORY c/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
+
 endif ()

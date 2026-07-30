@@ -204,7 +204,7 @@ The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing
 
 ### C and C++
 
-Header-only, or pull it in with CMake `FetchContent` &centerdot; guides: [`include/stringzilla/README.md`](include/stringzilla/README.md) and [`include/stringzillas/README.md`](include/stringzillas/README.md)
+Header-only, or pull it in with CMake `FetchContent`, or `find_package(stringzilla)` an installed build &centerdot; guides: [`include/stringzilla/README.md`](include/stringzilla/README.md) and [`include/stringzillas/README.md`](include/stringzillas/README.md)
 
 ```c
 #include <stringzilla/stringzilla.h>

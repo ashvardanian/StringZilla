@@ -10,11 +10,11 @@ And each call runs across a chosen slice of __CPU cores or a CUDA GPU__, selecte
 StringZillas is __compiled__, not header-only: the heavy template instantiations for every engine are baked into precompiled libraries so you link them rather than recompile them.
 The CMake project is named `stringzilla`, and it exposes four StringZillas library targets gated by two options.
 
-The CPU libraries `stringzillas_cpus_shared` and `stringzillas_cpus_static` are built when `STRINGZILLAS_BUILD_SHARED` is on.
-The CUDA libraries `stringzillas_cuda_shared` and `stringzillas_cuda_static` are additionally built when `STRINGZILLA_BUILD_CUDA` is on.
-Every target also gets a namespaced alias under `stringzilla::`, for example `stringzilla::stringzillas_cpus_shared`.
+The CPU libraries `stringzillas::cpus_shared` and `stringzillas::cpus_static` are built when `STRINGZILLAS_BUILD_SHARED` is on.
+The CUDA libraries `stringzillas::cuda_shared` and `stringzillas::cuda_static` are additionally built when `STRINGZILLA_BUILD_CUDA` is on.
+The longer `stringzilla::stringzillas_cpus_shared` spelling still resolves, and likewise for the rest.
 
-There is no `find_package` config export, so pull the project in with `FetchContent` (or `add_subdirectory`) and link a target:
+Pull the project in with `FetchContent` or `add_subdirectory`, then link a target:
 
 ```cmake
 include(FetchContent)
@@ -26,7 +26,7 @@ set(STRINGZILLAS_BUILD_SHARED ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(stringzilla)
 
 add_executable(my_app main.c)
-target_link_libraries(my_app PRIVATE stringzilla::stringzillas_cpus_shared)
+target_link_libraries(my_app PRIVATE stringzillas::cpus_shared)
 ```
 
 To also build and link the GPU engines, enable CUDA and link the matching target:
@@ -34,10 +34,18 @@ To also build and link the GPU engines, enable CUDA and link the matching target
 ```cmake
 set(STRINGZILLA_BUILD_CUDA ON CACHE BOOL "" FORCE)
 # ... after FetchContent_MakeAvailable ...
-target_link_libraries(my_app PRIVATE stringzilla::stringzillas_cuda_shared)
+target_link_libraries(my_app PRIVATE stringzillas::cuda_shared)
 ```
 
-The static variants `stringzillas_cpus_static` and `stringzillas_cuda_static` ship the same engines for local testing and benchmarking.
+An installed build exposes the same engines as their own CMake package, separate from the single-string `stringzilla` one:
+
+```cmake
+find_package(stringzillas REQUIRED)
+
+target_link_libraries(my_app PRIVATE stringzillas::cpus_shared)
+```
+
+Only the shared variants are exported: the static archives are assembled from OBJECT libraries that an installed package cannot carry, so `stringzillas::cpus_static` and `stringzillas::cuda_static` are reachable in-tree only, and ship the same engines for local testing and benchmarking.
 All four propagate the headers and the `SZ_DYNAMIC_DISPATCH=1` interface definition, so a consumer externs the precompiled engines instead of re-instantiating them.
 
 The public C surface is one header:
