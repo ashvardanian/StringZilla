@@ -894,4 +894,28 @@ if (STRINGZILLA_INSTALL)
     )
     install(DIRECTORY c/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
 
+    # A `.pc` for the consumers CMake never reaches - cgo among them. Spelling the prefix against `${pcfiledir}` keeps it
+    # correct after `cmake --install --prefix` moves the tree. `GNUInstallDirs` returns a relative path unless a distro
+    # forced an absolute one, and only the former may follow a prefix. No `Libs.private`: the shared library is C and
+    # links nothing but libc, so a static caller inherits no closure to name.
+    if (TARGET stringzilla_shared)
+        file(RELATIVE_PATH STRINGZILLA_PC_PREFIX "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
+        string(REGEX REPLACE "/+$" "" STRINGZILLA_PC_PREFIX "${STRINGZILLA_PC_PREFIX}")
+        set(STRINGZILLA_PC_PREFIX "\${pcfiledir}/${STRINGZILLA_PC_PREFIX}")
+
+        if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+            set(STRINGZILLA_PC_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+        else ()
+            set(STRINGZILLA_PC_LIBDIR "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
+        endif ()
+        if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+            set(STRINGZILLA_PC_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}")
+        else ()
+            set(STRINGZILLA_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+        endif ()
+
+        configure_file(cmake/stringzilla.pc.in "${CMAKE_CURRENT_BINARY_DIR}/stringzilla.pc" @ONLY)
+        install(FILES "${CMAKE_CURRENT_BINARY_DIR}/stringzilla.pc" DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+    endif ()
+
 endif ()

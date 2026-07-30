@@ -1,0 +1,11 @@
+prefix=@STRINGZILLA_PC_PREFIX@
+exec_prefix=${prefix}
+libdir=@STRINGZILLA_PC_LIBDIR@
+includedir=@STRINGZILLA_PC_INCLUDEDIR@
+
+Name: StringZilla
+Description: @PROJECT_DESCRIPTION@
+URL: https://github.com/ashvardanian/StringZilla
+Version: @PROJECT_VERSION@
+Cflags: -I${includedir} -DSZ_DYNAMIC_DISPATCH=1
+Libs: -L${libdir} -lstringzilla_shared

@@ -1208,6 +1208,14 @@ jobs:
           cmake --build consumer/build
           LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/build/consumer
 
+        # The `.pc` exists for build systems CMake never reaches, so it is checked without CMake.
+      - name: Consume via pkg-config
+        run: |
+          export PKG_CONFIG_PATH="$FULL_PREFIX/lib/pkgconfig"
+          test "$(pkg-config --modversion stringzilla)" = "$(cat VERSION)"
+          cc consumer/main.c $(pkg-config --cflags --libs stringzilla) -o consumer/pc_consumer
+          LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/pc_consumer
+
         # The in-tree aliases are a separate code path, and the only one offering the static archives.
       - name: Consume via add_subdirectory
         run: |

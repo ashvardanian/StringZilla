@@ -89,6 +89,12 @@ target_link_libraries(your_app PRIVATE stringzilla::header)
 `stringzilla::shared` and `stringzilla::bare` join the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
 The parallel engines are a separate package - see [`include/stringzillas/README.md`](../stringzillas/README.md).
 
+A shared-library install also writes `lib/pkgconfig/stringzilla.pc`, for build systems that read pkg-config rather than CMake:
+
+```sh
+cc main.c $(pkg-config --cflags --libs stringzilla) -o main
+```
+
 ### Build Knobs
 
 The behavior of the core is controlled entirely by preprocessor macros, so you can tune it without touching the sources.
