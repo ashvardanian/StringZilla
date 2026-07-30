@@ -782,9 +782,10 @@ fn try_build_stringzillas_cpus(serial_flags: &HashMap<String, bool>) -> Result<(
 }
 
 fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
+    // No ForkUnion trigger: those headers arrive via `DEP_FORKUNION_INCLUDE`, and the submodule path is absent from the
+    // published crate - `rerun-if-changed` on a missing path re-runs this script every build.
     println!("cargo:rerun-if-changed=c/stringzillas");
     println!("cargo:rerun-if-changed=include/stringzillas");
-    println!("cargo:rerun-if-changed=forkunion/include/forkunion.h");
 
     // `cuda` and `rocm` both imply `cpus`. Try the requested GPU backend first; if it can't build (commonly: no GPU
     // toolkit on this machine), fall through to the CPU-only backend so the crate still works.

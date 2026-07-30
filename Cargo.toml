@@ -1,26 +1,26 @@
 [package]
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
-categories = [
-    "text-processing",
-    "hardware-support",
-    "no-std",
-    "wasm",
-    "external-ffi-bindings",
-]
+# Not `external-ffi-bindings`: that is for a library built elsewhere, and `c/` is vendored and built by `build.rs`.
+categories = ["text-processing", "hardware-support", "no-std", "wasm"]
 description = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 documentation = "https://docs.rs/stringzilla"
 edition = "2021"
 homepage = "https://ashvardanian.com/posts/stringzilla/"
+# Leading slashes anchor to the package root; Cargo matches these like gitignore. No `forkunion/**`: `build.rs` reads
+# those headers from `DEP_FORKUNION_INCLUDE`, exported by the `forkunion` crate.
 include = [
-    "rust/**",
-    "c/**",
-    "include/**",
-    "forkunion/include/**",
-    "probes/**",
-    "build.rs",
+    "/rust/**",
+    "/c/**",
+    "/include/**",
+    "/probes/**",
+    "/build.rs",
+    "/LICENSE",
 ]
 keywords = ["simd", "search", "retrieval", "hash", "sort"]
 license = "Apache-2.0"
+# The bundled C sources export global `sz_*` symbols, so `links` makes Cargo refuse a graph holding two copies of this
+# crate. It adds exclusivity to resolution only; the linking itself stays in `build.rs`.
+links = "stringzilla"
 name = "stringzilla"
 publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
@@ -37,10 +37,10 @@ std = []
 # (mirrors CMake's `stringzilla_shared`). Disable (`--no-default-features`) to resolve the tier at
 # compile time instead - the analog of the header-only `stringzilla_header`.
 cpus = [
-    "std",            # std is required for multi-threaded backend
-    "allocator-api2",
-    "stringtape",
-    "dep:forkunion",  # Compiles and links the thread-pool runtime; StringZillas only consumes its C API
+    "std", # std is required for multi-threaded backend
+    "dep:allocator-api2",
+    "dep:stringtape",
+    "dep:forkunion", # Compiles and links the thread-pool runtime; StringZillas only consumes its C API
 ] # Multi-threaded CPU backend (StringZillas)
 cuda = ["std", "cpus"] # CUDA GPU backend (includes multi-threaded CPU backend)
 dynamic-dispatch = []

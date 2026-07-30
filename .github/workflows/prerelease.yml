@@ -199,6 +199,9 @@ jobs:
         run: cargo test --release
       - name: Test Rust with compile-time dispatch
         run: cargo test --release --no-default-features --features std
+        # Otherwise `cargo publish` is the first thing that ever reads the `include` list.
+      - name: Package the crate
+        run: cargo package --locked
 
   test_ubuntu_clang:
     name: Ubuntu Clang 16 - ${{ matrix.os }}
