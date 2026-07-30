@@ -442,6 +442,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
+    sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
     // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
@@ -505,6 +506,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                    //
     sz_cptr_t needle, sz_size_t needle_length) {
     sz_assert_(needle_length <= 256 && "The pattern is too long.");
+    sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
     union {
         sz_u8_t jumps[256];
         sz_u64_vec_t vecs[64];
@@ -613,7 +615,8 @@ SZ_HELPER_AUTO sz_cptr_t sz_rfind_with_suffix_(sz_cptr_t haystack, sz_size_t hay
         if (remaining < prefix_length) return SZ_NULL_CHAR;
         if (sz_equal_serial(found - prefix_length, needle, prefix_length)) return found - prefix_length;
 
-        // Adjust the position.
+        // Adjust the position, upholding `haystack_length >= needle_length` for the next `find_suffix`.
+        if (remaining <= needle_length) return SZ_NULL_CHAR;
         haystack_length = remaining - 1;
     }
 
