@@ -791,18 +791,20 @@ fn build_stringzillas(serial_flags: &HashMap<String, bool>) {
     // toolkit on this machine), fall through to the CPU-only backend so the crate still works.
     let is_cuda = env::var("CARGO_FEATURE_CUDA").is_ok();
     let is_rocm = env::var("CARGO_FEATURE_ROCM").is_ok();
-    let gpu_ok = if is_cuda {
-        try_build_stringzillas_cuda(serial_flags).is_ok()
+    let gpu_error = if is_cuda {
+        try_build_stringzillas_cuda(serial_flags).err()
     } else if is_rocm {
-        try_build_stringzillas_rocm(serial_flags).is_ok()
+        try_build_stringzillas_rocm(serial_flags).err()
     } else {
-        false
+        None
     };
-    if gpu_ok {
+    if (is_cuda || is_rocm) && gpu_error.is_none() {
         return;
     }
-    if is_cuda || is_rocm {
-        println!("cargo:warning=GPU backend unavailable; building CPU-only StringZillas instead");
+    if let Some(error) = gpu_error {
+        // The reason matters: a missing toolkit, an unusable compiler, and a genuine compile error in our own
+        // sources all land here, and only the message tells them apart.
+        println!("cargo:warning=GPU backend unavailable, building CPU-only StringZillas instead: {error}");
     }
     try_build_stringzillas_cpus(serial_flags).expect("failed to compile CPU-only StringZillas");
 }

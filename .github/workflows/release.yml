@@ -99,7 +99,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -132,7 +133,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -165,7 +167,8 @@ jobs:
             matrix:
                 arch: [ppc64le, s390x, i686, armv7l, riscv64]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -200,7 +203,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -234,7 +238,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -268,7 +273,8 @@ jobs:
             matrix:
                 python-version: ["311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -301,7 +307,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -335,7 +342,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -368,7 +376,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -403,7 +412,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -437,7 +447,8 @@ jobs:
             matrix:
                 python-version: ["311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -463,6 +474,9 @@ jobs:
     build_wheels_stringzillas_cuda_linux:
         name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
+        # The aarch64 leg has died mid-compile on every run so far, sometimes only after ~50 minutes of silence.
+        # A bound turns that into a labelled timeout instead of six runners burning an hour each.
+        timeout-minutes: 25
         needs: versioning
         strategy:
             fail-fast: false
@@ -470,7 +484,8 @@ jobs:
                 os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -504,6 +519,7 @@ jobs:
                       PATH=/usr/local/cuda-12.9/bin:$PATH
                       LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs
                       CUDAHOSTCXX=${{ matrix.os == 'ubuntu-24.04-arm' && '/usr/bin/clang++' || '' }}
+                      PYTHONUNBUFFERED=1
                   # Install just nvcc + the CUDA runtime/driver dev headers from NVIDIA's rhel8 repo (the manylinux
                   # base is AlmaLinux 8), instead of the ~4 GB `.run` installer, landing the /usr/local/cuda-12.9
                   # layout every StringZilla build system expects. Arm adds Clang 19 - the newest nvcc 12.9 accepts.
@@ -538,7 +554,8 @@ jobs:
             matrix:
                 python-version: ["310", "311", "312", "313", "314", "314t"]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -587,7 +604,8 @@ jobs:
         runs-on: ubuntu-24.04
         needs: versioning
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -612,7 +630,8 @@ jobs:
         runs-on: ubuntu-24.04
         needs: versioning
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -637,7 +656,8 @@ jobs:
         runs-on: ubuntu-24.04
         needs: versioning
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -676,7 +696,8 @@ jobs:
             url: https://pypi.org/p/stringzilla
         steps:
             # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
             - name: Prepare dist directory
@@ -734,7 +755,8 @@ jobs:
 
         steps:
             # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
             - name: Prepare dist directory
@@ -787,7 +809,8 @@ jobs:
             url: https://pypi.org/p/stringzillas-cuda
         steps:
             # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
             - name: Prepare dist directory
@@ -828,7 +851,8 @@ jobs:
         runs-on: ubuntu-22.04
         needs: versioning
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   ref: "main"
                   submodules: recursive
@@ -838,7 +862,8 @@ jobs:
               uses: dtolnay/rust-toolchain@stable
             - name: Test Rust with dynamic dispatch
               run: cargo test --release
-            - uses: katyo/publish-crates@v2
+            - name: Publish to crates.io
+              uses: katyo/publish-crates@v2
               with:
                   registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -999,7 +1024,8 @@ jobs:
                       target: aarch64-linux-gnu
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   persist-credentials: false
                   ref: "main"
@@ -1072,13 +1098,15 @@ jobs:
                     - arch: x64
                       target: x64
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   persist-credentials: false
                   ref: "main"
                   submodules: recursive
 
-            - uses: ilammy/msvc-dev-cmd@v1
+            - name: Set up MSVC developer environment
+              uses: ilammy/msvc-dev-cmd@v1
               with:
                   arch: ${{ matrix.arch }}
 
@@ -1113,7 +1141,8 @@ jobs:
             matrix:
                 arch: [arm64] # Only Apple Silicon for now
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   persist-credentials: false
                   ref: "main"

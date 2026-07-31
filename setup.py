@@ -6,21 +6,49 @@ from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
 import concurrent.futures
+import threading
+import time
 
 
 def _max_compile_workers() -> int:
     """Concurrency cap for compiling translation units. Each `cicc`/`cc1plus` pass on the heavily-templated
-    similarity headers needs ~1-2 GB, so we cap below the core count to avoid thrashing or OOM on big boxes."""
+    similarity headers needs ~1-2 GB, so we cap below the core count to avoid thrashing or OOM on big boxes.
+    `SZ_MAX_COMPILE_WORKERS` lowers it further on a machine that cannot afford this many at once."""
+    requested = os.environ.get("SZ_MAX_COMPILE_WORKERS", "")
+    if requested.isdigit() and int(requested) > 0:
+        return int(requested)
     return max(1, min(os.cpu_count() or 1, 8))
 
 
-def _available_memory_gb() -> str:
-    """Memory this machine reports, or `unknown` off POSIX. Logged beside the worker count so a runner killed
-    mid-compile leaves behind the one number needed to tell a real shortage from an infrastructure failure."""
+def _log_build_event(message: str) -> None:
+    """Timestamped progress line, flushed on every call. A build killed by the host keeps only what already
+    reached the log, so each step announces itself before starting rather than reporting after finishing."""
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
+
+
+def _memory_status() -> str:
+    """`available of total` in GB from `/proc/meminfo`, or `unknown` where that file is absent."""
     try:
-        return f"{os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 1024**3:.1f}"
-    except (AttributeError, ValueError, OSError):
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            fields = {line.split(":", 1)[0]: line.split()[1] for line in handle if ":" in line}
+        available = int(fields["MemAvailable"]) / 1024**2
+        total = int(fields["MemTotal"]) / 1024**2
+        return f"{available:.1f} of {total:.1f} GB"
+    except (OSError, KeyError, ValueError, IndexError):
         return "unknown"
+
+
+def _start_memory_sampler(interval_seconds: float = 10.0):
+    """Log memory on an interval while a compile batch runs, returning the callable that stops it. A compiler
+    killed by the out-of-memory killer reports nothing itself, so this trajectory is the only evidence left."""
+    stop_event = threading.Event()
+
+    def _sample() -> None:
+        while not stop_event.wait(interval_seconds):
+            _log_build_event(f"memory {_memory_status()}")
+
+    threading.Thread(target=_sample, daemon=True).start()
+    return stop_event.set
 
 
 def _depfile_prerequisites(dep_path: str):
@@ -55,17 +83,31 @@ def _object_is_fresh(obj_path: str, dep_path: str) -> bool:
 
 
 def _run_compilations_in_parallel(jobs, max_workers: int) -> None:
-    """Run `(callable, label)` compile jobs concurrently, surfacing the first failure (and its label)."""
+    """Run `(callable, label)` compile jobs concurrently, surfacing the first failure (and its label).
+    Each job brackets itself in the log and a sampler records memory throughout, so a batch that dies without
+    a compiler diagnostic still shows which translation units were in flight and what memory was doing."""
     if not jobs:
         return
     workers = max(1, min(max_workers, len(jobs)))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(job): label for job, label in jobs}
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                future.result()
-            except Exception as error:
-                raise RuntimeError(f"Compilation failed: {futures[future]}") from error
+    _log_build_event(f"compiling {len(jobs)} source(s) with {workers} worker(s), memory {_memory_status()}")
+
+    def _run_and_log(job, label):
+        _log_build_event(f"start {label}")
+        started_at = time.monotonic()
+        job()
+        _log_build_event(f"done  {label} in {time.monotonic() - started_at:.1f}s, memory {_memory_status()}")
+
+    stop_sampler = _start_memory_sampler()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_run_and_log, job, label): label for job, label in jobs}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as error:
+                    raise RuntimeError(f"Compilation failed: {futures[future]}") from error
+    finally:
+        stop_sampler()
 
 
 # CUDA architecture partition, kept in lockstep with the CMake build (`define_stringzillas_cuda_library` in
@@ -162,14 +204,29 @@ def _parallel_compiler_compile(
         else:
             self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
 
+    def _compile_one_logged(obj):
+        label = build[obj][0] if obj in build else obj
+        if use_depfiles and not force and _object_is_fresh(obj, obj + ".d"):
+            _log_build_event(f"skip  {label} (object up to date)")
+            return
+        _log_build_event(f"start {label}")
+        started_at = time.monotonic()
+        _compile_one(obj)
+        _log_build_event(f"done  {label} in {time.monotonic() - started_at:.1f}s, memory {_memory_status()}")
+
     workers = max(1, min(_max_compile_workers(), len(objects)))
-    if workers > 1:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            for _ in pool.map(_compile_one, objects):
-                pass
-    else:
-        for obj in objects:
-            _compile_one(obj)
+    _log_build_event(f"compiling {len(objects)} source(s) with {workers} worker(s), memory {_memory_status()}")
+    stop_sampler = _start_memory_sampler()
+    try:
+        if workers > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                for _ in pool.map(_compile_one_logged, objects):
+                    pass
+        else:
+            for obj in objects:
+                _compile_one_logged(obj)
+    finally:
+        stop_sampler()
     return objects
 
 
@@ -354,15 +411,10 @@ class CudaBuildExtension(NumpyBuildExt):
                 nvcc_cmd.extend(["-Xcompiler", flag])
 
             if use_depfiles and not self.force and _object_is_fresh(obj_path, dep_path):
-                print(f"Skipping {cuda_source} (object up to date)")
+                _log_build_event(f"skip  {cuda_source} (object up to date)")
                 continue
             nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
 
-        if nvcc_jobs:
-            print(
-                f"Compiling {len(nvcc_jobs)} CUDA source(s) with nvcc ({_max_compile_workers()} parallel workers, "
-                f"{_available_memory_gb()} GB available)..."
-            )
         _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers())
 
         # Update extension: remove .cu sources, add compiled objects

@@ -79,7 +79,8 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -215,7 +216,8 @@ jobs:
             CXX: clang++-16
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -338,7 +340,8 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -418,7 +421,8 @@ jobs:
             CXX: g++-12
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -512,7 +516,8 @@ jobs:
         runs-on: ubuntu-22.04
         container: swift:latest
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -534,7 +539,8 @@ jobs:
         name: C# on Linux
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -572,7 +578,8 @@ jobs:
         name: Java on Linux
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -666,7 +673,8 @@ jobs:
             RANLIB: llvm-ranlib-20
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -815,7 +823,8 @@ jobs:
         name: WebAssembly wasm32-wasip1
         runs-on: ubuntu-24.04
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -889,7 +898,8 @@ jobs:
         runs-on: macos-15
 
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -976,10 +986,12 @@ jobs:
                     - os: windows-11-arm
                       arch: arm64
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
-            - uses: ilammy/msvc-dev-cmd@v1
+            - name: Set up MSVC developer environment
+              uses: ilammy/msvc-dev-cmd@v1
               with:
                   arch: ${{ matrix.arch }}
 
@@ -1062,7 +1074,8 @@ jobs:
               run: |
                   echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
                   git --version || echo "git not installed"
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
 
@@ -1262,7 +1275,8 @@ jobs:
                     - os: windows-11-arm
                       python-version: "310"
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
             - name: Set up Python
@@ -1294,7 +1308,8 @@ jobs:
             matrix:
                 arch: [aarch64, ppc64le, s390x, i686, armv7l, riscv64]
         steps:
-            - uses: actions/checkout@v7
+            - name: Checkout
+              uses: actions/checkout@v7
               with:
                   submodules: recursive
             - name: Set up Python
