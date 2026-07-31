@@ -190,8 +190,8 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
             str(proj / "test" / "similarities.py"),
             str(proj / "test" / "fingerprints.py"),
         ]
-    # A data race only shows on a free-threaded interpreter, and only if the suite runs concurrently.
-    # Doctests sit out: they assert against a process-wide stdout capture that concurrent threads interleave.
+    # A free-threaded interpreter is the only place a data race can surface, and only if the suite runs
+    # concurrently. Doctests sit out, asserting against a process-wide stdout capture that threads interleave.
     gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
     parallel = [] if gil_enabled else ["--parallel-threads=4", "--ignore=" + str(proj / "test" / "doctests.py")]
     subprocess.check_call([sys.executable, "-m", "pytest", "-s", "-x", *parallel, *tests])  # noqa: S603

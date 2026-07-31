@@ -456,7 +456,10 @@ typedef struct {
  *  `PyObject_Malloc`/`PyObject_Free`, dealloc parks the dead header on a singly-linked free-list and
  *  the allocation helper pops it back. The link is threaded through the dead object's own storage
  *  (`Str::parent`, `Strs::data`), so the state needs only a head pointer and a counter per type - no
- *  array. Living in module state keeps it per-interpreter and free-threading clean (no baked static).
+ *  array. Living in module state keeps it per-interpreter, but on a free-threaded build the module
+ *  state is shared by every thread in the interpreter, so all four fields are guarded by
+ *  `freelist_lock`: without it, concurrent `alloc_`/`dealloc` calls race on the same linked list and
+ *  can hand out one header to two live objects at once.
  */
 enum { sz_freelist_capacity_k = 64 }; //< Headers retained per interpreter, per type.
 
@@ -465,6 +468,9 @@ typedef struct {
     sz_size_t str_freelist_count;  //< Cached `Str` headers, never exceeds `sz_freelist_capacity_k`.
     Strs *strs_freelist_head;      //< Intrusive list of dead `Strs` headers (link via `data`).
     sz_size_t strs_freelist_count; //< Cached `Strs` headers, never exceeds `sz_freelist_capacity_k`.
+#if defined(Py_GIL_DISABLED)
+    PyMutex freelist_lock; //< Guards the four fields above; zero-initialized, so starts unlocked.
+#endif
 } stringzilla_state_t;
 
 #pragma endregion
@@ -477,32 +483,48 @@ static stringzilla_state_t *stringzilla_state_(void) {
     return module ? (stringzilla_state_t *)PyModule_GetState(module) : NULL;
 }
 
+// On a free-threaded build the module state above is shared by every thread in the interpreter, so
+// the free-list head/count pairs need a lock around each read-modify-write; on a GIL build the GIL
+// already serializes these calls, so the lock/unlock compile away to nothing.
+#if defined(Py_GIL_DISABLED)
+#define sz_freelist_lock_(state) PyMutex_Lock(&(state)->freelist_lock)
+#define sz_freelist_unlock_(state) PyMutex_Unlock(&(state)->freelist_lock)
+#else
+#define sz_freelist_lock_(state) do {} while (0)
+#define sz_freelist_unlock_(state) do {} while (0)
+#endif
+
 /** @brief The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
 static Strs **Strs_freelist_next_(Strs *node) { return (Strs **)&node->data; }
 
 /** @brief Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
 static Str *Str_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
+    if (state) sz_freelist_lock_(state);
     if (state && state->str_freelist_head) {
         Str *self = state->str_freelist_head;
         state->str_freelist_head = (Str *)self->parent; // Unlink (the dead `parent` held `next`).
         state->str_freelist_count--;
+        sz_freelist_unlock_(state);
         _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
         self->parent = NULL;
         self->memory.start = NULL;
         self->memory.length = 0;
         return self;
     }
+    if (state) sz_freelist_unlock_(state);
     return (Str *)StrType.tp_alloc(&StrType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
 }
 
 /** @brief Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
 static Strs *Strs_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
+    if (state) sz_freelist_lock_(state);
     if (state && state->strs_freelist_head) {
         Strs *self = state->strs_freelist_head;
         state->strs_freelist_head = *Strs_freelist_next_(self); // Unlink (the dead `data` held `next`).
         state->strs_freelist_count--;
+        sz_freelist_unlock_(state);
         _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
         // Restore `tp_alloc`'s zero-init so a caller's early error path deallocs safely (the dealloc
         // `switch` reads `layout`/`data`); `STRS_U32_TAPE_VIEW` with a NULL parent is a no-op to free.
@@ -510,6 +532,7 @@ static Strs *Strs_alloc_(void) {
         memset(&self->data, 0, sizeof(self->data));
         return self;
     }
+    if (state) sz_freelist_unlock_(state);
     return (Strs *)StrsType.tp_alloc(&StrsType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
 }
 
@@ -1426,12 +1449,15 @@ static void Str_dealloc(Str *self) {
     // Park the dead header on the free-list instead of freeing it, threading the `next` link through
     // the now-unused `parent` field; fall through to a real free when the cache is full or absent.
     stringzilla_state_t *state = stringzilla_state_();
+    if (state) sz_freelist_lock_(state);
     if (state && state->str_freelist_count < sz_freelist_capacity_k) {
         self->parent = (PyObject *)state->str_freelist_head;
         state->str_freelist_head = self;
         state->str_freelist_count++;
+        sz_freelist_unlock_(state);
         return;
     }
+    if (state) sz_freelist_unlock_(state);
     self->parent = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -9297,12 +9323,15 @@ static void Strs_dealloc(Strs *self) {
     // Park the dead header on the free-list instead of freeing it, threading the `next` link through
     // the now-unused `data` union; fall through to a real free when the cache is full or absent.
     stringzilla_state_t *state = stringzilla_state_();
+    if (state) sz_freelist_lock_(state);
     if (state && state->strs_freelist_count < sz_freelist_capacity_k) {
         *Strs_freelist_next_(self) = state->strs_freelist_head;
         state->strs_freelist_head = self;
         state->strs_freelist_count++;
+        sz_freelist_unlock_(state);
         return;
     }
+    if (state) sz_freelist_unlock_(state);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 

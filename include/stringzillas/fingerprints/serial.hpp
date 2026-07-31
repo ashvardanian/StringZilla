@@ -1066,7 +1066,7 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
             engine.fingerprint_chunk(thread_local_text, thread_local_states, thread_local_minimums, {},
                                      thread_local_counts);
 
-            lock_guard lock(gather_mutex);
+            lock_guard<typename executor_t::mutex_t> lock(gather_mutex);
             for (size_t dim = 0; dim < dimensions_k; ++dim) {
                 rolling_state_t &min_hash = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];

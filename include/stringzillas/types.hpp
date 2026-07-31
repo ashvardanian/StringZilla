@@ -101,9 +101,10 @@ using remove_cvref = typename std::remove_cv<typename std::remove_reference<type
 
 struct dummy_executor_t {
     using prong_t = dummy_prong_t;
+    using mutex_t = dummy_mutex_t;
 
     constexpr size_t threads_count() const noexcept { return 1; }
-    constexpr dummy_mutex_t make_mutex() const noexcept { return {}; }
+    constexpr mutex_t make_mutex() const noexcept { return {}; }
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
@@ -158,6 +159,7 @@ class forkunion_executor_t {
 
   public:
     using prong_t = dummy_prong_t;
+    using mutex_t = spin_mutex_t;
 
     forkunion_executor_t() noexcept = default;
     forkunion_executor_t(forkunion_executor_t const &) = delete;
@@ -189,7 +191,7 @@ class forkunion_executor_t {
     }
 
     size_t threads_count() const noexcept { return fu_pool_threads_count(pool_); }
-    spin_mutex_t make_mutex() const noexcept { return {}; }
+    mutex_t make_mutex() const noexcept { return {}; }
 
     /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
