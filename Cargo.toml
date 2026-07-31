@@ -24,7 +24,7 @@ links = "stringzilla"
 name = "stringzilla"
 publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
-version = "5.0.6"
+version = "5.0.7"
 
 [lib]
 name = "stringzilla"
