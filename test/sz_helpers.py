@@ -35,6 +35,26 @@ except:  # noqa: E722
     pyarrow_available = False
 
 
+def _write_cache_atomically(cache_path: str, payload: bytes) -> None:
+    """Write payload to cache_path through a temporary file in the same directory, then rename.
+
+    Concurrent tests race to download the same URL, and a rename is the only way a reader is guaranteed
+    to see either the previous file or a complete new one, never a half-written one.
+    """
+    directory = os.path.dirname(cache_path) or "."
+    handle, staging_path = tempfile.mkstemp(dir=directory, suffix=".partial")
+    try:
+        with os.fdopen(handle, "wb") as staging_file:
+            staging_file.write(payload)
+        os.replace(staging_path, cache_path)
+    except BaseException:
+        try:
+            os.unlink(staging_path)
+        except OSError:
+            pass
+        raise
+
+
 class UnicodeDataDownloadError(Exception):
     """Raised when Unicode data files cannot be downloaded."""
 
@@ -67,8 +87,7 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
                 xml_filename = zip_file.namelist()[0]
                 with zip_file.open(xml_filename) as xml_file:
                     xml_content = xml_file.read()
-                    with open(cache_path, "wb") as data_file:
-                        data_file.write(xml_content)
+                    _write_cache_atomically(cache_path, xml_content)
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download UCD XML from {url}: {error}")
@@ -141,8 +160,7 @@ def _download_uncased_folding_file(version: str) -> str:
         try:
             # Use urlopen with 30-second timeout instead of urlretrieve
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download CaseFolding.txt from {url}: {error}")
 
@@ -268,8 +286,7 @@ def _download_word_break_property_file(version: str) -> str:
         print(f"Downloading Unicode {version} WordBreakProperty.txt from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download WordBreakProperty.txt from {url}: {error}")
@@ -329,8 +346,7 @@ def _download_word_break_test_file(version: str) -> str:
         print(f"Downloading Unicode {version} WordBreakTest.txt from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download WordBreakTest.txt from {url}: {error}")
@@ -620,8 +636,7 @@ def _download_break_property_file(filename: str, version: str) -> str:
         print(f"Downloading Unicode {version} {filename} from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
@@ -665,8 +680,7 @@ def _download_break_test_file(filename: str, version: str) -> str:
         print(f"Downloading Unicode {version} {filename} from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
@@ -1122,8 +1136,7 @@ def _download_ucd_text(filename: str, subdir: str, version: str = UNICODE_VERSIO
         print(f"Downloading Unicode {version} {filename} from {url}...")
         try:
             with urllib.request.urlopen(url, timeout=30) as response:
-                with open(cache_path, "wb") as data_file:
-                    data_file.write(response.read())
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download {filename} from {url}: {error}")
@@ -1357,6 +1370,7 @@ UNCASED_DEGENERATE_BOUNDS = [0, 1, 3, 4, 5, 6, 7, 8, 11, 99]
 # different kernel code through one binding, so any divergence is a kernel bug, not a binding bug. The
 # helpers below drive that comparison over inputs engineered to stress the SIMD tail/boundary logic.
 
+
 def capability_sweep():
     """All capability configurations every differential test should sweep over, the same list for every
     API, derived from the live hardware so no test hardcodes which backend its kernel uses.
@@ -1423,7 +1437,15 @@ def assert_backends_agree(results, *, oracle=None, format_inputs=None):
 
 # Lengths bracketing the 16/32/64-byte SIMD register widths (and a few larger tiers). Tail handling and
 # vector-boundary logic in the kernels is most likely to diverge from serial exactly at these sizes.
-VECTOR_WIDTH_LENGTHS = [0, 1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 63, 64, 65, 95, 96, 127, 128, 129, 255, 256, 257, 1024, 4096]
+VECTOR_WIDTH_LENGTHS = (
+    [0, 1, 2, 3]  # Degenerate and sub-word inputs
+    + [7, 8, 9]  # 64-bit SWAR
+    + [15, 16, 17]  # 128-bit NEON and SSE
+    + [31, 32, 33, 47, 48]  # 256-bit AVX2, plus one and a half windows
+    + [63, 64, 65, 95, 96]  # 512-bit AVX-512, plus one and a half windows
+    + [127, 128, 129, 255, 256, 257]  # Several whole windows
+    + [1024, 4096]  # Bulk, where the tail is a small fraction
+)
 
 
 def boundary_strings(alphabet: str = "ab") -> List[str]:
