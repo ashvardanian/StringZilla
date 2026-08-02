@@ -11,7 +11,6 @@
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
 #include <cstring> // For `std::memcpy`
-#include <cassert> // For `assert`
 
 #include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
@@ -139,7 +138,7 @@ class strided_ptr {
     using iterator_category = std::random_access_iterator_tag;
 
     strided_ptr(sz_ptr_t data, std::size_t stride_bytes) : data_(data), stride_(stride_bytes) {
-        assert(data_ && "Pointer must not be null, as NULL arithmetic is undefined");
+        sz_assert_(data_ && "Pointer must not be null, as NULL arithmetic is undefined");
     }
 #if defined(__cpp_lib_assume_aligned) // Not available in Apple Clang
     reference operator*() const noexcept {
@@ -189,7 +188,7 @@ class strided_ptr {
         return temp -= offset;
     }
     friend difference_type operator-(strided_ptr const &a, strided_ptr const &b) noexcept {
-        assert(a.stride_ == b.stride_);
+        sz_assert_(a.stride_ == b.stride_);
         return (a.data_ - b.data_) / static_cast<difference_type>(a.stride_);
     }
     friend bool operator==(strided_ptr const &a, strided_ptr const &b) noexcept { return a.data_ == b.data_; }

@@ -36,7 +36,6 @@
 #endif
 
 #if !SZ_AVOID_STL
-#include <cassert>   // `assert`
 #include <cstddef>   // `std::size_t`
 #include <cstdint>   // `std::int8_t`
 #include <iosfwd>    // `std::basic_ostream`
@@ -2323,7 +2322,7 @@ class basic_string_slice {
      *         Supports signed and unsigned intervals.
      */
     string_slice operator[](std::initializer_list<difference_type> signed_offsets) const noexcept {
-        assert(signed_offsets.size() == 2 && "operator[] can't take more than 2 offsets");
+        sz_assert_(signed_offsets.size() == 2 && "operator[] can't take more than 2 offsets");
         return sub(signed_offsets.begin()[0], signed_offsets.begin()[1]);
     }
 
@@ -2333,7 +2332,7 @@ class basic_string_slice {
      */
     reference sat(difference_type signed_offset) const noexcept {
         size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
-        assert(pos < size() && "string_slice::sat(i) out of bounds");
+        sz_assert_(pos < size() && "string_slice::sat(i) out of bounds");
         return start_[pos];
     }
 
@@ -2345,7 +2344,7 @@ class basic_string_slice {
      */
     string_slice front(difference_type signed_offset) const noexcept {
         size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
-        assert(pos <= size() && "string_slice::front(signed_offset) out of bounds");
+        sz_assert_(pos <= size() && "string_slice::front(signed_offset) out of bounds");
         return {start_, pos};
     }
 
@@ -2356,7 +2355,7 @@ class basic_string_slice {
      */
     string_slice back(difference_type signed_offset) const noexcept {
         size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
-        assert(pos <= size() && "string_slice::back(signed_offset) out of bounds");
+        sz_assert_(pos <= size() && "string_slice::back(signed_offset) out of bounds");
         return {start_ + pos, length_ - pos};
     }
 
@@ -2388,13 +2387,19 @@ class basic_string_slice {
      *  @brief Removes the first @p `n` bytes from the view.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    void remove_prefix(size_type n) noexcept { assert(n <= size()), start_ += n, length_ -= n; }
+    void remove_prefix(size_type n) noexcept {
+        sz_assert_(n <= size());
+        start_ += n, length_ -= n;
+    }
 
     /**
      *  @brief Removes the last @p `n` bytes from the view.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    void remove_suffix(size_type n) noexcept { assert(n <= size()), length_ -= n; }
+    void remove_suffix(size_type n) noexcept {
+        sz_assert_(n <= size());
+        length_ -= n;
+    }
 
 #if !SZ_AVOID_STL
 
@@ -3574,7 +3579,7 @@ class basic_string {
      *  @warning The behavior is @b undefined if `n > size()`.
      */
     void remove_prefix(size_type n) noexcept {
-        assert(n <= size());
+        sz_assert_(n <= size());
         sz_string_erase(&string_, 0, n);
     }
 
@@ -3583,7 +3588,7 @@ class basic_string {
      *  @warning The behavior is @b undefined if `n > size()`.
      */
     void remove_suffix(size_type n) noexcept {
-        assert(n <= size());
+        sz_assert_(n <= size());
         sz_string_erase(&string_, size() - n, n);
     }
 
@@ -5137,7 +5142,7 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
     // 1. The replacement is the same length as the replaced range.
     // 2. The replacement is shorter than the replaced range.
     // 3. The replacement is longer than the replaced range. An allocation may occur.
-    assert(offset + length <= size());
+    sz_assert_(offset + length <= size());
 
     // 1. The replacement is the same length as the replaced range.
     if (replacement_length == length) return true;
