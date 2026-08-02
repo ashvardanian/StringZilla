@@ -392,15 +392,18 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_haswell_( //
         return produced;
     }
 
-    sz_u512_vec_t indices;
-    sz_utf8_unpack_indices_haswell_(boundary, indices.u8s);
+    // The wave loop's eight-byte index load starts at `emitted`, which steps by up to four and so can land on any
+    // of the 64 slots, not just multiples of eight. Eight zeroed bytes of tail keep that load inside the buffer.
+    sz_u8_t indices[64 + 8];
+    sz_utf8_unpack_indices_haswell_(boundary, indices);
+    _mm_storel_epi64((__m128i *)(indices + 64), _mm_setzero_si128());
 
     __m256i const base_address_u64x4 = _mm256_set1_epi64x((long long)base);
     sz_size_t emitted = 0;
     while (emitted < boundary_count && produced < capacity) {
         sz_size_t const wave = sz_min_of_three(boundary_count - emitted, capacity - produced, 4);
         // Widen four lane indices to u64 positions: position[k] = base + indices[emitted + k].
-        __m128i const indices_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(indices.u8s + emitted));
+        __m128i const indices_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(indices + emitted));
         __m256i const positions_u64x4 = _mm256_add_epi64(_mm256_cvtepu8_epi64(indices_bytes_u8x16), base_address_u64x4);
         // segment_starts = [previous, p0, p1, p2]: shift positions up one u64, seat the carry in lane 0.
         __m256i const previous_start_u64x4 = _mm256_set1_epi64x((long long)previous);
