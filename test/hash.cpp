@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
@@ -101,7 +100,7 @@ static void check_sha256_unit_(                                   //
     init(&state);
     update(&state, message.data(), (sz_size_t)message.size());
     digest(&state, produced);
-    assert(std::memcmp(produced, expected, 32) == 0);
+    verify(std::memcmp(produced, expected, 32) == 0);
 }
 
 #pragma endregion // Helpers
@@ -144,7 +143,7 @@ void test_hash_unit() {
     // An embedded-NUL message must hash past the NUL: `"abc\x00def"` is 7 bytes, not 3. Construct the
     // `std::string` with an explicit length so the interior NUL is retained.
     std::string const embedded_nul("abc\x00" "def", 7);
-    assert(embedded_nul.size() == 7);
+    verify(embedded_nul.size() == 7);
     check_sha256_unit_(sz_sha256_state_init, sz_sha256_state_update, // Dispatched (automatic kernel)
                        sz_sha256_state_digest, embedded_nul,
                        "516a5e926ce20c5f4d80f00e1a01abdf14986def6588d6abeed9fce090bc660c");
@@ -153,29 +152,29 @@ void test_hash_unit() {
                        "516a5e926ce20c5f4d80f00e1a01abdf14986def6588d6abeed9fce090bc660c");
 
     // `sz_bytesum` is an order-independent byte sum, so "abc" sums to 0x61 + 0x62 + 0x63 = 0x126.
-    let_assert(auto bytesum_abc = sz_bytesum("abc", 3), bytesum_abc == 0x126u); // Dispatched (automatic kernel)
-    assert(sz_bytesum_serial("abc", 3) == 0x126u); // Manual propagation to the serial kernel
+    let_verify(auto bytesum_abc = sz_bytesum("abc", 3), bytesum_abc == 0x126u); // Dispatched (automatic kernel)
+    verify(sz_bytesum_serial("abc", 3) == 0x126u); // Manual propagation to the serial kernel
 #if SZ_USE_ICELAKE
-    assert(sz_bytesum_icelake("abc", 3) == 0x126u);
+    verify(sz_bytesum_icelake("abc", 3) == 0x126u);
 #endif
 
     // The byte sum must include the interior NUL byte: "abc\x00def" sums to 0x255.
-    let_assert(auto bytesum_nul = sz_bytesum(embedded_nul.data(), embedded_nul.size()), bytesum_nul == 0x255u);
-    assert(sz_bytesum_serial(embedded_nul.data(), embedded_nul.size()) == 0x255u);
+    let_verify(auto bytesum_nul = sz_bytesum(embedded_nul.data(), embedded_nul.size()), bytesum_nul == 0x255u);
+    verify(sz_bytesum_serial(embedded_nul.data(), embedded_nul.size()) == 0x255u);
 
     // `sz_hash` is deterministic; the dispatched result equals the serial kernel and the C++ wrapper,
     // and a different seed must change the digest.
     char const *fox = "The quick brown fox";
     sz_size_t const fox_length = (sz_size_t)std::strlen(fox);
-    let_assert(auto hash_fox = sz_hash(fox, fox_length, 0u), hash_fox == sz_hash(fox, fox_length, 0u)); // Deterministic
-    assert(sz_hash(fox, fox_length, 0u) == sz_hash_serial(fox, fox_length, 0u));     // Dispatch == serial
-    assert(sz_hash(fox, fox_length, 0u) != sz_hash(fox, fox_length, 1u));            // Seed changes output
-    assert(sz::string_view(fox, fox_length).hash() == sz_hash(fox, fox_length, 0u)); // C++ wrapper
+    let_verify(auto hash_fox = sz_hash(fox, fox_length, 0u), hash_fox == sz_hash(fox, fox_length, 0u)); // Deterministic
+    verify(sz_hash(fox, fox_length, 0u) == sz_hash_serial(fox, fox_length, 0u));     // Dispatch == serial
+    verify(sz_hash(fox, fox_length, 0u) != sz_hash(fox, fox_length, 1u));            // Seed changes output
+    verify(sz::string_view(fox, fox_length).hash() == sz_hash(fox, fox_length, 0u)); // C++ wrapper
 
     // The hash must also read past an interior NUL, so truncating at the NUL changes the digest.
-    let_assert(auto hash_nul = sz_hash(embedded_nul.data(), embedded_nul.size(), 0u),
+    let_verify(auto hash_nul = sz_hash(embedded_nul.data(), embedded_nul.size(), 0u),
                hash_nul == sz_hash_serial(embedded_nul.data(), embedded_nul.size(), 0u)); // Dispatch == serial
-    assert(sz_hash(embedded_nul.data(), embedded_nul.size(), 0u) != sz_hash(embedded_nul.data(), 3u, 0u));
+    verify(sz_hash(embedded_nul.data(), embedded_nul.size(), 0u) != sz_hash(embedded_nul.data(), 3u, 0u));
 }
 
 #pragma endregion // Unit
@@ -240,38 +239,38 @@ void test_hash_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         // Compute the entire hash at once, expecting the same output
         sz_u64_t result_base = reference(text.data(), text.size(), seed);
         sz_u64_t result_simd = candidate(text.data(), text.size(), seed);
-        assert(result_base == result_simd);
+        verify(result_base == result_simd);
 
         // Compare incremental hashing across platforms
         sz_hash_state_t state_base, state_simd;
         reference.init(&state_base, seed);
         candidate.init(&state_simd, seed);
-        assert(sz_hash_state_equal(&state_base, &state_base) == sz_true_k); // Self-equality
-        assert(sz_hash_state_equal(&state_simd, &state_simd) == sz_true_k); // Self-equality
-        assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+        verify(sz_hash_state_equal(&state_base, &state_base) == sz_true_k); // Self-equality
+        verify(sz_hash_state_equal(&state_simd, &state_simd) == sz_true_k); // Self-equality
+        verify(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
 
         // Let's also create an intentionally misaligned version of the state,
         // assuming some of the SIMD instructions may require alignment.
         sz_align_(64) char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
         sz_hash_state_t &state_misaligned = *reinterpret_cast<sz_hash_state_t *>(state_misaligned_buffer + 1);
         candidate.init(&state_misaligned, seed);
-        assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
+        verify(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
 
         // Try breaking those strings into arbitrary chunks, expecting the same output in the streaming mode.
         // The length of each chunk and the number of chunks will be determined with a coin toss.
         iterate_in_random_slices(text, [&](std::string slice) {
             reference.update(&state_base, slice.data(), slice.size());
             candidate.update(&state_simd, slice.data(), slice.size());
-            assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+            verify(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
 
             candidate.update(&state_misaligned, slice.data(), slice.size());
-            assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
+            verify(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
 
             result_base = reference.digest(&state_base);
             result_simd = candidate.digest(&state_simd);
-            assert(result_base == result_simd);
+            verify(result_base == result_simd);
             sz_u64_t result_misaligned = candidate.digest(&state_misaligned);
-            assert(result_base == result_misaligned);
+            verify(result_base == result_misaligned);
         });
     };
 
@@ -336,8 +335,8 @@ void test_hash_multiseed_equivalence(candidate_ candidate, sz_size_t inputs) {
             std::vector<sz_u64_t> output(seed_count + 1, 0xDEADBEEFDEADBEEFull);
             candidate.multiseed(text.data(), text.size(), seeds.data(), seed_count, output.data());
             for (std::size_t index = 0; index < seed_count; ++index)
-                assert(output[index] == candidate.hash_one(text.data(), text.size(), seeds[index]));
-            assert(output[seed_count] == 0xDEADBEEFDEADBEEFull); // No overwrite past `seed_count`
+                verify(output[index] == candidate.hash_one(text.data(), text.size(), seeds[index]));
+            verify(output[seed_count] == 0xDEADBEEFDEADBEEFull); // No overwrite past `seed_count`
         }
     };
 
@@ -366,7 +365,7 @@ void test_random_equivalence(reference_ reference, candidate_ candidate, sz_size
         std::string text_simd(length, '\0');
         reference(&text_base[0], static_cast<sz_size_t>(length), nonce);
         candidate(&text_simd[0], static_cast<sz_size_t>(length), nonce);
-        assert(text_base == text_simd);
+        verify(text_base == text_simd);
     };
 
     // Boundary nonces are always exercised, including the 0 and max extremes:
@@ -418,7 +417,7 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
         candidate.update(&state_simd, random_text.data(), length);
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+        verify(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
 
         // Incremental hashing with random chunks
         reference.init(&state_base);
@@ -429,7 +428,7 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
         });
         reference.digest(&state_base, digest_base_result);
         candidate.digest(&state_simd, digest_simd_result);
-        assert(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
+        verify(std::memcmp(digest_base_result, digest_simd_result, 32) == 0);
     }
 }
 
@@ -456,8 +455,8 @@ void test_hash_all() {
     sz_unused_(hash_inputs), sz_unused_(random_inputs), sz_unused_(sha256_inputs);
 
     // Ensure the seed affects hash results
-    assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
-    assert(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
+    verify(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
+    verify(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
 
 #if SZ_USE_WESTMERE
     test_hash_equivalence(hash_serial,

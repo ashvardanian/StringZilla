@@ -40,7 +40,6 @@
  *  @endcode
  */
 #pragma once
-#include <cassert> // `assert` used directly by `with_guarded_buffer_`
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::printf`, `std::fflush`
@@ -65,6 +64,47 @@
 #if SZ_USE_CUDA
 #include "stringzillas/types.cuh"
 #endif
+
+#pragma region Assertion Helpers
+
+/**
+ *  @brief Test-suite verification - always active, regardless of `NDEBUG` or `SZ_DEBUG`. Unlike `sz_assert_`,
+ *         which is a debug-only invariant check for the library, a test's oracle must never be a no-op.
+ */
+#define verify(condition)                                                                                  \
+    do {                                                                                                   \
+        if (!(condition)) {                                                                                \
+            std::fprintf(stderr, "Test verification failed: %s, %s:%d\n", #condition, __FILE__, __LINE__); \
+            std::abort();                                                                                  \
+        }                                                                                                  \
+    } while (0)
+
+#define let_verify(init, condition) \
+    do {                            \
+        init;                       \
+        verify(condition);          \
+    } while (0)
+
+#define scope_verify(init, operation, condition) \
+    do {                                         \
+        init;                                    \
+        operation;                               \
+        verify(condition);                       \
+    } while (0)
+
+#define throws_verify(expression, exception_type) \
+    do {                                          \
+        bool threw = false;                       \
+        try {                                     \
+            sz_unused_(expression);               \
+        }                                         \
+        catch (exception_type const &) {          \
+            threw = true;                         \
+        }                                         \
+        verify(threw);                            \
+    } while (0)
+
+#pragma endregion // Assertion Helpers
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -258,8 +298,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) noexcept
     unsigned char *usable = storage.data() + guard_width;
     body(reinterpret_cast<sz_ptr_t>(usable), length);
     for (std::size_t index = 0; index != guard_width; ++index) {
-        assert(storage[index] == canary_value && "front canary overwritten");
-        assert(storage[guard_width + length + index] == canary_value && "back canary overwritten");
+        verify(storage[index] == canary_value && "front canary overwritten");
+        verify(storage[guard_width + length + index] == canary_value && "back canary overwritten");
     }
 }
 
@@ -517,35 +557,6 @@ inline int run_test(char const *name, function_type_ &&test_function) noexcept {
  *  match the TU definitions; the using-declaration makes `scale_iterations` visible for the default
  *  arguments below. */
 using ashvardanian::stringzilla::scripts::scale_iterations;
-
-#pragma region Assertion Helpers
-
-#define scope_assert(init, operation, condition) \
-    do {                                         \
-        init;                                    \
-        operation;                               \
-        assert(condition);                       \
-    } while (0)
-
-#define let_assert(init, condition) \
-    do {                            \
-        init;                       \
-        assert(condition);          \
-    } while (0)
-
-#define assert_throws(expression, exception_type) \
-    do {                                          \
-        bool threw = false;                       \
-        try {                                     \
-            sz_unused_(expression);               \
-        }                                         \
-        catch (exception_type const &) {          \
-            threw = true;                         \
-        }                                         \
-        assert(threw);                            \
-    } while (0)
-
-#pragma endregion // Assertion Helpers
 
 #pragma region Basic Utilities
 

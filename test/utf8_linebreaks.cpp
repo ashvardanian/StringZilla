@@ -16,7 +16,6 @@
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
 #include <cstdio>  // `std::printf`
 
@@ -74,14 +73,14 @@ void test_utf8_linebreaks_unit() {
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
         sz::string_view("a\nb").utf8_linebreaks().template to<std::vector<std::string>>();
-    assert(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linebreaks range");
+    verify(wrapped.size() == 2 && wrapped[0] == "a\n" && wrapped[1] == "b" && "C++ utf8_linebreaks range");
 
     // Line-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    assert(utf8_prose_hotel_review().utf8_linebreaks().template to<std::vector<std::string>>().size() == 45 &&
+    verify(utf8_prose_hotel_review().utf8_linebreaks().template to<std::vector<std::string>>().size() == 45 &&
            "hotel_review linebreaks");
-    assert(utf8_prose_science_abstract().utf8_linebreaks().template to<std::vector<std::string>>().size() == 43 &&
+    verify(utf8_prose_science_abstract().utf8_linebreaks().template to<std::vector<std::string>>().size() == 43 &&
            "science_abstract linebreaks");
-    assert(utf8_prose_news_lede().utf8_linebreaks().template to<std::vector<std::string>>().size() == 32 &&
+    verify(utf8_prose_news_lede().utf8_linebreaks().template to<std::vector<std::string>>().size() == 32 &&
            "news_lede linebreaks");
 }
 

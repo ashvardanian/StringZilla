@@ -144,4 +144,19 @@ if [ -n "$serial_bitops" ]; then
   exit 1
 fi
 
+# Raw libc assert() in test/ is silently stripped by the -DNDEBUG that CMake's Release and
+# RelWithDebInfo configs add by default - exactly the configs CI builds the test binaries with.
+# The test suite's oracle must never be a no-op: use verify() / let_verify() / scope_verify() /
+# throws_verify() from test/stringzilla.hpp instead, which are never gated by NDEBUG or SZ_DEBUG.
+raw_assert=$(git diff --cached --no-color -U0 -- 'test/*.c' 'test/*.h' 'test/*.cpp' 'test/*.hpp' 'test/*.cuh' 'test/*.cu' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '(^|[^A-Za-z0-9_])assert[[:space:]]*\(' || true)
+if [ -n "$raw_assert" ]; then
+  echo "pre-commit: raw assert() in staged test/ changes (stripped by -DNDEBUG in CI's Release/RelWithDebInfo" >&2
+  echo "test builds). Use verify() / let_verify() / scope_verify() / throws_verify() instead:" >&2
+  echo "$raw_assert" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
 exit 0

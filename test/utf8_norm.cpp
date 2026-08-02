@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
@@ -96,62 +95,62 @@ void test_utf8_norm_unit() {
     // breaks NFD (é decomposes into e + U+0301). NFC normalization is a no-op; NFD expands it to 5 bytes.
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
     sz_size_t const cafe_length = (sz_size_t)(sizeof(cafe_nfc) - 1);
-    assert(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    verify(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Dispatched: already NFC
-    assert(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+    verify(sz_utf8_find_denormalized(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Dispatched: not NFD
-    assert(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Manual: serial
-    assert(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+    verify(sz_utf8_find_denormalized_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Manual: serial
 #if SZ_USE_ICELAKE
-    assert(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
+    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfc_k) ==
            SZ_NULL_CHAR); // Manual: icelake
-    assert(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
+    verify(sz_utf8_find_denormalized_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k) !=
            SZ_NULL_CHAR); // Manual: icelake
 #endif
     {
         char norm_buffer[64];
         sz_size_t const nfc_length = sz_utf8_norm(cafe_nfc, cafe_length, sz_normal_form_nfc_k, norm_buffer);
-        assert(nfc_length == cafe_length && std::memcmp(norm_buffer, cafe_nfc, cafe_length) == 0); // NFC no-op
+        verify(nfc_length == cafe_length && std::memcmp(norm_buffer, cafe_nfc, cafe_length) == 0); // NFC no-op
         sz_size_t const nfd_length = sz_utf8_norm(cafe_nfc, cafe_length, sz_normal_form_nfd_k, norm_buffer);
-        assert(nfd_length == 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
+        verify(nfd_length == 6u); // "caf" + 'e' + U+0301 (2-byte combining acute)
         sz_size_t const nfd_length_serial = sz_utf8_norm_serial(cafe_nfc, cafe_length, sz_normal_form_nfd_k,
                                                                 norm_buffer); // Manual: serial
-        assert(nfd_length_serial == 6u);
+        verify(nfd_length_serial == 6u);
 #if SZ_USE_ICELAKE
         sz_size_t const nfd_length_icelake = sz_utf8_norm_icelake(cafe_nfc, cafe_length, sz_normal_form_nfd_k,
                                                                   norm_buffer); // Manual: icelake
-        assert(nfd_length_icelake == 6u);
+        verify(nfd_length_icelake == 6u);
 #endif
     }
 
     // C++ binding round-trip: NFC -> NFD -> NFC should recover the original NFC string.
     sz::string nfc_str {cafe_nfc};
-    assert(nfc_str.try_utf8_normalize(sz_normal_form_nfd_k));
-    assert(nfc_str.try_utf8_normalize(sz_normal_form_nfc_k));
-    assert(nfc_str == cafe_nfc);
+    verify(nfc_str.try_utf8_normalize(sz_normal_form_nfd_k));
+    verify(nfc_str.try_utf8_normalize(sz_normal_form_nfc_k));
+    verify(nfc_str == cafe_nfc);
 
     // is_normalized: NFC string is normalized under NFC, not NFD (é decomposes in NFD).
     sz::string_view nfc_view {cafe_nfc};
-    assert(nfc_view.is_normalized(sz_normal_form_nfc_k));
-    assert(!nfc_view.is_normalized(sz_normal_form_nfd_k));
+    verify(nfc_view.is_normalized(sz_normal_form_nfc_k));
+    verify(!nfc_view.is_normalized(sz_normal_form_nfd_k));
 
     // is_normalized on the owning type mirrors the view behaviour.
     sz::string nfc_own {cafe_nfc};
-    assert(nfc_own.is_normalized(sz_normal_form_nfc_k));
-    assert(!nfc_own.is_normalized(sz_normal_form_nfd_k));
+    verify(nfc_own.is_normalized(sz_normal_form_nfc_k));
+    verify(!nfc_own.is_normalized(sz_normal_form_nfd_k));
 
     // utf8_find_denormalized returns non-null for a non-normalized string.
-    assert(nfc_view.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
-    assert(nfc_own.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+    verify(nfc_view.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
+    verify(nfc_own.utf8_find_denormalized(sz_normal_form_nfd_k) != SZ_NULL_CHAR);
 
     // NFKD of "ﬁ" (U+FB01 LATIN SMALL LIGATURE FI) decomposes to "fi".
     char const ligature_fi[] = "\xEF\xAC\x81"; // U+FB01
     sz::string fi_str {ligature_fi};
-    assert(fi_str.try_utf8_normalize(sz_normal_form_nfkd_k));
-    assert(fi_str.contains('f'));
-    assert(fi_str.contains('i'));
+    verify(fi_str.try_utf8_normalize(sz_normal_form_nfkd_k));
+    verify(fi_str.contains('f'));
+    verify(fi_str.contains('i'));
 
     std::printf("    normalization known-answer vectors passed!\n");
 }
@@ -214,13 +213,13 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
                 std::memcmp(output_reference.data(), output_candidate.data(), len_reference) != 0) {
                 std::fprintf(stderr, "norm mismatch (form=%d, iter=%zu): reference_len=%zu candidate_len=%zu\n",
                              (int)normal_form, it, (size_t)len_reference, (size_t)len_candidate);
-                assert(false);
+                verify(false);
             }
             sz_cptr_t viol_reference = reference.violation(input_buffer.data(), input_length, normal_form);
             sz_cptr_t viol_candidate = candidate.violation(input_buffer.data(), input_length, normal_form);
             if (viol_reference != viol_candidate) {
                 std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)normal_form, it);
-                assert(false);
+                verify(false);
             }
         }
     }
@@ -267,7 +266,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
             std::fprintf(stderr, "norm violation returned out-of-bounds pointer (form=%d, input=%zu)\n",
                          (int)normal_form, input_length);
             print_utf8_test_bytes_("input", input, input_length);
-            assert(false && "Normalization-violation finder returned a pointer outside the input");
+            verify(false && "Normalization-violation finder returned a pointer outside the input");
         }
 
         // Normalization: unlike the violation finder, `sz_utf8_norm` documents a valid-UTF-8 precondition and
@@ -281,7 +280,7 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
                     std::fprintf(stderr, "Norm of invalid input returned %zu bytes for %zu input bytes (bound %zu)\n",
                                  (std::size_t)normalized, input_length, norm_bound);
                     print_utf8_test_bytes_("input", input, input_length);
-                    assert(false && "Normalizer output must stay within the documented bound");
+                    verify(false && "Normalizer output must stay within the documented bound");
                 }
             });
         }

@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
@@ -95,7 +94,7 @@ inline void expect_equality(char const *first, char const *second, std::size_t s
         if (first[mismatch_position] != second[mismatch_position]) break;
     std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, first[mismatch_position],
                  second[mismatch_position]);
-    assert(false);
+    verify(false);
 }
 
 /**
@@ -140,7 +139,7 @@ struct accounting_allocator : public std::allocator<char> {
     }
 
     void deallocate(char *val, std::size_t n) {
-        assert(n <= counter_ref());
+        verify(n <= counter_ref());
         counter_ref() -= n;
         print_if_verbose("dealloc: %zd -> %zd\n", n, counter_ref());
         std::allocator<char>::deallocate(val, n);
@@ -161,7 +160,7 @@ struct accounting_allocator : public std::allocator<char> {
 template <typename callback_type>
 void assert_balanced_memory(callback_type callback) {
     auto bytes = accounting_allocator::account_block(callback);
-    assert(bytes == 0);
+    verify(bytes == 0);
 }
 
 /**
@@ -181,8 +180,8 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char target[sizeof(source) + 1];
         std::memset(target, '#', sizeof(target));
         copy(target, source, length);
-        assert(std::memcmp(target, source, length) == 0);
-        assert(target[length] == '#'); // No overwrite past `length`
+        verify(std::memcmp(target, source, length) == 0);
+        verify(target[length] == '#'); // No overwrite past `length`
     }
 
     // `move` handles overlapping regions. Shifting "abcdef" left-into-itself by two yields "cdef" at the front.
@@ -190,7 +189,7 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char const expected[] = "cdef"; // After moving "cdef" (offset 2, 4 bytes) to offset 0
         char buffer[] = "abcdef";
         move(buffer, buffer + 2, 4);
-        assert(std::memcmp(buffer, expected, 4) == 0);
+        verify(std::memcmp(buffer, expected, 4) == 0);
     }
 
     // `fill` writes a known byte across a known span, leaving a guard byte untouched.
@@ -199,8 +198,8 @@ static void check_memory_unit_(sz_copy_t copy, sz_move_t move, sz_fill_t fill) {
         char target[5 + 1];
         std::memset(target, '#', sizeof(target));
         fill(target, 5, (sz_u8_t)'*');
-        assert(std::memcmp(target, expected, 5) == 0);
-        assert(target[5] == '#'); // No overwrite past `length`
+        verify(std::memcmp(target, expected, 5) == 0);
+        verify(target[5] == '#'); // No overwrite past `length`
     }
 }
 
@@ -223,8 +222,8 @@ static void check_lookup_unit_(sz_lookup_t lookup) {
     char target[sizeof(source) + 1];
     std::memset(target, '#', sizeof(target));
     lookup(target, length, source, upper_table);
-    assert(std::memcmp(target, expected, length) == 0);
-    assert(target[length] == '#'); // No overwrite past `length`
+    verify(std::memcmp(target, expected, length) == 0);
+    verify(target[length] == '#'); // No overwrite past `length`
 }
 
 #pragma endregion // Helpers
@@ -239,61 +238,61 @@ static void check_lookup_unit_(sz_lookup_t lookup) {
  */
 void test_arithmetic_unit() {
 
-    assert(sz_u64_clz(0x0000000000000001ull) == 63);
-    assert(sz_u64_clz(0x0000000000000002ull) == 62);
-    assert(sz_u64_clz(0x0000000000000003ull) == 62);
-    assert(sz_u64_clz(0x0000000000000004ull) == 61);
-    assert(sz_u64_clz(0x0000000000000007ull) == 61);
-    assert(sz_u64_clz(0x8000000000000001ull) == 0);
-    assert(sz_u64_clz(0xffffffffffffffffull) == 0);
-    assert(sz_u64_clz(0x4000000000000000ull) == 1);
+    verify(sz_u64_clz(0x0000000000000001ull) == 63);
+    verify(sz_u64_clz(0x0000000000000002ull) == 62);
+    verify(sz_u64_clz(0x0000000000000003ull) == 62);
+    verify(sz_u64_clz(0x0000000000000004ull) == 61);
+    verify(sz_u64_clz(0x0000000000000007ull) == 61);
+    verify(sz_u64_clz(0x8000000000000001ull) == 0);
+    verify(sz_u64_clz(0xffffffffffffffffull) == 0);
+    verify(sz_u64_clz(0x4000000000000000ull) == 1);
 
-    assert(sz_size_log2i_nonzero(1) == 0);
-    assert(sz_size_log2i_nonzero(2) == 1);
-    assert(sz_size_log2i_nonzero(3) == 1);
+    verify(sz_size_log2i_nonzero(1) == 0);
+    verify(sz_size_log2i_nonzero(2) == 1);
+    verify(sz_size_log2i_nonzero(3) == 1);
 
-    assert(sz_size_log2i_nonzero(4) == 2);
-    assert(sz_size_log2i_nonzero(5) == 2);
-    assert(sz_size_log2i_nonzero(7) == 2);
+    verify(sz_size_log2i_nonzero(4) == 2);
+    verify(sz_size_log2i_nonzero(5) == 2);
+    verify(sz_size_log2i_nonzero(7) == 2);
 
-    assert(sz_size_log2i_nonzero(8) == 3);
-    assert(sz_size_log2i_nonzero(9) == 3);
+    verify(sz_size_log2i_nonzero(8) == 3);
+    verify(sz_size_log2i_nonzero(9) == 3);
 
-    assert(sz_size_bit_ceil(0) == 0);
-    assert(sz_size_bit_ceil(1) == 1);
+    verify(sz_size_bit_ceil(0) == 0);
+    verify(sz_size_bit_ceil(1) == 1);
 
-    assert(sz_size_bit_ceil(2) == 2);
-    assert(sz_size_bit_ceil(3) == 4);
-    assert(sz_size_bit_ceil(4) == 4);
+    verify(sz_size_bit_ceil(2) == 2);
+    verify(sz_size_bit_ceil(3) == 4);
+    verify(sz_size_bit_ceil(4) == 4);
 
-    assert(sz_size_bit_ceil(77) == 128);
-    assert(sz_size_bit_ceil(127) == 128);
-    assert(sz_size_bit_ceil(128) == 128);
+    verify(sz_size_bit_ceil(77) == 128);
+    verify(sz_size_bit_ceil(127) == 128);
+    verify(sz_size_bit_ceil(128) == 128);
 
-    assert(sz_size_bit_ceil(1000000ull) == (1ull << 20));
-    assert(sz_size_bit_ceil(2000000ull) == (1ull << 21));
-    assert(sz_size_bit_ceil(4000000ull) == (1ull << 22));
-    assert(sz_size_bit_ceil(8000000ull) == (1ull << 23));
+    verify(sz_size_bit_ceil(1000000ull) == (1ull << 20));
+    verify(sz_size_bit_ceil(2000000ull) == (1ull << 21));
+    verify(sz_size_bit_ceil(4000000ull) == (1ull << 22));
+    verify(sz_size_bit_ceil(8000000ull) == (1ull << 23));
 
-    assert(sz_size_bit_ceil(16000000ull) == (1ull << 24));
-    assert(sz_size_bit_ceil(32000000ull) == (1ull << 25));
-    assert(sz_size_bit_ceil(64000000ull) == (1ull << 26));
+    verify(sz_size_bit_ceil(16000000ull) == (1ull << 24));
+    verify(sz_size_bit_ceil(32000000ull) == (1ull << 25));
+    verify(sz_size_bit_ceil(64000000ull) == (1ull << 26));
 
-    assert(sz_size_bit_ceil(128000000ull) == (1ull << 27));
-    assert(sz_size_bit_ceil(256000000ull) == (1ull << 28));
-    assert(sz_size_bit_ceil(512000000ull) == (1ull << 29));
+    verify(sz_size_bit_ceil(128000000ull) == (1ull << 27));
+    verify(sz_size_bit_ceil(256000000ull) == (1ull << 28));
+    verify(sz_size_bit_ceil(512000000ull) == (1ull << 29));
 
-    assert(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
-    assert(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
+    verify(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
+    verify(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
 #if SZ_IS_64BIT_
-    assert(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
-    assert(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
-    assert(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
+    verify(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
+    verify(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
+    verify(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
 
-    assert(sz_size_bit_ceil((1ull << 62)) == (1ull << 62));
-    assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
-    assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
+    verify(sz_size_bit_ceil((1ull << 62)) == (1ull << 62));
+    verify(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
+    verify(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
 }
 
@@ -309,10 +308,10 @@ void test_sequence_unit() {
         sz_sequence_t sequence;
         sz_cptr_t strings[] = {"banana", "apple", "cherry"};
         sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-        assert(sequence.count == 3);
-        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
-        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
-        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+        verify(sequence.count == 3);
+        verify("banana"_sv == sequence.get_start(sequence.handle, 0));
+        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
+        verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
     }
     // Do the same for STL:
     {
@@ -332,10 +331,10 @@ void test_sequence_unit() {
                 return strings[index].size();
             });
 
-        assert(sequence.count == 3);
-        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
-        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
-        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+        verify(sequence.count == 3);
+        verify("banana"_sv == sequence.get_start(sequence.handle, 0));
+        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
+        verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
     }
 }
 
@@ -350,7 +349,7 @@ void test_allocator_unit() {
     {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_default(&alloc);
-        assert(alloc.allocate(0, alloc.handle) == nullptr);
+        verify(alloc.allocate(0, alloc.handle) == nullptr);
     }
 
     // Non-NULL allocation
@@ -358,7 +357,7 @@ void test_allocator_unit() {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_default(&alloc);
         void *byte = alloc.allocate(1, alloc.handle);
-        assert(byte != nullptr);
+        verify(byte != nullptr);
         alloc.free(byte, 1, alloc.handle);
     }
 
@@ -368,7 +367,7 @@ void test_allocator_unit() {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_fixed(&alloc, buffer, sizeof(buffer));
         void *byte = alloc.allocate(1, alloc.handle);
-        assert(byte != nullptr);
+        verify(byte != nullptr);
         alloc.free(byte, 1, alloc.handle);
     }
 }
@@ -381,17 +380,17 @@ void test_allocator_unit() {
 void test_byteset_unit() {
     sz_byteset_t s;
     sz_byteset_init(&s);
-    assert(sz_byteset_contains(&s, 'a') == sz_false_k);
+    verify(sz_byteset_contains(&s, 'a') == sz_false_k);
     sz_byteset_add(&s, 'a');
-    assert(sz_byteset_contains(&s, 'a') == sz_true_k);
+    verify(sz_byteset_contains(&s, 'a') == sz_true_k);
     sz_byteset_add(&s, 'z');
-    assert(sz_byteset_contains(&s, 'z') == sz_true_k);
+    verify(sz_byteset_contains(&s, 'z') == sz_true_k);
     sz_byteset_invert(&s);
-    assert(sz_byteset_contains(&s, 'a') == sz_false_k);
-    assert(sz_byteset_contains(&s, 'z') == sz_false_k);
-    assert(sz_byteset_contains(&s, 'b') == sz_true_k);
+    verify(sz_byteset_contains(&s, 'a') == sz_false_k);
+    verify(sz_byteset_contains(&s, 'z') == sz_false_k);
+    verify(sz_byteset_contains(&s, 'b') == sz_true_k);
     sz_byteset_init_ascii(&s);
-    assert(sz_byteset_contains(&s, 'A') == sz_true_k);
+    verify(sz_byteset_contains(&s, 'A') == sz_true_k);
 }
 
 /**
@@ -403,50 +402,50 @@ void test_ascii_unit() {
 
     using str = string_type;
 
-    assert("aaa"_bs.size() == 1ull);
-    assert("\0\0"_bs.size() == 1ull);
-    assert("abc"_bs.size() == 3ull);
-    assert("a\0bc"_bs.size() == 4ull);
+    verify("aaa"_bs.size() == 1ull);
+    verify("\0\0"_bs.size() == 1ull);
+    verify("abc"_bs.size() == 3ull);
+    verify("a\0bc"_bs.size() == 4ull);
 
-    assert(!"abc"_bs.contains('\0'));
-    assert(str("bca").contains_only("abc"_bs));
+    verify(!"abc"_bs.contains('\0'));
+    verify(str("bca").contains_only("abc"_bs));
 
-    assert(!str("").is_alpha());
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
-    assert(!str("abc9").is_alpha());
+    verify(!str("").is_alpha());
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
+    verify(!str("abc9").is_alpha());
 
-    assert(!str("").is_alnum());
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
-    assert(!str("abc!").is_alnum());
+    verify(!str("").is_alnum());
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
+    verify(!str("abc!").is_alnum());
 
-    assert(str("").is_ascii());
-    assert(str("\x00x7F").is_ascii());
-    assert(!str("abc123🔥").is_ascii());
+    verify(str("").is_ascii());
+    verify(str("\x00x7F").is_ascii());
+    verify(!str("abc123🔥").is_ascii());
 
-    assert(!str("").is_digit());
-    assert(str("0123456789").is_digit());
-    assert(!str("012a").is_digit());
+    verify(!str("").is_digit());
+    verify(str("0123456789").is_digit());
+    verify(!str("012a").is_digit());
 
-    assert(!str("").is_lower());
-    assert(str("abcdefghijklmnopqrstuvwxyz").is_lower());
-    assert(!str("abcA").is_lower());
-    assert(!str("abc\n").is_lower());
+    verify(!str("").is_lower());
+    verify(str("abcdefghijklmnopqrstuvwxyz").is_lower());
+    verify(!str("abcA").is_lower());
+    verify(!str("abc\n").is_lower());
 
-    assert(!str("").is_space());
-    assert(str(" \t\n\r\f\v").is_space());
-    assert(!str(" \t\r\na").is_space());
+    verify(!str("").is_space());
+    verify(str(" \t\n\r\f\v").is_space());
+    verify(!str(" \t\r\na").is_space());
 
-    assert(!str("").is_upper());
-    assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
-    assert(!str("ABCa").is_upper());
+    verify(!str("").is_upper());
+    verify(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
+    verify(!str("ABCa").is_upper());
 
-    assert(str("").is_printable());
-    assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
-    assert(!str("012🔥").is_printable());
+    verify(str("").is_printable());
+    verify(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
+    verify(!str("012🔥").is_printable());
 
-    assert(str("").contains_only("abc"_bs));
-    assert(str("abc").contains_only("abc"_bs));
-    assert(!str("abcd").contains_only("abc"_bs));
+    verify(str("").contains_only("abc"_bs));
+    verify(str("abc").contains_only("abc"_bs));
+    verify(!str("abcd").contains_only("abc"_bs));
 }
 
 #pragma endregion // Byteset
@@ -535,29 +534,29 @@ void test_memory_unit(std::size_t max_l2_size) {
     // C++ wrapper sanity: a couple of `sz::string` / `sz::string_view` known-answer reads alongside the C API.
     {
         sz::string_view const view = "Hello, World!"_sv;
-        assert(view.size() == 13u);              // Length matches the literal
-        assert(view.substr(7, 5) == "World"_sv); // Slice extracts the expected token
-        assert(view.front() == 'H' && view.back() == '!');
+        verify(view.size() == 13u);              // Length matches the literal
+        verify(view.substr(7, 5) == "World"_sv); // Slice extracts the expected token
+        verify(view.front() == 'H' && view.back() == '!');
 
         sz::string const owned = "Hello, World!";
-        assert(owned.size() == 13u);                       // Owning string reports the same length
-        assert(owned == view);                             // Owning string equals the view
-        assert(sz::string("apple").compare("banana") < 0); // "apple" sorts before "banana"
+        verify(owned.size() == 13u);                       // Owning string reports the same length
+        verify(owned == view);                             // Owning string equals the view
+        verify(sz::string("apple").compare("banana") < 0); // "apple" sorts before "banana"
     }
 
     // The C++ movement wrappers must agree with the known-answers, including overlapping `memmove`.
     {
         char const fox[] = "The quick brown fox";
         char target[sizeof(fox) + 1];
-        let_assert(std::memset(target, '#', sizeof(target)), //
+        let_verify(std::memset(target, '#', sizeof(target)), //
                    (sz::memcpy(target, fox, sizeof(fox) - 1), std::memcmp(target, fox, sizeof(fox) - 1) == 0) &&
                        target[sizeof(fox) - 1] == '#');
 
         char overlap[] = "abcdef";
-        let_assert(sz::memmove(overlap, overlap + 2, 4), std::memcmp(overlap, "cdef", 4) == 0);
+        let_verify(sz::memmove(overlap, overlap + 2, 4), std::memcmp(overlap, "cdef", 4) == 0);
 
         char asterisks[5 + 1];
-        let_assert(std::memset(asterisks, '#', sizeof(asterisks)), //
+        let_verify(std::memset(asterisks, '#', sizeof(asterisks)), //
                    (sz::memset(asterisks, '*', 5), std::memcmp(asterisks, "*****", 5) == 0) && asterisks[5] == '#');
     }
 
@@ -566,10 +565,10 @@ void test_memory_unit(std::size_t max_l2_size) {
     {
         char const with_nul[] = {'a', 'b', '\0', 'c', 'd'};
         sz::string const owned(with_nul, sizeof(with_nul));
-        assert(owned.size() == sizeof(with_nul));   // Full length, NUL is a stored byte
-        assert(owned[2] == '\0');                   // The interior NUL survives
-        assert(owned[3] == 'c' && owned[4] == 'd'); // Indexing past the NUL works
-        assert(owned == sz::string_view(with_nul, sizeof(with_nul)));
+        verify(owned.size() == sizeof(with_nul));   // Full length, NUL is a stored byte
+        verify(owned[2] == '\0');                   // The interior NUL survives
+        verify(owned[3] == 'c' && owned[4] == 'd'); // Indexing past the NUL works
+        verify(owned == sz::string_view(with_nul, sizeof(with_nul)));
     }
 
     // We will be mirroring the operations on both standard and StringZilla strings.
@@ -744,259 +743,259 @@ void test_stl_reads_unit() {
     using str = string_type;
 
     // Constructors.
-    assert(str().empty());             // Test default constructor
-    assert(str().size() == 0);         // Test default constructor
-    assert(str("").empty());           // Test default constructor
-    assert(str("").size() == 0);       // Test default constructor
-    assert(str("hello").size() == 5);  // Test constructor with c-string
-    assert(str("hello", 4) == "hell"); // Construct from substring
+    verify(str().empty());             // Test default constructor
+    verify(str().size() == 0);         // Test default constructor
+    verify(str("").empty());           // Test default constructor
+    verify(str("").size() == 0);       // Test default constructor
+    verify(str("hello").size() == 5);  // Test constructor with c-string
+    verify(str("hello", 4) == "hell"); // Construct from substring
 
     // Element access.
-    assert(str("rest")[0] == 'r');
-    assert(str("rest").at(1) == 'e');
-    assert(*str("rest").data() == 'r');
-    assert(str("front").front() == 'f');
-    assert(str("back").back() == 'k');
+    verify(str("rest")[0] == 'r');
+    verify(str("rest").at(1) == 'e');
+    verify(*str("rest").data() == 'r');
+    verify(str("front").front() == 'f');
+    verify(str("back").back() == 'k');
 
     // Iterators.
-    assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
-    assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
-    assert(str("size").size() == 4 && str("length").length() == 6);
+    verify(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
+    verify(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
+    verify(str("size").size() == 4 && str("length").length() == 6);
 
     // Slices... out-of-bounds exceptions are asymmetric!
     // Moreover, `std::string` has no `remove_prefix` and `remove_suffix` methods.
-    // scope_assert(str s = "hello", s.remove_prefix(1), s == "ello");
-    // scope_assert(str s = "hello", s.remove_suffix(1), s == "hell");
-    assert(str("hello world").substr(0, 5) == "hello");
-    assert(str("hello world").substr(6, 5) == "world");
-    assert(str("hello world").substr(6) == "world");
-    assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
-    assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
-    assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
+    // scope_verify(str s = "hello", s.remove_prefix(1), s == "ello");
+    // scope_verify(str s = "hello", s.remove_suffix(1), s == "hell");
+    verify(str("hello world").substr(0, 5) == "hello");
+    verify(str("hello world").substr(6, 5) == "world");
+    verify(str("hello world").substr(6) == "world");
+    verify(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
+    throws_verify(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+    throws_verify(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
 #if defined(__GNUC__) && !defined(__NVCC__) // -1 casts to unsigned without warnings on GCC, but not NVCC
-    assert_throws(str("hello world").substr(-1, 5), std::out_of_range);
-    assert(str("hello world").substr(0, -1) == "hello world");
+    throws_verify(str("hello world").substr(-1, 5), std::out_of_range);
+    verify(str("hello world").substr(0, -1) == "hello world");
 #endif
 
     // Character search in normal and reverse directions.
-    assert(str("hello").find('e') == 1);
-    assert(str("hello").find('e', 1) == 1);
-    assert(str("hello").find('e', 2) == str::npos);
-    assert(str("hello").rfind('l') == 3);
-    assert(str("hello").rfind('l', 2) == 2);
-    assert(str("hello").rfind('l', 1) == str::npos);
+    verify(str("hello").find('e') == 1);
+    verify(str("hello").find('e', 1) == 1);
+    verify(str("hello").find('e', 2) == str::npos);
+    verify(str("hello").rfind('l') == 3);
+    verify(str("hello").rfind('l', 2) == 2);
+    verify(str("hello").rfind('l', 1) == str::npos);
 
     // Substring search in normal and reverse directions.
-    assert(str("hello").find("ell") == 1);
-    assert(str("hello").find("ell", 1) == 1);
-    assert(str("hello").find("ell", 2) == str::npos);
-    assert(str("hello").find("el", 1) == 1);
-    assert(str("hello").find("ell", 1, 2) == 1);
-    assert(str("hello").rfind("l") == 3);
-    assert(str("hello").rfind("l", 2) == 2);
-    assert(str("hello").rfind("l", 1) == str::npos);
+    verify(str("hello").find("ell") == 1);
+    verify(str("hello").find("ell", 1) == 1);
+    verify(str("hello").find("ell", 2) == str::npos);
+    verify(str("hello").find("el", 1) == 1);
+    verify(str("hello").find("ell", 1, 2) == 1);
+    verify(str("hello").rfind("l") == 3);
+    verify(str("hello").rfind("l", 2) == 2);
+    verify(str("hello").rfind("l", 1) == str::npos);
 
     // The second argument is the last possible value of the returned offset.
-    assert(str("hello").rfind("el", 1) == 1);
-    assert(str("hello").rfind("ell", 1) == 1);
-    assert(str("hello").rfind("ello", 1) == 1);
-    assert(str("hello").rfind("ell", 1, 2) == 1);
+    verify(str("hello").rfind("el", 1) == 1);
+    verify(str("hello").rfind("ell", 1) == 1);
+    verify(str("hello").rfind("ello", 1) == 1);
+    verify(str("hello").rfind("ell", 1, 2) == 1);
 
     // More complex queries.
-    assert(str("abbabbaaaaaa").find("aa") == 6);
-    assert(str("abbabbaaaaaa").find("ba") == 2);
-    assert(str("abbabbaaaaaa").find("bb") == 1);
-    assert(str("abbabbaaaaaa").find("bab") == 2);
-    assert(str("abbabbaaaaaa").find("babb") == 2);
-    assert(str("abbabbaaaaaa").find("babba") == 2);
-    assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
-    assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
-    assert(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
-    assert(str("abcdabcdabc________").find("abcd") == 0);
-    assert(str("________abcdabcdabc").find("abcd") == 8);
+    verify(str("abbabbaaaaaa").find("aa") == 6);
+    verify(str("abbabbaaaaaa").find("ba") == 2);
+    verify(str("abbabbaaaaaa").find("bb") == 1);
+    verify(str("abbabbaaaaaa").find("bab") == 2);
+    verify(str("abbabbaaaaaa").find("babb") == 2);
+    verify(str("abbabbaaaaaa").find("babba") == 2);
+    verify(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
+    verify(str("hello, world!").substr(0, 11).find("world") == str::npos);
+    verify(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
+    verify(str("abcdabcdabc________").find("abcd") == 0);
+    verify(str("________abcdabcdabc").find("abcd") == 8);
 
     // Cover every SWAR case for unique string sequences.
     auto lowercase_alphabet = str("abcdefghijklmnopqrstuvwxyz");
     for (std::size_t one_byte_offset = 0; one_byte_offset + 1 <= lowercase_alphabet.size(); ++one_byte_offset)
-        assert(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)) == one_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(one_byte_offset, 1)) == one_byte_offset);
     for (std::size_t two_byte_offset = 0; two_byte_offset + 2 <= lowercase_alphabet.size(); ++two_byte_offset)
-        assert(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)) == two_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(two_byte_offset, 2)) == two_byte_offset);
     for (std::size_t four_byte_offset = 0; four_byte_offset + 4 <= lowercase_alphabet.size(); ++four_byte_offset)
-        assert(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)) == four_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(four_byte_offset, 4)) == four_byte_offset);
     for (std::size_t three_byte_offset = 0; three_byte_offset + 3 <= lowercase_alphabet.size(); ++three_byte_offset)
-        assert(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)) == three_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(three_byte_offset, 3)) == three_byte_offset);
     for (std::size_t five_byte_offset = 0; five_byte_offset + 5 <= lowercase_alphabet.size(); ++five_byte_offset)
-        assert(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)) == five_byte_offset);
+        verify(lowercase_alphabet.find(lowercase_alphabet.substr(five_byte_offset, 5)) == five_byte_offset);
 
     // Simple repeating patterns - with one "almost match" before an actual match in each direction.
-    assert(str("_ab_abc_").find("abc") == 4);
-    assert(str("_abc_ab_").rfind("abc") == 1);
-    assert(str("_abc_abcd_").find("abcd") == 5);
-    assert(str("_abcd_abc_").rfind("abcd") == 1);
-    assert(str("_abcd_abcde_").find("abcde") == 6);
-    assert(str("_abcde_abcd_").rfind("abcde") == 1);
-    assert(str("_abcde_abcdef_").find("abcdef") == 7);
-    assert(str("_abcdef_abcde_").rfind("abcdef") == 1);
-    assert(str("_abcdef_abcdefg_").find("abcdefg") == 8);
-    assert(str("_abcdefg_abcdef_").rfind("abcdefg") == 1);
+    verify(str("_ab_abc_").find("abc") == 4);
+    verify(str("_abc_ab_").rfind("abc") == 1);
+    verify(str("_abc_abcd_").find("abcd") == 5);
+    verify(str("_abcd_abc_").rfind("abcd") == 1);
+    verify(str("_abcd_abcde_").find("abcde") == 6);
+    verify(str("_abcde_abcd_").rfind("abcde") == 1);
+    verify(str("_abcde_abcdef_").find("abcdef") == 7);
+    verify(str("_abcdef_abcde_").rfind("abcdef") == 1);
+    verify(str("_abcdef_abcdefg_").find("abcdefg") == 8);
+    verify(str("_abcdefg_abcdef_").rfind("abcdefg") == 1);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
-    assert(str("hello").find_first_of("le") == 1);
-    assert(str("hello").find_first_of("le", 1) == 1);
-    assert(str("hello").find_last_of("le") == 3);
-    assert(str("hello").find_last_of("le", 2) == 2);
-    assert(str("hello").find_first_not_of("hel") == 4);
-    assert(str("hello").find_first_not_of("hel", 1) == 4);
-    assert(str("hello").find_last_not_of("hel") == 4);
-    assert(str("hello").find_last_not_of("hel", 4) == 4);
+    verify(str("hello").find_first_of("le") == 1);
+    verify(str("hello").find_first_of("le", 1) == 1);
+    verify(str("hello").find_last_of("le") == 3);
+    verify(str("hello").find_last_of("le", 2) == 2);
+    verify(str("hello").find_first_not_of("hel") == 4);
+    verify(str("hello").find_first_not_of("hel", 1) == 4);
+    verify(str("hello").find_last_not_of("hel") == 4);
+    verify(str("hello").find_last_not_of("hel", 4) == 4);
 
     // Try longer strings to enforce SIMD.
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);  // first byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);  // first byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23); // last byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49); // last byte
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);  // first byte
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);  // first byte
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23); // last byte
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49); // last byte
 
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy") == 23);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY") == 49);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("yz") == 24);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("YZ") == 50);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy") == 23); // last match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy") == 23);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY") == 49);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("yz") == 24);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("YZ") == 50);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy") == 23); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY") == 49); // last match
 
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz") == 23); // last match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz") == 23); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ") == 49); // last match
 
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA") == 23);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0") == 49);  // first match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA") == 23); // last match
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA") == 23);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0") == 49);  // first match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA") == 23); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0") == 49); // last match
 
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz") == 23); // sets
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ") == 49); // sets
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz") == 23); // sets
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ") == 49); // sets
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
 
     // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6). The `\xFA`/`0` boundary is
     // load-bearing: a literal hex digit after `\xFA` would extend the escape, so keep it split.
     {
         char const *non_ascii_set = "abcdefgh\x01\xC6ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\xC0\xFA" //
                                     "0123456789+-";                                                        // 68 bytes
-        assert(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);                                     // sets
-        assert(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);                                    // sets
-        assert(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);                                      // sets
-        assert(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);                                     // sets
+        verify(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);                                     // sets
+        verify(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);                                    // sets
+        verify(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);                                      // sets
+        verify(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);                                     // sets
     }
 
     // Boundary conditions.
-    assert(str("hello").find_first_of("ox", 4) == 4);
-    assert(str("hello").find_first_of("ox", 5) == str::npos);
-    assert(str("hello").find_last_of("ox", 4) == 4);
-    assert(str("hello").find_last_of("ox", 5) == 4);
-    assert(str("hello").find_first_of("hx", 0) == 0);
-    assert(str("hello").find_last_of("hx", 0) == 0);
+    verify(str("hello").find_first_of("ox", 4) == 4);
+    verify(str("hello").find_first_of("ox", 5) == str::npos);
+    verify(str("hello").find_last_of("ox", 4) == 4);
+    verify(str("hello").find_last_of("ox", 5) == 4);
+    verify(str("hello").find_first_of("hx", 0) == 0);
+    verify(str("hello").find_last_of("hx", 0) == 0);
 
     // More complex relative patterns
-    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+    verify(str("0123456789012345678901234567890123456789012345678901234567890123") <=
            str("0123456789012345678901234567890123456789012345678901234567890123"));
-    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+    verify(str("0123456789012345678901234567890123456789012345678901234567890123") <=
            str("0223456789012345678901234567890123456789012345678901234567890123"));
-    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+    verify(str("0123456789012345678901234567890123456789012345678901234567890123") <=
            str("0213456789012345678901234567890123456789012345678901234567890123"));
-    assert(str("12341234") <= str("12341234"));
-    assert(str("12341234") > str("12241224"));
-    assert(str("12341234") < str("13241324"));
-    assert(str("0123456789012345678901234567890123456789012345678901234567890123") ==
+    verify(str("12341234") <= str("12341234"));
+    verify(str("12341234") > str("12241224"));
+    verify(str("12341234") < str("13241324"));
+    verify(str("0123456789012345678901234567890123456789012345678901234567890123") ==
            str("0123456789012345678901234567890123456789012345678901234567890123"));
-    assert(str("0123456789012345678901234567890123456789012345678901234567890123") !=
+    verify(str("0123456789012345678901234567890123456789012345678901234567890123") !=
            str("0223456789012345678901234567890123456789012345678901234567890123"));
 
     // Comparisons.
-    assert(str("a") != str("b"));
-    assert(str("a") < str("b"));
-    assert(str("a") <= str("b"));
-    assert(str("b") > str("a"));
-    assert(str("b") >= str("a"));
-    assert(str("a") < str("aa"));
+    verify(str("a") != str("b"));
+    verify(str("a") < str("b"));
+    verify(str("a") <= str("b"));
+    verify(str("b") > str("a"));
+    verify(str("b") >= str("a"));
+    verify(str("a") < str("aa"));
 
 #if SZ_IS_CPP20_ && defined(__cpp_lib_three_way_comparison)
     // Spaceship operator instead of conventional comparions.
-    assert((str("a") <=> str("b")) == std::strong_ordering::less);
-    assert((str("b") <=> str("a")) == std::strong_ordering::greater);
-    assert((str("b") <=> str("b")) == std::strong_ordering::equal);
-    assert((str("a") <=> str("aa")) == std::strong_ordering::less);
+    verify((str("a") <=> str("b")) == std::strong_ordering::less);
+    verify((str("b") <=> str("a")) == std::strong_ordering::greater);
+    verify((str("b") <=> str("b")) == std::strong_ordering::equal);
+    verify((str("a") <=> str("aa")) == std::strong_ordering::less);
 #endif
 
     // Compare with another `str`.
-    assert(str("test").compare(str("test")) == 0);   // Equal strings
-    assert(str("apple").compare(str("banana")) < 0); // "apple" is less than "banana"
-    assert(str("banana").compare(str("apple")) > 0); // "banana" is greater than "apple"
+    verify(str("test").compare(str("test")) == 0);   // Equal strings
+    verify(str("apple").compare(str("banana")) < 0); // "apple" is less than "banana"
+    verify(str("banana").compare(str("apple")) > 0); // "banana" is greater than "apple"
 
     // Compare with a C-string.
-    assert(str("test").compare("test") == 0); // Equal to C-string "test"
-    assert(str("alpha").compare("beta") < 0); // "alpha" is less than C-string "beta"
-    assert(str("beta").compare("alpha") > 0); // "beta" is greater than C-string "alpha"
+    verify(str("test").compare("test") == 0); // Equal to C-string "test"
+    verify(str("alpha").compare("beta") < 0); // "alpha" is less than C-string "beta"
+    verify(str("beta").compare("alpha") > 0); // "beta" is greater than C-string "alpha"
 
     // Compare substring with another `str`.
-    assert(str("hello world").compare(0, 5, str("hello")) == 0); // Substring "hello" is equal to "hello"
-    assert(str("hello world").compare(6, 5, str("earth")) > 0);  // Substring "world" is greater than "earth"
-    assert(str("hello world").compare(6, 5, str("worlds")) < 0); // Substring "world" is less than "worlds"
-    assert_throws(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
+    verify(str("hello world").compare(0, 5, str("hello")) == 0); // Substring "hello" is equal to "hello"
+    verify(str("hello world").compare(6, 5, str("earth")) > 0);  // Substring "world" is greater than "earth"
+    verify(str("hello world").compare(6, 5, str("worlds")) < 0); // Substring "world" is less than "worlds"
+    throws_verify(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
 
     // Compare substring with another `str`'s substring.
-    assert(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);      // Substring "hello" in both strings
-    assert(str("hello world").compare(6, 5, str("world peace"), 0, 5) == 0);    // Substring "world" in both strings
-    assert(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0); // Both substrings are "world"
+    verify(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);      // Substring "hello" in both strings
+    verify(str("hello world").compare(6, 5, str("world peace"), 0, 5) == 0);    // Substring "world" in both strings
+    verify(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0); // Both substrings are "world"
 
     // Out of bounds cases for both compared strings.
-    assert_throws(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
-    assert_throws(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
+    throws_verify(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
+    throws_verify(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
 
     // Compare substring with a C-string.
-    assert(str("hello world").compare(0, 5, "hello") == 0); // Substring "hello" is equal to C-string "hello"
-    assert(str("hello world").compare(6, 5, "earth") > 0);  // Substring "world" is greater than C-string "earth"
-    assert(str("hello world").compare(6, 5, "worlds") < 0); // Substring "world" is greater than C-string "worlds"
+    verify(str("hello world").compare(0, 5, "hello") == 0); // Substring "hello" is equal to C-string "hello"
+    verify(str("hello world").compare(6, 5, "earth") > 0);  // Substring "world" is greater than C-string "earth"
+    verify(str("hello world").compare(6, 5, "worlds") < 0); // Substring "world" is greater than C-string "worlds"
 
     // Compare substring with a C-string's prefix.
-    assert(str("hello world").compare(0, 5, "hello Ash", 5) == 0); // Substring "hello" in both strings
-    assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
-    assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
+    verify(str("hello world").compare(0, 5, "hello Ash", 5) == 0); // Substring "hello" in both strings
+    verify(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
+    verify(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
 
 #if SZ_IS_CPP20_ && defined(__cpp_lib_starts_ends_with)
     // Prefix and suffix checks against strings.
-    assert(str("https://cppreference.com").starts_with(str("http")) == true);
-    assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
-    assert(str("https://cppreference.com").ends_with(str("com")) == true);
-    assert(str("https://cppreference.com").ends_with(str("org")) == false);
+    verify(str("https://cppreference.com").starts_with(str("http")) == true);
+    verify(str("https://cppreference.com").starts_with(str("ftp")) == false);
+    verify(str("https://cppreference.com").ends_with(str("com")) == true);
+    verify(str("https://cppreference.com").ends_with(str("org")) == false);
 
     // Prefix and suffix checks against characters.
-    assert(str("C++20").starts_with('C') == true);
-    assert(str("C++20").starts_with('J') == false);
-    assert(str("C++20").ends_with('0') == true);
-    assert(str("C++20").ends_with('3') == false);
+    verify(str("C++20").starts_with('C') == true);
+    verify(str("C++20").starts_with('J') == false);
+    verify(str("C++20").ends_with('0') == true);
+    verify(str("C++20").ends_with('3') == false);
 
     // Prefix and suffix checks against C-style strings.
-    assert(str("string_view").starts_with("string") == true);
-    assert(str("string_view").starts_with("String") == false);
-    assert(str("string_view").ends_with("view") == true);
-    assert(str("string_view").ends_with("View") == false);
+    verify(str("string_view").starts_with("string") == true);
+    verify(str("string_view").starts_with("String") == false);
+    verify(str("string_view").ends_with("view") == true);
+    verify(str("string_view").ends_with("View") == false);
 #endif
 
 #if SZ_IS_CPP23_ && defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
-    assert(str("hello").contains(str("ell")) == true);
-    assert(str("hello").contains(str("oll")) == false);
-    assert(str("hello").contains('l') == true);
-    assert(str("hello").contains('x') == false);
-    assert(str("hello").contains("lo") == true);
-    assert(str("hello").contains("lx") == false);
+    verify(str("hello").contains(str("ell")) == true);
+    verify(str("hello").contains(str("oll")) == false);
+    verify(str("hello").contains('l') == true);
+    verify(str("hello").contains('x') == false);
+    verify(str("hello").contains("lo") == true);
+    verify(str("hello").contains("lx") == false);
 #endif
 
     // Exporting the contents of the string using the `str::copy` method.
-    scope_assert(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
-    scope_assert(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
-    assert_throws(str("hello").copy((char *)"", 1, 100), std::out_of_range);
+    scope_verify(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
+    scope_verify(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
+    throws_verify(str("hello").copy((char *)"", 1, 100), std::out_of_range);
 
     // Swaps.
     for (str const first : {"", "hello", "hellohellohellohellohellohellohellohellohellohellohellohello"}) {
@@ -1004,20 +1003,20 @@ void test_stl_reads_unit() {
             str first_copy = first;
             str second_copy = second;
             first_copy.swap(second_copy);
-            assert(first_copy == second && second_copy == first);
+            verify(first_copy == second && second_copy == first);
             first_copy.swap(first_copy); // Swapping with itself.
-            assert(first_copy == second);
+            verify(first_copy == second);
         }
     }
 
     // Make sure the standard hash and function-objects instantiate just fine.
-    assert(std::hash<str> {}("hello") != 0);
-    scope_assert(std::ostringstream os, os << str("hello"), os.str() == "hello");
+    verify(std::hash<str> {}("hello") != 0);
+    scope_verify(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
 #if SZ_IS_CPP14_
     // Comparison function objects are a C++14 feature.
-    assert(std::equal_to<str> {}("hello", "world") == false);
-    assert(std::less<str> {}("hello", "world") == true);
+    verify(std::equal_to<str> {}("hello", "world") == false);
+    verify(std::less<str> {}("hello", "world") == true);
 #endif
 }
 
@@ -1035,53 +1034,53 @@ void test_stl_updates_unit() {
     using str = string_type;
 
     // Constructors.
-    assert(str().empty());                             // Test default constructor
-    assert(str().size() == 0);                         // Test default constructor
-    assert(str("").empty());                           // Test default constructor
-    assert(str("").size() == 0);                       // Test default constructor
-    assert(str("hello").size() == 5);                  // Test constructor with c-string
-    assert(str("hello", 4) == "hell");                 // Construct from substring
-    assert(str(5, 'a') == "aaaaa");                    // Construct with count and character
-    assert(str({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
-    assert(str(str("hello"), 2) == "llo");             // Construct from another string suffix
-    assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
+    verify(str().empty());                             // Test default constructor
+    verify(str().size() == 0);                         // Test default constructor
+    verify(str("").empty());                           // Test default constructor
+    verify(str("").size() == 0);                       // Test default constructor
+    verify(str("hello").size() == 5);                  // Test constructor with c-string
+    verify(str("hello", 4) == "hell");                 // Construct from substring
+    verify(str(5, 'a') == "aaaaa");                    // Construct with count and character
+    verify(str({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
+    verify(str(str("hello"), 2) == "llo");             // Construct from another string suffix
+    verify(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
 
     // Corner case constructors and search behaviors for long strings
-    assert(str(258, '0').find(str(256, '1')) == str::npos);
+    verify(str(258, '0').find(str(256, '1')) == str::npos);
 
     // Assignments.
-    scope_assert(str s = "obsolete", s = "hello", s == "hello");
-    scope_assert(str s = "obsolete", s.assign("hello"), s == "hello");
-    scope_assert(str s = "obsolete", s.assign("hello", 4), s == "hell");
-    scope_assert(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
-    scope_assert(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    scope_assert(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    scope_assert(str s = "obsolete", s.assign(str("hello")), s == "hello");
-    scope_assert(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
-    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    scope_assert(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
-    scope_assert(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
-    scope_assert(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
-    scope_assert(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
+    scope_verify(str s = "obsolete", s = "hello", s == "hello");
+    scope_verify(str s = "obsolete", s.assign("hello"), s == "hello");
+    scope_verify(str s = "obsolete", s.assign("hello", 4), s == "hell");
+    scope_verify(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    scope_verify(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    scope_verify(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    scope_verify(str s = "obsolete", s.assign(str("hello")), s == "hello");
+    scope_verify(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
+    scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
+    scope_verify(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
+    scope_verify(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
+    scope_verify(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
 
     // Self-assignment is a special case of assignment.
-    scope_assert(str s = "obsolete", s = s, s == "obsolete");
-    scope_assert(str s = "obsolete", s.assign(s), s == "obsolete");
-    scope_assert(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
-    scope_assert(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
+    scope_verify(str s = "obsolete", s = s, s == "obsolete");
+    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");
+    scope_verify(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
+    scope_verify(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
 
     // Allocations, capacity and memory management.
-    scope_assert(str s, s.reserve(10), s.capacity() >= 10);
-    scope_assert(str s, s.resize(10), s.size() == 10);
-    scope_assert(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
-    assert(str().max_size() > 0);
-    assert(str().get_allocator() == std::allocator<char>());
-    assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
+    scope_verify(str s, s.reserve(10), s.capacity() >= 10);
+    scope_verify(str s, s.resize(10), s.size() == 10);
+    scope_verify(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
+    verify(str().max_size() > 0);
+    verify(str().get_allocator() == std::allocator<char>());
+    verify(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
 #if SZ_IS_CPP23_ && defined(__cpp_lib_string_resize_and_overwrite)
     // Test C++23 resize and overwrite functionality
-    scope_assert(str s("hello"),
+    scope_verify(str s("hello"),
                  s.resize_and_overwrite(10,
                                         [](char *p, std::size_t count) noexcept {
                                             std::memset(p, 'X', count);
@@ -1089,7 +1088,7 @@ void test_stl_updates_unit() {
                                         }),
                  s.size() == 10 && s == "XXXXXXXXXX");
 
-    scope_assert(str s("test"),
+    scope_verify(str s("test"),
                  s.resize_and_overwrite(8,
                                         [](char *p, std::size_t) noexcept {
                                             std::strcpy(p, "ABCDE");
@@ -1097,7 +1096,7 @@ void test_stl_updates_unit() {
                                         }),
                  s.size() == 5 && s == "ABCDE");
 
-    scope_assert(str s("orig"),
+    scope_verify(str s("orig"),
                  s.try_resize_and_overwrite(6,
                                             [](char *p, std::size_t count) noexcept {
                                                 std::strcpy(p, "works!");
@@ -1108,76 +1107,76 @@ void test_stl_updates_unit() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_IS_64BIT_) scope_assert(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (SZ_IS_64BIT_) scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
-    // scope_assert(str s = "!?", s.push_front('a'), s == "a!?");
-    // scope_assert(str s = "!?", s.pop_front(), s == "?");
-    assert(str().append("test") == "test");
-    assert(str("test") + "ing" == "testing");
-    assert(str("test") + str("ing") == "testing");
-    assert(str("test") + str("ing") + str("123") == "testing123");
-    scope_assert(str s = "!?", s.push_back('a'), s == "!?a");
-    scope_assert(str s = "!?", s.pop_back(), s == "!");
+    // scope_verify(str s = "!?", s.push_front('a'), s == "a!?");
+    // scope_verify(str s = "!?", s.pop_front(), s == "?");
+    verify(str().append("test") == "test");
+    verify(str("test") + "ing" == "testing");
+    verify(str("test") + str("ing") == "testing");
+    verify(str("test") + str("ing") + str("123") == "testing123");
+    scope_verify(str s = "!?", s.push_back('a'), s == "!?a");
+    scope_verify(str s = "!?", s.pop_back(), s == "!");
 
     // Incremental construction.
-    assert(str("__").insert(1, "test") == "_test_");
-    assert(str("__").insert(1, "test", 2) == "_te_");
-    assert(str("__").insert(1, 5, 'a') == "_aaaaa_");
-    assert(str("__").insert(1, str("test")) == "_test_");
-    assert(str("__").insert(1, str("test"), 2) == "_st_");
-    assert(str("__").insert(1, str("test"), 2, 1) == "_s_");
+    verify(str("__").insert(1, "test") == "_test_");
+    verify(str("__").insert(1, "test", 2) == "_te_");
+    verify(str("__").insert(1, 5, 'a') == "_aaaaa_");
+    verify(str("__").insert(1, str("test")) == "_test_");
+    verify(str("__").insert(1, str("test"), 2) == "_st_");
+    verify(str("__").insert(1, str("test"), 2, 1) == "_s_");
 
     // Inserting at a given iterator position yields back an iterator.
-    scope_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
-    scope_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
-    let_assert(str s = "__", s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
-    let_assert(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
+    scope_verify(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
+    scope_verify(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
+    let_verify(str s = "__", s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
+    let_verify(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
 
     // Handle exceptions.
     // The `length_error` might be difficult to catch due to a large `max_size()`.
-    // assert_throws(large_string.insert(large_string.size() - 1, large_number_of_chars, 'a'), std::length_error);
-    assert_throws(str("hello").insert(6, "world"), std::out_of_range);         // `index > size()` case from STL
-    assert_throws(str("hello").insert(5, str("world"), 6), std::out_of_range); // `s_index > str.size()` case from STL
+    // throws_verify(large_string.insert(large_string.size() - 1, large_number_of_chars, 'a'), std::length_error);
+    throws_verify(str("hello").insert(6, "world"), std::out_of_range);         // `index > size()` case from STL
+    throws_verify(str("hello").insert(5, str("world"), 6), std::out_of_range); // `s_index > str.size()` case from STL
 
     // Erasure.
-    assert(str("").erase(0, 3) == "");
-    assert(str("test").erase(1, 2) == "tt");
-    assert(str("test").erase(1) == "t");
-    scope_assert(str s = "test", s.erase(s.begin() + 1), s == "tst");
-    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
-    scope_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-    let_assert(str s = "test", s.erase(s.begin() + 1) == (s.begin() + 1));
-    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
-    let_assert(str s = "test", s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
+    verify(str("").erase(0, 3) == "");
+    verify(str("test").erase(1, 2) == "tt");
+    verify(str("test").erase(1) == "t");
+    scope_verify(str s = "test", s.erase(s.begin() + 1), s == "tst");
+    scope_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
+    scope_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    let_verify(str s = "test", s.erase(s.begin() + 1) == (s.begin() + 1));
+    let_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
+    let_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
 
     // Substitutions.
-    assert(str("hello").replace(1, 2, "123") == "h123lo");
-    assert(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
-    assert(str("hello").replace(1, 2, "123", 1) == "h1lo");
-    assert(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
-    assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
-    assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
+    verify(str("hello").replace(1, 2, "123") == "h123lo");
+    verify(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
+    verify(str("hello").replace(1, 2, "123", 1) == "h1lo");
+    verify(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
+    verify(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
+    verify(str("hello").replace(1, 2, 3, 'a') == "haaalo");
 
     // Substitutions with iterators.
-    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
-    scope_assert(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
+    scope_verify(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
+    scope_verify(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
 
     // Some nice "tweetable" examples :)
-    assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
-    assert(str("Loose").replace(2, 2, "vath", 1) == "Love");
+    verify(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
+    verify(str("Loose").replace(2, 2, "vath", 1) == "Love");
 
     // Insertion is a special case of replacement.
     // Appending and assigning are special cases of insertion.
     // Still, we test them separately to make sure they are not broken.
-    assert(str("hello").append("123") == "hello123");
-    assert(str("hello").append(str("123")) == "hello123");
-    assert(str("hello").append(str("123"), 1) == "hello23");
-    assert(str("hello").append(str("123"), 1, 1) == "hello2");
-    assert(str("hello").append({'1', '2'}) == "hello12");
-    assert(str("hello").append(2, '!') == "hello!!");
-    let_assert(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
+    verify(str("hello").append("123") == "hello123");
+    verify(str("hello").append(str("123")) == "hello123");
+    verify(str("hello").append(str("123"), 1) == "hello23");
+    verify(str("hello").append(str("123"), 1, 1) == "hello2");
+    verify(str("hello").append({'1', '2'}) == "hello12");
+    verify(str("hello").append(2, '!') == "hello!!");
+    let_verify(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
 }
 
 /** @brief Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working. */
@@ -1214,13 +1213,13 @@ void test_stl_conversions_unit() {
 void test_stl_containers_unit() {
     std::map<sz::string, int> sorted_words_sz;
     std::unordered_map<sz::string, int> words_sz;
-    assert(sorted_words_sz.empty());
-    assert(words_sz.empty());
+    verify(sorted_words_sz.empty());
+    verify(words_sz.empty());
 
     std::map<std::string, int, sz::less> sorted_words_stl;
     std::unordered_map<std::string, int, sz::hash, sz::equal_to> words_stl;
-    assert(sorted_words_stl.empty());
-    assert(words_stl.empty());
+    verify(sorted_words_stl.empty());
+    verify(words_stl.empty());
 }
 
 #pragma endregion // STL Updates
@@ -1236,58 +1235,58 @@ void test_extensions_reads_unit() {
     using str = string_type;
 
     // Signed offset lookups and slices.
-    assert(str("hello").sat(0) == 'h');
-    assert(str("hello").sat(-1) == 'o');
-    assert(str("rest").sat(1) == 'e');
-    assert(str("rest").sat(-1) == 't');
-    assert(str("rest").sat(-4) == 'r');
+    verify(str("hello").sat(0) == 'h');
+    verify(str("hello").sat(-1) == 'o');
+    verify(str("rest").sat(1) == 'e');
+    verify(str("rest").sat(-1) == 't');
+    verify(str("rest").sat(-4) == 'r');
 
-    assert(str("front").front() == 'f');
-    assert(str("front").front(1) == "f");
-    assert(str("front").front(2) == "fr");
-    assert(str("front").front(2) == "fr");
-    assert(str("front").front(-2) == "fro");
-    assert(str("front").front(0) == "");
-    assert(str("front").front(5) == "front");
-    assert(str("front").front(-5) == "");
+    verify(str("front").front() == 'f');
+    verify(str("front").front(1) == "f");
+    verify(str("front").front(2) == "fr");
+    verify(str("front").front(2) == "fr");
+    verify(str("front").front(-2) == "fro");
+    verify(str("front").front(0) == "");
+    verify(str("front").front(5) == "front");
+    verify(str("front").front(-5) == "");
 
-    assert(str("back").back() == 'k');
-    assert(str("back").back(1) == "ack");
-    assert(str("back").back(2) == "ck");
-    assert(str("back").back(-1) == "k");
-    assert(str("back").back(-2) == "ck");
-    assert(str("back").back(-4) == "back");
-    assert(str("back").back(4) == "");
+    verify(str("back").back() == 'k');
+    verify(str("back").back(1) == "ack");
+    verify(str("back").back(2) == "ck");
+    verify(str("back").back(-1) == "k");
+    verify(str("back").back(-2) == "ck");
+    verify(str("back").back(-4) == "back");
+    verify(str("back").back(4) == "");
 
-    assert(str("hello").sub(1) == "ello");
-    assert(str("hello").sub(-1) == "o");
-    assert(str("hello").sub(1, 2) == "e");
-    assert(str("hello").sub(1, 100) == "ello");
-    assert(str("hello").sub(100, 100) == "");
-    assert(str("hello").sub(-2, -1) == "l");
-    assert(str("hello").sub(-2, -2) == "");
-    assert(str("hello").sub(100, -100) == "");
+    verify(str("hello").sub(1) == "ello");
+    verify(str("hello").sub(-1) == "o");
+    verify(str("hello").sub(1, 2) == "e");
+    verify(str("hello").sub(1, 100) == "ello");
+    verify(str("hello").sub(100, 100) == "");
+    verify(str("hello").sub(-2, -1) == "l");
+    verify(str("hello").sub(-2, -2) == "");
+    verify(str("hello").sub(100, -100) == "");
 
     // Passing initializer lists to `operator[]`.
     // Put extra braces to correctly estimate the number of macro arguments :)
-    assert((str("hello")[{1, 2}] == "e"));
-    assert((str("hello")[{1, 100}] == "ello"));
-    assert((str("hello")[{100, 100}] == ""));
-    assert((str("hello")[{100, -100}] == ""));
-    assert((str("hello")[{-100, -100}] == ""));
+    verify((str("hello")[{1, 2}] == "e"));
+    verify((str("hello")[{1, 100}] == "ello"));
+    verify((str("hello")[{100, 100}] == ""));
+    verify((str("hello")[{100, -100}] == ""));
+    verify((str("hello")[{-100, -100}] == ""));
 
     // Checksums
     auto accumulate_bytes = [](str const &s) -> std::size_t {
         return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
     };
-    assert(str("a").bytesum() == (std::size_t)'a');
-    assert(str("0").bytesum() == (std::size_t)'0');
-    assert(str("0123456789").bytesum() == arithmetic_sum('0', '9'));
-    assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
-    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
+    verify(str("a").bytesum() == (std::size_t)'a');
+    verify(str("0").bytesum() == (std::size_t)'0');
+    verify(str("0123456789").bytesum() == arithmetic_sum('0', '9'));
+    verify(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
+    verify(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
-    let_assert(str s = "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累" //
+    let_verify(str s = "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累" //
                        "瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、被过度" //
                        "消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事" //
                        "以来，他没有过过一天没有名气的日子。",
@@ -1299,80 +1298,80 @@ void test_extensions_updates_unit() {
     using str = sz::string;
 
     // Try methods.
-    assert(str("obsolete").try_assign("hello"));
-    assert(str().try_reserve(10));
-    assert(str().try_resize(10));
-    assert(str("__").try_insert(1, "test"));
-    assert(str("test").try_erase(1, 2));
-    assert(str("test").try_clear());
-    assert(str("test").try_replace(1, 2, "aaaa"));
-    assert(str("test").try_push_back('a'));
-    assert(str("test").try_shrink_to_fit());
+    verify(str("obsolete").try_assign("hello"));
+    verify(str().try_reserve(10));
+    verify(str().try_resize(10));
+    verify(str("__").try_insert(1, "test"));
+    verify(str("test").try_erase(1, 2));
+    verify(str("test").try_clear());
+    verify(str("test").try_replace(1, 2, "aaaa"));
+    verify(str("test").try_push_back('a'));
+    verify(str("test").try_shrink_to_fit());
 
     // Self-referencing methods.
-    scope_assert(str s = "test", s.try_assign(s.view()), s == "test");
-    scope_assert(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
-    scope_assert(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
+    scope_verify(str s = "test", s.try_assign(s.view()), s == "test");
+    scope_verify(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
+    scope_verify(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
 
     // Try methods going beyond and beneath capacity threshold.
-    scope_assert(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
+    scope_verify(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
                  s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
                      s.try_shrink_to_fit(),
                  s.capacity() < sz::string::min_capacity);
 
     // Same length replacements.
-    scope_assert(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("l", "1"), s == "he11o");
-    scope_assert(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    scope_assert(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
-    scope_assert(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
+    scope_verify(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("l", "1"), s == "he11o");
+    scope_verify(str s = "hello", s.replace_all("he", "al"), s == "alllo");
+    scope_verify(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
+    scope_verify(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
 
     // Shorter replacements.
-    scope_assert(str s = "hello", s.replace_all("xx", "x"), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("l", ""), s == "heo");
-    scope_assert(str s = "hello", s.replace_all("h", ""), s == "ello");
-    scope_assert(str s = "hello", s.replace_all("o", ""), s == "hell");
-    scope_assert(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    scope_assert(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
+    scope_verify(str s = "hello", s.replace_all("xx", "x"), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("l", ""), s == "heo");
+    scope_verify(str s = "hello", s.replace_all("h", ""), s == "ello");
+    scope_verify(str s = "hello", s.replace_all("o", ""), s == "hell");
+    scope_verify(str s = "hello", s.replace_all("llo", "!"), s == "he!");
+    scope_verify(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
 
     // Longer replacements.
-    scope_assert(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
-    scope_assert(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
-    scope_assert(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
-    scope_assert(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    scope_assert(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
-    scope_assert(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
+    scope_verify(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
+    scope_verify(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
+    scope_verify(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
+    scope_verify(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
+    scope_verify(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
+    scope_verify(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
     sz::look_up_table invert_case = sz::look_up_table::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
-    scope_assert(str s = "hello", s.lookup(invert_case), s == "HELLO");
-    scope_assert(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
-    scope_assert(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
+    scope_verify(str s = "hello", s.lookup(invert_case), s == "HELLO");
+    scope_verify(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
+    scope_verify(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
 
     // Concatenation.
-    assert(str(str("a") | str("b")) == "ab");
-    assert(str(str("a") | str("b") | str("ab")) == "abab");
+    verify(str(str("a") | str("b")) == "ab");
+    verify(str(str("a") | str("b") | str("ab")) == "abab");
 
-    assert(str(sz::concatenate("a"_sv, "b"_sv)) == "ab");
-    assert(str(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
+    verify(str(sz::concatenate("a"_sv, "b"_sv)) == "ab");
+    verify(str(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
 
     // The cases above pass only rvalues carrying a `::value_type`. Named lvalues deduce to a
     // reference and raw literals to a character array, neither of which has member typedefs.
     {
         str name = "ash", domain = "mail", tld = "com";
-        assert(str(sz::concatenate(name, "@", domain, ".", tld)) == "ash@mail.com");
-        assert(str(name | "@" | domain | "." | tld) == "ash@mail.com");
-        assert(str(sz::concatenate(name, domain)) == "ashmail");
-        assert(str(sz::concatenate("@", name)) == "@ash");
+        verify(str(sz::concatenate(name, "@", domain, ".", tld)) == "ash@mail.com");
+        verify(str(name | "@" | domain | "." | tld) == "ash@mail.com");
+        verify(str(sz::concatenate(name, domain)) == "ashmail");
+        verify(str(sz::concatenate("@", name)) == "@ash");
 
         // Materializing uses an implicit conversion, so the concatenation constructor is not explicit.
         sz::string email = name | "@" | domain;
-        assert(email == "ash@mail");
+        verify(email == "ash@mail");
     }
 
     // Range members slice the string they were called on, so offsets stay inside its own buffer.
@@ -1380,27 +1379,27 @@ void test_extensions_updates_unit() {
         str text = "hello brave new world";
         for (auto segment : text.utf8_wordbreaks()) {
             std::ptrdiff_t const offset = segment.data() - text.data();
-            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
         }
         for (auto token : text.utf8_split_whitespaces()) {
             std::ptrdiff_t const offset = token.data() - text.data();
-            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
         }
         for (auto field : text.utf8_split_delimiters()) {
             std::ptrdiff_t const offset = field.data() - text.data();
-            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()));
         }
         str sso = "a b c";
         for (auto token : sso.utf8_split_whitespaces()) {
             std::ptrdiff_t const offset = token.data() - sso.data();
-            assert(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()));
+            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()));
         }
     }
 
     // Randomization.
-    assert(str::random(0).empty());
-    assert(str::random(4).size() == 4);
-    assert(str::random(4, 42).size() == 4);
+    verify(str::random(0).empty());
+    verify(str::random(4).size() == 4);
+    verify(str::random(4, 42).size() == 4);
 }
 
 #pragma endregion // Extensions
@@ -1414,20 +1413,20 @@ void test_string_constructors_unit() {
     for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
         strings.push_back(alphabet.substr(0, alphabet_slice));
     std::vector<sz::string> copies {strings};
-    assert(copies.size() == strings.size());
+    verify(copies.size() == strings.size());
     for (size_t i = 0; i < copies.size(); ++i) {
-        assert(copies[i].size() == strings[i].size());
-        assert(copies[i] == strings[i]);
-        for (size_t j = 0; j < strings[i].size(); j++) { assert(copies[i][j] == strings[i][j]); }
+        verify(copies[i].size() == strings[i].size());
+        verify(copies[i] == strings[i]);
+        for (size_t j = 0; j < strings[i].size(); j++) { verify(copies[i][j] == strings[i][j]); }
     }
     std::vector<sz::string> assignments = strings;
     for (size_t i = 0; i < assignments.size(); ++i) {
-        assert(assignments[i].size() == strings[i].size());
-        assert(assignments[i] == strings[i]);
-        for (size_t j = 0; j < strings[i].size(); j++) { assert(assignments[i][j] == strings[i][j]); }
+        verify(assignments[i].size() == strings[i].size());
+        verify(assignments[i] == strings[i]);
+        for (size_t j = 0; j < strings[i].size(); j++) { verify(assignments[i][j] == strings[i][j]); }
     }
-    assert(std::equal(strings.begin(), strings.end(), copies.begin()));
-    assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
+    verify(std::equal(strings.begin(), strings.end(), copies.begin()));
+    verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
 /**
@@ -1439,19 +1438,19 @@ void test_string_constructors_unit() {
  */
 void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
 
-    assert(accounting_allocator::counter_ref() == 0);
+    verify(accounting_allocator::counter_ref() == 0);
     using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
     for (std::size_t i = 0; i < length; ++i) base.push_back('c');
-    assert(base.length() == length);
+    verify(base.length() == length);
 
     // Do copies leak?
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy(base);
-            assert(copy.length() == length);
-            assert(copy == base);
+            verify(copy.length() == length);
+            verify(copy == base);
         }
     });
 
@@ -1460,8 +1459,8 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
         for (std::size_t i = 0; i < iterations; ++i) {
             string copy;
             copy = base;
-            assert(copy.length() == length);
-            assert(copy == base);
+            verify(copy.length() == length);
+            verify(copy == base);
         }
     });
 
@@ -1469,11 +1468,11 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
-            assert(unique_item.length() == length);
-            assert(unique_item == base);
+            verify(unique_item.length() == length);
+            verify(unique_item == base);
             string copy(std::move(unique_item));
-            assert(copy.length() == length);
-            assert(copy == base);
+            verify(copy.length() == length);
+            verify(copy == base);
         }
     });
 
@@ -1483,8 +1482,8 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
             string unique_item(base);
             string copy;
             copy = std::move(unique_item);
-            assert(copy.length() == length);
-            assert(copy == base);
+            verify(copy.length() == length);
+            verify(copy == base);
         }
     });
 
@@ -1495,14 +1494,14 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
             string copy;
             for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
             copy = std::move(unique_item);
-            assert(copy.length() == length);
-            assert(copy == base);
+            verify(copy.length() == length);
+            verify(copy == base);
         }
     });
 
     // Now let's clear the base and check that we're back to zero
     base = string();
-    assert(accounting_allocator::counter_ref() == 0);
+    verify(accounting_allocator::counter_ref() == 0);
 }
 
 /**
@@ -1519,7 +1518,7 @@ void test_string_updates_unit(std::size_t repetitions) {
             char c = alphabet_chars[std::rand() % 26];
             stl_string.push_back(c);
             sz_string.push_back(c);
-            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+            verify(sz::string_view(stl_string) == sz::string_view(sz_string));
         }
 
         // Compare STL and StringZilla strings erase functionality.
@@ -1528,7 +1527,7 @@ void test_string_updates_unit(std::size_t repetitions) {
             std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
             stl_string.erase(offset_to_erase, chars_to_erase);
             sz_string.erase(offset_to_erase, chars_to_erase);
-            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+            verify(sz::string_view(stl_string) == sz::string_view(sz_string));
         }
     }
 }
@@ -1598,11 +1597,11 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
                 std::vector<char> reference_output(length, '\0');
                 reference.copy(reference_output.data(), source, length);
                 candidate.copy(target, source, length);
-                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
 
                 reference.fill(reference_output.data(), length, fill_value);
                 candidate.fill(target, length, fill_value);
-                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
             });
 
             // `move` with overlapping regions: shift the source pattern within one buffer by a small offset,
@@ -1618,14 +1617,14 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
                     std::memcpy(reference_buffer.data(), source, length);
                     candidate.move(buffer + shift, buffer, moved);
                     reference.move(reference_buffer.data() + shift, reference_buffer.data(), moved);
-                    assert(std::memcmp(buffer, reference_buffer.data(), length) == 0);
+                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0);
 
                     // Backward overlap: destination behind the source.
                     std::memcpy(buffer, source, length);
                     std::memcpy(reference_buffer.data(), source, length);
                     candidate.move(buffer, buffer + shift, moved);
                     reference.move(reference_buffer.data(), reference_buffer.data() + shift, moved);
-                    assert(std::memcmp(buffer, reference_buffer.data(), length) == 0);
+                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0);
                 });
             }
         }
@@ -1662,7 +1661,7 @@ void test_lookup_equivalence(reference_ reference, candidate_ candidate, sz_size
                 std::vector<char> reference_output(length, '\0');
                 reference.lookup(reference_output.data(), length, source, lookup_table);
                 candidate.lookup(target, length, source, lookup_table);
-                if (length) assert(std::memcmp(reference_output.data(), target, length) == 0);
+                if (length) verify(std::memcmp(reference_output.data(), target, length) == 0);
             });
         }
     }

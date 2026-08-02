@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 

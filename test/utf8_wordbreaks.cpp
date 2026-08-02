@@ -16,7 +16,6 @@
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
 #include <cstdio>  // `std::printf`
 
@@ -46,41 +45,41 @@ static constexpr std::size_t utf8_wordbreaks_unit_cases_count = sizeof(utf8_word
 /** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
 static void test_utf8_wordbreaks_classification_() {
     // ASCII letters, digits, underscore, and the mid-word apostrophe are word characters.
-    assert(sz_rune_is_word_char('A') == sz_true_k);
-    assert(sz_rune_is_word_char('z') == sz_true_k);
-    assert(sz_rune_is_word_char('0') == sz_true_k);
-    assert(sz_rune_is_word_char('9') == sz_true_k);
-    assert(sz_rune_is_word_char('_') == sz_true_k);
-    assert(sz_rune_is_word_char('\'') == sz_true_k);
+    verify(sz_rune_is_word_char('A') == sz_true_k);
+    verify(sz_rune_is_word_char('z') == sz_true_k);
+    verify(sz_rune_is_word_char('0') == sz_true_k);
+    verify(sz_rune_is_word_char('9') == sz_true_k);
+    verify(sz_rune_is_word_char('_') == sz_true_k);
+    verify(sz_rune_is_word_char('\'') == sz_true_k);
 
     // ASCII whitespace and punctuation are boundaries.
-    assert(sz_rune_is_word_char(' ') == sz_false_k);
-    assert(sz_rune_is_word_char('\n') == sz_false_k);
-    assert(sz_rune_is_word_char('\t') == sz_false_k);
-    assert(sz_rune_is_word_char('!') == sz_false_k);
-    assert(sz_rune_is_word_char('-') == sz_false_k);
+    verify(sz_rune_is_word_char(' ') == sz_false_k);
+    verify(sz_rune_is_word_char('\n') == sz_false_k);
+    verify(sz_rune_is_word_char('\t') == sz_false_k);
+    verify(sz_rune_is_word_char('!') == sz_false_k);
+    verify(sz_rune_is_word_char('-') == sz_false_k);
 
     // Latin Extended, Greek, Cyrillic, Hebrew, Arabic letters and Hangul syllables are word characters.
-    assert(sz_rune_is_word_char(0x00DF) == sz_true_k); // ß
-    assert(sz_rune_is_word_char(0x0100) == sz_true_k); // Latin Extended-A start
-    assert(sz_rune_is_word_char(0x03B1) == sz_true_k); // Greek alpha
-    assert(sz_rune_is_word_char(0x0430) == sz_true_k); // Cyrillic a
-    assert(sz_rune_is_word_char(0x05D0) == sz_true_k); // Hebrew alef
-    assert(sz_rune_is_word_char(0x0627) == sz_true_k); // Arabic alef
-    assert(sz_rune_is_word_char(0xAC00) == sz_true_k); // Hangul first
-    assert(sz_rune_is_word_char(0xD7A3) == sz_true_k); // Hangul last
+    verify(sz_rune_is_word_char(0x00DF) == sz_true_k); // ß
+    verify(sz_rune_is_word_char(0x0100) == sz_true_k); // Latin Extended-A start
+    verify(sz_rune_is_word_char(0x03B1) == sz_true_k); // Greek alpha
+    verify(sz_rune_is_word_char(0x0430) == sz_true_k); // Cyrillic a
+    verify(sz_rune_is_word_char(0x05D0) == sz_true_k); // Hebrew alef
+    verify(sz_rune_is_word_char(0x0627) == sz_true_k); // Arabic alef
+    verify(sz_rune_is_word_char(0xAC00) == sz_true_k); // Hangul first
+    verify(sz_rune_is_word_char(0xD7A3) == sz_true_k); // Hangul last
 
     // CJK ideographs, spaces, dashes, and emoji are boundaries (not word characters under TR29).
-    assert(sz_rune_is_word_char(0x4E00) == sz_false_k);  // CJK first
-    assert(sz_rune_is_word_char(0x9FFF) == sz_false_k);  // CJK last
-    assert(sz_rune_is_word_char(0x3000) == sz_false_k);  // Ideographic space
-    assert(sz_rune_is_word_char(0x2014) == sz_false_k);  // Em dash
-    assert(sz_rune_is_word_char(0x1F600) == sz_false_k); // emoji
+    verify(sz_rune_is_word_char(0x4E00) == sz_false_k);  // CJK first
+    verify(sz_rune_is_word_char(0x9FFF) == sz_false_k);  // CJK last
+    verify(sz_rune_is_word_char(0x3000) == sz_false_k);  // Ideographic space
+    verify(sz_rune_is_word_char(0x2014) == sz_false_k);  // Em dash
+    verify(sz_rune_is_word_char(0x1F600) == sz_false_k); // emoji
 
     // Edge cases.
-    assert(sz_rune_is_word_char(0x0000) == sz_false_k); // NUL
-    assert(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
-    assert(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
+    verify(sz_rune_is_word_char(0x0000) == sz_false_k); // NUL
+    verify(sz_rune_is_word_char(0x007F) == sz_false_k); // DEL
+    verify(sz_rune_is_word_char(0xFFFF) == sz_false_k); // BMP max
 }
 
 /**
@@ -124,11 +123,11 @@ static void check_utf8_wordbreaks_lengths_(char const *label, sz_utf8_segmenter_
     sz_size_t start = 0, length = 0, position = 0;
     for (sz_size_t const expected : expected_lengths) {
         sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, length);
-        assert(more && label && "deferred-mid golden emitted fewer segments than expected");
-        assert(start == position && length == expected && label && "deferred-mid golden segment mismatch");
+        verify(more && label && "deferred-mid golden emitted fewer segments than expected");
+        verify(start == position && length == expected && label && "deferred-mid golden segment mismatch");
         position += length;
     }
-    assert(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
+    verify(!utf8_segment_cursor_next_(cursor, start, length) && label && "deferred-mid golden emitted extra segments");
 }
 
 /**
@@ -195,22 +194,22 @@ void test_utf8_wordbreaks_unit() {
     {
         sz::string_view const text("Hello, world!");
         auto segments = text.utf8_wordbreaks().template to<std::vector<std::string>>();
-        assert(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world" && "C++ utf8_wordbreaks");
+        verify(segments.size() == 5 && segments[0] == "Hello" && segments[3] == "world" && "C++ utf8_wordbreaks");
         std::string rejoined;
         for (auto const &s : segments) rejoined += s;
-        assert(rejoined == "Hello, world!" && "wordbreaks tile losslessly");
+        verify(rejoined == "Hello, world!" && "wordbreaks tile losslessly");
     }
 
     // Word-break counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    assert(utf8_prose_hotel_review().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 100 &&
+    verify(utf8_prose_hotel_review().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 100 &&
            "hotel_review wordbreaks");
-    assert(utf8_prose_news_lede().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 83 &&
+    verify(utf8_prose_news_lede().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 83 &&
            "news_lede wordbreaks");
-    assert(utf8_prose_concert_post().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 69 &&
+    verify(utf8_prose_concert_post().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 69 &&
            "concert_post wordbreaks");
-    assert(utf8_prose_rtl_scripts().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 98 &&
+    verify(utf8_prose_rtl_scripts().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 98 &&
            "rtl_scripts wordbreaks");
-    assert(utf8_prose_micro_apostrophe().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 5 &&
+    verify(utf8_prose_micro_apostrophe().utf8_wordbreaks().template to<std::vector<std::string>>().size() == 5 &&
            "micro_apostrophe wordbreaks");
 }
 

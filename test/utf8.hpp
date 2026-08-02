@@ -24,7 +24,6 @@
 #ifndef STRINGZILLA_TEST_UTF8_HPP_
 #define STRINGZILLA_TEST_UTF8_HPP_
 
-#include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
 #include <cstdio>  // `std::fprintf`
 #include <cstring> // `std::memcpy`, `std::strcmp`, `std::strlen`
@@ -607,7 +606,7 @@ inline void utf8_report_divergence_(utf8_repro_t const &repro, sz_cptr_t data, s
                      (std::size_t)candidate_length);
     else std::fprintf(stderr, "    candidate: <end of stream>\n");
     print_utf8_test_bytes_("input", data, length);
-    assert(false && "UTF-8 segmentation backends diverged (see stderr for the reproduction record)");
+    verify(false && "UTF-8 segmentation backends diverged (see stderr for the reproduction record)");
 }
 
 /**
@@ -634,13 +633,13 @@ inline void utf8_compare_streams_(utf8_repro_t const &repro, sz_utf8_segmenter_t
         if (!agree)
             utf8_report_divergence_(repro, data, length, segment_index, reference_more, reference_start,
                                     reference_length, candidate_more, candidate_start, candidate_length);
-        assert(candidate_start == running_cursor && "segments do not tile the input contiguously");
+        verify(candidate_start == running_cursor && "segments do not tile the input contiguously");
         if (flavor == utf8_corpus_flavor_t::valid_k && candidate_length != 0)
-            assert((((sz_u8_t)data[candidate_start]) & 0xC0u) != 0x80u && "segment starts mid-codepoint");
+            verify((((sz_u8_t)data[candidate_start]) & 0xC0u) != 0x80u && "segment starts mid-codepoint");
         running_cursor += candidate_length;
         ++segment_index;
     }
-    assert(running_cursor == length && "segments do not cover the whole input");
+    verify(running_cursor == length && "segments do not cover the whole input");
 }
 
 #pragma endregion // Lazy streaming comparison
@@ -673,13 +672,13 @@ inline void check_utf8_segment_unit_(char const *family, sz_utf8_segmenter_t for
         sz_size_t start = 0, segment_length = 0;
         for (sz::string_view const expected : golden.expected) {
             sz_bool_t const more = utf8_segment_cursor_next_(cursor, start, segment_length);
-            assert(more && family && "segment forward emitted fewer segments than the golden");
-            assert(segment_length == expected.size() &&
+            verify(more && family && "segment forward emitted fewer segments than the golden");
+            verify(segment_length == expected.size() &&
                    std::memcmp(golden.text.data() + start, expected.data(), expected.size()) == 0 && family &&
                    "segment forward bytes != golden");
         }
         sz_size_t extra_start = 0, extra_length = 0;
-        assert(!utf8_segment_cursor_next_(cursor, extra_start, extra_length) && family &&
+        verify(!utf8_segment_cursor_next_(cursor, extra_start, extra_length) && family &&
                "segment forward emitted more segments than the golden");
     }
 }
@@ -725,7 +724,7 @@ inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t re
         bool covered = false;
         for (std::size_t case_index = 0; case_index != case_count && !covered; ++case_index)
             covered = std::strcmp(cases[case_index].rule_id, required_rule_ids[required_index]) == 0;
-        assert(covered && family && "UAX rule id not exercised by any coverage motif");
+        verify(covered && family && "UAX rule id not exercised by any coverage motif");
     }
 }
 
@@ -787,13 +786,13 @@ inline void check_utf8_segment_safety_(char const *family, sz_utf8_segmenter_t f
         sz_size_t bytes_consumed = 0;
         sz_size_t const found = forward(input, (sz_size_t)input_length, offsets, lengths,
                                         (sz_size_t)(utf8_unit_capacity_k + 1), &bytes_consumed);
-        assert(bytes_consumed <= input_length && "segment finder consumed past the input");
+        verify(bytes_consumed <= input_length && "segment finder consumed past the input");
         for (sz_size_t index = 0; index != found; ++index) {
             if (offsets[index] + lengths[index] <= input_length) continue;
             std::fprintf(stderr, "%s emitted out-of-bounds segment (offset=%zu len=%zu, input=%zu)\n", family,
                          (std::size_t)offsets[index], (std::size_t)lengths[index], input_length);
             print_utf8_test_bytes_("input", input, input_length);
-            assert(false && "segment finder emitted a span outside the input");
+            verify(false && "segment finder emitted a span outside the input");
         }
     };
     std::mt19937 &rng = global_random_generator();

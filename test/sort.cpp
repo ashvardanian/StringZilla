@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdint> // `std::uintptr_t`
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
@@ -104,8 +103,8 @@ static sz_sequence_t sort_sequence_from_(std::vector<std::string> const &strings
 static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const *sequence,
                              std::vector<sz_sorted_idx_t> const &expected) {
     std::vector<sz_sorted_idx_t> order(expected.size());
-    assert(argsort(sequence, nullptr, order.data(), 0, sz_false_k) == sz_success_k);
-    assert(order == expected);
+    verify(argsort(sequence, nullptr, order.data(), 0, sz_false_k) == sz_success_k);
+    verify(order == expected);
 }
 
 /** @brief Runs one sequence intersect backend over both inputs and asserts the matched (first, second) pairs. */
@@ -117,13 +116,13 @@ static void check_intersect_unit_(sz_sequence_intersect_t intersect, sz_sequence
                                                                               : second_sequence->count;
     std::vector<sz_sorted_idx_t> first_positions(capacity), second_positions(capacity);
     sz_size_t intersection_size = 0;
-    assert(intersect(first_sequence, second_sequence, nullptr, 0u, &intersection_size, //
+    verify(intersect(first_sequence, second_sequence, nullptr, 0u, &intersection_size, //
                      first_positions.data(), second_positions.data()) == sz_success_k);
-    assert(intersection_size == expected_pairs.size());
+    verify(intersection_size == expected_pairs.size());
     std::set<std::pair<std::size_t, std::size_t>> produced;
     for (sz_size_t index = 0; index != intersection_size; ++index)
         produced.insert({(std::size_t)first_positions[index], (std::size_t)second_positions[index]});
-    assert(produced == expected_pairs);
+    verify(produced == expected_pairs);
 }
 
 #pragma endregion // Helpers
@@ -176,7 +175,7 @@ void test_sort_unit() {
 #endif
 
         // C++ wrapper must agree with the dispatched C API on the same permutation.
-        assert(sz::argsort(fruits) == std::vector<sz::sorted_idx_t>({1u, 0u, 2u}));
+        verify(sz::argsort(fruits) == std::vector<sz::sorted_idx_t>({1u, 0u, 2u}));
     }
 
     // Uncased UTF-8 arg-sort: {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
@@ -204,7 +203,7 @@ void test_sort_unit() {
 #endif
 
         // C++ wrapper must agree on the case-folded ordering.
-        assert(sz::argsort_utf8_uncased(words) == std::vector<sz::sorted_idx_t>({1u, 0u}));
+        verify(sz::argsort_utf8_uncased(words) == std::vector<sz::sorted_idx_t>({1u, 0u}));
     }
 
     // Intersection: {"apple","banana","cherry"} vs {"cherry","date","banana"} share {"banana","cherry"}.
@@ -226,11 +225,11 @@ void test_sort_unit() {
 
         // C++ wrapper must surface the same matched pairs.
         sz::intersect_result_t const result = sz::intersect(first, second);
-        assert(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u);
+        verify(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u);
         std::set<std::pair<std::size_t, std::size_t>> wrapper_pairs;
         for (std::size_t index = 0; index != result.first_offsets.size(); ++index)
             wrapper_pairs.insert({result.first_offsets[index], result.second_offsets[index]});
-        assert(wrapper_pairs == expected_pairs);
+        verify(wrapper_pairs == expected_pairs);
     }
 
     // Low-level `try_*` API takes sized `sz::span` outputs and returns the count via `sz::expected`.
@@ -239,10 +238,10 @@ void test_sort_unit() {
 
         std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
         order_t order(fruits.size());
-        assert(sz::try_argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
-        assert(order == order_t({1u, 0u, 2u}));
-        assert(sz::try_argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
-        assert(order == order_t({1u, 0u, 2u}));
+        verify(sz::try_argsort(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        verify(order == order_t({1u, 0u, 2u}));
+        verify(sz::try_argsort_utf8_uncased(fruits, as_view, {order.data(), order.size()}) == sz::status_t::success_k);
+        verify(order == order_t({1u, 0u, 2u}));
 
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
@@ -251,38 +250,38 @@ void test_sort_unit() {
         sz::expected<std::size_t, sz::status_t> const matched = sz::try_intersect( //
             first, as_view, second, as_view, /*seed*/ 0u,                          //
             {first_positions.data(), first_positions.size()}, {second_positions.data(), second_positions.size()});
-        assert(matched.status == sz::status_t::success_k);
-        assert(matched.value == 2u);
+        verify(matched.status == sz::status_t::success_k);
+        verify(matched.value == 2u);
         std::set<std::pair<std::size_t, std::size_t>> low_level_pairs;
         for (std::size_t index = 0; index != matched.value; ++index)
             low_level_pairs.insert({first_positions[index], second_positions[index]});
         std::set<std::pair<std::size_t, std::size_t>> const expected_low_level = {{1u, 2u}, {2u, 0u}};
-        assert(low_level_pairs == expected_low_level);
+        verify(low_level_pairs == expected_low_level);
     }
 
     // Basic tests with predetermined orders.
-    let_assert(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})), result == order_t({0u, 1u, 2u, 3u}));
-    let_assert(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})), result == order_t({3u, 0u, 1u, 2u}));
-    let_assert(auto result = sz::argsort(strs_t({"b", "a", "d", "c"})), result == order_t({1u, 0u, 3u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"a", "b", "c", "d"})), result == order_t({0u, 1u, 2u, 3u}));
+    let_verify(auto result = sz::argsort(strs_t({"b", "c", "d", "a"})), result == order_t({3u, 0u, 1u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"b", "a", "d", "c"})), result == order_t({1u, 0u, 3u, 2u}));
 
     // Single character vs multi-character strings
-    let_assert(auto result = sz::argsort(strs_t({"aa", "a", "aaa", "aa"})), result == order_t({1u, 0u, 3u, 2u}));
+    let_verify(auto result = sz::argsort(strs_t({"aa", "a", "aaa", "aa"})), result == order_t({1u, 0u, 3u, 2u}));
 
     // Mix of short and long strings with common prefixes
-    let_assert(auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})),
+    let_verify(auto result = sz::argsort(strs_t({"test", "t", "testing", "te", "tests", "testify", "tea", "team"})),
                result == order_t({1u, 3u, 6u, 7u, 0u, 5u, 2u, 4u}));
 
     // Single character vs multi-character strings with varied patterns
-    let_assert(auto result = sz::argsort(
+    let_verify(auto result = sz::argsort(
                    strs_t({"zebra", "z", "zoo", "zip", "zap", "a", "apple", "ant", "ark", "mango", "m", "maple"})),
                result == order_t({5u, 7u, 6u, 8u, 10u, 9u, 11u, 1u, 4u, 0u, 3u, 2u}));
 
     // Numeric-like strings of varying lengths
-    let_assert(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})),
+    let_verify(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})),
                result == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
     // Real names with varied lengths and prefixes (this one is already correct)
-    let_assert(auto result = sz::argsort(
+    let_verify(auto result = sz::argsort(
                    strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})),
                result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 
@@ -305,7 +304,7 @@ void test_sort_unit() {
             for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
                 std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
                 auto order = sz::argsort(dataset);
-                for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
+                for (std::size_t i = 1; i < dataset.size(); ++i) verify(dataset[order[i - 1]] <= dataset[order[i]]);
             }
         }
     }
@@ -320,7 +319,7 @@ void test_sort_unit() {
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
-            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+            for (std::size_t i = 1; i < dataset_size; ++i) { verify(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
 
@@ -336,7 +335,7 @@ void test_sort_unit() {
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
-            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+            for (std::size_t i = 1; i < dataset_size; ++i) { verify(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
 
@@ -350,7 +349,7 @@ void test_sort_unit() {
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
-            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+            for (std::size_t i = 1; i < dataset_size; ++i) { verify(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
 
@@ -400,25 +399,25 @@ void test_sort_unit() {
     };
 
     // Ascending and descending must match a byte-key stable sort exactly.
-    assert(is_permutation(sz::argsort(mixed)) && sz::argsort(mixed) == reference_order(mixed, false));
-    assert(sz::argsort(mixed, 0, true) == reference_order(mixed, true));
+    verify(is_permutation(sz::argsort(mixed)) && sz::argsort(mixed) == reference_order(mixed, false));
+    verify(sz::argsort(mixed, 0, true) == reference_order(mixed, true));
 
     // Top-K must reproduce the value-prefix of the full sort and stay a permutation.
     for (std::size_t top_count : {std::size_t(1), std::size_t(50), std::size_t(777), mixed_count}) {
         for (bool reverse : {false, true}) {
             order_t const got = sz::argsort(mixed, top_count, reverse);
             order_t const reference = reference_order(mixed, reverse);
-            assert(is_permutation(got));
+            verify(is_permutation(got));
             std::size_t const head = top_count < mixed_count ? top_count : mixed_count;
-            for (std::size_t i = 0; i < head; ++i) assert(mixed[got[i]] == mixed[reference[i]]);
+            for (std::size_t i = 0; i < head; ++i) verify(mixed[got[i]] == mixed[reference[i]]);
         }
     }
 
     // Uncased sort must match folding every string then byte-stable-sorting.
     std::vector<std::string> folded(mixed_count);
     for (std::size_t i = 0; i < mixed_count; ++i) folded[i] = fold_string(mixed[i]);
-    assert(sz::argsort_utf8_uncased(mixed) == reference_order(folded, false));
-    assert(sz::argsort_utf8_uncased(mixed, 0, true) == reference_order(folded, true));
+    verify(sz::argsort_utf8_uncased(mixed) == reference_order(folded, false));
+    verify(sz::argsort_utf8_uncased(mixed, 0, true) == reference_order(folded, true));
 }
 
 /**
@@ -448,9 +447,9 @@ void test_intersect_unit() {
         // Empty sets
         {
             result = sz::intersect(empty, empty);
-            assert(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
             result = sz::intersect(abcd, empty);
-            assert(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            verify(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
         }
         // Each predetermined non-empty case is verified through the C++ wrapper and through the dispatched API plus
         // every natively-compiled kernel, so a serial/SIMD consensus that disagrees with the known answer is caught.
@@ -470,22 +469,22 @@ void test_intersect_unit() {
         // Identity check
         {
             result = sz::intersect(abcd, abcd);
-            assert(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            assert(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
+            verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
             check_all_intersect_kernels(&abcd_sequence, &abcd_sequence, {{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}});
         }
         // Identical size, different order
         {
             result = sz::intersect(abcd, dcba);
-            assert(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            assert(to_pairs(result) == idx_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
+            verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            verify(to_pairs(result) == idx_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
             check_all_intersect_kernels(&abcd_sequence, &dcba_sequence, {{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}});
         }
         // Different sets
         {
             result = sz::intersect(abcd, abs);
-            assert(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
-            assert(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}}));
+            verify(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
+            verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}}));
             check_all_intersect_kernels(&abcd_sequence, &abs_sequence, {{0u, 0u}, {1u, 1u}});
         }
     }
@@ -513,7 +512,7 @@ void test_intersect_unit() {
         // Try different joins
         result_t result;
         result = sz::intersect(all_strings, first_half);
-        assert(result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size());
+        verify(result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size());
     }
 }
 
@@ -594,13 +593,13 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
                     reference.argsort(&sequence, nullptr, order_reference.data(), top, reverse);
                     candidate.argsort(&sequence, nullptr, order_candidate.data(), top, reverse);
                     for (std::size_t i = 0; i < head; ++i)
-                        assert(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
+                        verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
 
                     // Uncased arg-sort: also stable, same exact-match requirement.
                     reference.argsort_uncased(&sequence, nullptr, order_reference.data(), top, reverse);
                     candidate.argsort_uncased(&sequence, nullptr, order_candidate.data(), top, reverse);
                     for (std::size_t i = 0; i < head; ++i)
-                        assert(order_reference[i] == order_candidate[i] &&
+                        verify(order_reference[i] == order_candidate[i] &&
                                "SIMD uncased arg-sort disagrees with serial");
                 }
             }

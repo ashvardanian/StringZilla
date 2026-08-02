@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
@@ -106,37 +105,37 @@ static void check_find_unit_(                      //
     sz_cptr_t const backward_expected = backward_offset == SZ_SIZE_MAX ? SZ_NULL_CHAR : haystack + backward_offset;
 
     // Dispatched (automatic kernel resolution).
-    assert(sz_find(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind(haystack, haystack_length, needle, needle_length) == backward_expected);
 
     // Manual propagation to each natively-compiled backend kernel.
-    assert(sz_find_serial(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind_serial(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find_serial(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind_serial(haystack, haystack_length, needle, needle_length) == backward_expected);
 #if SZ_USE_WESTMERE
-    assert(sz_find_westmere(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind_westmere(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find_westmere(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind_westmere(haystack, haystack_length, needle, needle_length) == backward_expected);
 #endif
 #if SZ_USE_HASWELL
-    assert(sz_find_haswell(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind_haswell(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find_haswell(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind_haswell(haystack, haystack_length, needle, needle_length) == backward_expected);
 #endif
 #if SZ_USE_SKYLAKE
-    assert(sz_find_skylake(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind_skylake(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find_skylake(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind_skylake(haystack, haystack_length, needle, needle_length) == backward_expected);
 #endif
 #if SZ_USE_NEON
-    assert(sz_find_neon(haystack, haystack_length, needle, needle_length) == forward_expected);
-    assert(sz_rfind_neon(haystack, haystack_length, needle, needle_length) == backward_expected);
+    verify(sz_find_neon(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_rfind_neon(haystack, haystack_length, needle, needle_length) == backward_expected);
 #endif
 #if SZ_USE_SVE
-    assert(sz_find_sve(haystack, haystack_length, needle, needle_length) == forward_expected);
+    verify(sz_find_sve(haystack, haystack_length, needle, needle_length) == forward_expected);
 #endif
 
     // The C++ `sz::string_view` wrapper resolves to the same offsets.
     sz::string_view const haystack_view(haystack, haystack_length);
     sz::string_view const needle_view(needle, needle_length);
-    assert(haystack_view.find(needle_view) == (forward_offset == SZ_SIZE_MAX ? sz::string_view::npos : forward_offset));
-    assert(haystack_view.rfind(needle_view) ==
+    verify(haystack_view.find(needle_view) == (forward_offset == SZ_SIZE_MAX ? sz::string_view::npos : forward_offset));
+    verify(haystack_view.rfind(needle_view) ==
            (backward_offset == SZ_SIZE_MAX ? sz::string_view::npos : backward_offset));
 }
 
@@ -173,24 +172,24 @@ void test_find_unit() {
     check_find_unit_(hello, hello_length, "xyz", 3, SZ_SIZE_MAX, SZ_SIZE_MAX); // Missing needle
 
     // `sz_find_byte` / `sz_rfind_byte` in isolation: the byte 'l' occurs at offsets 2, 3, and 9.
-    assert(sz_find_byte(hello, hello_length, "l") == hello + 2);           // Dispatched (automatic kernel)
-    assert(sz_rfind_byte(hello, hello_length, "l") == hello + 9);          // Dispatched (automatic kernel)
-    assert(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);    // Manual propagation to the serial kernel
-    assert(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);   // Manual propagation to the serial kernel
-    assert(sz_find_byte(hello, hello_length, "z") == SZ_NULL_CHAR);        // Missing byte
-    assert(sz_rfind_byte(hello, hello_length, "z") == SZ_NULL_CHAR);       // Missing byte
-    assert(sz_find_byte_serial(hello, hello_length, "z") == SZ_NULL_CHAR); // Missing byte, serial kernel
+    verify(sz_find_byte(hello, hello_length, "l") == hello + 2);           // Dispatched (automatic kernel)
+    verify(sz_rfind_byte(hello, hello_length, "l") == hello + 9);          // Dispatched (automatic kernel)
+    verify(sz_find_byte_serial(hello, hello_length, "l") == hello + 2);    // Manual propagation to the serial kernel
+    verify(sz_rfind_byte_serial(hello, hello_length, "l") == hello + 9);   // Manual propagation to the serial kernel
+    verify(sz_find_byte(hello, hello_length, "z") == SZ_NULL_CHAR);        // Missing byte
+    verify(sz_rfind_byte(hello, hello_length, "z") == SZ_NULL_CHAR);       // Missing byte
+    verify(sz_find_byte_serial(hello, hello_length, "z") == SZ_NULL_CHAR); // Missing byte, serial kernel
 #if SZ_USE_WESTMERE
-    assert(sz_find_byte_westmere(hello, hello_length, "l") == hello + 2);
-    assert(sz_rfind_byte_westmere(hello, hello_length, "l") == hello + 9);
+    verify(sz_find_byte_westmere(hello, hello_length, "l") == hello + 2);
+    verify(sz_rfind_byte_westmere(hello, hello_length, "l") == hello + 9);
 #endif
 #if SZ_USE_HASWELL
-    assert(sz_find_byte_haswell(hello, hello_length, "l") == hello + 2);
-    assert(sz_rfind_byte_haswell(hello, hello_length, "l") == hello + 9);
+    verify(sz_find_byte_haswell(hello, hello_length, "l") == hello + 2);
+    verify(sz_rfind_byte_haswell(hello, hello_length, "l") == hello + 9);
 #endif
 #if SZ_USE_SKYLAKE
-    assert(sz_find_byte_skylake(hello, hello_length, "l") == hello + 2);
-    assert(sz_rfind_byte_skylake(hello, hello_length, "l") == hello + 9);
+    verify(sz_find_byte_skylake(hello, hello_length, "l") == hello + 2);
+    verify(sz_rfind_byte_skylake(hello, hello_length, "l") == hello + 9);
 #endif
 
     // `sz_find_byteset` / `sz_rfind_byteset`: a set of vowels {a, e, i, o, u} first hits 'e' at offset 1
@@ -202,198 +201,198 @@ void test_find_unit() {
     sz_byteset_add(&vowels, 'i');
     sz_byteset_add(&vowels, 'o');
     sz_byteset_add(&vowels, 'u');
-    assert(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);  // Dispatched (automatic kernel)
-    assert(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7); // Dispatched (automatic kernel)
-    assert(sz_find_byteset_serial(hello, hello_length, &vowels) ==
+    verify(sz_find_byteset(hello, hello_length, &vowels) == hello + 1);  // Dispatched (automatic kernel)
+    verify(sz_rfind_byteset(hello, hello_length, &vowels) == hello + 7); // Dispatched (automatic kernel)
+    verify(sz_find_byteset_serial(hello, hello_length, &vowels) ==
            hello + 1); // Manual propagation to the serial kernel
-    assert(sz_rfind_byteset_serial(hello, hello_length, &vowels) ==
+    verify(sz_rfind_byteset_serial(hello, hello_length, &vowels) ==
            hello + 7); // Manual propagation to the serial kernel
     // A set with none of the present bytes returns `SZ_NULL_CHAR`.
     sz_byteset_t digits;
     sz_byteset_init(&digits);
     sz_byteset_add(&digits, '0');
     sz_byteset_add(&digits, '9');
-    assert(sz_find_byteset(hello, hello_length, &digits) == SZ_NULL_CHAR);        // No digit present
-    assert(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present, serial kernel
+    verify(sz_find_byteset(hello, hello_length, &digits) == SZ_NULL_CHAR);        // No digit present
+    verify(sz_find_byteset_serial(hello, hello_length, &digits) == SZ_NULL_CHAR); // No digit present, serial kernel
 
     // `sz_order` / `sz_equal`: lexicographic ordering and byte-equality on hand-verifiable pairs.
-    assert(sz_order("abc", 3, "abc", 3) == sz_equal_k);       // Equal strings
-    assert(sz_order("abc", 3, "abd", 3) == sz_less_k);        // Differ in the last byte
-    assert(sz_order("abd", 3, "abc", 3) == sz_greater_k);     // Differ in the last byte
-    assert(sz_order("ab", 2, "abc", 3) == sz_less_k);         // Prefix orders before the longer string
-    assert(sz_order("abc", 3, "ab", 2) == sz_greater_k);      // Longer string orders after its prefix
-    assert(sz_equal("abc", "abc", 3) == sz_true_k);           // Identical bytes
-    assert(sz_equal("abc", "abd", 3) == sz_false_k);          // Differing bytes
-    assert(sz_order_serial("abc", 3, "abd", 3) == sz_less_k); // Manual propagation to the serial kernel
-    assert(sz_equal_serial("abc", "abc", 3) == sz_true_k);    // Manual propagation to the serial kernel
-    assert(sz_equal_serial("abc", "abd", 3) == sz_false_k);   // Manual propagation to the serial kernel
+    verify(sz_order("abc", 3, "abc", 3) == sz_equal_k);       // Equal strings
+    verify(sz_order("abc", 3, "abd", 3) == sz_less_k);        // Differ in the last byte
+    verify(sz_order("abd", 3, "abc", 3) == sz_greater_k);     // Differ in the last byte
+    verify(sz_order("ab", 2, "abc", 3) == sz_less_k);         // Prefix orders before the longer string
+    verify(sz_order("abc", 3, "ab", 2) == sz_greater_k);      // Longer string orders after its prefix
+    verify(sz_equal("abc", "abc", 3) == sz_true_k);           // Identical bytes
+    verify(sz_equal("abc", "abd", 3) == sz_false_k);          // Differing bytes
+    verify(sz_order_serial("abc", 3, "abd", 3) == sz_less_k); // Manual propagation to the serial kernel
+    verify(sz_equal_serial("abc", "abc", 3) == sz_true_k);    // Manual propagation to the serial kernel
+    verify(sz_equal_serial("abc", "abd", 3) == sz_false_k);   // Manual propagation to the serial kernel
 #if SZ_USE_HASWELL
-    assert(sz_order_haswell("abc", 3, "abd", 3) == sz_less_k);
-    assert(sz_equal_haswell("abc", "abc", 3) == sz_true_k);
-    assert(sz_equal_haswell("abc", "abd", 3) == sz_false_k);
+    verify(sz_order_haswell("abc", 3, "abd", 3) == sz_less_k);
+    verify(sz_equal_haswell("abc", "abc", 3) == sz_true_k);
+    verify(sz_equal_haswell("abc", "abd", 3) == sz_false_k);
 #endif
 #if SZ_USE_SKYLAKE
-    assert(sz_order_skylake("abc", 3, "abd", 3) == sz_less_k);
-    assert(sz_equal_skylake("abc", "abc", 3) == sz_true_k);
-    assert(sz_equal_skylake("abc", "abd", 3) == sz_false_k);
+    verify(sz_order_skylake("abc", 3, "abd", 3) == sz_less_k);
+    verify(sz_equal_skylake("abc", "abc", 3) == sz_true_k);
+    verify(sz_equal_skylake("abc", "abd", 3) == sz_false_k);
 #endif
     // And the same orderings through the C++ `sz::string_view` comparison operators.
-    assert("abc"_sv == "abc"_sv); // Equality operator
-    assert("abc"_sv != "abd"_sv); // Inequality operator
-    assert("abc"_sv < "abd"_sv);  // Strictly-less operator
-    assert("abd"_sv > "abc"_sv);  // Strictly-greater operator
-    assert("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
+    verify("abc"_sv == "abc"_sv); // Equality operator
+    verify("abc"_sv != "abd"_sv); // Inequality operator
+    verify("abc"_sv < "abd"_sv);  // Strictly-less operator
+    verify("abd"_sv > "abc"_sv);  // Strictly-greater operator
+    verify("ab"_sv < "abc"_sv);   // Prefix orders before the longer string
 
     // Searching for a set of characters
-    assert(sz::string_view("a").find_first_of("az") == 0);
-    assert(sz::string_view("a").find_last_of("az") == 0);
-    assert(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
-    assert(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
+    verify(sz::string_view("a").find_first_of("az") == 0);
+    verify(sz::string_view("a").find_last_of("az") == 0);
+    verify(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
+    verify(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
 
-    assert(sz::string_view("a").find_first_not_of("xz") == 0);
-    assert(sz::string_view("a").find_last_not_of("xz") == 0);
-    assert(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
-    assert(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
+    verify(sz::string_view("a").find_first_not_of("xz") == 0);
+    verify(sz::string_view("a").find_last_not_of("xz") == 0);
+    verify(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
+    verify(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
 
-    assert(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
-    assert(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
-    assert(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
-    assert(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
-    assert(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
-    assert(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
-    assert(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
+    verify(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
+    verify(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
+    verify(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
+    verify(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
+    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
+    verify(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
+    verify(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
            sz::string_view::npos);
 
-    assert("aabaa"_sv.remove_prefix("a") == "abaa");
-    assert("aabaa"_sv.remove_suffix("a") == "aaba");
-    assert("aabaa"_sv.lstrip("a"_bs) == "baa");
-    assert("aabaa"_sv.rstrip("a"_bs) == "aab");
-    assert("aabaa"_sv.strip("a"_bs) == "b");
+    verify("aabaa"_sv.remove_prefix("a") == "abaa");
+    verify("aabaa"_sv.remove_suffix("a") == "aaba");
+    verify("aabaa"_sv.lstrip("a"_bs) == "baa");
+    verify("aabaa"_sv.rstrip("a"_bs) == "aab");
+    verify("aabaa"_sv.strip("a"_bs) == "b");
 
     // Check more advanced composite operations
-    assert("abbccc"_sv.partition('b').before.size() == 1);
-    assert("abbccc"_sv.partition("bb").before.size() == 1);
-    assert("abbccc"_sv.partition("bb").match.size() == 2);
-    assert("abbccc"_sv.partition("bb").after.size() == 3);
-    assert("abbccc"_sv.partition("bb").before == "a");
-    assert("abbccc"_sv.partition("bb").match == "bb");
-    assert("abbccc"_sv.partition("bb").after == "ccc");
-    assert("abb ccc"_sv.partition(sz::whitespaces_set()).after == "ccc");
+    verify("abbccc"_sv.partition('b').before.size() == 1);
+    verify("abbccc"_sv.partition("bb").before.size() == 1);
+    verify("abbccc"_sv.partition("bb").match.size() == 2);
+    verify("abbccc"_sv.partition("bb").after.size() == 3);
+    verify("abbccc"_sv.partition("bb").before == "a");
+    verify("abbccc"_sv.partition("bb").match == "bb");
+    verify("abbccc"_sv.partition("bb").after == "ccc");
+    verify("abb ccc"_sv.partition(sz::whitespaces_set()).after == "ccc");
 
     // Check ranges of search matches
-    assert("hello"_sv.find_all("l").size() == 2);
-    assert("hello"_sv.rfind_all("l").size() == 2);
+    verify("hello"_sv.find_all("l").size() == 2);
+    verify("hello"_sv.rfind_all("l").size() == 2);
 
-    assert(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
-    assert(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    assert("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
-    assert("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    assert(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
-    assert(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
-    assert(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
-    assert(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    assert("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
-    assert("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    assert(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
-    assert(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    verify(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
+    verify(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    verify("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
+    verify("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    verify(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
+    verify(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    verify(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
+    verify(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    verify("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
+    verify("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    verify(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
+    verify(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
 
-    assert("a.b.c.d"_sv.find_all(".").size() == 3);
-    assert("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
-    assert("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
-    assert("a.b,c.d"_sv.find_all(".,"_bs).size() == 3);
-    assert("a...b...c"_sv.rfind_all("..").size() == 4);
-    assert("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
-    assert("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
+    verify("a.b.c.d"_sv.find_all(".").size() == 3);
+    verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
+    verify("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
+    verify("a.b,c.d"_sv.find_all(".,"_bs).size() == 3);
+    verify("a...b...c"_sv.rfind_all("..").size() == 4);
+    verify("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
+    verify("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
 
-    let_assert(auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>(),
+    let_verify(auto finds = "a.b.c"_sv.find_all("abcd"_bs).template to<std::vector<std::string>>(),
                finds.size() == 3 && finds[0] == "a");
-    let_assert(auto rfinds = "a.b.c"_sv.rfind_all("abcd"_bs).template to<std::vector<std::string>>(),
+    let_verify(auto rfinds = "a.b.c"_sv.rfind_all("abcd"_bs).template to<std::vector<std::string>>(),
                rfinds.size() == 3 && rfinds[0] == "c");
 
     // Test propagating strings and their non-owning views into temporary ranges and iterators
-    assert(sz::find_all("abc"_sv, "b"_sv).size() == 1);
-    assert(sz::find_all("hello"_sv, "l"_sv).size() == 2);
-    assert(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
+    verify(sz::find_all("abc"_sv, "b"_sv).size() == 1);
+    verify(sz::find_all("hello"_sv, "l"_sv).size() == 2);
+    verify(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
 
     {
         sz::string h("abc"), n("b");
-        assert(sz::find_all(h, n).size() == 1);
+        verify(sz::find_all(h, n).size() == 1);
     }
     {
         sz::string h("hello"), n("l");
-        assert(sz::find_all(h, n).size() == 2);
+        verify(sz::find_all(h, n).size() == 2);
     }
     {
         sz::string h("abc"), n("b");
-        assert(sz::rfind_all(h, n).size() == 1);
+        verify(sz::rfind_all(h, n).size() == 1);
     }
 
-    assert(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
-    assert(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
-    assert(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
+    verify(sz::find_all(sz::string("abc"), sz::string("b")).size() == 1);
+    verify(sz::find_all(sz::string("hello"), sz::string("l")).size() == 2);
+    verify(sz::rfind_all(sz::string("abc"), sz::string("b")).size() == 1);
 
     // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
     // haystack would offset into a private copy - and under SSO those offsets look plausible.
     {
         sz::string haystack("hello world, hello cpp");
         sz::string sso("a b a");
-        let_assert(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
+        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view>>(),
                    matches.size() == 2 &&                          //
                        matches[0].data() - haystack.data() == 0 && //
                        matches[1].data() - haystack.data() == 13);
-        let_assert(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
+        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view>>(),
                    in_sso.size() == 2 &&                     //
                        in_sso[0].data() - sso.data() == 0 && //
                        in_sso[1].data() - sso.data() == 4);
     }
 
     // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
-    assert(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
+    verify(sz::find_all(sz::string("hello world, hello cpp"), sz::string("hello")).size() == 2);
 
     // Haystack and needle need not share a type - literals, views, and owning strings mix.
     {
         sz::string owning("a-b-c");
         sz::string_view view("a-b-c");
         sz::string needle("-");
-        assert(sz::find_all(view, "-").size() == 2);
-        assert(sz::find_all(owning, "-").size() == 2);
-        assert(sz::find_all(owning, view.substr(1, 1)).size() == 2);
-        assert(sz::find_all(view, needle).size() == 2);
-        assert(sz::split(owning, "-").size() == 3);
-        assert(sz::rsplit(view, needle).size() == 3);
-        assert(sz::split_characters(owning, "-").size() == 3);
+        verify(sz::find_all(view, "-").size() == 2);
+        verify(sz::find_all(owning, "-").size() == 2);
+        verify(sz::find_all(owning, view.substr(1, 1)).size() == 2);
+        verify(sz::find_all(view, needle).size() == 2);
+        verify(sz::split(owning, "-").size() == 3);
+        verify(sz::rsplit(view, needle).size() == 3);
+        verify(sz::split_characters(owning, "-").size() == 3);
     }
 
     // Check splitting - the inverse of `find_all` ranges
-    let_assert(auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>(),
+    let_verify(auto splits = ".a..c."_sv.split("."_bs).template to<std::vector<std::string>>(),
                splits.size() == 5 && splits[0] == "" && splits[1] == "a" && splits[4] == "");
-    let_assert(auto line_splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>(),
+    let_verify(auto line_splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>(),
                line_splits.size() == 2 && line_splits[0] == "line1\nline2\n" && line_splits[1] == "");
 
-    assert(""_sv.split(".").size() == 1);
-    assert(""_sv.rsplit(".").size() == 1);
+    verify(""_sv.split(".").size() == 1);
+    verify(""_sv.rsplit(".").size() == 1);
 
-    assert("hello"_sv.split("l").size() == 3);
-    assert("hello"_sv.rsplit("l").size() == 3);
-    assert(*advanced("hello"_sv.split("l").begin(), 0) == "he");
-    assert(*advanced("hello"_sv.rsplit("l").begin(), 0) == "o");
-    assert(*advanced("hello"_sv.split("l").begin(), 1) == "");
-    assert(*advanced("hello"_sv.rsplit("l").begin(), 1) == "");
-    assert(*advanced("hello"_sv.split("l").begin(), 2) == "o");
-    assert(*advanced("hello"_sv.rsplit("l").begin(), 2) == "he");
+    verify("hello"_sv.split("l").size() == 3);
+    verify("hello"_sv.rsplit("l").size() == 3);
+    verify(*advanced("hello"_sv.split("l").begin(), 0) == "he");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 0) == "o");
+    verify(*advanced("hello"_sv.split("l").begin(), 1) == "");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 1) == "");
+    verify(*advanced("hello"_sv.split("l").begin(), 2) == "o");
+    verify(*advanced("hello"_sv.rsplit("l").begin(), 2) == "he");
 
-    assert("a.b.c.d"_sv.split(".").size() == 4);
-    assert("a.b.c.d"_sv.rsplit(".").size() == 4);
-    assert(*("a.b.c.d"_sv.split(".").begin()) == "a");
-    assert(*("a.b.c.d"_sv.rsplit(".").begin()) == "d");
-    assert(*advanced("a.b.c.d"_sv.split(".").begin(), 1) == "b");
-    assert(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1) == "c");
-    assert(*advanced("a.b.c.d"_sv.split(".").begin(), 3) == "d");
-    assert(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3) == "a");
-    assert("a.b.,c,d"_sv.split(".,").size() == 2);
-    assert("a.b,c.d"_sv.split(".,"_bs).size() == 4);
+    verify("a.b.c.d"_sv.split(".").size() == 4);
+    verify("a.b.c.d"_sv.rsplit(".").size() == 4);
+    verify(*("a.b.c.d"_sv.split(".").begin()) == "a");
+    verify(*("a.b.c.d"_sv.rsplit(".").begin()) == "d");
+    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 1) == "b");
+    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1) == "c");
+    verify(*advanced("a.b.c.d"_sv.split(".").begin(), 3) == "d");
+    verify(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3) == "a");
+    verify("a.b.,c,d"_sv.split(".,").size() == 2);
+    verify("a.b,c.d"_sv.split(".,"_bs).size() == 4);
 
-    let_assert(auto rsplits = ".a..c."_sv.rsplit("."_bs).template to<std::vector<std::string>>(),
+    let_verify(auto rsplits = ".a..c."_sv.rsplit("."_bs).template to<std::vector<std::string>>(),
                rsplits.size() == 5 && rsplits[0] == "" && rsplits[1] == "c" && rsplits[4] == "");
 }
 
@@ -402,15 +401,15 @@ void test_find_unit() {
  */
 void test_compare_unit() {
     // Comparing relative order of the strings
-    assert("a"_sv.compare("a") == 0);
-    assert("a"_sv.compare("ab") == -1);
-    assert("ab"_sv.compare("a") == 1);
-    assert("a"_sv.compare("a\0"_sv) == -1);
-    assert("a\0"_sv.compare("a") == 1);
-    assert("a\0"_sv.compare("a\0"_sv) == 0);
-    assert("a"_sv == "a"_sv);
-    assert("a"_sv != "a\0"_sv);
-    assert("a\0"_sv == "a\0"_sv);
+    verify("a"_sv.compare("a") == 0);
+    verify("a"_sv.compare("ab") == -1);
+    verify("ab"_sv.compare("a") == 1);
+    verify("a"_sv.compare("a\0"_sv) == -1);
+    verify("a\0"_sv.compare("a") == 1);
+    verify("a\0"_sv.compare("a\0"_sv) == 0);
+    verify("a"_sv == "a"_sv);
+    verify("a"_sv != "a\0"_sv);
+    verify("a\0"_sv == "a\0"_sv);
 }
 
 #pragma endregion // Unit
@@ -467,7 +466,7 @@ void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size
 
                 sz_cptr_t const result_reference = reference(haystack, haystack_length, needle.data(), needle_length);
                 sz_cptr_t const result_candidate = candidate(haystack, haystack_length, needle.data(), needle_length);
-                assert(result_reference == result_candidate);
+                verify(result_reference == result_candidate);
             });
     };
 
@@ -529,7 +528,7 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
 
                 sz_cptr_t const result_reference = reference(haystack, haystack_length, &byteset);
                 sz_cptr_t const result_candidate = candidate(haystack, haystack_length, &byteset);
-                assert(result_reference == result_candidate);
+                verify(result_reference == result_candidate);
             });
     };
 
@@ -639,16 +638,16 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
                 std::printf("Mismatch at index #%zu: %zu != %zu\n", match_idx, match_stl.data() - haystack_stl.data(),
                             match_sz.data() - haystack_sz.data());
                 print_all_matches();
-                assert(false);
+                verify(false);
             }
         }
 
         // If one range is not finished, assert failure
         if (count_stl != count_sz) {
             print_all_matches();
-            assert(false);
+            verify(false);
         }
-        assert(begin_stl == end_stl && begin_sz == end_sz);
+        verify(begin_stl == end_stl && begin_sz == end_sz);
 
         offsets_stl.clear();
         offsets_sz.clear();
@@ -799,7 +798,7 @@ void test_lookup_fuzz(std::size_t lookup_tables_to_try, std::size_t slices_per_t
             sz::lookup<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
                              const_cast<char *>(transformed.data()) + slice_offset);
             for (std::size_t i = 0; i != slice_length; ++i) {
-                assert(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
+                verify(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
             }
         }
     }

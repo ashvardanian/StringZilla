@@ -16,7 +16,6 @@
 #endif
 #define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
 #include <cstdio>  // `std::printf`
 
@@ -76,16 +75,16 @@ void test_utf8_sentences_unit() {
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
         sz::string_view("Hi. Yo.").utf8_sentences().template to<std::vector<std::string>>();
-    assert(sentences.size() == 2 && "C++ utf8_sentences range");
+    verify(sentences.size() == 2 && "C++ utf8_sentences range");
 
     // Sentence counts for the shared prose fixtures; per-fixture rationale lives in test/utf8.hpp.
-    assert(utf8_prose_hotel_review().utf8_sentences().template to<std::vector<std::string>>().size() == 5 &&
+    verify(utf8_prose_hotel_review().utf8_sentences().template to<std::vector<std::string>>().size() == 5 &&
            "hotel_review sentences");
-    assert(utf8_prose_concert_post().utf8_sentences().template to<std::vector<std::string>>().size() == 4 &&
+    verify(utf8_prose_concert_post().utf8_sentences().template to<std::vector<std::string>>().size() == 4 &&
            "concert_post sentences");
-    assert(utf8_prose_news_lede().utf8_sentences().template to<std::vector<std::string>>().size() == 6 &&
+    verify(utf8_prose_news_lede().utf8_sentences().template to<std::vector<std::string>>().size() == 6 &&
            "news_lede sentences");
-    assert(utf8_prose_micro_hardbreaks().utf8_sentences().template to<std::vector<std::string>>().size() == 3 &&
+    verify(utf8_prose_micro_hardbreaks().utf8_sentences().template to<std::vector<std::string>>().size() == 3 &&
            "micro_hardbreaks sentences");
 }
 

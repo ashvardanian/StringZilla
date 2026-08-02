@@ -46,7 +46,6 @@
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#include <cassert> // C-style assertions
 #include <cstdio>  // `std::printf`
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
@@ -106,16 +105,16 @@ static void check_utf8_unit_(                                                   
     sz_cptr_t whitespace_text, sz_size_t whitespace_length,                               //
     std::vector<std::pair<sz_size_t, sz_size_t>> const &expected_whitespaces) {
 
-    assert(count(count_text, count_length) == expected_count);
+    verify(count(count_text, count_length) == expected_count);
 
     auto check_boundaries = [](sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length,
                                std::vector<std::pair<sz_size_t, sz_size_t>> const &expected) {
         sz_size_t found_offsets[16], found_lengths[16], consumed = 0;
         sz_size_t const found = finder(text, length, found_offsets, found_lengths, 16u, &consumed);
-        assert(found == expected.size());
+        verify(found == expected.size());
         for (sz_size_t index = 0; index != found; ++index) {
-            assert(found_offsets[index] == expected[index].first);
-            assert(found_lengths[index] == expected[index].second);
+            verify(found_offsets[index] == expected[index].first);
+            verify(found_lengths[index] == expected[index].second);
         }
     };
     check_boundaries(newlines, newline_text, newline_length, expected_newlines);
@@ -139,7 +138,7 @@ static void drain_matches_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t le
         sz_size_t consumed = 0;
         sz_size_t const emitted = matcher(text + position, length - position, offset_batch.data(), length_batch.data(),
                                           capacity, &consumed);
-        assert(consumed <= length - position && "Segmenter consumed past the input");
+        verify(consumed <= length - position && "Segmenter consumed past the input");
         for (sz_size_t index = 0; index != emitted; ++index)
             offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
         if (consumed == 0) break; // No forward progress: stop rather than spin.
@@ -167,7 +166,7 @@ static void reconstruct_segments_(matcher_type_ &&matcher, sz_cptr_t text, sz_si
         sz_size_t consumed = 0;
         sz_size_t const emitted = matcher(text + suffix, region, offset_batch.data(), length_batch.data(), capacity,
                                           &consumed);
-        assert(consumed <= region && "Segmenter consumed past the input");
+        verify(consumed <= region && "Segmenter consumed past the input");
         sz_size_t previous_end = 0;
         for (sz_size_t index = 0; index != emitted; ++index) {
             offsets.push_back(suffix + previous_end), lengths.push_back(offset_batch[index] - previous_end);
@@ -203,7 +202,7 @@ void test_utf8_tokens_unit() {
     // so 6 bytes encode exactly 3 codepoints {0x61, 0xDF, 0x4E2D}.
     char const mixed[] = "a\xC3\x9F\xE4\xB8\xAD"; // "aß中"
     sz_size_t const mixed_length = (sz_size_t)(sizeof(mixed) - 1);
-    assert(mixed_length == 6u);
+    verify(mixed_length == 6u);
 
     // `sz_utf8_newlines`: in "a\nb\r\nc" the `\n` is a length-1 newline at byte 1, and the `\r\n` is a
     // single length-2 newline at byte 3 (CRLF merges into one match).
@@ -276,41 +275,41 @@ void test_utf8_tokens_unit() {
         auto lines = [](sz::string_view t) { return t.utf8_split_newlines().template to<std::vector<std::string>>(); };
 
         // Basic newline types
-        let_assert(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
-        let_assert(auto l = lines("a\r\nb\r\nc"), l.size() == 3 && l[1] == "b");
-        let_assert(auto l = lines("a\rb\rc"), l.size() == 3 && l[0] == "a");
-        let_assert(auto l = lines("a\r\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b"); // CRLF counts as one newline
-        let_assert(auto l = lines("a\r\n\r\nb"), l.size() == 3 && l[0] == "a" && l[1].empty() && l[2] == "b");
-        let_assert(auto l = lines("\r\na\r\n\r\nb\r\n"),
+        let_verify(auto l = lines("a\nb\nc"), l.size() == 3 && l[0] == "a" && l[2] == "c");
+        let_verify(auto l = lines("a\r\nb\r\nc"), l.size() == 3 && l[1] == "b");
+        let_verify(auto l = lines("a\rb\rc"), l.size() == 3 && l[0] == "a");
+        let_verify(auto l = lines("a\r\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b"); // CRLF counts as one newline
+        let_verify(auto l = lines("a\r\n\r\nb"), l.size() == 3 && l[0] == "a" && l[1].empty() && l[2] == "b");
+        let_verify(auto l = lines("\r\na\r\n\r\nb\r\n"),
                    l.size() == 5 && l[0].empty() && l[1] == "a" && l[2].empty() && l[3] == "b" && l[4].empty());
 
         // Edge cases - N delimiters yield N+1 segments
-        let_assert(auto l = lines(""), l.size() == 1 && l[0] == "");
-        let_assert(auto l = lines("\n"), l.size() == 2 && l[0] == "" && l[1] == "");
-        let_assert(auto l = lines("\n\n"), l.size() == 3 && l[0] == "" && l[1] == "" && l[2] == "");
-        let_assert(auto l = lines("a\n"), l.size() == 2 && l[0] == "a" && l[1] == "");
-        let_assert(auto l = lines("\na"), l.size() == 2 && l[0] == "" && l[1] == "a");
-        let_assert(auto l = lines("a\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b");
-        let_assert(auto l = lines("single"), l.size() == 1 && l[0] == "single");
+        let_verify(auto l = lines(""), l.size() == 1 && l[0] == "");
+        let_verify(auto l = lines("\n"), l.size() == 2 && l[0] == "" && l[1] == "");
+        let_verify(auto l = lines("\n\n"), l.size() == 3 && l[0] == "" && l[1] == "" && l[2] == "");
+        let_verify(auto l = lines("a\n"), l.size() == 2 && l[0] == "a" && l[1] == "");
+        let_verify(auto l = lines("\na"), l.size() == 2 && l[0] == "" && l[1] == "a");
+        let_verify(auto l = lines("a\nb"), l.size() == 2 && l[0] == "a" && l[1] == "b");
+        let_verify(auto l = lines("single"), l.size() == 1 && l[0] == "single");
 
         // Mixed newlines with non-ASCII content
-        let_assert(auto l = lines("Hello 世界\nПривет\r\n😀"),
+        let_verify(auto l = lines("Hello 世界\nПривет\r\n😀"),
                    l.size() == 3 && l[0] == "Hello 世界" && l[1] == "Привет" && l[2] == "😀");
 
         // Multiple line types
-        let_assert(auto l = lines("a\nb\r\nc\rd"), l.size() == 4 && l[3] == "d");
+        let_verify(auto l = lines("a\nb\r\nc\rd"), l.size() == 4 && l[3] == "d");
 
         // Unicode line separators (U+2028, U+2029)
-        let_assert(auto l = lines("a\xE2\x80\xA8" "b"), l.size() >= 1);
-        let_assert(auto l = lines("a\xE2\x80\xA9" "b"), l.size() >= 1);
+        let_verify(auto l = lines("a\xE2\x80\xA8" "b"), l.size() >= 1);
+        let_verify(auto l = lines("a\xE2\x80\xA9" "b"), l.size() >= 1);
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto l = lines("a\x00" "b"_sv),
+        let_verify(auto l = lines("a\x00" "b"_sv),
                    l.size() == 1);                                      // NUL in middle - NOT a newline
-        let_assert(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
-        let_assert(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
-        let_assert(auto l = lines("\x00\n"_sv), l.size() == 2); // NUL before newline - find \n, yields 2 segments
-        let_assert(auto l = lines("\n\x00"_sv), l.size() == 2); // Newline before NUL - split correctly
+        let_verify(auto l = lines("\x00\x00\x00"_sv), l.size() == 1);   // Only NULs - one "line"
+        let_verify(auto l = lines("hello\x00world"_sv), l.size() == 1); // NUL between words - NOT a newline
+        let_verify(auto l = lines("\x00\n"_sv), l.size() == 2); // NUL before newline - find \n, yields 2 segments
+        let_verify(auto l = lines("\n\x00"_sv), l.size() == 2); // Newline before NUL - split correctly
     }
 
     // Split by Unicode whitespace (25 total Unicode White_Space characters)
@@ -320,101 +319,101 @@ void test_utf8_tokens_unit() {
         };
 
         // Basic ASCII whitespace (6 single-byte chars)
-        let_assert(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
-        let_assert(auto w = words("a\tb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0009 TAB
-        let_assert(auto w = words("a\nb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000A LF
-        let_assert(auto w = words("a\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000B VT
-        let_assert(auto w = words("a\fb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000C FF
-        let_assert(auto w = words("a\rb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000D CR
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");  // U+0020 SPACE
-        let_assert(auto w = words("a\r\nb"),
+        let_verify(auto w = words("Hello World"), w.size() == 2 && w[0] == "Hello" && w[1] == "World");
+        let_verify(auto w = words("a\tb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0009 TAB
+        let_verify(auto w = words("a\nb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000A LF
+        let_verify(auto w = words("a\vb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000B VT
+        let_verify(auto w = words("a\fb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000C FF
+        let_verify(auto w = words("a\rb"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+000D CR
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b");  // U+0020 SPACE
+        let_verify(auto w = words("a\r\nb"),
                    w.size() == 3 && w[0] == "a" && w[1].empty() && w[2] == "b"); // CR and LF are both spaces
 
         // Multiple spaces - N delimiters yield N+1 segments
-        let_assert(auto w = words("  a  b  "), w.size() == 7); // 6 spaces: "" "" "a" "" "b" "" ""
-        let_assert(auto w = words("a    b"), w.size() == 5);   // 4 spaces: "a" "" "" "" "b"
-        let_assert(auto w = words("a\tb\nc\rd"), w.size() == 4 && w[3] == "d");
+        let_verify(auto w = words("  a  b  "), w.size() == 7); // 6 spaces: "" "" "a" "" "b" "" ""
+        let_verify(auto w = words("a    b"), w.size() == 5);   // 4 spaces: "a" "" "" "" "b"
+        let_verify(auto w = words("a\tb\nc\rd"), w.size() == 4 && w[3] == "d");
 
         // Double-byte whitespace (2 chars)
-        let_assert(auto w = words("a\xC2\x85" "b"),
+        let_verify(auto w = words("a\xC2\x85" "b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+0085 NEL (Next Line)
-        let_assert(auto w = words("a\xC2\xA0" "b"),
+        let_verify(auto w = words("a\xC2\xA0" "b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+00A0 NBSP (No-Break Space)
 
         // Triple-byte whitespace (17 chars) - various space widths
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+1680 OGHAM SPACE MARK
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2000 EN QUAD
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2001 EM QUAD
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2002 EN SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2003 EM SPACE
-        let_assert(auto w = words("a b"),
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+1680 OGHAM SPACE MARK
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2000 EN QUAD
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2001 EM QUAD
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2002 EN SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2003 EM SPACE
+        let_verify(auto w = words("a b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b");                        // U+2004 THREE-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2005 FOUR-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2006 SIX-PER-EM SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2007 FIGURE SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2008 PUNCTUATION SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2009 THIN SPACE
-        let_assert(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+200A HAIR SPACE
-        let_assert(auto w = words("a\xE2\x80\xA8" "b"),
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2005 FOUR-PER-EM SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2006 SIX-PER-EM SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2007 FIGURE SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2008 PUNCTUATION SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2009 THIN SPACE
+        let_verify(auto w = words("a b"), w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+200A HAIR SPACE
+        let_verify(auto w = words("a\xE2\x80\xA8" "b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2028 LINE SEPARATOR
-        let_assert(auto w = words("a\xE2\x80\xA9" "b"),
+        let_verify(auto w = words("a\xE2\x80\xA9" "b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+2029 PARAGRAPH SEPARATOR
-        let_assert(auto w = words("a b"),
+        let_verify(auto w = words("a b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+202F NARROW NO-BREAK SPACE
-        let_assert(auto w = words("a b"),
+        let_verify(auto w = words("a b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+205F MEDIUM MATHEMATICAL SPACE
-        let_assert(auto w = words("a\xE3\x80\x80" "b"),
+        let_verify(auto w = words("a\xE3\x80\x80" "b"),
                    w.size() == 2 && w[0] == "a" && w[1] == "b"); // U+3000 IDEOGRAPHIC SPACE
 
         // Mixed byte-length whitespace patterns
-        let_assert(auto w = words("a \xC2\xA0" " b"), w.size() == 4);                // 1+2+3 byte mix: "a" "" "" "b"
-        let_assert(auto w = words("a\t\xC2\x85" "\xE3\x80\x80" "b"), w.size() == 4); // 1+2+3 byte mix: "a" "" "" "b"
-        let_assert(auto w = words("Hello 世界\xC2\xA0" "Привет"), w.size() == 3);    // Unicode content + spaces
+        let_verify(auto w = words("a \xC2\xA0" " b"), w.size() == 4);                // 1+2+3 byte mix: "a" "" "" "b"
+        let_verify(auto w = words("a\t\xC2\x85" "\xE3\x80\x80" "b"), w.size() == 4); // 1+2+3 byte mix: "a" "" "" "b"
+        let_verify(auto w = words("Hello 世界\xC2\xA0" "Привет"), w.size() == 3);    // Unicode content + spaces
 
         // Edge cases
-        let_assert(auto w = words(""), w.size() == 1 && w[0] == "");
-        let_assert(auto w = words("   "), w.size() == 4);                    // "" "" "" ""
-        let_assert(auto w = words("\t\n\r\v\f"), w.size() == 6);             // All single-byte whitespace
-        let_assert(auto w = words("\xC2\x85" "\xC2\xA0" ""), w.size() == 3); // All double-byte whitespace
-        let_assert(auto w = words("  \xE3\x80\x80" ""), w.size() == 4);      // All triple-byte whitespace
-        let_assert(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
+        let_verify(auto w = words(""), w.size() == 1 && w[0] == "");
+        let_verify(auto w = words("   "), w.size() == 4);                    // "" "" "" ""
+        let_verify(auto w = words("\t\n\r\v\f"), w.size() == 6);             // All single-byte whitespace
+        let_verify(auto w = words("\xC2\x85" "\xC2\xA0" ""), w.size() == 3); // All double-byte whitespace
+        let_verify(auto w = words("  \xE3\x80\x80" ""), w.size() == 4);      // All triple-byte whitespace
+        let_verify(auto w = words("NoSpaces"), w.size() == 1 && w[0] == "NoSpaces");
 
         // Non-ASCII content with regular spaces
-        let_assert(auto w = words("Hello 世界 Привет 😀"),
+        let_verify(auto w = words("Hello 世界 Привет 😀"),
                    w.size() == 4 && w[1] == "世界" && w[2] == "Привет" && w[3] == "😀");
-        let_assert(auto w = words("مرحبا بك"), w.size() == 2);
-        let_assert(auto w = words("שלום עולם"), w.size() == 2);
+        let_verify(auto w = words("مرحبا بك"), w.size() == 2);
+        let_verify(auto w = words("שלום עולם"), w.size() == 2);
 
         // U+001C-U+001F are separators, not whitespace
-        let_assert(auto w = words("ab"), w.size() == 1); // FILE SEPARATOR - correctly NOT split
-        let_assert(auto w = words("ab"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
-        let_assert(auto w = words("ab"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
-        let_assert(auto w = words("ab"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
+        let_verify(auto w = words("ab"), w.size() == 1); // FILE SEPARATOR - correctly NOT split
+        let_verify(auto w = words("ab"), w.size() == 1); // GROUP SEPARATOR - correctly NOT split
+        let_verify(auto w = words("ab"), w.size() == 1); // RECORD SEPARATOR - correctly NOT split
+        let_verify(auto w = words("ab"), w.size() == 1); // UNIT SEPARATOR - correctly NOT split
 
         // Use `_sv` literals for size-aware NUL-containing strings
-        let_assert(auto w = words("a\x00" "b"_sv),
+        let_verify(auto w = words("a\x00" "b"_sv),
                    w.size() == 1);                                      // NUL in middle - NOT split
-        let_assert(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
-        let_assert(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
-        let_assert(auto w = words("\x00 a"_sv), w.size() == 2);         // NUL before space - yields 2 segments
-        let_assert(auto w = words("a \x00"_sv), w.size() == 2);         // Space before NUL - yields 2 segments
+        let_verify(auto w = words("\x00\x00\x00"_sv), w.size() == 1);   // Only NULs - one "word"
+        let_verify(auto w = words("hello\x00world"_sv), w.size() == 1); // NUL between words - NOT split
+        let_verify(auto w = words("\x00 a"_sv), w.size() == 2);         // NUL before space - yields 2 segments
+        let_verify(auto w = words("a \x00"_sv), w.size() == 2);         // Space before NUL - yields 2 segments
 
         // U+200B/200C/200D (ZWSP/ZWNJ/ZWJ) are Format characters (Unicode White_Space=No): NOT whitespace, so a word
         // containing one stays a single segment. A regression here would shatter ZWJ emoji and Arabic/Indic words.
-        let_assert(auto w = words("a​b"), w.size() == 1); // ZERO WIDTH SPACE - Format char, not whitespace
-        let_assert(auto w = words("a‌b"), w.size() == 1); // ZERO WIDTH NON-JOINER - Format char, not whitespace
-        let_assert(auto w = words("a‍b"), w.size() == 1); // ZERO WIDTH JOINER - Format char, not whitespace
+        let_verify(auto w = words("a​b"), w.size() == 1); // ZERO WIDTH SPACE - Format char, not whitespace
+        let_verify(auto w = words("a‌b"), w.size() == 1); // ZERO WIDTH NON-JOINER - Format char, not whitespace
+        let_verify(auto w = words("a‍b"), w.size() == 1); // ZERO WIDTH JOINER - Format char, not whitespace
 
         // Consecutive different whitespace types - N delimiters yield N+1 segments
-        let_assert(auto w = words("a \t\n\r\vb"), w.size() == 6); // 5 whitespace chars between a and b
-        let_assert(auto w = words("a \xC2\xA0" " \xE3\x80\x80" "b"), w.size() == 5); // 1+2+3+3 byte: 4 delims -> 5 segs
+        let_verify(auto w = words("a \t\n\r\vb"), w.size() == 6); // 5 whitespace chars between a and b
+        let_verify(auto w = words("a \xC2\xA0" " \xE3\x80\x80" "b"), w.size() == 5); // 1+2+3+3 byte: 4 delims -> 5 segs
 
         // Long sequences to test chunk boundaries - N delimiters yield N+1 segments
-        scope_assert(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
+        scope_verify(std::string long_ws, for (int i = 0; i < 100; ++i) long_ws += " ",
                      sz::string_view(long_ws).utf8_split_whitespaces().template to<std::vector<std::string>>().size() ==
                          101); // 100 spaces = 101 empty segments
 
-        scope_assert(
+        scope_verify(
             std::string long_mixed,
             {
                 for (int i = 0; i < 50; ++i) long_mixed += "word ";
@@ -427,21 +426,21 @@ void test_utf8_tokens_unit() {
     // Test with `sz::string` - not just `sz::string_view`
     {
         sz::string multiline = "a\nb\nc";
-        let_assert(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
+        let_verify(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
                    l.size() == 3 && l[1] == "b");
 
         sz::string words_str = "foo bar baz";
-        let_assert(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
+        let_verify(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }
 
     // The kernel-named accessors yield the DELIMITER runs themselves (not the segments between).
     {
         // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
-        let_assert(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
+        let_verify(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
                    n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
         // `utf8_whitespaces` on "a b  c": each whitespace codepoint is its own delimiter (runs are not coalesced).
-        let_assert(auto w = sz::string_view("a b  c").utf8_whitespaces().template to<std::vector<std::string>>(),
+        let_verify(auto w = sz::string_view("a b  c").utf8_whitespaces().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[0] == " " && w[1] == " " && w[2] == " ");
     }
 
@@ -452,14 +451,14 @@ void test_utf8_tokens_unit() {
             std::string rejoined;
             for (auto piece : input.utf8_split_whitespaces().with_separators())
                 rejoined.append(piece.data(), piece.size());
-            let_assert(std::string round = rejoined, round == std::string(input.data(), input.size()));
+            let_verify(std::string round = rejoined, round == std::string(input.data(), input.size()));
         }
     }
 
     // `.skip_empty()`: a compile-time, branchless variant that drops empty segments, matching Rust/Python.
     {
         // Whitespace tokens across a double space: "a  b" -> "a", "b" (the empty middle dropped).
-        let_assert(
+        let_verify(
             auto t =
                 sz::string_view("a  b").utf8_split_whitespaces().skip_empty().template to<std::vector<std::string>>(),
             t.size() == 2 && t[0] == "a" && t[1] == "b");
@@ -527,7 +526,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         // Test `sz_utf8_count` equivalence
         sz_size_t count_result_reference = reference.count(data, length);
         sz_size_t count_result_candidate = candidate.count(data, length);
-        assert(count_result_reference == count_result_candidate);
+        verify(count_result_reference == count_result_candidate);
 
         // Sweep capacities: one huge (one-shot), the awkward 65/63 straddling the 64-byte AVX-512 window, the
         // binding default 16, and tiny 3/1 - stressing the per-window / mid-window capacity cut at every boundary.
@@ -537,22 +536,22 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
             if (capacity == 0) continue;
             drain_matches_(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
             drain_matches_(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
-            assert(reference_offsets == candidate_offsets && "Mismatch in newline offsets");
-            assert(reference_lengths == candidate_lengths && "Mismatch in newline lengths");
+            verify(reference_offsets == candidate_offsets && "Mismatch in newline offsets");
+            verify(reference_lengths == candidate_lengths && "Mismatch in newline lengths");
 
             drain_matches_(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
             drain_matches_(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
-            assert(reference_offsets == candidate_offsets && "Mismatch in whitespace offsets");
-            assert(reference_lengths == candidate_lengths && "Mismatch in whitespace lengths");
+            verify(reference_offsets == candidate_offsets && "Mismatch in whitespace offsets");
+            verify(reference_lengths == candidate_lengths && "Mismatch in whitespace lengths");
 
             // Segment-level (iterator) equivalence: catches a `bytes_consumed` overshoot at a window-aligned fill.
             reconstruct_segments_(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
             reconstruct_segments_(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
-            assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
+            verify(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in newline segments");
             reconstruct_segments_(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
             reconstruct_segments_(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
-            assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
+            verify(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in whitespace segments");
         }
     };
@@ -674,13 +673,13 @@ void test_utf8_tokens_safety() {
             sz_size_t bytes_consumed = 0;
             sz_size_t const found = finder(input, (sz_size_t)input_length, boundary_offsets, boundary_lengths,
                                            (sz_size_t)(max_input_length + 1), &bytes_consumed);
-            assert(bytes_consumed <= input_length && "Boundary finder consumed past the input");
+            verify(bytes_consumed <= input_length && "Boundary finder consumed past the input");
             for (sz_size_t index = 0; index != found; ++index) {
                 if (boundary_offsets[index] + boundary_lengths[index] <= input_length) continue;
                 std::fprintf(stderr, "%s emitted out-of-bounds boundary (offset=%zu len=%zu, input=%zu)\n", finder_name,
                              (std::size_t)boundary_offsets[index], (std::size_t)boundary_lengths[index], input_length);
                 print_utf8_test_bytes_("input", input, input_length);
-                assert(false && "Boundary finder emitted a span outside the input");
+                verify(false && "Boundary finder emitted a span outside the input");
             }
         };
 
@@ -930,21 +929,21 @@ void test_utf8_delimiters_unit() {
     auto check_backend = [&](sz_utf8_segmenter_t finder) {
         for (auto const &one : cases) {
             drain_matches_(finder, one.text, one.length, one.length + 1, offsets, lengths);
-            assert(offsets.size() == one.expected_count && "Delimiter count mismatch");
+            verify(offsets.size() == one.expected_count && "Delimiter count mismatch");
             if (one.expected_count) {
-                assert(offsets[0] == one.expected_offset && "Delimiter offset mismatch");
-                assert(lengths[0] == one.expected_length && "Delimiter length mismatch");
+                verify(offsets[0] == one.expected_offset && "Delimiter offset mismatch");
+                verify(lengths[0] == one.expected_length && "Delimiter length mismatch");
             }
         }
         for (resume_case_t const &one : resume_cases) {
             sz_size_t batch_offsets[4], batch_lengths[4], consumed = 0;
-            assert(one.capacity <= 4 && "Resume probe capacity outgrew its output buffers");
+            verify(one.capacity <= 4 && "Resume probe capacity outgrew its output buffers");
             sz_size_t const emitted = finder(one.text.data(), (sz_size_t)one.text.size(), batch_offsets, batch_lengths,
                                              one.capacity, &consumed);
-            assert(emitted == one.capacity && "Capacity-limited batch should fill the output");
-            assert(batch_offsets[emitted - 1] + batch_lengths[emitted - 1] == one.expected_consumed &&
+            verify(emitted == one.capacity && "Capacity-limited batch should fill the output");
+            verify(batch_offsets[emitted - 1] + batch_lengths[emitted - 1] == one.expected_consumed &&
                    "Last emitted delimiter ends elsewhere than the probe expects");
-            assert(consumed == one.expected_consumed &&
+            verify(consumed == one.expected_consumed &&
                    "Resume offset must be the end of the last emitted delimiter, not the vector window's edge");
         }
     };
@@ -954,20 +953,20 @@ void test_utf8_delimiters_unit() {
     // The C++ range wrappers over the same kernel, on the same hand-verifiable inputs.
     {
         // "Hi, world" -> delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
-        let_assert(
+        let_verify(
             auto d = sz::string_view("Hi, world").utf8_split_delimiters().template to<std::vector<std::string>>(),
             d.size() == 3 && d[0] == "Hi" && d[2] == "world");
         // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
-        let_assert(auto e = sz::string_view("a\xE2\x80\x94" "b")
+        let_verify(auto e = sz::string_view("a\xE2\x80\x94" "b")
                                 .utf8_split_delimiters()
                                 .skip_empty()
                                 .template to<std::vector<std::string>>(),
                    e.size() == 2 && e[0] == "a" && e[1] == "b");
         // The kernel-named accessor yields the DELIMITER runs themselves, not the segments between.
-        let_assert(auto r = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
+        let_verify(auto r = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
                    r.size() == 2 && r[0] == "," && r[1] == " ");
         // `.skip_empty()` drops the empty field between ',' and ' ': "Hi", "world".
-        let_assert(auto s = sz::string_view("Hi, world")
+        let_verify(auto s = sz::string_view("Hi, world")
                                 .utf8_split_delimiters()
                                 .skip_empty()
                                 .template to<std::vector<std::string>>(),
@@ -993,12 +992,12 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
     auto check = [&](sz_cptr_t data, sz_size_t length) {
         drain_matches_(finder_serial, data, length, length + 1, serial_offsets, serial_lengths);
         drain_matches_(finder_candidate, data, length, length + 1, candidate_offsets, candidate_lengths);
-        assert(candidate_offsets == serial_offsets && "Mismatch in delimiter offsets");
-        assert(candidate_lengths == serial_lengths && "Mismatch in delimiter lengths");
+        verify(candidate_offsets == serial_offsets && "Mismatch in delimiter offsets");
+        verify(candidate_lengths == serial_lengths && "Mismatch in delimiter lengths");
         // Resume path: a capacity of 3 forces repeated re-entry; the accumulated list must still match.
         drain_matches_(finder_candidate, data, length, 3u, resumed_offsets, resumed_lengths);
-        assert(resumed_offsets == serial_offsets && "Resume-path delimiter offsets diverged");
-        assert(resumed_lengths == serial_lengths && "Resume-path delimiter lengths diverged");
+        verify(resumed_offsets == serial_offsets && "Resume-path delimiter offsets diverged");
+        verify(resumed_lengths == serial_lengths && "Resume-path delimiter lengths diverged");
 
         // Segment-level (iterator) equivalence, mirroring the newline/whitespace differential: sweep the capacities
         // that straddle the 64-byte vector window, so a batch filling exactly at a window edge is caught. The
@@ -1007,8 +1006,8 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
         reconstruct_segments_(finder_serial, data, length, length + 64, serial_offsets, serial_lengths);
         for (sz_size_t capacity : capacities) {
             reconstruct_segments_(finder_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
-            assert(candidate_offsets == serial_offsets && "Mismatch in delimiter segment offsets");
-            assert(candidate_lengths == serial_lengths && "Mismatch in delimiter segment lengths");
+            verify(candidate_offsets == serial_offsets && "Mismatch in delimiter segment offsets");
+            verify(candidate_lengths == serial_lengths && "Mismatch in delimiter segment lengths");
         }
     };
 
@@ -1044,9 +1043,9 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
         drain_matches_(finder, input, (sz_size_t)input_length, (sz_size_t)input_length + 1, offsets, lengths);
         sz_size_t previous_end = 0;
         for (std::size_t index = 0; index != offsets.size(); ++index) {
-            assert(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
-            assert(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
-            assert(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
+            verify(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
+            verify(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
+            verify(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
             previous_end = offsets[index] + lengths[index];
         }
     };
