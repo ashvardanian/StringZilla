@@ -323,7 +323,7 @@ SZ_HELPER_AUTO __m256i sz_delimiter_astral_membership_haswell_( //
     __m256i const low8 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b2, _mm256_set1_epi8(0x03)), 6), b3);
 
     // group = astral_l1[super]; row id = astral_l2[group*256 + sub]; bitmap byte from astral columns.
-    __m256i const group = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l1_, super);
+    __m256i const group = sz_utf8_rune_lut16_haswell_(sz_utf8_delimiter_astral_l1_, super);
     // l2 index = group*256 + sub. group < 2, so the index high byte is `group` and the low byte is `sub`; a 512-entry
     // table is two 256-entry pages selected by `group`.
     __m256i const page0 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 0, sub);

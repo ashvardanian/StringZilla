@@ -302,6 +302,25 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base,
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 16, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
+/** @brief  64-entry byte LUT addressed by a per-lane index in `[0,64)`: a four-row cascade over the 64-byte table.
+ *          The bounded twin of @ref sz_utf8_rune_lut256_haswell_ for callers whose table is only four rows wide -
+ *          e.g. a 128-entry property table read as two 64-byte halves - so the loads never run past the array, and
+ *          only a quarter of the shuffle/blend work is issued. @p group_base must point to at least 64 valid bytes. */
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index) {
+    __m256i const index_within_low_u8x32 = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
+    __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index, 4), _mm256_set1_epi8(0x03));
+    return sz_utf8_rune_cascade_stage_haswell_(group_base, 4, index_selector_high_u8x32, index_within_low_u8x32);
+}
+
+/** @brief  16-entry byte LUT addressed by a per-lane index in `[0,16)`: one broadcast row and one `vpshufb`, with
+ *          no cascade at all, since a single row covers the whole index range. The bounded twin of
+ *          @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at least 16 valid
+ *          bytes, and @p index must have bit 7 clear on every lane or `vpshufb` zeroes that lane. */
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index) {
+    __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)group_base));
+    return _mm256_shuffle_epi8(lut_row_broadcast_u8x32, index);
+}
+
 /** @brief  Narrow four `u32x8` vectors, each carrying one class byte in the low byte of every dword, into a single
  *          `u8x32` in ascending lane order. The companion of the flat-leaf `vpgatherdd`, which resolves eight lanes
  *          per gather and so needs four gathers per 32-lane window. `packus` saturates per 128-bit half, leaving the

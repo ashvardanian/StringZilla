@@ -89,12 +89,12 @@ SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_of
 }
 
 /** @brief  Word_Break class byte for thirty-two ASCII codepoints (cp < 0x80) via the existing 128-entry property
- *          table, read in-register by two `lut256` halves (low six bits) blended on bit 6, the AVX2 twin of the
+ *          table, read in-register by two `lut64` halves (low six bits) blended on bit 6, the AVX2 twin of the
  *          icelake ASCII permute. The window byte equals the codepoint on ASCII lanes. */
 SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
     __m256i const index_low6 = _mm256_and_si256(bytes, _mm256_set1_epi8(0x3F));
-    __m256i const low_half = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
-    __m256i const high_half = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
+    __m256i const low_half = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
+    __m256i const high_half = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
     __m256i const high_bit = _mm256_cmpeq_epi8(_mm256_and_si256(bytes, _mm256_set1_epi8(0x40)), _mm256_set1_epi8(0x40));
     return _mm256_blendv_epi8(low_half, high_half, high_bit);
 }
