@@ -316,14 +316,14 @@ pub trait SequenceData {
 }
 
 // Implement SequenceData for slices.
-impl<T> SequenceData for [T] {
-    type Item = T;
+impl<Element> SequenceData for [Element] {
+    type Item = Element;
     #[inline]
     fn len(&self) -> usize {
         self.len()
     }
     #[inline]
-    fn index(&self, idx: usize) -> &T {
+    fn index(&self, idx: usize) -> &Element {
         &self[idx]
     }
 }
@@ -412,9 +412,9 @@ impl Default for Byteset {
     }
 }
 
-impl<T: AsRef<[u8]>> From<T> for Byteset {
+impl<Source: AsRef<[u8]>> From<Source> for Byteset {
     #[inline]
-    fn from(bytes: T) -> Self {
+    fn from(bytes: Source) -> Self {
         Self::from_bytes(bytes.as_ref())
     }
 }
@@ -861,16 +861,19 @@ pub fn version() -> SemVer {
 
 /// A fixed-size, compile-time known C-string buffer type.
 /// It keeps track of the number of written bytes (excluding the null terminator).
-pub struct FixedCString<const N: usize> {
-    buf: [u8; N],
+pub struct FixedCString<const CAPACITY: usize> {
+    buf: [u8; CAPACITY],
     len: usize,
 }
 
-impl<const N: usize> FixedCString<N> {
+impl<const CAPACITY: usize> FixedCString<CAPACITY> {
     /// Create a new, empty buffer.
     /// The buffer always has a terminating NUL (0) byte at position `len`.
     pub const fn new() -> Self {
-        Self { buf: [0u8; N], len: 0 }
+        Self {
+            buf: [0u8; CAPACITY],
+            len: 0,
+        }
     }
 
     /// Returns the raw pointer to the C string.
@@ -893,17 +896,17 @@ impl<const N: usize> FixedCString<N> {
     }
 }
 
-impl<const N: usize> Default for FixedCString<N> {
+impl<const CAPACITY: usize> Default for FixedCString<CAPACITY> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const N: usize> Write for FixedCString<N> {
+impl<const CAPACITY: usize> Write for FixedCString<CAPACITY> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         let bytes = s.as_bytes();
         // Ensure we have room for the new bytes and a NUL terminator.
-        if self.len + bytes.len() >= N {
+        if self.len + bytes.len() >= CAPACITY {
             return Err(fmt::Error);
         }
         self.buf[self.len..self.len + bytes.len()].copy_from_slice(bytes);
@@ -952,9 +955,9 @@ pub fn capabilities() -> SmallCString {
 ///
 /// A `u64` representing the checksum value of the input byte slice.
 #[inline(always)]
-pub fn bytesum<T>(text: T) -> u64
+pub fn bytesum<Text>(text: Text) -> u64
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
@@ -966,14 +969,17 @@ where
 /// This function is useful for scenarios where you need to replace the contents of a byte slice
 /// with the contents of another byte slice.
 #[inline(always)]
-pub fn move_<T, S>(target: &mut T, source: &S)
+pub fn move_<Target, Source>(target: &mut Target, source: &Source)
 where
-    T: AsMut<[u8]> + ?Sized,
-    S: AsRef<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
+    Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(target_slice.len() >= source_slice.len());
+    assert!(
+        target_slice.len() >= source_slice.len(),
+        "target must be at least as long as source"
+    );
     unsafe {
         sz_move(
             target_slice.as_mut_ptr() as *const c_void,
@@ -987,9 +993,9 @@ where
 /// scenarios where you need to set all bytes in a byte slice to a specific value, such as
 /// zeroing out a buffer or initializing a buffer with a specific byte pattern.
 #[inline(always)]
-pub fn fill<T>(target: &mut T, value: u8)
+pub fn fill<Target>(target: &mut Target, value: u8)
 where
-    T: AsMut<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     unsafe {
@@ -1001,14 +1007,17 @@ where
 /// This function is useful for scenarios where you need to replace the contents of a byte slice
 /// with the contents of another byte slice.
 #[inline(always)]
-pub fn copy<T, S>(target: &mut T, source: &S)
+pub fn copy<Target, Source>(target: &mut Target, source: &Source)
 where
-    T: AsMut<[u8]> + ?Sized,
-    S: AsRef<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
+    Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(target_slice.len() >= source_slice.len());
+    assert!(
+        target_slice.len() >= source_slice.len(),
+        "target must be at least as long as source"
+    );
     unsafe {
         sz_copy(
             target_slice.as_mut_ptr() as *mut c_void,
@@ -1044,14 +1053,17 @@ where
 /// assert_eq!(result, "hello world!");
 /// ```
 ///
-pub fn lookup<T, S>(target: &mut T, source: &S, table: [u8; 256])
+pub fn lookup<Target, Source>(target: &mut Target, source: &Source, table: [u8; 256])
 where
-    T: AsMut<[u8]> + ?Sized,
-    S: AsRef<[u8]> + ?Sized,
+    Target: AsMut<[u8]> + ?Sized,
+    Source: AsRef<[u8]> + ?Sized,
 {
     let target_slice = target.as_mut();
     let source_slice = source.as_ref();
-    assert!(target_slice.len() >= source_slice.len());
+    assert!(
+        target_slice.len() >= source_slice.len(),
+        "target must be at least as long as source"
+    );
     unsafe {
         sz_lookup(
             target_slice.as_mut_ptr() as *mut c_void,
@@ -1083,9 +1095,9 @@ where
 /// assert_eq!(text, *b"hello world!");
 /// ```
 ///
-pub fn lookup_inplace<T>(buffer: &mut T, table: [u8; 256])
+pub fn lookup_inplace<Buffer>(buffer: &mut Buffer, table: [u8; 256])
 where
-    T: AsMut<[u8]> + ?Sized,
+    Buffer: AsMut<[u8]> + ?Sized,
 {
     let buffer_slice = buffer.as_mut();
     unsafe {
@@ -1127,10 +1139,10 @@ where
 /// assert_eq!(&dest[..len], b"hello world");
 /// ```
 ///
-pub fn utf8_uncased_fold<T, D>(source: T, destination: &mut D) -> usize
+pub fn utf8_uncased_fold<Source, Destination>(source: Source, destination: &mut Destination) -> usize
 where
-    T: AsRef<[u8]>,
-    D: AsMut<[u8]> + ?Sized,
+    Source: AsRef<[u8]>,
+    Destination: AsMut<[u8]> + ?Sized,
 {
     let source_ref = source.as_ref();
     let dest_slice = destination.as_mut();
@@ -1177,10 +1189,10 @@ where
 /// assert_eq!(&dest[..len], "caf\u{00E9}".as_bytes()); // unchanged — already NFC
 /// ```
 ///
-pub fn utf8_norm<T, D>(source: T, form: Utf8NormalForm, destination: &mut D) -> usize
+pub fn utf8_norm<Source, Destination>(source: Source, form: Utf8NormalForm, destination: &mut Destination) -> usize
 where
-    T: AsRef<[u8]>,
-    D: AsMut<[u8]> + ?Sized,
+    Source: AsRef<[u8]>,
+    Destination: AsMut<[u8]> + ?Sized,
 {
     let source_ref = source.as_ref();
     let dest_slice = destination.as_mut();
@@ -1222,9 +1234,9 @@ where
 /// assert!(sz::utf8_find_denormalized("café", Utf8NormalForm::Nfc).is_none());
 /// ```
 ///
-pub fn utf8_find_denormalized<T>(source: T, form: Utf8NormalForm) -> Option<usize>
+pub fn utf8_find_denormalized<Source>(source: Source, form: Utf8NormalForm) -> Option<usize>
 where
-    T: AsRef<[u8]>,
+    Source: AsRef<[u8]>,
 {
     let source_ref = source.as_ref();
     let ptr = unsafe { sz_utf8_find_denormalized(source_ref.as_ptr() as *const c_void, source_ref.len(), form as i32) };
@@ -1282,10 +1294,10 @@ where
 /// assert_eq!(result2, Some((0, 5)));
 /// ```
 ///
-pub fn utf8_uncased_search<H, N>(haystack: H, needle: N) -> Option<(usize, usize)>
+pub fn utf8_uncased_search<Haystack, Needle>(haystack: Haystack, needle: Needle) -> Option<(usize, usize)>
 where
-    H: AsRef<[u8]>,
-    N: Utf8UncasedNeedleArg,
+    Haystack: AsRef<[u8]>,
+    Needle: Utf8UncasedNeedleArg,
 {
     needle.find_uncased_in(haystack.as_ref())
 }
@@ -1300,7 +1312,7 @@ pub trait Utf8UncasedNeedleArg {
     fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)>;
 }
 
-impl<T: AsRef<[u8]>> Utf8UncasedNeedleArg for T {
+impl<Source: AsRef<[u8]>> Utf8UncasedNeedleArg for Source {
     fn find_uncased_in(self, haystack: &[u8]) -> Option<(usize, usize)> {
         let needle_ref = self.as_ref();
         let mut matched_length: usize = 0;
@@ -1358,14 +1370,14 @@ impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
 ///
 /// # Arguments
 ///
-/// * `a`: First UTF-8 string.
-/// * `b`: Second UTF-8 string.
+/// * `first`: First UTF-8 string.
+/// * `second`: Second UTF-8 string.
 ///
 /// # Returns
 ///
-/// * `Ordering::Less` if `a < b`
-/// * `Ordering::Equal` if `a == b` (uncasedly)
-/// * `Ordering::Greater` if `a > b`
+/// * `Ordering::Less` if `first < second`
+/// * `Ordering::Equal` if `first == second` (uncasedly)
+/// * `Ordering::Greater` if `first > second`
 ///
 /// # Examples
 ///
@@ -1376,20 +1388,20 @@ impl<'a, 'b> Utf8UncasedNeedleArg for &'b Utf8UncasedNeedle<'a> {
 /// assert_eq!(sz::utf8_uncased_order("abc", "ABD"), Ordering::Less);
 /// ```
 ///
-pub fn utf8_uncased_order<A, B>(a: A, b: B) -> Ordering
+pub fn utf8_uncased_order<First, Second>(first: First, second: Second) -> Ordering
 where
-    A: AsRef<[u8]>,
-    B: AsRef<[u8]>,
+    First: AsRef<[u8]>,
+    Second: AsRef<[u8]>,
 {
-    let a_ref = a.as_ref();
-    let b_ref = b.as_ref();
+    let first_ref = first.as_ref();
+    let second_ref = second.as_ref();
 
     let result = unsafe {
         sz_utf8_uncased_order(
-            a_ref.as_ptr() as *const c_void,
-            a_ref.len(),
-            b_ref.as_ptr() as *const c_void,
-            b_ref.len(),
+            first_ref.as_ptr() as *const c_void,
+            first_ref.len(),
+            second_ref.as_ptr() as *const c_void,
+            second_ref.len(),
         )
     };
 
@@ -1413,19 +1425,19 @@ where
 /// assert_eq!(sz::order("apple", "banana"), Ordering::Less);
 /// assert_eq!(sz::order("abc", "abc"), Ordering::Equal);
 /// ```
-pub fn order<A, B>(a: A, b: B) -> Ordering
+pub fn order<First, Second>(first: First, second: Second) -> Ordering
 where
-    A: AsRef<[u8]>,
-    B: AsRef<[u8]>,
+    First: AsRef<[u8]>,
+    Second: AsRef<[u8]>,
 {
-    let a_ref = a.as_ref();
-    let b_ref = b.as_ref();
+    let first_ref = first.as_ref();
+    let second_ref = second.as_ref();
     let result = unsafe {
         sz_order(
-            a_ref.as_ptr() as *const c_void,
-            a_ref.len(),
-            b_ref.as_ptr() as *const c_void,
-            b_ref.len(),
+            first_ref.as_ptr() as *const c_void,
+            first_ref.len(),
+            second_ref.as_ptr() as *const c_void,
+            second_ref.len(),
         )
     };
     match result {
@@ -1445,20 +1457,20 @@ where
 /// assert!(sz::equal("abc", "abc"));
 /// assert!(!sz::equal("abc", "abd"));
 /// ```
-pub fn equal<A, B>(a: A, b: B) -> bool
+pub fn equal<First, Second>(first: First, second: Second) -> bool
 where
-    A: AsRef<[u8]>,
-    B: AsRef<[u8]>,
+    First: AsRef<[u8]>,
+    Second: AsRef<[u8]>,
 {
-    let a_ref = a.as_ref();
-    let b_ref = b.as_ref();
+    let first_ref = first.as_ref();
+    let second_ref = second.as_ref();
     // `sz_equal` assumes equal lengths; differing lengths can never be byte-equal.
-    a_ref.len() == b_ref.len()
+    first_ref.len() == second_ref.len()
         && unsafe {
             sz_equal(
-                a_ref.as_ptr() as *const c_void,
-                b_ref.as_ptr() as *const c_void,
-                a_ref.len(),
+                first_ref.as_ptr() as *const c_void,
+                second_ref.as_ptr() as *const c_void,
+                first_ref.len(),
             ) != 0
         }
 }
@@ -1549,9 +1561,9 @@ pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
 ///
 /// A `u64` representing the hash value of the input byte slice.
 #[inline(always)]
-pub fn hash_with_seed<T>(text: T, seed: u64) -> u64
+pub fn hash_with_seed<Text>(text: Text, seed: u64) -> u64
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as _;
@@ -1572,9 +1584,9 @@ where
 ///
 /// A `u64` representing the hash value of the input byte slice.
 #[inline(always)]
-pub fn hash<T>(text: T) -> u64
+pub fn hash<Text>(text: Text) -> u64
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     hash_with_seed(text, 0)
 }
@@ -1594,9 +1606,9 @@ where
 ///
 /// Panics if `out.len() != seeds.len()`.
 #[inline(always)]
-pub fn hash_multiseed_into<T>(text: T, seeds: &[u64], out: &mut [u64])
+pub fn hash_multiseed_into<Text>(text: Text, seeds: &[u64], out: &mut [u64])
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     assert_eq!(seeds.len(), out.len(), "`out` must have one slot per seed");
     let text_ref = text.as_ref();
@@ -1630,10 +1642,10 @@ where
 /// The C core returns the start of `haystack` for an empty needle, like `strstr`, so
 /// `find(haystack, b"")` is always `Some(0)`, matching `"abc".find("") == Some(0)`. This holds even
 /// for an empty `haystack`.
-pub fn find<H, N>(haystack: H, needle: N) -> Option<usize>
+pub fn find<Haystack, Needle>(haystack: Haystack, needle: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     let haystack_ref = haystack.as_ref();
     let needle_ref = needle.as_ref();
@@ -1670,10 +1682,10 @@ where
 /// `rfind(haystack, b"")` is always `Some(haystack.len())`, matching `"abc".rfind("") == Some(3)`.
 /// This holds even for an empty `haystack`.
 #[inline(always)]
-pub fn rfind<H, N>(haystack: H, needle: N) -> Option<usize>
+pub fn rfind<Haystack, Needle>(haystack: Haystack, needle: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     let haystack_ref = haystack.as_ref();
     let needle_ref = needle.as_ref();
@@ -1706,10 +1718,10 @@ where
 /// Mirrors `str::contains`: an empty needle is always present, so `contains(haystack, b"")` is
 /// always `true`, matching `"abc".contains("") == true` (even for an empty `haystack`).
 #[inline(always)]
-pub fn contains<H, N>(haystack: H, needle: N) -> bool
+pub fn contains<Haystack, Needle>(haystack: Haystack, needle: Needle) -> bool
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     find(haystack, needle).is_some()
 }
@@ -1728,9 +1740,9 @@ where
 /// An `Option<usize>` representing the index of the first occurrence of any byte from
 /// `needles` within `haystack`, if found, otherwise `None`.
 #[inline(always)]
-pub fn find_byteset<H>(haystack: H, needles: Byteset) -> Option<usize>
+pub fn find_byteset<Haystack>(haystack: Haystack, needles: Byteset) -> Option<usize>
 where
-    H: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
 {
     let haystack_ref = haystack.as_ref();
     let haystack_pointer = haystack_ref.as_ptr() as _;
@@ -1757,9 +1769,9 @@ where
 ///
 /// An `Option<usize>` representing the index of the last occurrence of any byte from
 /// `needles` within `haystack`, if found, otherwise `None`.
-pub fn rfind_byteset<H>(haystack: H, needles: Byteset) -> Option<usize>
+pub fn rfind_byteset<Haystack>(haystack: Haystack, needles: Byteset) -> Option<usize>
 where
-    H: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
 {
     let haystack_ref = haystack.as_ref();
     let haystack_pointer = haystack_ref.as_ptr() as _;
@@ -1787,10 +1799,10 @@ where
 /// An `Option<usize>` representing the index of the first occurrence of any byte from
 /// `needles` within `haystack`, if found, otherwise `None`.
 #[inline(always)]
-pub fn find_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+pub fn find_byte_from<Haystack, Needle>(haystack: Haystack, needles: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     find_byteset(haystack, Byteset::from(needles))
 }
@@ -1808,10 +1820,10 @@ where
 ///
 /// An `Option<usize>` representing the index of the last occurrence of any byte from
 /// `needles` within `haystack`, if found, otherwise `None`.
-pub fn rfind_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+pub fn rfind_byte_from<Haystack, Needle>(haystack: Haystack, needles: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     rfind_byteset(haystack, Byteset::from(needles))
 }
@@ -1829,10 +1841,10 @@ where
 ///
 /// An `Option<usize>` representing the index of the first occurrence of any byte not in
 /// `needles` within `haystack`, if found, otherwise `None`.
-pub fn find_byte_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
+pub fn find_byte_not_from<Haystack, Needle>(haystack: Haystack, needles: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     find_byteset(haystack, Byteset::from(needles).inverted())
 }
@@ -1850,25 +1862,25 @@ where
 ///
 /// An `Option<usize>` representing the index of the last occurrence of any byte not in
 /// `needles` within `haystack`, if found, otherwise `None`.
-pub fn rfind_byte_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
+pub fn rfind_byte_not_from<Haystack, Needle>(haystack: Haystack, needles: Needle) -> Option<usize>
 where
-    H: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    Haystack: AsRef<[u8]>,
+    Needle: AsRef<[u8]>,
 {
     rfind_byteset(haystack, Byteset::from(needles).inverted())
 }
 
 #[cfg(feature = "std")]
-fn replace_all_with_finder<F, R>(
+fn replace_all_with_finder<FindNext, FindPrev>(
     buffer: &mut Vec<u8>,
     needle_length: usize,
     replacement: &[u8],
-    mut find_next: F,
-    mut find_prev: R,
+    mut find_next: FindNext,
+    mut find_prev: FindPrev,
 ) -> Result<usize, Status>
 where
-    F: FnMut(&[u8], usize) -> Option<usize>,
-    R: FnMut(&[u8], usize) -> Option<usize>,
+    FindNext: FnMut(&[u8], usize) -> Option<usize>,
+    FindPrev: FnMut(&[u8], usize) -> Option<usize>,
 {
     if needle_length == 0 || buffer.is_empty() {
         return Ok(0);
@@ -2067,9 +2079,9 @@ pub fn try_replace_all_byteset(buffer: &mut Vec<u8>, byteset: Byteset, replaceme
 /// let text_cjk = "你好世界";
 /// assert_eq!(sz::count_utf8(text_cjk), 4);
 /// ```
-pub fn count_utf8<T>(text: T) -> usize
+pub fn count_utf8<Text>(text: Text) -> usize
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as *const c_void;
@@ -2107,9 +2119,9 @@ where
 /// assert_eq!(sz::find_nth_utf8(text_unicode, 5), Some(5)); // 🌍 starts at byte 5
 /// assert_eq!(sz::find_nth_utf8(text_unicode, 6), None);
 /// ```
-pub fn find_nth_utf8<T>(text: T, n: usize) -> Option<usize>
+pub fn find_nth_utf8<Text>(text: Text, n: usize) -> Option<usize>
 where
-    T: AsRef<[u8]>,
+    Text: AsRef<[u8]>,
 {
     let text_ref = text.as_ref();
     let text_pointer = text_ref.as_ptr() as *const c_void;
@@ -2325,9 +2337,9 @@ impl<'a, const STEPS: usize> Iterator for Utf8Runes<'a, STEPS> {
 /// ```
 ///
 /// After than,  `buffer` is filled with random byte values from 0 to 255.
-pub fn fill_random<T>(buffer: &mut T, nonce: u64)
+pub fn fill_random<Buffer>(buffer: &mut Buffer, nonce: u64)
 where
-    T: AsMut<[u8]> + ?Sized, // Allows for mutable references to dynamically sized types.
+    Buffer: AsMut<[u8]> + ?Sized, // Allows for mutable references to dynamically sized types.
 {
     let buffer_slice = buffer.as_mut();
     unsafe {
@@ -2340,8 +2352,8 @@ where
 ///
 /// The closure is expected to have type `Fn(usize) -> &[u8]` so that callers
 /// can write closures like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
-struct _SliceLookupView<F: Fn(usize) -> &'static [u8]> {
-    mapper: F,
+struct _SliceLookupView<Mapper: Fn(usize) -> &'static [u8]> {
+    mapper: Mapper,
 }
 
 /// Type-punned wrapper for the slice lookup view
@@ -2363,18 +2375,18 @@ unsafe extern "C" fn _slice_get_length_punned(handle: *const c_void, idx: Sorted
 }
 
 /// Type-specific function generator for each concrete type
-unsafe fn _get_slice_fn<F>() -> unsafe fn(*const c_void, usize) -> &'static [u8]
+unsafe fn _get_slice_fn<Mapper>() -> unsafe fn(*const c_void, usize) -> &'static [u8]
 where
-    F: Fn(usize) -> &'static [u8],
+    Mapper: Fn(usize) -> &'static [u8],
 {
-    unsafe fn get_slice_impl<F>(data: *const c_void, idx: usize) -> &'static [u8]
+    unsafe fn get_slice_impl<Mapper>(data: *const c_void, idx: usize) -> &'static [u8]
     where
-        F: Fn(usize) -> &'static [u8],
+        Mapper: Fn(usize) -> &'static [u8],
     {
-        let mapper = &*(data as *const F);
+        let mapper = &*(data as *const Mapper);
         mapper(idx)
     }
-    get_slice_impl::<F>
+    get_slice_impl::<Mapper>
 }
 
 /// Knobs for [`argsort`] and [`argsort_by`].
@@ -2440,7 +2452,11 @@ impl ArgsortOptions {
 /// sz::argsort(&labels, &mut order, sz::ArgsortOptions::default().reversed().uncased()).unwrap();
 /// assert_eq!(labels[order[0]], "beta"); // "beta"/"BETA" (fold-equal) before "Alpha", stable on ties
 /// ```
-pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status> {
+pub fn argsort<Element: AsRef<[u8]>>(
+    data: &[Element],
+    order: &mut [SortedIdx],
+    options: ArgsortOptions,
+) -> Result<(), Status> {
     if data.len() > order.len() {
         return Err(Status::BadAlloc);
     }
@@ -2465,10 +2481,10 @@ pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: Arg
 /// sz::argsort_by(|i| people[i].name.as_bytes(), &mut order, Default::default()).expect("sort failed");
 /// assert_eq!(&order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
 /// ```
-pub fn argsort_by<F, A>(mapper: F, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
+pub fn argsort_by<Mapper, Key>(mapper: Mapper, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
-    F: Fn(usize) -> A,
-    A: AsRef<[u8]>,
+    Mapper: Fn(usize) -> Key,
+    Key: AsRef<[u8]>,
 {
     // Adapter closure: given an index, call the provided mapper and then transmute the
     // resulting slice to have a `'static` lifetime. This transmute is safe as long as
@@ -2483,13 +2499,13 @@ where
 }
 
 /// Helper that takes an adapter (with a concrete type) and performs the FFI call.
-fn _argsort_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
+fn _argsort_impl<Adapter>(adapter: Adapter, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
 where
-    FAdapter: Fn(usize) -> &'static [u8],
+    Adapter: Fn(usize) -> &'static [u8],
 {
     let wrapper = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<FAdapter>() },
-        data: &adapter as *const FAdapter as *const c_void,
+        get_slice: unsafe { _get_slice_fn::<Adapter>() },
+        data: &adapter as *const Adapter as *const c_void,
     };
     let seq = _SzSequence {
         handle: &wrapper as *const _ as *const c_void,
@@ -2531,12 +2547,12 @@ where
 /// let set2 = ["cherry", "orange", "pineapple", "banana"];
 /// let mut positions1 = [0; 3]; // at least min(3, 4) == 3 elements.
 /// let mut positions2 = [0; 3];
-/// let n = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
+/// let n = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersection failed");
 /// assert!(n == 2); // "banana" and "cherry" are common.
 /// ```
-pub fn intersection<T: AsRef<[u8]>>(
-    data1: &[T],
-    data2: &[T],
+pub fn intersection<Element: AsRef<[u8]>>(
+    data1: &[Element],
+    data2: &[Element],
     seed: u64,
     positions1: &mut [SortedIdx],
     positions2: &mut [SortedIdx],
@@ -2596,21 +2612,21 @@ pub fn intersection<T: AsRef<[u8]>>(
 ///     0,
 ///     &mut positions1,
 ///     &mut positions2,
-/// ).expect("intersect failed");
+/// ).expect("intersection_by failed");
 /// assert!(n == 3); // "Alice", "Bob", and "Charlie" are common.
 /// ```
-pub fn intersection_by<F, G, A, B>(
-    mapper1: F,
-    mapper2: G,
+pub fn intersection_by<Mapper1, Mapper2, Key1, Key2>(
+    mapper1: Mapper1,
+    mapper2: Mapper2,
     seed: u64,
     positions1: &mut [SortedIdx],
     positions2: &mut [SortedIdx],
 ) -> Result<usize, Status>
 where
-    F: Fn(usize) -> A,
-    A: AsRef<[u8]>,
-    G: Fn(usize) -> B,
-    B: AsRef<[u8]>,
+    Mapper1: Fn(usize) -> Key1,
+    Key1: AsRef<[u8]>,
+    Mapper2: Fn(usize) -> Key2,
+    Key2: AsRef<[u8]>,
 {
     if positions1.len() != positions2.len() {
         return Err(Status::BadAlloc);
@@ -2641,9 +2657,9 @@ where
     )
 }
 
-fn _intersection_by_impl<FAdapter, GAdapter>(
-    adapter1: FAdapter,
-    adapter2: GAdapter,
+fn _intersection_by_impl<Adapter1, Adapter2>(
+    adapter1: Adapter1,
+    adapter2: Adapter2,
     seed: u64,
     positions1: &mut [SortedIdx],
     positions2: &mut [SortedIdx],
@@ -2651,16 +2667,16 @@ fn _intersection_by_impl<FAdapter, GAdapter>(
     count2: usize,
 ) -> Result<usize, Status>
 where
-    FAdapter: Fn(usize) -> &'static [u8],
-    GAdapter: Fn(usize) -> &'static [u8],
+    Adapter1: Fn(usize) -> &'static [u8],
+    Adapter2: Fn(usize) -> &'static [u8],
 {
     let wrapper1 = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<FAdapter>() },
-        data: &adapter1 as *const FAdapter as *const c_void,
+        get_slice: unsafe { _get_slice_fn::<Adapter1>() },
+        data: &adapter1 as *const Adapter1 as *const c_void,
     };
     let wrapper2 = _PunnedSliceLookupView {
-        get_slice: unsafe { _get_slice_fn::<GAdapter>() },
-        data: &adapter2 as *const GAdapter as *const c_void,
+        get_slice: unsafe { _get_slice_fn::<Adapter2>() },
+        data: &adapter2 as *const Adapter2 as *const c_void,
     };
     let seq1 = _SzSequence {
         handle: &wrapper1 as *const _ as *const c_void,
@@ -2747,11 +2763,11 @@ impl<'a> Matcher<'a> for MatcherType<'a> {
 /// let matches: Vec<&[u8]> = FindMatches::new(haystack, matcher).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
 /// ```
-pub struct FindMatches<'a, O: Overlaps = NonOverlapping> {
+pub struct FindMatches<'a, Overlap: Overlaps = NonOverlapping> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
-    _overlaps: PhantomData<O>,
+    _overlaps: PhantomData<Overlap>,
 }
 
 impl<'a> FindMatches<'a, NonOverlapping> {
@@ -2775,7 +2791,7 @@ impl<'a> FindMatches<'a, NonOverlapping> {
     }
 }
 
-impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
+impl<'a, Overlap: Overlaps> Iterator for FindMatches<'a, Overlap> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2796,7 +2812,7 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
             let end = start + self.matcher.needle_length();
             // A zero-length match (empty needle) must still advance by at least one byte, or
             // this would loop forever re-matching the same position.
-            let step = if O::OVERLAP {
+            let step = if Overlap::OVERLAP {
                 1
             } else {
                 self.matcher.needle_length().max(1)
@@ -2835,11 +2851,11 @@ impl<'a, O: Overlaps> Iterator for FindMatches<'a, O> {
 /// let splits: Vec<&[u8]> = FindSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
 /// ```
-pub struct FindSplits<'a, E: EmptySegments = KeepEmpty, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct FindSplits<'a, Empty: EmptySegments = KeepEmpty, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: usize,
-    _empties: PhantomData<E>,
+    _empties: PhantomData<Empty>,
 }
 
 impl<'a> FindSplits<'a, KeepEmpty, ITERATORS_DEFAULT_STEPS> {
@@ -2871,7 +2887,7 @@ impl<'a, const STEPS: usize> FindSplits<'a, KeepEmpty, STEPS> {
     }
 }
 
-impl<'a, E: EmptySegments, const STEPS: usize> FindSplits<'a, E, STEPS> {
+impl<'a, Empty: EmptySegments, const STEPS: usize> FindSplits<'a, Empty, STEPS> {
     /// Yields the next raw segment without the empty-segment filter.
     #[inline(always)]
     fn next_raw(&mut self) -> Option<&'a [u8]> {
@@ -2909,14 +2925,14 @@ impl<'a, E: EmptySegments, const STEPS: usize> FindSplits<'a, E, STEPS> {
     }
 }
 
-impl<'a, E: EmptySegments, const STEPS: usize> Iterator for FindSplits<'a, E, STEPS> {
+impl<'a, Empty: EmptySegments, const STEPS: usize> Iterator for FindSplits<'a, Empty, STEPS> {
     type Item = &'a [u8];
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let segment = self.next_raw()?;
-            if E::SKIP && segment.is_empty() {
+            if Empty::SKIP && segment.is_empty() {
                 continue;
             }
             return Some(segment);
@@ -2944,12 +2960,12 @@ impl<'a, E: EmptySegments, const STEPS: usize> Iterator for FindSplits<'a, E, ST
 /// let matches: Vec<&[u8]> = RFindMatches::new(haystack, matcher).collect();
 /// assert_eq!(matches, vec![b"aba", b"aba"]);
 /// ```
-pub struct RFindMatches<'a, O: Overlaps = NonOverlapping> {
+pub struct RFindMatches<'a, Overlap: Overlaps = NonOverlapping> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     // Right-exclusive bound of the unsearched prefix; `usize::MAX` means exhausted.
     position: usize,
-    _overlaps: PhantomData<O>,
+    _overlaps: PhantomData<Overlap>,
 }
 
 impl<'a> RFindMatches<'a, NonOverlapping> {
@@ -2973,7 +2989,7 @@ impl<'a> RFindMatches<'a, NonOverlapping> {
     }
 }
 
-impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
+impl<'a, Overlap: Overlaps> Iterator for RFindMatches<'a, Overlap> {
     type Item = &'a [u8];
 
     #[inline(always)]
@@ -2989,7 +3005,7 @@ impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
             let end = start + self.matcher.needle_length();
             let result = Some(&self.haystack[start..end]);
 
-            let skip = if O::OVERLAP {
+            let skip = if Overlap::OVERLAP {
                 self.matcher.needle_length().saturating_sub(1)
             } else {
                 0
@@ -3037,11 +3053,11 @@ impl<'a, O: Overlaps> Iterator for RFindMatches<'a, O> {
 /// let splits: Vec<&[u8]> = RFindSplits::new(haystack, matcher).collect();
 /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
 /// ```
-pub struct RFindSplits<'a, E: EmptySegments = KeepEmpty, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct RFindSplits<'a, Empty: EmptySegments = KeepEmpty, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
     position: Option<usize>, // End of the not-yet-segmented prefix; `None` once the final segment is yielded
-    _empties: PhantomData<E>,
+    _empties: PhantomData<Empty>,
 }
 
 impl<'a> RFindSplits<'a, KeepEmpty, ITERATORS_DEFAULT_STEPS> {
@@ -3073,7 +3089,7 @@ impl<'a, const STEPS: usize> RFindSplits<'a, KeepEmpty, STEPS> {
     }
 }
 
-impl<'a, E: EmptySegments, const STEPS: usize> RFindSplits<'a, E, STEPS> {
+impl<'a, Empty: EmptySegments, const STEPS: usize> RFindSplits<'a, Empty, STEPS> {
     /// Yields the next raw segment (reverse order) without the empty-segment filter.
     #[inline(always)]
     fn next_raw(&mut self) -> Option<&'a [u8]> {
@@ -3103,14 +3119,14 @@ impl<'a, E: EmptySegments, const STEPS: usize> RFindSplits<'a, E, STEPS> {
     }
 }
 
-impl<'a, E: EmptySegments, const STEPS: usize> Iterator for RFindSplits<'a, E, STEPS> {
+impl<'a, Empty: EmptySegments, const STEPS: usize> Iterator for RFindSplits<'a, Empty, STEPS> {
     type Item = &'a [u8];
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let segment = self.next_raw()?;
-            if E::SKIP && segment.is_empty() {
+            if Empty::SKIP && segment.is_empty() {
                 continue;
             }
             return Some(segment);
@@ -3263,9 +3279,9 @@ impl Overlaps for Overlapping {
 /// each boundary is computed on the fly (vs C++/Python which materialize the boundary array).
 pub struct Utf8Split<
     'a,
-    K: SegmenterKernel,
-    P: SplitParts = Between,
-    E: EmptySegments = KeepEmpty,
+    Kernel: SegmenterKernel,
+    Parts: SplitParts = Between,
+    Empty: EmptySegments = KeepEmpty,
     const STEPS: usize = ITERATORS_DEFAULT_STEPS,
 > {
     text: &'a [u8],
@@ -3277,10 +3293,12 @@ pub struct Utf8Split<
     spans: usize,            // Number of yieldable boundary spans; `spans == 0` is the end sentinel
     index: usize,            // Current boundary cursor (span is `bound(index)..bound(index + 1)`)
     advance: usize,          // Bytes to advance `suffix` by when the batch drains
-    _markers: PhantomData<(K, P, E)>,
+    _markers: PhantomData<(Kernel, Parts, Empty)>,
 }
 
-impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments> Utf8Split<'a, K, P, E, ITERATORS_DEFAULT_STEPS> {
+impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments>
+    Utf8Split<'a, Kernel, Parts, Empty, ITERATORS_DEFAULT_STEPS>
+{
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish.
     pub fn new(text: &'a [u8]) -> Self {
@@ -3288,7 +3306,9 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments> Utf8Split<'a, K, P
     }
 }
 
-impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize> Utf8Split<'a, K, P, E, STEPS> {
+impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize>
+    Utf8Split<'a, Kernel, Parts, Empty, STEPS>
+{
     /// Constructs an iterator buffering up to `STEPS` separators per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3308,18 +3328,18 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
         splits
     }
 
-    /// The `k`-th span boundary relative to `suffix`: `{0, s0.start, s0.end, s1.start, ..., [region]}`.
+    /// The `boundary`-th span boundary relative to `suffix`: `{0, s0.start, s0.end, s1.start, ..., [region]}`.
     #[inline]
-    fn bound(&self, k: usize) -> usize {
-        if k == 0 {
+    fn bound(&self, boundary: usize) -> usize {
+        if boundary == 0 {
             0
-        } else if k > 2 * self.separators {
+        } else if boundary > 2 * self.separators {
             self.region // the end-of-text closing boundary
-        } else if k & 1 == 1 {
-            self.starts[(k - 1) / 2]
+        } else if boundary & 1 == 1 {
+            self.starts[(boundary - 1) / 2]
         } else {
-            let i = k / 2 - 1;
-            self.starts[i] + self.lengths[i]
+            let separator = boundary / 2 - 1;
+            self.starts[separator] + self.lengths[separator]
         }
     }
 
@@ -3328,7 +3348,7 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
         self.region = self.text.len() - self.suffix;
         let mut consumed = 0usize;
         self.separators = unsafe {
-            K::segment(
+            Kernel::segment(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.region,
                 self.starts.as_mut_ptr(),
@@ -3362,16 +3382,16 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
         // Boundaries: `0`, then 2 per separator, plus the closing `region` at end-of-text.
         self.spans = 2 * self.separators + if eof { 1 } else { 0 };
         self.advance = if eof { self.region + 1 } else { consumed };
-        self.index = P::FIRST;
+        self.index = Parts::FIRST;
     }
 
-    /// Position `index` on the next yieldable span, refilling and (when `E::SKIP`) skipping empty spans.
-    /// `E::SKIP` is a const, so the skip loop folds away entirely for the default keep-empties (`KeepEmpty`) case.
+    /// Position `index` on the next yieldable span, refilling and (when `Empty::SKIP`) skipping empty spans.
+    /// `Empty::SKIP` is a const, so the skip loop folds away entirely for the default keep-empties (`KeepEmpty`) case.
     fn settle(&mut self) {
         loop {
-            if E::SKIP {
+            if Empty::SKIP {
                 while self.index < self.spans && self.bound(self.index + 1) == self.bound(self.index) {
-                    self.index += P::STRIDE;
+                    self.index += Parts::STRIDE;
                 }
             }
             if self.index < self.spans || self.spans == 0 {
@@ -3387,25 +3407,29 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
     }
 }
 
-impl<'a, K: SegmenterKernel, P: SplitParts, const STEPS: usize> Utf8Split<'a, K, P, KeepEmpty, STEPS> {
+impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, const STEPS: usize>
+    Utf8Split<'a, Kernel, Parts, KeepEmpty, STEPS>
+{
     /// Skips zero-length spans, returning the `SkipEmpty` variant. A compile-time policy (like C++'s
     /// `empty_segments_t`), not a runtime flag, so the keep-empties default stays branchless.
-    pub fn skip_empty(self) -> Utf8Split<'a, K, P, SkipEmpty, STEPS> {
+    pub fn skip_empty(self) -> Utf8Split<'a, Kernel, Parts, SkipEmpty, STEPS> {
         Utf8Split::with_steps(self.text)
     }
 }
 
-impl<'a, K: SegmenterKernel, E: EmptySegments, const STEPS: usize> Utf8Split<'a, K, Between, E, STEPS> {
+impl<'a, Kernel: SegmenterKernel, Empty: EmptySegments, const STEPS: usize>
+    Utf8Split<'a, Kernel, Between, Empty, STEPS>
+{
     /// The same split yielding segments **and** separators interleaved. Lossless (concatenation reproduces the
-    /// input) only when empties are kept; the `E` policy carries through the type, so `.skip_empty()` and
+    /// input) only when empties are kept; the `Empty` policy carries through the type, so `.skip_empty()` and
     /// `.with_separators()` compose in either order (matching the C++ binding).
-    pub fn with_separators(self) -> Utf8Split<'a, K, Both, E, STEPS> {
+    pub fn with_separators(self) -> Utf8Split<'a, Kernel, Both, Empty, STEPS> {
         Utf8Split::with_steps(self.text)
     }
 }
 
-impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize> Iterator
-    for Utf8Split<'a, K, P, E, STEPS>
+impl<'a, Kernel: SegmenterKernel, Parts: SplitParts, Empty: EmptySegments, const STEPS: usize> Iterator
+    for Utf8Split<'a, Kernel, Parts, Empty, STEPS>
 {
     type Item = &'a [u8];
 
@@ -3415,7 +3439,7 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
         }
         let begin = self.suffix + self.bound(self.index);
         let end = self.suffix + self.bound(self.index + 1);
-        self.index += P::STRIDE;
+        self.index += Parts::STRIDE;
         self.settle();
         Some(&self.text[begin..end])
     }
@@ -3499,17 +3523,17 @@ pub type Utf8Delimiters<'a, const STEPS: usize = ITERATORS_DEFAULT_STEPS> =
 /// kernels report `bytes_consumed`, so a full buffer simply resumes on the next call.
 pub const ITERATORS_DEFAULT_STEPS: usize = 64;
 
-pub struct Utf8Segments<'a, K: SegmenterKernel, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
+pub struct Utf8Segments<'a, Kernel: SegmenterKernel, const STEPS: usize = ITERATORS_DEFAULT_STEPS> {
     text: &'a [u8],
     suffix: usize, // Start of the not-yet-segmented suffix (a TR29 boundary; `text.len()` once exhausted)
     starts: [usize; STEPS], // Buffered word offsets, relative to `suffix`
     lengths: [usize; STEPS], // Buffered word lengths
     count: usize,  // Number of buffered words (0 once exhausted)
     index: usize,  // Index of the next word to yield from the buffer
-    _kernel: PhantomData<K>, // Zero-sized; selects the FFI segmenter at monomorphization.
+    _kernel: PhantomData<Kernel>, // Zero-sized; selects the FFI segmenter at monomorphization.
 }
 
-impl<'a, K: SegmenterKernel> Utf8Segments<'a, K, ITERATORS_DEFAULT_STEPS> {
+impl<'a, Kernel: SegmenterKernel> Utf8Segments<'a, Kernel, ITERATORS_DEFAULT_STEPS> {
     /// Constructs an iterator with the default batch size ([`ITERATORS_DEFAULT_STEPS`]).
     /// For an explicit batch size use [`Self::with_steps`] with a turbofish, e.g.
     /// `Utf8Wordbreaks::<1>::with_steps(text)`.
@@ -3518,7 +3542,7 @@ impl<'a, K: SegmenterKernel> Utf8Segments<'a, K, ITERATORS_DEFAULT_STEPS> {
     }
 }
 
-impl<'a, K: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, K, STEPS> {
+impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, Kernel, STEPS> {
     /// Constructs an iterator buffering up to `STEPS` words per FFI call.
     pub fn with_steps(text: &'a [u8]) -> Self {
         let mut splits = Self {
@@ -3538,7 +3562,7 @@ impl<'a, K: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, K, STEPS> {
     fn fill(&mut self) {
         let mut consumed = 0usize;
         self.count = unsafe {
-            K::segment(
+            Kernel::segment(
                 self.text[self.suffix..].as_ptr() as *const c_void,
                 self.text.len() - self.suffix,
                 self.starts.as_mut_ptr(),
@@ -3551,7 +3575,7 @@ impl<'a, K: SegmenterKernel, const STEPS: usize> Utf8Segments<'a, K, STEPS> {
     }
 }
 
-impl<'a, K: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<'a, K, STEPS> {
+impl<'a, Kernel: SegmenterKernel, const STEPS: usize> Iterator for Utf8Segments<'a, Kernel, STEPS> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -3907,9 +3931,9 @@ pub trait StringZillableUnary {
 /// let haystack = "Hello, world!";
 /// assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
 /// ```
-pub trait StringZillableBinary<'a, N>
+pub trait StringZillableBinary<'a, Needle>
 where
-    N: AsRef<[u8]> + 'a,
+    Needle: AsRef<[u8]> + 'a,
 {
     /// Searches for the first occurrence of `needle` in `self`.
     ///
@@ -3921,7 +3945,7 @@ where
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
     /// ```
-    fn sz_find(&self, needle: N) -> Option<usize>;
+    fn sz_find(&self, needle: Needle) -> Option<usize>;
 
     /// Searches for the last occurrence of `needle` in `self`.
     ///
@@ -3933,7 +3957,7 @@ where
     /// let haystack = "Hello, world, world!";
     /// assert_eq!(haystack.sz_rfind("world".as_bytes()), Some(14));
     /// ```
-    fn sz_rfind(&self, needle: N) -> Option<usize>;
+    fn sz_rfind(&self, needle: Needle) -> Option<usize>;
 
     /// Finds the index of the first character in `self` that is also present in `needles`.
     ///
@@ -3945,7 +3969,7 @@ where
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find_byte_from("aeiou".as_bytes()), Some(1));
     /// ```
-    fn sz_find_byte_from(&self, needles: N) -> Option<usize>;
+    fn sz_find_byte_from(&self, needles: Needle) -> Option<usize>;
 
     /// Finds the index of the last character in `self` that is also present in `needles`.
     ///
@@ -3957,7 +3981,7 @@ where
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_rfind_byte_from("aeiou".as_bytes()), Some(8));
     /// ```
-    fn sz_rfind_byte_from(&self, needles: N) -> Option<usize>;
+    fn sz_rfind_byte_from(&self, needles: Needle) -> Option<usize>;
 
     /// Finds the index of the first character in `self` that is not present in `needles`.
     ///
@@ -3969,7 +3993,7 @@ where
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_find_byte_not_from("aeiou".as_bytes()), Some(0));
     /// ```
-    fn sz_find_byte_not_from(&self, needles: N) -> Option<usize>;
+    fn sz_find_byte_not_from(&self, needles: Needle) -> Option<usize>;
 
     /// Finds the index of the last character in `self` that is not present in `needles`.
     ///
@@ -3981,7 +4005,7 @@ where
     /// let haystack = "Hello, world!";
     /// assert_eq!(haystack.sz_rfind_byte_not_from("aeiou".as_bytes()), Some(12));
     /// ```
-    fn sz_rfind_byte_not_from(&self, needles: N) -> Option<usize>;
+    fn sz_rfind_byte_not_from(&self, needles: Needle) -> Option<usize>;
 
     /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`.
     ///
@@ -4001,7 +4025,7 @@ where
     /// let overlapping: Vec<&[u8]> = haystack.sz_matches(needle).overlapping().collect();
     /// assert_eq!(overlapping, vec![b"aba", b"aba", b"aba"]); // opt in with .overlapping()
     /// ```
-    fn sz_matches(&'a self, needle: &'a N) -> FindMatches<'a>;
+    fn sz_matches(&'a self, needle: &'a Needle) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`, searching from the end.
     ///
@@ -4021,7 +4045,7 @@ where
     /// let overlapping: Vec<&[u8]> = haystack.sz_rmatches(needle).overlapping().collect();
     /// assert_eq!(overlapping, vec![b"aba", b"aba", b"aba"]); // opt in with .overlapping()
     /// ```
-    fn sz_rmatches(&'a self, needle: &'a N) -> RFindMatches<'a>;
+    fn sz_rmatches(&'a self, needle: &'a Needle) -> RFindMatches<'a>;
 
     /// Returns an iterator over the substrings of `self` that are separated by the given `needle`.
     ///
@@ -4039,7 +4063,7 @@ where
     /// let splits: Vec<&[u8]> = haystack.sz_splits(needle).collect();
     /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
     /// ```
-    fn sz_splits(&'a self, needle: &'a N) -> FindSplits<'a>;
+    fn sz_splits(&'a self, needle: &'a Needle) -> FindSplits<'a>;
 
     /// Returns an iterator over the substrings of `self` that are separated by the given `needle`, searching from the end.
     ///
@@ -4057,7 +4081,7 @@ where
     /// let splits: Vec<&[u8]> = haystack.sz_rsplits(needle).collect();
     /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
     /// ```
-    fn sz_rsplits(&'a self, needle: &'a N) -> RFindSplits<'a>;
+    fn sz_rsplits(&'a self, needle: &'a Needle) -> RFindSplits<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`.
     ///
@@ -4075,7 +4099,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_first_of(needles).collect();
     /// assert_eq!(matches, vec![b"e", b"o", b"o"]);
     /// ```
-    fn sz_find_first_of(&'a self, needles: &'a N) -> FindMatches<'a>;
+    fn sz_find_first_of(&'a self, needles: &'a Needle) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`, searching from the end.
     ///
@@ -4093,7 +4117,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_last_of(needles).collect();
     /// assert_eq!(matches, vec![b"o", b"o", b"e"]);
     /// ```
-    fn sz_find_last_of(&'a self, needles: &'a N) -> RFindMatches<'a>;
+    fn sz_find_last_of(&'a self, needles: &'a Needle) -> RFindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`.
     ///
@@ -4111,7 +4135,7 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_first_not_of(needles).collect();
     /// assert_eq!(matches, vec![b"H", b"l", b"l", b",", b" ", b"w", b"r", b"l", b"d", b"!"]);
     /// ```
-    fn sz_find_first_not_of(&'a self, needles: &'a N) -> FindMatches<'a>;
+    fn sz_find_first_not_of(&'a self, needles: &'a Needle) -> FindMatches<'a>;
 
     /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`, searching from the end.
     ///
@@ -4129,12 +4153,12 @@ where
     /// let matches: Vec<&[u8]> = haystack.sz_find_last_not_of(needles).collect();
     /// assert_eq!(matches, vec![b"!", b"d", b"l", b"r", b"w", b" ", b",", b"l", b"l", b"H"]);
     /// ```
-    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RFindMatches<'a>;
+    fn sz_find_last_not_of(&'a self, needles: &'a Needle) -> RFindMatches<'a>;
 }
 
-impl<T> StringZillableUnary for T
+impl<Source> StringZillableUnary for Source
 where
-    T: AsRef<[u8]> + ?Sized,
+    Source: AsRef<[u8]> + ?Sized,
 {
     fn sz_bytesum(&self) -> u64 {
         bytesum(self)
@@ -4189,69 +4213,69 @@ where
     }
 }
 
-impl<'a, T, N> StringZillableBinary<'a, N> for T
+impl<'a, Source, Needle> StringZillableBinary<'a, Needle> for Source
 where
-    T: AsRef<[u8]> + ?Sized,
-    N: AsRef<[u8]> + 'a,
+    Source: AsRef<[u8]> + ?Sized,
+    Needle: AsRef<[u8]> + 'a,
 {
-    fn sz_find(&self, needle: N) -> Option<usize> {
+    fn sz_find(&self, needle: Needle) -> Option<usize> {
         find(self, needle)
     }
 
-    fn sz_rfind(&self, needle: N) -> Option<usize> {
+    fn sz_rfind(&self, needle: Needle) -> Option<usize> {
         rfind(self, needle)
     }
 
-    fn sz_find_byte_from(&self, needles: N) -> Option<usize> {
+    fn sz_find_byte_from(&self, needles: Needle) -> Option<usize> {
         find_byte_from(self, needles)
     }
 
-    fn sz_rfind_byte_from(&self, needles: N) -> Option<usize> {
+    fn sz_rfind_byte_from(&self, needles: Needle) -> Option<usize> {
         rfind_byte_from(self, needles)
     }
 
-    fn sz_find_byte_not_from(&self, needles: N) -> Option<usize> {
+    fn sz_find_byte_not_from(&self, needles: Needle) -> Option<usize> {
         find_byte_not_from(self, needles)
     }
 
-    fn sz_rfind_byte_not_from(&self, needles: N) -> Option<usize> {
+    fn sz_rfind_byte_not_from(&self, needles: Needle) -> Option<usize> {
         rfind_byte_not_from(self, needles)
     }
 
-    fn sz_matches(&'a self, needle: &'a N) -> FindMatches<'a> {
+    fn sz_matches(&'a self, needle: &'a Needle) -> FindMatches<'a> {
         FindMatches::new(self.as_ref(), MatcherType::Find(needle.as_ref()))
     }
 
-    fn sz_rmatches(&'a self, needle: &'a N) -> RFindMatches<'a> {
+    fn sz_rmatches(&'a self, needle: &'a Needle) -> RFindMatches<'a> {
         RFindMatches::new(self.as_ref(), MatcherType::RFind(needle.as_ref()))
     }
 
-    fn sz_splits(&'a self, needle: &'a N) -> FindSplits<'a> {
+    fn sz_splits(&'a self, needle: &'a Needle) -> FindSplits<'a> {
         FindSplits::new(self.as_ref(), MatcherType::Find(needle.as_ref()))
     }
 
-    fn sz_rsplits(&'a self, needle: &'a N) -> RFindSplits<'a> {
+    fn sz_rsplits(&'a self, needle: &'a Needle) -> RFindSplits<'a> {
         RFindSplits::new(self.as_ref(), MatcherType::RFind(needle.as_ref()))
     }
 
-    fn sz_find_first_of(&'a self, needles: &'a N) -> FindMatches<'a> {
+    fn sz_find_first_of(&'a self, needles: &'a Needle) -> FindMatches<'a> {
         FindMatches::new(self.as_ref(), MatcherType::FindFirstOf(needles.as_ref()))
     }
 
-    fn sz_find_last_of(&'a self, needles: &'a N) -> RFindMatches<'a> {
+    fn sz_find_last_of(&'a self, needles: &'a Needle) -> RFindMatches<'a> {
         RFindMatches::new(self.as_ref(), MatcherType::FindLastOf(needles.as_ref()))
     }
 
-    fn sz_find_first_not_of(&'a self, needles: &'a N) -> FindMatches<'a> {
+    fn sz_find_first_not_of(&'a self, needles: &'a Needle) -> FindMatches<'a> {
         FindMatches::new(self.as_ref(), MatcherType::FindFirstNotOf(needles.as_ref()))
     }
 
-    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RFindMatches<'a> {
+    fn sz_find_last_not_of(&'a self, needles: &'a Needle) -> RFindMatches<'a> {
         RFindMatches::new(self.as_ref(), MatcherType::FindLastNotOf(needles.as_ref()))
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
 
     // Realistic multi-script prose fixtures (ASCII-source \u{} escapes; rendered prose in comments).
@@ -4323,6 +4347,92 @@ mod tests {
     const PROSE_MICRO_PREPEND: &str = "\u{600}\u{664} \u{d4e}\u{d15}";
     // A CR-LF pair and a U+2028 line separator: both Sep (force sentence and line breaks); CR-LF is one grapheme.
     const PROSE_MICRO_HARDBREAKS: &str = "A.\u{d}\u{a}B.\u{2028}C.";
+    // "cafe": precomposed e-acute (U+00E9, NFC) vs. base 'e' + combining acute U+0301 (NFD) - the
+    // shared NFC/NFD fixture pair for the UTF-8 normalization tests.
+    const CAFE_NFC: &str = "caf\u{00E9}";
+    const CAFE_NFD: &str = "cafe\u{0301}";
+
+    /// Folds a single codepoint into a fixed-size buffer, returning the buffer and its
+    /// used length. A single codepoint case-folds to at most a handful of bytes (the
+    /// longest known expansion is the Greek "ΐ" growing to 6 bytes), so a 16-byte buffer
+    /// is comfortably oversized.
+    fn fold_codepoint(codepoint: char) -> ([u8; 16], usize) {
+        let mut source_buffer = [0u8; 4];
+        let source = codepoint.encode_utf8(&mut source_buffer);
+        let mut folded = [0u8; 16];
+        let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
+        debug_assert!(folded_length <= folded.len(), "fold expansion exceeded buffer");
+        (folded, folded_length)
+    }
+
+    /// Independent oracle for uncased UTF-8 search. A match exists iff the fold of
+    /// `needle` is a contiguous run of the fold of `haystack`; the earliest such run wins.
+    /// The reported `(offset, length)` is in ORIGINAL haystack bytes, snapped to codepoint
+    /// boundaries. Implemented by folding each haystack codepoint and remembering, for every
+    /// folded byte, the original byte span of the codepoint that produced it.
+    fn reference_uncased_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+        // Fixed-size accumulators sized for the short test inputs.
+        const CAPACITY: usize = 512;
+        let mut haystack_folded = [0u8; CAPACITY];
+        // For each folded byte, the [start, end) byte range in the ORIGINAL haystack of the
+        // codepoint that produced it.
+        let mut source_starts = [0usize; CAPACITY];
+        let mut source_ends = [0usize; CAPACITY];
+        let mut haystack_folded_length = 0usize;
+
+        let mut original_offset = 0usize;
+        for codepoint in haystack.chars() {
+            let codepoint_length = codepoint.len_utf8();
+            let codepoint_start = original_offset;
+            let codepoint_end = original_offset + codepoint_length;
+            let (folded, folded_length) = fold_codepoint(codepoint);
+            for byte_index in 0..folded_length {
+                debug_assert!(haystack_folded_length < CAPACITY, "haystack fold overflow");
+                haystack_folded[haystack_folded_length] = folded[byte_index];
+                source_starts[haystack_folded_length] = codepoint_start;
+                source_ends[haystack_folded_length] = codepoint_end;
+                haystack_folded_length += 1;
+            }
+            original_offset = codepoint_end;
+        }
+
+        // Fold the needle independently.
+        let mut needle_folded = [0u8; CAPACITY];
+        let mut needle_folded_length = 0usize;
+        let mut needle_buffer = [0u8; 4];
+        for codepoint in needle.chars() {
+            let source = codepoint.encode_utf8(&mut needle_buffer);
+            let mut folded = [0u8; 16];
+            let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
+            for byte_index in 0..folded_length {
+                debug_assert!(needle_folded_length < CAPACITY, "needle fold overflow");
+                needle_folded[needle_folded_length] = folded[byte_index];
+                needle_folded_length += 1;
+            }
+        }
+
+        let haystack_fold = &haystack_folded[..haystack_folded_length];
+        let needle_fold = &needle_folded[..needle_folded_length];
+
+        // An empty needle-fold matches at the very start with zero length.
+        if needle_fold.is_empty() {
+            return Some((0, 0));
+        }
+        if needle_fold.len() > haystack_fold.len() {
+            return None;
+        }
+
+        // Slide the needle-fold over the haystack-fold; earliest run wins.
+        for run_start in 0..=(haystack_fold.len() - needle_fold.len()) {
+            let run_end = run_start + needle_fold.len();
+            if &haystack_fold[run_start..run_end] == needle_fold {
+                let offset = source_starts[run_start];
+                let length = source_ends[run_end - 1] - offset;
+                return Some((offset, length));
+            }
+        }
+        None
+    }
 
     // Realistic multi-script prose fixtures: per-family segment counts (oracle-locked: ICU root / uniseg).
     #[test]
@@ -4364,9 +4474,17 @@ mod tests {
         assert_eq!(PROSE_NEWS_LEDE.as_bytes().sz_utf8_linebreaks().count(), 32);
     }
 
-    use std::borrow::Cow;
+    extern crate alloc;
+    use alloc::borrow::Cow;
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+    use core::hash::Hasher as _;
+    // `HashMap`/`HashSet` have no `alloc`-only equivalent (unlike `Vec`/`String`/`BTreeMap`), so the
+    // handful of tests that need them stay behind `feature = "std"`; everything else here runs no_std.
+    #[cfg(feature = "std")]
     use std::collections::{HashMap, HashSet};
-    use std::hash::Hasher as _;
 
     use super::*;
     use crate::sz;
@@ -4544,6 +4662,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn hashmap_with_sz() {
         let mut map: HashMap<&str, i32, sz::BuildSzHasher> = HashMap::with_hasher(sz::BuildSzHasher::with_seed(0));
         map.insert("a", 1);
@@ -4556,6 +4675,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn hashset_with_sz() {
         let mut set: HashSet<&str, sz::BuildSzHasher> = HashSet::with_hasher(sz::BuildSzHasher::with_seed(42));
         assert!(set.insert("alpha"));
@@ -5048,6 +5168,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn intersection_default() {
         // Two slices of string literals.
         let set1 = ["banana", "apple", "cherry"];
@@ -5076,6 +5197,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn intersection_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
@@ -5130,13 +5252,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "BadAlloc")]
     fn intersection_size_checks() {
         let mut indices = [0usize; 10];
         let mut indices2 = [0usize; 5];
         let data = vec![0x41u8; 12];
 
-        intersection_by(|_: usize| &data, |_: usize| &data, 1, &mut indices, &mut indices2).unwrap();
+        sz::intersection_by(|_: usize| &data, |_: usize| &data, 1, &mut indices, &mut indices2).unwrap();
     }
 
     #[test]
@@ -5147,26 +5269,9 @@ mod tests {
         let set2 = ["", "z"];
         let mut positions1 = [0usize; 2];
         let mut positions2 = [0usize; 2];
-        let matched = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
+        let matched = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersection failed");
         assert_eq!(matched, 1);
         assert_eq!(set1[positions1[0]], set2[positions2[0]]);
-    }
-
-    #[test]
-    fn intersection_debug() {
-        println!("Starting intersection debug test...");
-
-        let set1 = ["banana", "apple", "cherry"];
-        let set2 = ["cherry", "orange", "pineapple", "banana"];
-        let mut positions1 = [0; 3];
-        let mut positions2 = [0; 3];
-
-        println!("About to call intersection function...");
-        let n = intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
-
-        println!("Intersection found {} common elements", n);
-        assert!(n == 2);
-        println!("Test passed!");
     }
 
     #[test]
@@ -5256,79 +5361,86 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "target must be at least as long as source")]
     fn copy_size_checks() {
         let long: Vec<u8> = vec![0; 20];
         let mut less_long: Vec<u8> = vec![0; 10];
 
-        copy(&mut less_long, &long);
+        sz::copy(&mut less_long, &long);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "target must be at least as long as source")]
     fn move_size_checks() {
         let long: Vec<u8> = vec![0; 20];
         let mut less_long: Vec<u8> = vec![0; 10];
 
-        move_(&mut less_long, &long);
+        sz::move_(&mut less_long, &long);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "target must be at least as long as source")]
     fn lookup_size_checks() {
         let long: Vec<u8> = vec![0; 20];
         let mut less_long: Vec<u8> = vec![0; 10];
 
         let lut: [u8; 256] = (0..=255u8).collect::<Vec<_>>().try_into().unwrap();
-        lookup(&mut less_long, &long, lut);
+        sz::lookup(&mut less_long, &long, lut);
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_same_length() {
         let mut buffer = b"abcabc".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"ab", b"XY").unwrap();
+        let replaced = sz::try_replace_all(&mut buffer, b"ab", b"XY").expect("try_replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"XYcXYc");
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_shrinks() {
         let mut buffer = b"aaaa".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"aa", b"b").unwrap();
+        let replaced = sz::try_replace_all(&mut buffer, b"aa", b"b").expect("try_replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"bb");
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_grows() {
         let mut buffer = b"aba".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"a", b"XYZ").unwrap();
+        let replaced = sz::try_replace_all(&mut buffer, b"a", b"XYZ").expect("try_replace_all failed");
         assert_eq!(replaced, 2);
         assert_eq!(buffer, b"XYZbXYZ");
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_byteset_basic() {
         let mut buffer = b"hello world".to_vec();
         let vowels = sz::Byteset::from("aeiou");
-        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"_").unwrap();
+        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"_").expect("try_replace_all_byteset failed");
         assert_eq!(replaced, 3);
         assert_eq!(buffer, b"h_ll_ w_rld");
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_byteset_grows() {
         let mut buffer = b"yzz".to_vec();
         let vowels = sz::Byteset::from("y");
-        let replaced = sz::try_replace_all_byteset(&mut buffer, vowels, b"(y)").unwrap();
+        let replaced =
+            sz::try_replace_all_byteset(&mut buffer, vowels, b"(y)").expect("try_replace_all_byteset failed");
         assert_eq!(replaced, 1);
         assert_eq!(buffer, b"(y)zz");
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn replace_all_noop_on_empty_pattern() {
         let mut buffer = b"unchanged".to_vec();
-        let replaced = sz::try_replace_all(&mut buffer, b"", b"anything").unwrap();
+        let replaced = sz::try_replace_all(&mut buffer, b"", b"anything").expect("try_replace_all failed");
         assert_eq!(replaced, 0);
         assert_eq!(buffer, b"unchanged");
     }
@@ -5508,48 +5620,36 @@ mod tests {
         assert_eq!(lines, vec![b"", b""]);
     }
 
+    /// Segments tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
+    /// a tiny batch (STEPS == 1) exercises the refill seam on every boundary the kernel reports.
+    fn assert_steps_invariant<Kernel: SegmenterKernel>(text: &[u8]) {
+        let forward: Vec<&[u8]> = Utf8Segments::<Kernel, ITERATORS_DEFAULT_STEPS>::new(text).collect();
+        assert_eq!(Utf8Segments::<Kernel, 1>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(Utf8Segments::<Kernel, 3>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_eq!(
+            Utf8Segments::<Kernel, 65>::with_steps(text).collect::<Vec<_>>(),
+            forward
+        );
+    }
+
     #[test]
     fn iter_word_utf8_splits_steps_invariance() {
-        // Words tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
-        // a tiny batch (STEPS == 1) exercises the refill seam on every word boundary.
-        let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Wordbreaks::new(text).collect();
-        assert_eq!(Utf8Wordbreaks::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Wordbreaks::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Wordbreaks::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_steps_invariant::<Wordbreaks>(b"Hi, world! A second sentence.");
     }
 
     #[test]
     fn iter_grapheme_utf8_splits_steps_invariance() {
-        // Grapheme clusters tile the input, so the yielded segments must match regardless of the batch size
-        // `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every cluster boundary.
-        let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Graphemes::new(text).collect();
-        assert_eq!(Utf8Graphemes::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Graphemes::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Graphemes::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_steps_invariant::<Graphemes>(b"Hi, world! A second sentence.");
     }
 
     #[test]
     fn iter_sentence_utf8_splits_steps_invariance() {
-        // Sentences tile the input, so the yielded segments must match regardless of the batch size `STEPS`;
-        // a tiny batch (STEPS == 1) exercises the refill seam on every sentence boundary.
-        let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Sentences::new(text).collect();
-        assert_eq!(Utf8Sentences::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Sentences::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Sentences::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+        assert_steps_invariant::<Sentences>(b"Hi, world! A second sentence.");
     }
 
     #[test]
-    fn iter_linewrap_utf8_splits_steps_invariance() {
-        // Linewrap segments tile the input, so the yielded segments must match regardless of
-        // the batch size `STEPS`; a tiny batch (STEPS == 1) exercises the refill seam on every line-break opportunity.
-        let text = b"Hi, world! A second sentence.";
-        let forward: Vec<&[u8]> = Utf8Linebreaks::new(text).collect();
-        assert_eq!(Utf8Linebreaks::<1>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linebreaks::<3>::with_steps(text).collect::<Vec<_>>(), forward);
-        assert_eq!(Utf8Linebreaks::<65>::with_steps(text).collect::<Vec<_>>(), forward);
+    fn iter_linebreak_utf8_splits_steps_invariance() {
+        assert_steps_invariant::<Linebreaks>(b"Hi, world! A second sentence.");
     }
 
     #[test]
@@ -5596,88 +5696,6 @@ mod tests {
         assert_eq!(&destination[..folded_length], "\u{03B9}\u{0308}\u{0301}".as_bytes());
     }
 
-    /// Folds a single codepoint into a fixed-size buffer, returning the buffer and its
-    /// used length. A single codepoint case-folds to at most a handful of bytes (the
-    /// longest known expansion is the Greek "ΐ" growing to 6 bytes), so a 16-byte buffer
-    /// is comfortably oversized.
-    fn fold_codepoint(codepoint: char) -> ([u8; 16], usize) {
-        let mut source_buffer = [0u8; 4];
-        let source = codepoint.encode_utf8(&mut source_buffer);
-        let mut folded = [0u8; 16];
-        let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
-        debug_assert!(folded_length <= folded.len(), "fold expansion exceeded buffer");
-        (folded, folded_length)
-    }
-
-    /// Independent oracle for uncased UTF-8 search. A match exists iff the fold of
-    /// `needle` is a contiguous run of the fold of `haystack`; the earliest such run wins.
-    /// The reported `(offset, length)` is in ORIGINAL haystack bytes, snapped to codepoint
-    /// boundaries. Implemented by folding each haystack codepoint and remembering, for every
-    /// folded byte, the original byte span of the codepoint that produced it.
-    fn reference_uncased_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-        // Fixed-size accumulators sized for the short test inputs.
-        const CAPACITY: usize = 512;
-        let mut haystack_folded = [0u8; CAPACITY];
-        // For each folded byte, the [start, end) byte range in the ORIGINAL haystack of the
-        // codepoint that produced it.
-        let mut source_starts = [0usize; CAPACITY];
-        let mut source_ends = [0usize; CAPACITY];
-        let mut haystack_folded_length = 0usize;
-
-        let mut original_offset = 0usize;
-        for codepoint in haystack.chars() {
-            let codepoint_length = codepoint.len_utf8();
-            let codepoint_start = original_offset;
-            let codepoint_end = original_offset + codepoint_length;
-            let (folded, folded_length) = fold_codepoint(codepoint);
-            for byte_index in 0..folded_length {
-                debug_assert!(haystack_folded_length < CAPACITY, "haystack fold overflow");
-                haystack_folded[haystack_folded_length] = folded[byte_index];
-                source_starts[haystack_folded_length] = codepoint_start;
-                source_ends[haystack_folded_length] = codepoint_end;
-                haystack_folded_length += 1;
-            }
-            original_offset = codepoint_end;
-        }
-
-        // Fold the needle independently.
-        let mut needle_folded = [0u8; CAPACITY];
-        let mut needle_folded_length = 0usize;
-        let mut needle_buffer = [0u8; 4];
-        for codepoint in needle.chars() {
-            let source = codepoint.encode_utf8(&mut needle_buffer);
-            let mut folded = [0u8; 16];
-            let folded_length = sz::utf8_uncased_fold(source.as_bytes(), &mut folded[..]);
-            for byte_index in 0..folded_length {
-                debug_assert!(needle_folded_length < CAPACITY, "needle fold overflow");
-                needle_folded[needle_folded_length] = folded[byte_index];
-                needle_folded_length += 1;
-            }
-        }
-
-        let haystack_fold = &haystack_folded[..haystack_folded_length];
-        let needle_fold = &needle_folded[..needle_folded_length];
-
-        // An empty needle-fold matches at the very start with zero length.
-        if needle_fold.is_empty() {
-            return Some((0, 0));
-        }
-        if needle_fold.len() > haystack_fold.len() {
-            return None;
-        }
-
-        // Slide the needle-fold over the haystack-fold; earliest run wins.
-        for run_start in 0..=(haystack_fold.len() - needle_fold.len()) {
-            let run_end = run_start + needle_fold.len();
-            if &haystack_fold[run_start..run_end] == needle_fold {
-                let offset = source_starts[run_start];
-                let length = source_ends[run_end - 1] - offset;
-                return Some((offset, length));
-            }
-        }
-        None
-    }
-
     #[test]
     fn utf8_uncased_search_crossing_expansions() {
         // Curated cross-expansion cases where folding changes byte counts and matches can
@@ -5722,8 +5740,6 @@ mod tests {
 
     #[test]
     fn utf8_norm_golden_vectors() {
-        use sz::Utf8NormalForm;
-
         // ASCII is invariant under all normalization forms.
         for form in [
             Utf8NormalForm::Nfd,
@@ -5737,29 +5753,26 @@ mod tests {
             assert_eq!(&dest[..len], source.as_bytes(), "ASCII unchanged under {:?}", form);
         }
 
-        // "café" with precomposed é (U+00E9) is already NFC.
-        // NFC → NFC is a no-op (same bytes out).
-        let cafe_nfc = "caf\u{00E9}"; // 5 bytes: c a f 0xC3 0xA9
+        // CAFE_NFC has precomposed é (U+00E9); NFC → NFC is a no-op (same bytes out).
         {
-            let mut dest = vec![0u8; cafe_nfc.len() * 18];
-            let len = sz::utf8_norm(cafe_nfc, Utf8NormalForm::Nfc, &mut dest);
-            assert_eq!(&dest[..len], cafe_nfc.as_bytes(), "café NFC→NFC unchanged");
+            let mut dest = vec![0u8; CAFE_NFC.len() * 18];
+            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut dest);
+            assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFC→NFC unchanged");
         }
 
-        // "café" with decomposed é = base 'e' + combining acute U+0301 is NFD.
-        // NFD → NFC must produce the precomposed form.
-        let cafe_nfd = "cafe\u{0301}"; // 6 bytes: c a f e 0xCC 0x81
+        // CAFE_NFD has decomposed é (base 'e' + combining acute U+0301); NFD → NFC must produce
+        // the precomposed form.
         {
-            let mut dest = vec![0u8; cafe_nfd.len() * 18];
-            let len = sz::utf8_norm(cafe_nfd, Utf8NormalForm::Nfc, &mut dest);
-            assert_eq!(&dest[..len], cafe_nfc.as_bytes(), "café NFD→NFC gives precomposed form");
+            let mut dest = vec![0u8; CAFE_NFD.len() * 18];
+            let len = sz::utf8_norm(CAFE_NFD, Utf8NormalForm::Nfc, &mut dest);
+            assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFD→NFC gives precomposed form");
         }
 
         // NFD of the precomposed form must give the decomposed form.
         {
-            let mut dest = vec![0u8; cafe_nfc.len() * 18];
-            let len = sz::utf8_norm(cafe_nfc, Utf8NormalForm::Nfd, &mut dest);
-            assert_eq!(&dest[..len], cafe_nfd.as_bytes(), "café NFC→NFD gives decomposed form");
+            let mut dest = vec![0u8; CAFE_NFC.len() * 18];
+            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfd, &mut dest);
+            assert_eq!(&dest[..len], CAFE_NFD.as_bytes(), "café NFC→NFD gives decomposed form");
         }
 
         // Ligature U+FB03 ﬃ: NFKD and NFKC both decompose to "ffi".
@@ -5777,7 +5790,7 @@ mod tests {
 
         // Idempotence: norm(norm(x, NFC), NFC) == norm(x, NFC).
         {
-            let source = cafe_nfd;
+            let source = CAFE_NFD;
             let mut first = vec![0u8; source.len() * 18];
             let first_len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut first);
             let first_result = first[..first_len].to_vec();
@@ -5790,20 +5803,16 @@ mod tests {
 
     #[test]
     fn utf8_find_denormalized() {
-        use sz::Utf8NormalForm;
-
         // NFC string: precomposed é — no violation.
-        let nfc_str = "caf\u{00E9}";
         assert_eq!(
-            sz::utf8_find_denormalized(nfc_str, Utf8NormalForm::Nfc),
+            sz::utf8_find_denormalized(CAFE_NFC, Utf8NormalForm::Nfc),
             None,
             "NFC string has no NFC violation"
         );
 
         // NFD string: decomposed e + combining acute U+0301.
         // The combining mark violates NFC (it should be composed with the preceding base).
-        let nfd_str = "cafe\u{0301}";
-        let violation = sz::utf8_find_denormalized(nfd_str, Utf8NormalForm::Nfc);
+        let violation = sz::utf8_find_denormalized(CAFE_NFD, Utf8NormalForm::Nfc);
         assert!(violation.is_some(), "NFD string must report an NFC violation");
         // The violation may point to the base 'e' (byte 3) or to the combining mark (byte 4);
         // either is within the suffix that must change during composition.

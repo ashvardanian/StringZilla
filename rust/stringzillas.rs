@@ -68,7 +68,7 @@ impl<'a> AnyCharsTape<'a> {
     /// Copy string sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
     /// automatically from the input size. Use this to feed the engines' `compute_into` methods
     /// without depending on the `stringtape` crate directly.
-    pub fn from_sequences<T: AsRef<str>>(sequences: &[T]) -> Result<Self, Error> {
+    pub fn from_sequences<Sequence: AsRef<str>>(sequences: &[Sequence]) -> Result<Self, Error> {
         copy_chars_into_tape(sequences, false)
     }
 }
@@ -86,7 +86,7 @@ impl<'a> AnyBytesTape<'a> {
     /// Copy byte sequences into an owned unified-memory tape, choosing 32- or 64-bit offsets
     /// automatically from the input size. Use this to feed the engines' `compute_into` methods
     /// without depending on the `stringtape` crate directly.
-    pub fn from_sequences<T: AsRef<[u8]>>(sequences: &[T]) -> Result<Self, Error> {
+    pub fn from_sequences<Sequence: AsRef<[u8]>>(sequences: &[Sequence]) -> Result<Self, Error> {
         copy_bytes_into_tape(sequences, false)
     }
 }
@@ -517,33 +517,33 @@ impl<'a> From<&CharsTapeView<'a, u64>> for SzSequenceU64Tape {
 }
 
 /// Generic callback to get start of string at index for byte slices
-extern "C" fn sz_sequence_get_start_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> *const u8 {
+extern "C" fn sz_sequence_get_start_generic<Sequence: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> *const u8 {
     unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        let strings = core::slice::from_raw_parts(handle as *const Sequence, index + 1);
         strings[index].as_ref().as_ptr()
     }
 }
 
 /// Generic callback to get length of string at index for byte slices
-extern "C" fn sz_sequence_get_length_generic<T: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> usize {
+extern "C" fn sz_sequence_get_length_generic<Sequence: AsRef<[u8]>>(handle: *mut c_void, index: usize) -> usize {
     unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        let strings = core::slice::from_raw_parts(handle as *const Sequence, index + 1);
         strings[index].as_ref().len()
     }
 }
 
 /// Generic callback to get start of string at index for string slices
-extern "C" fn sz_sequence_get_start_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> *const u8 {
+extern "C" fn sz_sequence_get_start_str<Sequence: AsRef<str>>(handle: *mut c_void, index: usize) -> *const u8 {
     unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        let strings = core::slice::from_raw_parts(handle as *const Sequence, index + 1);
         strings[index].as_ref().as_bytes().as_ptr()
     }
 }
 
 /// Generic callback to get length of string at index for string slices
-extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, index: usize) -> usize {
+extern "C" fn sz_sequence_get_length_str<Sequence: AsRef<str>>(handle: *mut c_void, index: usize) -> usize {
     unsafe {
-        let strings = core::slice::from_raw_parts(handle as *const T, index + 1);
+        let strings = core::slice::from_raw_parts(handle as *const Sequence, index + 1);
         strings[index].as_ref().as_bytes().len()
     }
 }
@@ -553,13 +553,13 @@ trait SzSequenceFromBytes {
     fn to_sz_sequence(&self) -> SzSequence;
 }
 
-impl<T: AsRef<[u8]>> SzSequenceFromBytes for [T] {
+impl<Sequence: AsRef<[u8]>> SzSequenceFromBytes for [Sequence] {
     fn to_sz_sequence(&self) -> SzSequence {
         SzSequence {
             handle: self.as_ptr() as *mut c_void,
             count: self.len(),
-            get_start: sz_sequence_get_start_generic::<T>,
-            get_length: sz_sequence_get_length_generic::<T>,
+            get_start: sz_sequence_get_start_generic::<Sequence>,
+            get_length: sz_sequence_get_length_generic::<Sequence>,
             starts: ptr::null(),
             lengths: ptr::null(),
         }
@@ -571,13 +571,13 @@ trait SzSequenceFromChars {
     fn to_sz_sequence(&self) -> SzSequence;
 }
 
-impl<T: AsRef<str>> SzSequenceFromChars for [T] {
+impl<Sequence: AsRef<str>> SzSequenceFromChars for [Sequence] {
     fn to_sz_sequence(&self) -> SzSequence {
         SzSequence {
             handle: self.as_ptr() as *mut c_void,
             count: self.len(),
-            get_start: sz_sequence_get_start_str::<T>,
-            get_length: sz_sequence_get_length_str::<T>,
+            get_start: sz_sequence_get_start_str::<Sequence>,
+            get_length: sz_sequence_get_length_str::<Sequence>,
             starts: ptr::null(),
             lengths: ptr::null(),
         }
@@ -915,19 +915,19 @@ pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 /// assert_eq!(matrix.dimensions(), (2, 2));
 /// assert_eq!(matrix[(0, 0)], 3); // kitten vs sitting
 /// ```
-pub struct Mat<T, A: Allocator = allocator_api2::alloc::Global> {
-    data: allocator_api2::vec::Vec<T, A>,
+pub struct Mat<Element, Alloc: Allocator = allocator_api2::alloc::Global> {
+    data: allocator_api2::vec::Vec<Element, Alloc>,
     queries_count: usize,
     candidates_count: usize,
     row_stride: usize,
 }
 
 /// A [`Mat`] backed by unified (CPU+GPU) memory - the matrix counterpart of [`UnifiedVec`].
-pub type UnifiedMat<T> = Mat<T, UnifiedAlloc>;
+pub type UnifiedMat<Element> = Mat<Element, UnifiedAlloc>;
 
-impl<T> Mat<T, UnifiedAlloc>
+impl<Element> Mat<Element, UnifiedAlloc>
 where
-    T: Copy + Default,
+    Element: Copy + Default,
 {
     /// Allocate a zero-initialized `queries_count × candidates_count` matrix in unified memory, guarding
     /// against allocation failure (mirrors the C++ engines' `try_resize` discipline - never panics on OOM).
@@ -939,7 +939,7 @@ where
         let mut data = allocator_api2::vec::Vec::new_in(UnifiedAlloc);
         data.try_reserve_exact(element_count)
             .map_err(|_| Error::from(SzStatus::BadAlloc))?;
-        data.resize(element_count, T::default()); // No reallocation: capacity was just reserved.
+        data.resize(element_count, Element::default()); // No reallocation: capacity was just reserved.
         Ok(Mat {
             data,
             queries_count,
@@ -949,7 +949,7 @@ where
     }
 }
 
-impl<T, A: Allocator> Mat<T, A> {
+impl<Element, Alloc: Allocator> Mat<Element, Alloc> {
     /// Returns the `(queries_count, candidates_count)` shape of the matrix.
     pub fn dimensions(&self) -> (usize, usize) {
         (self.queries_count, self.candidates_count)
@@ -971,21 +971,21 @@ impl<T, A: Allocator> Mat<T, A> {
     }
 
     /// Returns the row of distances for `query_index` as a contiguous slice of `candidates_count` elements.
-    pub fn row(&self, query_index: usize) -> &[T] {
+    pub fn row(&self, query_index: usize) -> &[Element] {
         let row_start = query_index * self.row_stride;
         &self.data[row_start..row_start + self.candidates_count]
     }
 
     /// Returns the entire backing buffer (including any inter-row padding) as a flat slice.
-    pub fn as_slice(&self) -> &[T] {
+    pub fn as_slice(&self) -> &[Element] {
         &self.data[..]
     }
 }
 
-impl<T, A: Allocator> Index<(usize, usize)> for Mat<T, A> {
-    type Output = T;
+impl<Element, Alloc: Allocator> Index<(usize, usize)> for Mat<Element, Alloc> {
+    type Output = Element;
 
-    fn index(&self, (query_index, candidate_index): (usize, usize)) -> &T {
+    fn index(&self, (query_index, candidate_index): (usize, usize)) -> &Element {
         &self.data[query_index * self.row_stride + candidate_index]
     }
 }
@@ -1097,10 +1097,15 @@ impl LevenshteinDistances {
     /// assert_eq!(matrix.dimensions(), (2, 3));
     /// assert_eq!(matrix[(0, 0)], 1); // cat vs bat
     /// ```
-    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        queries: Sequences,
+        candidates: Sequences,
+    ) -> Result<UnifiedMat<usize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let queries_slice = queries.as_ref();
         let candidates_slice = candidates.as_ref();
@@ -1128,10 +1133,14 @@ impl LevenshteinDistances {
     /// assert_eq!(matrix.dimensions(), (3, 3));
     /// assert_eq!(matrix[(0, 1)], matrix[(1, 0)]);
     /// ```
-    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute_symmetric<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        sequences: Sequences,
+    ) -> Result<UnifiedMat<usize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let sequences_slice = sequences.as_ref();
         let mut matrix = UnifiedMat::<usize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
@@ -1145,15 +1154,15 @@ impl LevenshteinDistances {
     /// engine to request symmetric self-similarity of `queries`. On GPU devices the
     /// inputs are first copied into unified-memory tapes and dispatched through
     /// `compute_into`.
-    fn compute_pair<S>(
+    fn compute_pair<Sequence>(
         &self,
         device: &DeviceScope,
-        queries: &[S],
-        candidates: Option<&[S]>,
+        queries: &[Sequence],
+        candidates: Option<&[Sequence]>,
         matrix: &mut UnifiedMat<usize>,
     ) -> Result<(), Error>
     where
-        S: AsRef<[u8]>,
+        Sequence: AsRef<[u8]>,
     {
         if device.is_gpu() {
             let force_64bit = match candidates {
@@ -1423,10 +1432,15 @@ impl LevenshteinDistancesUtf8 {
     /// // Distance would be non-zero without normalization
     /// // Use unicode-normalization crate if needed
     /// ```
-    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        queries: Sequences,
+        candidates: Sequences,
+    ) -> Result<UnifiedMat<usize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<str>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<str>,
     {
         let queries_slice = queries.as_ref();
         let candidates_slice = candidates.as_ref();
@@ -1440,10 +1454,14 @@ impl LevenshteinDistancesUtf8 {
     /// Produces a square `sequences × sequences` matrix of character-level edit
     /// distances by forwarding a null candidates pointer to the engine. The matrix
     /// is symmetric and its diagonal holds the distance of each string to itself.
-    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<usize>, Error>
+    pub fn compute_symmetric<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        sequences: Sequences,
+    ) -> Result<UnifiedMat<usize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<str>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<str>,
     {
         let sequences_slice = sequences.as_ref();
         let mut matrix = UnifiedMat::<usize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
@@ -1456,15 +1474,15 @@ impl LevenshteinDistancesUtf8 {
     /// Forwards a null candidates pointer when `candidates` is `None` to request
     /// symmetric self-similarity. On GPU devices the inputs are first copied into
     /// unified-memory tapes and dispatched through `compute_into`.
-    fn compute_pair<S>(
+    fn compute_pair<Sequence>(
         &self,
         device: &DeviceScope,
-        queries: &[S],
-        candidates: Option<&[S]>,
+        queries: &[Sequence],
+        candidates: Option<&[Sequence]>,
         matrix: &mut UnifiedMat<usize>,
     ) -> Result<(), Error>
     where
-        S: AsRef<str>,
+        Sequence: AsRef<str>,
     {
         if device.is_gpu() {
             let force_64bit = match candidates {
@@ -1744,10 +1762,15 @@ impl NeedlemanWunschScores {
     ///     .max_by_key(|(_, &score)| score)
     ///     .map(|(flat_index, _)| flat_index);
     /// ```
-    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        queries: Sequences,
+        candidates: Sequences,
+    ) -> Result<UnifiedMat<isize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let queries_slice = queries.as_ref();
         let candidates_slice = candidates.as_ref();
@@ -1761,10 +1784,14 @@ impl NeedlemanWunschScores {
     /// Produces a square `sequences × sequences` matrix of global-alignment scores
     /// by forwarding a null candidates pointer to the engine. The matrix is symmetric
     /// and its diagonal holds the self-alignment score of each sequence.
-    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute_symmetric<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        sequences: Sequences,
+    ) -> Result<UnifiedMat<isize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let sequences_slice = sequences.as_ref();
         let mut matrix = UnifiedMat::<isize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
@@ -1777,15 +1804,15 @@ impl NeedlemanWunschScores {
     /// Forwards a null candidates pointer when `candidates` is `None` to request
     /// symmetric self-similarity. On GPU devices the inputs are first copied into
     /// unified-memory tapes and dispatched through `compute_into`.
-    fn compute_pair<S>(
+    fn compute_pair<Sequence>(
         &self,
         device: &DeviceScope,
-        queries: &[S],
-        candidates: Option<&[S]>,
+        queries: &[Sequence],
+        candidates: Option<&[Sequence]>,
         matrix: &mut UnifiedMat<isize>,
     ) -> Result<(), Error>
     where
-        S: AsRef<[u8]>,
+        Sequence: AsRef<[u8]>,
     {
         if device.is_gpu() {
             let force_64bit = match candidates {
@@ -2130,10 +2157,15 @@ impl SmithWatermanScores {
     ///     println!("Database[{}]: score {}", database_index, score);
     /// }
     /// ```
-    pub fn compute<T, S>(&self, device: &DeviceScope, queries: T, candidates: T) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        queries: Sequences,
+        candidates: Sequences,
+    ) -> Result<UnifiedMat<isize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let queries_slice = queries.as_ref();
         let candidates_slice = candidates.as_ref();
@@ -2147,10 +2179,14 @@ impl SmithWatermanScores {
     /// Produces a square `sequences × sequences` matrix of local-alignment scores
     /// by forwarding a null candidates pointer to the engine. The matrix is symmetric
     /// and its diagonal holds the self-alignment score of each sequence.
-    pub fn compute_symmetric<T, S>(&self, device: &DeviceScope, sequences: T) -> Result<UnifiedMat<isize>, Error>
+    pub fn compute_symmetric<Sequences, Sequence>(
+        &self,
+        device: &DeviceScope,
+        sequences: Sequences,
+    ) -> Result<UnifiedMat<isize>, Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let sequences_slice = sequences.as_ref();
         let mut matrix = UnifiedMat::<isize>::try_allocate(sequences_slice.len(), sequences_slice.len())?;
@@ -2163,15 +2199,15 @@ impl SmithWatermanScores {
     /// Forwards a null candidates pointer when `candidates` is `None` to request
     /// symmetric self-similarity. On GPU devices the inputs are first copied into
     /// unified-memory tapes and dispatched through `compute_into`.
-    fn compute_pair<S>(
+    fn compute_pair<Sequence>(
         &self,
         device: &DeviceScope,
-        queries: &[S],
-        candidates: Option<&[S]>,
+        queries: &[Sequence],
+        candidates: Option<&[Sequence]>,
         matrix: &mut UnifiedMat<isize>,
     ) -> Result<(), Error>
     where
-        S: AsRef<[u8]>,
+        Sequence: AsRef<[u8]>,
     {
         if device.is_gpu() {
             let force_64bit = match candidates {
@@ -2864,7 +2900,7 @@ impl Fingerprints {
     /// // Estimate Jaccard similarity between strings 0 and 1
     /// let mut matches = 0;
     /// for i in 0..dimensions {
-    ///     if hashes[0 * dimensions + i] == hashes[1 * dimensions + i] {
+    ///     if hashes[i] == hashes[1 * dimensions + i] {
     ///         matches += 1;
     ///     }
     /// }
@@ -2885,15 +2921,15 @@ impl Fingerprints {
     /// - Memory usage: 8 bytes per string per dimension
     /// - Processing time scales linearly with total input size
     /// - SIMD acceleration provides significant speedup on modern CPUs
-    pub fn compute<T, S>(
+    pub fn compute<Sequences, Sequence>(
         &self,
         device: &DeviceScope,
-        strings: T,
+        strings: Sequences,
         dimensions: usize,
     ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Error>
     where
-        T: AsRef<[S]>,
-        S: AsRef<[u8]>,
+        Sequences: AsRef<[Sequence]>,
+        Sequence: AsRef<[u8]>,
     {
         let strings_slice = strings.as_ref();
         let num_strings = strings_slice.len();
@@ -3070,7 +3106,7 @@ pub fn error_costs_classes_unary() -> ([u8; 256], [[i8; 32]; 32]) {
 }
 
 /// Check if either byte collection requires 64-bit tapes
-fn should_use_64bit_for_bytes<T: AsRef<[u8]>>(seq_a: &[T], seq_b: &[T]) -> bool {
+fn should_use_64bit_for_bytes<Sequence: AsRef<[u8]>>(seq_a: &[Sequence], seq_b: &[Sequence]) -> bool {
     let total_size_a: usize = seq_a.iter().map(|s| s.as_ref().len()).sum();
     let total_size_b: usize = seq_b.iter().map(|s| s.as_ref().len()).sum();
     total_size_a > u32::MAX as usize
@@ -3080,7 +3116,7 @@ fn should_use_64bit_for_bytes<T: AsRef<[u8]>>(seq_a: &[T], seq_b: &[T]) -> bool 
 }
 
 /// Check if either string collection requires 64-bit tapes
-fn should_use_64bit_for_strings<T: AsRef<str>>(seq_a: &[T], seq_b: &[T]) -> bool {
+fn should_use_64bit_for_strings<Sequence: AsRef<str>>(seq_a: &[Sequence], seq_b: &[Sequence]) -> bool {
     let total_size_a: usize = seq_a.iter().map(|s| s.as_ref().len()).sum();
     let total_size_b: usize = seq_b.iter().map(|s| s.as_ref().len()).sum();
     total_size_a > u32::MAX as usize
@@ -3090,9 +3126,9 @@ fn should_use_64bit_for_strings<T: AsRef<str>>(seq_a: &[T], seq_b: &[T]) -> bool
 }
 
 /// Convert byte sequences to BytesTape
-fn copy_bytes_into_tape<'a, T>(sequences: &[T], force_64bit: bool) -> Result<AnyBytesTape<'a>, Error>
+fn copy_bytes_into_tape<'a, Sequence>(sequences: &[Sequence], force_64bit: bool) -> Result<AnyBytesTape<'a>, Error>
 where
-    T: AsRef<[u8]>,
+    Sequence: AsRef<[u8]>,
 {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
@@ -3110,7 +3146,10 @@ where
 }
 
 /// Convert string sequences to CharsTape
-fn copy_chars_into_tape<'a, T: AsRef<str>>(sequences: &[T], force_64bit: bool) -> Result<AnyCharsTape<'a>, Error> {
+fn copy_chars_into_tape<'a, Sequence: AsRef<str>>(
+    sequences: &[Sequence],
+    force_64bit: bool,
+) -> Result<AnyCharsTape<'a>, Error> {
     // Estimate total size to decide between 32-bit and 64-bit tapes
     let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
     let use_64bit = force_64bit || total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
@@ -3153,9 +3192,26 @@ pub fn backend_info() -> &'static str {
 mod tests {
     use super::*;
 
+    const TEST_FINGERPRINT_DIMS_SMALL: usize = 64;
+    const TEST_FINGERPRINT_DIMS_LARGE: usize = 128;
+    const TEST_LARGE_BATCH_SIZE: usize = 1000;
+
+    /// Returns a CPU-backed `DeviceScope`, or `None` after logging why. `DeviceScope::default()`
+    /// picks CPU cores, which should always succeed in CI, so a failure here signals an
+    /// environment problem rather than a missing GPU - every skip is logged, never swallowed.
+    fn device_or_skip(test_name: &str) -> Option<DeviceScope> {
+        match DeviceScope::default() {
+            Ok(device) => Some(device),
+            Err(error) => {
+                println!("Skipping {test_name} - device initialization failed: {error:?}");
+                None
+            }
+        }
+    }
+
     #[test]
-    fn test_backend_info() {
-        let info = backend_info();
+    fn backend_info() {
+        let info = super::backend_info();
         assert!(!info.is_empty());
         println!("Backend: {}", info);
     }
@@ -3215,12 +3271,9 @@ mod tests {
 
     #[test]
     fn fingerprint_builder_configurations() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping fingerprint tests - device initialization failed");
+        let Some(device) = device_or_skip("fingerprint_builder_configurations") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
         // Test default configuration
         let default_engine = Fingerprints::builder().build(&device);
@@ -3261,98 +3314,68 @@ mod tests {
 
     #[test]
     fn fingerprint_computation() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping fingerprint computation test - device initialization failed");
+        let Some(device) = device_or_skip("fingerprint_computation") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
-        let engine_result = Fingerprints::builder()
+        let engine = Fingerprints::builder()
             .binary()
-            .dimensions(64) // Small dimensions for testing
-            .build(&device);
-        if engine_result.is_err() {
-            println!("Skipping fingerprint computation test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+            .dimensions(TEST_FINGERPRINT_DIMS_SMALL) // Small dimensions for testing
+            .build(&device)
+            .expect("binary fingerprint engine should build on CPU");
 
         // Test basic computation
         let test_strings = vec!["hello", "world", "test"];
-        let result = engine.compute(&device, &test_strings, 64);
-        match result {
-            Ok((hashes, counts)) => {
-                assert_eq!(hashes.len(), 3 * 64); // 3 strings * 64 dimensions
-                assert_eq!(counts.len(), 3 * 64); // 3 strings * 64 dimensions
-                println!("Fingerprint computation successful");
-            }
-            Err(e) => println!("Fingerprint computation failed: {:?}", e),
-        }
+        let (hashes, counts) = engine
+            .compute(&device, &test_strings, TEST_FINGERPRINT_DIMS_SMALL)
+            .expect("fingerprint computation should succeed on CPU");
+        assert_eq!(hashes.len(), 3 * TEST_FINGERPRINT_DIMS_SMALL);
+        assert_eq!(counts.len(), 3 * TEST_FINGERPRINT_DIMS_SMALL);
     }
 
     #[test]
     fn levenshtein_distance_engine() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping Levenshtein test - device initialization failed");
+        let Some(device) = device_or_skip("levenshtein_distance_engine") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
         // Test engine creation
-        let engine_result = LevenshteinDistances::new(
+        let engine = LevenshteinDistances::new(
             &device, 0, // match cost
             1, // mismatch cost
             1, // open cost
             1, // extend cost
-        );
-        if engine_result.is_err() {
-            println!("Skipping Levenshtein test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        )
+        .expect("Levenshtein engine should build on CPU");
 
         // Cross-product distance computation over a non-square query/candidate set.
         let queries = vec!["kitten", "saturday"];
         let candidates = vec!["sitting", "sunday", "kitten"];
-        let result = engine.compute(&device, &queries, &candidates);
-        match result {
-            Ok(matrix) => {
-                assert_eq!(matrix.dimensions(), (2, 3));
-                // kitten -> sitting is 3 (substitute k->s, e->i, insert g)
-                assert_eq!(matrix[(0, 0)], 3);
-                // kitten -> kitten is 0 (identical)
-                assert_eq!(matrix[(0, 2)], 0);
-                // saturday -> sunday is 3 (delete a,t,r)
-                assert_eq!(matrix[(1, 1)], 3);
-                // The row slice mirrors the indexed cells.
-                assert_eq!(matrix.row(0), &[3usize, 6, 0][..]);
-                println!("Levenshtein distance matrix: {:?}", matrix.as_slice());
-            }
-            Err(e) => println!("Levenshtein computation failed: {:?}", e),
-        }
+        let matrix = engine
+            .compute(&device, &queries, &candidates)
+            .expect("Levenshtein computation should succeed on CPU");
+        assert_eq!(matrix.dimensions(), (2, 3));
+        // kitten -> sitting is 3 (substitute k->s, e->i, insert g)
+        assert_eq!(matrix[(0, 0)], 3);
+        // kitten -> kitten is 0 (identical)
+        assert_eq!(matrix[(0, 2)], 0);
+        // saturday -> sunday is 3 (delete a,t,r)
+        assert_eq!(matrix[(1, 1)], 3);
+        // The row slice mirrors the indexed cells.
+        assert_eq!(matrix.row(0), &[3usize, 6, 0][..]);
     }
 
     #[test]
     fn levenshtein_distance_symmetric() {
-        let device = match DeviceScope::default() {
-            Ok(device) => device,
-            Err(_) => return,
+        let Some(device) = device_or_skip("levenshtein_distance_symmetric") else {
+            return;
         };
-        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
-            Ok(engine) => engine,
-            Err(_) => return,
-        };
+        let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).expect("Levenshtein engine should build on CPU");
 
         let sequences = vec!["cat", "bat", "cart"];
-        let matrix = match engine.compute_symmetric(&device, &sequences) {
-            Ok(matrix) => matrix,
-            Err(error) => {
-                println!("Symmetric Levenshtein computation failed: {:?}", error);
-                return;
-            }
-        };
+        let matrix = engine
+            .compute_symmetric(&device, &sequences)
+            .expect("symmetric Levenshtein computation should succeed on CPU");
 
         assert_eq!(matrix.dimensions(), (3, 3));
         // The diagonal of a self-similarity matrix is all zeros.
@@ -3370,136 +3393,113 @@ mod tests {
 
         // The diagonal entry equals a one-by-one cross-product of the same string.
         let single = vec!["cat"];
-        let single_matrix = engine.compute(&device, &single, &single).unwrap();
+        let single_matrix = engine
+            .compute(&device, &single, &single)
+            .expect("Levenshtein computation should succeed on CPU");
         assert_eq!(single_matrix[(0, 0)], matrix[(0, 0)]);
     }
 
     #[test]
     fn levenshtein_utf8_engine() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping UTF-8 Levenshtein test - device initialization failed");
+        let Some(device) = device_or_skip("levenshtein_utf8_engine") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
-        let engine_result = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1);
-        if engine_result.is_err() {
-            println!("Skipping UTF-8 Levenshtein test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine =
+            LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).expect("UTF-8 Levenshtein engine should build on CPU");
 
         // Cross-product over Unicode strings.
         let queries = vec!["café", "naïve"];
         let candidates = vec!["cafe", "naive"];
-        let result = engine.compute(&device, &queries, &candidates);
-        match result {
-            Ok(matrix) => {
-                assert_eq!(matrix.dimensions(), (2, 2));
-                // Each accented character counts as one character-level substitution.
-                assert_eq!(matrix[(0, 0)], 1); // café vs cafe
-                assert_eq!(matrix[(1, 1)], 1); // naïve vs naive
-                println!("UTF-8 Levenshtein distance matrix: {:?}", matrix.as_slice());
-            }
-            Err(e) => println!("UTF-8 Levenshtein computation failed: {:?}", e),
-        }
+        let matrix = engine
+            .compute(&device, &queries, &candidates)
+            .expect("UTF-8 Levenshtein computation should succeed on CPU");
+        assert_eq!(matrix.dimensions(), (2, 2));
+        // Each accented character counts as one character-level substitution.
+        assert_eq!(matrix[(0, 0)], 1); // café vs cafe
+        assert_eq!(matrix[(1, 1)], 1); // naïve vs naive
     }
 
     #[test]
     fn needleman_wunsch_engine() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping Needleman-Wunsch test - device initialization failed");
+        let Some(device) = device_or_skip("needleman_wunsch_engine") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
         // Create a simple class-based scoring scheme
         let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
 
-        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
-        if engine_result.is_err() {
-            println!("Skipping Needleman-Wunsch test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1)
+            .expect("Needleman-Wunsch engine should build on CPU");
 
         let queries = vec!["ACGT", "ACGT"];
         let candidates = vec!["ACGT", "TTTT"];
-        let result = engine.compute(&device, &queries, &candidates);
-        match result {
-            Ok(matrix) => {
-                assert_eq!(matrix.dimensions(), (2, 2));
-                // Identical sequences score higher than the mismatching pair.
-                assert!(matrix[(0, 0)] > matrix[(0, 1)]);
-                assert!(matrix[(0, 0)] > 0, "Identical sequences should score positively");
-                println!("Needleman-Wunsch score matrix: {:?}", matrix.as_slice());
-            }
-            Err(e) => println!("Needleman-Wunsch computation failed: {:?}", e),
-        }
+        let matrix = engine
+            .compute(&device, &queries, &candidates)
+            .expect("Needleman-Wunsch computation should succeed on CPU");
+        assert_eq!(matrix.dimensions(), (2, 2));
+        // Identical sequences score higher than the mismatching pair.
+        assert!(matrix[(0, 0)] > matrix[(0, 1)]);
+        assert!(matrix[(0, 0)] > 0, "Identical sequences should score positively");
 
         // Symmetric self-alignment matrix.
         let sequences = vec!["ACGT", "AGGT", "TTTT"];
-        if let Ok(matrix) = engine.compute_symmetric(&device, &sequences) {
-            assert_eq!(matrix.dimensions(), (3, 3));
-            for first_index in 0..3 {
-                for second_index in 0..3 {
-                    assert_eq!(matrix[(first_index, second_index)], matrix[(second_index, first_index)]);
-                }
+        let symmetric = engine
+            .compute_symmetric(&device, &sequences)
+            .expect("Needleman-Wunsch symmetric computation should succeed on CPU");
+        assert_eq!(symmetric.dimensions(), (3, 3));
+        for first_index in 0..3 {
+            for second_index in 0..3 {
+                assert_eq!(
+                    symmetric[(first_index, second_index)],
+                    symmetric[(second_index, first_index)]
+                );
             }
-            // The diagonal self-alignment score is the strongest in its row.
-            for diagonal_index in 0..3 {
-                let diagonal_score = matrix[(diagonal_index, diagonal_index)];
-                for candidate_index in 0..3 {
-                    assert!(diagonal_score >= matrix[(diagonal_index, candidate_index)]);
-                }
+        }
+        // The diagonal self-alignment score is the strongest in its row.
+        for diagonal_index in 0..3 {
+            let diagonal_score = symmetric[(diagonal_index, diagonal_index)];
+            for candidate_index in 0..3 {
+                assert!(diagonal_score >= symmetric[(diagonal_index, candidate_index)]);
             }
         }
     }
 
     #[test]
     fn smith_waterman_engine() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping Smith-Waterman test - device initialization failed");
+        let Some(device) = device_or_skip("smith_waterman_engine") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
         // Create a simple class-based scoring scheme
         let (byte_to_class, class_costs) = error_costs_classes_diagonal(3, -1);
 
-        let engine_result = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1);
-        if engine_result.is_err() {
-            println!("Skipping Smith-Waterman test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine = SmithWatermanScores::new(&device, &byte_to_class, &class_costs, -2, -1)
+            .expect("Smith-Waterman engine should build on CPU");
 
         // One query against two candidates yields a single-row cross-product matrix.
         let queries = vec!["ACGTACGT"];
         let candidates = vec!["ACGT", "TTTT"];
-        let result = engine.compute(&device, &queries, &candidates);
-        match result {
-            Ok(matrix) => {
-                assert_eq!(matrix.dimensions(), (1, 2));
-                // The embedded "ACGT" run aligns better than the all-mismatch candidate.
-                assert!(matrix[(0, 0)] > matrix[(0, 1)]);
-                assert!(matrix[(0, 0)] > 0, "Local alignment should be positive");
-                println!("Smith-Waterman score matrix: {:?}", matrix.as_slice());
-            }
-            Err(e) => println!("Smith-Waterman computation failed: {:?}", e),
-        }
+        let matrix = engine
+            .compute(&device, &queries, &candidates)
+            .expect("Smith-Waterman computation should succeed on CPU");
+        assert_eq!(matrix.dimensions(), (1, 2));
+        // The embedded "ACGT" run aligns better than the all-mismatch candidate.
+        assert!(matrix[(0, 0)] > matrix[(0, 1)]);
+        assert!(matrix[(0, 0)] > 0, "Local alignment should be positive");
 
         // Symmetric self-alignment matrix is symmetric with a dominant diagonal.
         let sequences = vec!["ACGTACGT", "ACGT", "TTTT"];
-        if let Ok(matrix) = engine.compute_symmetric(&device, &sequences) {
-            assert_eq!(matrix.dimensions(), (3, 3));
-            for first_index in 0..3 {
-                for second_index in 0..3 {
-                    assert_eq!(matrix[(first_index, second_index)], matrix[(second_index, first_index)]);
-                }
+        let symmetric = engine
+            .compute_symmetric(&device, &sequences)
+            .expect("Smith-Waterman symmetric computation should succeed on CPU");
+        assert_eq!(symmetric.dimensions(), (3, 3));
+        for first_index in 0..3 {
+            for second_index in 0..3 {
+                assert_eq!(
+                    symmetric[(first_index, second_index)],
+                    symmetric[(second_index, first_index)]
+                );
             }
         }
     }
@@ -3532,23 +3532,12 @@ mod tests {
     }
 
     #[test]
-    fn error_handling() {
-        // Test that valid operations don't panic
-        let valid_cpu = DeviceScope::cpu_cores(0); // 0 means all cores - valid
-        assert!(valid_cpu.is_ok(), "CPU cores 0 should succeed");
-
-        let invalid_gpu = DeviceScope::gpu_device(999);
-        // May succeed or fail depending on system, but shouldn't panic
-        match invalid_gpu {
+    fn device_scope_invalid_gpu_id_does_not_panic() {
+        // An out-of-range GPU id must return an Err, never panic - it may legitimately succeed or
+        // fail depending on how many GPUs the machine has, so only the "no panic" contract is checked.
+        match DeviceScope::gpu_device(999) {
             Ok(_) => println!("GPU device 999 unexpectedly available"),
             Err(e) => println!("GPU device 999 correctly failed: {:?}", e),
-        }
-
-        // Test default device scope
-        let default_device = DeviceScope::default();
-        match default_device {
-            Ok(_) => println!("Default device scope created successfully"),
-            Err(e) => println!("Default device scope failed: {:?}", e),
         }
     }
 
@@ -3557,89 +3546,76 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping thread safety test - device initialization failed");
-            return;
-        }
-        let device = Arc::new(device_result.unwrap());
+        const THREAD_COUNT: usize = 4;
 
-        let engine_result = Fingerprints::builder().dimensions(64).build(&device);
-        if engine_result.is_err() {
-            println!("Skipping thread safety test - engine initialization failed");
+        let Some(device) = device_or_skip("thread_safety") else {
             return;
-        }
-        let engine = Arc::new(engine_result.unwrap());
+        };
+        let device = Arc::new(device);
+
+        let engine = Fingerprints::builder()
+            .dimensions(TEST_FINGERPRINT_DIMS_SMALL)
+            .build(&device)
+            .expect("fingerprint engine should build on CPU");
+        let engine = Arc::new(engine);
 
         // Test parallel computation
-        let handles: Vec<_> = (0..4)
+        let handles: Vec<_> = (0..THREAD_COUNT)
             .map(|i| {
                 let device = Arc::clone(&device);
                 let engine = Arc::clone(&engine);
                 thread::spawn(move || {
                     let test_data = vec![format!("thread_{}_data", i)];
-                    engine.compute(&device, &test_data, 64)
+                    engine.compute(&device, &test_data, TEST_FINGERPRINT_DIMS_SMALL)
                 })
             })
             .collect();
 
         let mut success_count = 0;
         for handle in handles {
-            match handle.join().unwrap() {
+            match handle.join().expect("worker thread should not panic") {
                 Ok(_) => success_count += 1,
                 Err(e) => println!("Thread computation failed: {:?}", e),
             }
         }
 
-        println!("Thread safety test: {}/4 threads succeeded", success_count);
+        assert_eq!(success_count, THREAD_COUNT, "not all threads succeeded");
     }
 
     #[test]
     fn large_batch_processing() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping large batch test - device initialization failed");
+        let Some(device) = device_or_skip("large_batch_processing") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
-        let engine_result = Fingerprints::builder().dimensions(64).build(&device);
-        if engine_result.is_err() {
-            println!("Skipping large batch test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine = Fingerprints::builder()
+            .dimensions(TEST_FINGERPRINT_DIMS_SMALL)
+            .build(&device)
+            .expect("fingerprint engine should build on CPU");
 
         // Create large batch
-        let large_batch: Vec<String> = (0..1000).map(|i| format!("test_string_{}", i)).collect();
+        let large_batch: Vec<String> = (0..TEST_LARGE_BATCH_SIZE)
+            .map(|i| format!("test_string_{}", i))
+            .collect();
         let large_batch_refs: Vec<&str> = large_batch.iter().map(|s| s.as_str()).collect();
 
-        let result = engine.compute(&device, &large_batch_refs, 64);
-        match result {
-            Ok((hashes, counts)) => {
-                assert_eq!(hashes.len(), 1000 * 64);
-                assert_eq!(counts.len(), 1000 * 64);
-                println!("Large batch processing successful: 1000 strings processed");
-            }
-            Err(e) => println!("Large batch processing failed: {:?}", e),
-        }
+        let (hashes, counts) = engine
+            .compute(&device, &large_batch_refs, TEST_FINGERPRINT_DIMS_SMALL)
+            .expect("fingerprint computation should succeed on CPU");
+        assert_eq!(hashes.len(), TEST_LARGE_BATCH_SIZE * TEST_FINGERPRINT_DIMS_SMALL);
+        assert_eq!(counts.len(), TEST_LARGE_BATCH_SIZE * TEST_FINGERPRINT_DIMS_SMALL);
     }
 
     #[test]
     fn similarity_estimation() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping similarity test - device initialization failed");
+        let Some(device) = device_or_skip("similarity_estimation") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
-        let engine_result = Fingerprints::builder().dimensions(128).build(&device);
-        if engine_result.is_err() {
-            println!("Skipping similarity test - engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine = Fingerprints::builder()
+            .dimensions(TEST_FINGERPRINT_DIMS_LARGE)
+            .build(&device)
+            .expect("fingerprint engine should build on CPU");
 
         let test_strings = vec![
             "the quick brown fox",
@@ -3648,93 +3624,75 @@ mod tests {
             "completely different", // Different
         ];
 
-        let result = engine.compute(&device, &test_strings, 128);
-        match result {
-            Ok((hashes, _counts)) => {
-                // Compare fingerprints
-                let dimensions = 128;
+        let (hashes, _counts) = engine
+            .compute(&device, &test_strings, TEST_FINGERPRINT_DIMS_LARGE)
+            .expect("fingerprint computation should succeed on CPU");
+        {
+            let dimensions = TEST_FINGERPRINT_DIMS_LARGE;
 
-                // Compare identical strings (should have high similarity)
-                let mut matches_identical = 0;
-                for i in 0..dimensions {
-                    if hashes[0 * dimensions + i] == hashes[1 * dimensions + i] {
-                        matches_identical += 1;
-                    }
+            // Compare identical strings (should have high similarity)
+            let mut matches_identical = 0;
+            for i in 0..dimensions {
+                if hashes[i] == hashes[1 * dimensions + i] {
+                    matches_identical += 1;
                 }
-                let similarity_identical = matches_identical as f64 / dimensions as f64;
-
-                // Compare similar strings
-                let mut matches_similar = 0;
-                for i in 0..dimensions {
-                    if hashes[0 * dimensions + i] == hashes[2 * dimensions + i] {
-                        matches_similar += 1;
-                    }
-                }
-                let similarity_similar = matches_similar as f64 / dimensions as f64;
-
-                // Compare different strings
-                let mut matches_different = 0;
-                for i in 0..dimensions {
-                    if hashes[0 * dimensions + i] == hashes[3 * dimensions + i] {
-                        matches_different += 1;
-                    }
-                }
-                let similarity_different = matches_different as f64 / dimensions as f64;
-
-                println!("Similarity identical: {:.3}", similarity_identical);
-                println!("Similarity similar: {:.3}", similarity_similar);
-                println!("Similarity different: {:.3}", similarity_different);
-
-                // Basic sanity checks
-                assert!(similarity_identical >= similarity_similar);
-                assert!(similarity_similar >= similarity_different);
             }
-            Err(e) => println!("Similarity estimation failed: {:?}", e),
+            let similarity_identical = matches_identical as f64 / dimensions as f64;
+
+            // Compare similar strings
+            let mut matches_similar = 0;
+            for i in 0..dimensions {
+                if hashes[i] == hashes[2 * dimensions + i] {
+                    matches_similar += 1;
+                }
+            }
+            let similarity_similar = matches_similar as f64 / dimensions as f64;
+
+            // Compare different strings
+            let mut matches_different = 0;
+            for i in 0..dimensions {
+                if hashes[i] == hashes[3 * dimensions + i] {
+                    matches_different += 1;
+                }
+            }
+            let similarity_different = matches_different as f64 / dimensions as f64;
+
+            println!("Similarity identical: {:.3}", similarity_identical);
+            println!("Similarity similar: {:.3}", similarity_similar);
+            println!("Similarity different: {:.3}", similarity_different);
+
+            // Basic sanity checks
+            assert!(similarity_identical >= similarity_similar);
+            assert!(similarity_similar >= similarity_different);
         }
     }
 
     #[test]
     fn error_costs_for_needleman_wunsch() {
-        let device_result = DeviceScope::default();
-        if device_result.is_err() {
-            println!("Skipping error_costs test - device initialization failed");
+        let Some(device) = device_or_skip("error_costs_for_needleman_wunsch") else {
             return;
-        }
-        let device = device_result.unwrap();
+        };
 
         // Test our diagonal class-based scoring function with NW aligner
         let (byte_to_class, class_costs) = error_costs_classes_diagonal(2, -1);
-        let engine_result = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1);
-        if engine_result.is_err() {
-            println!("Skipping error_costs test - NW engine initialization failed");
-            return;
-        }
-        let engine = engine_result.unwrap();
+        let engine = NeedlemanWunschScores::new(&device, &byte_to_class, &class_costs, -2, -1)
+            .expect("Needleman-Wunsch engine should build on CPU");
 
         let queries = vec!["ABCD"];
         let candidates = vec!["ABCD"];
-        let result = engine.compute(&device, &queries, &candidates);
-
-        match result {
-            Ok(matrix) => {
-                assert_eq!(matrix.dimensions(), (1, 1));
-                assert!(matrix[(0, 0)] > 0, "Identical sequences should have positive score");
-                println!("Error costs matrix integration test passed: score = {}", matrix[(0, 0)]);
-            }
-            Err(e) => println!("Error costs test failed: {:?}", e),
-        }
+        let matrix = engine
+            .compute(&device, &queries, &candidates)
+            .expect("Needleman-Wunsch computation should succeed on CPU");
+        assert_eq!(matrix.dimensions(), (1, 1));
+        assert!(matrix[(0, 0)] > 0, "Identical sequences should have positive score");
     }
 
     #[test]
     fn levenshtein_compute_into_u32_bytes() {
-        let device = match DeviceScope::default() {
-            Ok(d) => d,
-            Err(_) => return, // skip if device unavailable
+        let Some(device) = device_or_skip("levenshtein_compute_into_u32_bytes") else {
+            return;
         };
-        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+        let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).expect("Levenshtein engine should build on CPU");
 
         let queries = [b"kitten".as_ref(), b"saturday".as_ref()];
         let candidates = [b"sitting".as_ref(), b"sunday".as_ref()];
@@ -3746,29 +3704,25 @@ mod tests {
 
         let mut matrix = UnifiedMat::<usize>::try_allocate(2, 2).expect("matrix allocation");
 
-        let outcome = engine.compute_into(
-            &device,
-            AnyBytesTape::Tape32(queries_tape),
-            Some(AnyBytesTape::Tape32(candidates_tape)),
-            &mut matrix,
-        );
-        if let Ok(()) = outcome {
-            // Diagonal: kitten vs sitting = 3, saturday vs sunday = 3.
-            assert_eq!(matrix[(0, 0)], 3);
-            assert_eq!(matrix[(1, 1)], 3);
-        }
+        engine
+            .compute_into(
+                &device,
+                AnyBytesTape::Tape32(queries_tape),
+                Some(AnyBytesTape::Tape32(candidates_tape)),
+                &mut matrix,
+            )
+            .expect("Levenshtein compute_into should succeed on CPU");
+        // Diagonal: kitten vs sitting = 3, saturday vs sunday = 3.
+        assert_eq!(matrix[(0, 0)], 3);
+        assert_eq!(matrix[(1, 1)], 3);
     }
 
     #[test]
     fn levenshtein_compute_into_u64_bytes() {
-        let device = match DeviceScope::default() {
-            Ok(d) => d,
-            Err(_) => return, // skip if device unavailable
+        let Some(device) = device_or_skip("levenshtein_compute_into_u64_bytes") else {
+            return;
         };
-        let engine = match LevenshteinDistances::new(&device, 0, 1, 1, 1) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
+        let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).expect("Levenshtein engine should build on CPU");
 
         let queries = [b"abc".as_ref(), b"abcdef".as_ref()];
         let candidates = [b"yabd".as_ref(), b"abcxef".as_ref()];
@@ -3780,16 +3734,16 @@ mod tests {
 
         let mut matrix = UnifiedMat::<usize>::try_allocate(2, 2).expect("matrix allocation");
 
-        let outcome = engine.compute_into(
-            &device,
-            AnyBytesTape::Tape64(queries_tape),
-            Some(AnyBytesTape::Tape64(candidates_tape)),
-            &mut matrix,
-        );
-        if let Ok(()) = outcome {
-            // Diagonal: abc vs yabd => 2, abcdef vs abcxef => 1.
-            assert_eq!(matrix[(0, 0)], 2);
-            assert_eq!(matrix[(1, 1)], 1);
-        }
+        engine
+            .compute_into(
+                &device,
+                AnyBytesTape::Tape64(queries_tape),
+                Some(AnyBytesTape::Tape64(candidates_tape)),
+                &mut matrix,
+            )
+            .expect("Levenshtein compute_into should succeed on CPU");
+        // Diagonal: abc vs yabd => 2, abcdef vs abcxef => 1.
+        assert_eq!(matrix[(0, 0)], 2);
+        assert_eq!(matrix[(1, 1)], 1);
     }
 }

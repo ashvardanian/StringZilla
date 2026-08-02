@@ -9,12 +9,12 @@ homepage = "https://ashvardanian.com/posts/stringzilla/"
 # Leading slashes anchor to the package root; Cargo matches these like gitignore. No `forkunion/**`: `build.rs` reads
 # those headers from `DEP_FORKUNION_INCLUDE`, exported by the `forkunion` crate.
 include = [
-    "/rust/**",
-    "/c/**",
-    "/include/**",
-    "/probes/**",
-    "/build.rs",
-    "/LICENSE",
+  "/rust/**",
+  "/c/**",
+  "/include/**",
+  "/probes/**",
+  "/build.rs",
+  "/LICENSE",
 ]
 keywords = ["simd", "search", "retrieval", "hash", "sort"]
 license = "Apache-2.0"
@@ -39,19 +39,19 @@ std = []
 # (mirrors CMake's `stringzilla_shared`). Disable (`--no-default-features`) to resolve the tier at
 # compile time instead - the analog of the header-only `stringzilla_header`.
 cpus = [
-    "std", # std is required for multi-threaded backend
-    "dep:allocator-api2",
-    "dep:stringtape",
-    "dep:forkunion", # Compiles and links the thread-pool runtime; StringZillas only consumes its C API
+  "std", # std is required for multi-threaded backend
+  "dep:allocator-api2",
+  "dep:stringtape",
+  "dep:forkunion", # Compiles and links the thread-pool runtime; StringZillas only consumes its C API
 ] # Multi-threaded CPU backend (StringZillas)
 cuda = ["std", "cpus"] # CUDA GPU backend (includes multi-threaded CPU backend)
 dynamic-dispatch = []
 rocm = ["std", "cpus"] # ROCm GPU backend (includes multi-threaded CPU backend)
 
 [dependencies]
-allocator-api2 = { version = "0.4", optional = true }
-forkunion = { version = "3.0", optional = true }
-stringtape = { version = "2.4.2", optional = true }
+allocator-api2 = {version = "0.4", optional = true}
+forkunion = {version = "3.0", optional = true}
+stringtape = {version = "2.4.2", optional = true}
 
 [build-dependencies]
 cc = "1.2.47"

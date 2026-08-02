@@ -200,6 +200,8 @@ jobs:
               run: cargo test --release
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
+            - name: Test Rust no_std
+              run: cargo test --release --no-default-features
               # Otherwise `cargo publish` is the first thing that ever reads the `include` list.
             - name: Package the crate
               run: cargo package --locked
@@ -320,6 +322,8 @@ jobs:
               run: cargo test --release --features cpus
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
+            - name: Test Rust no_std
+              run: cargo test --release --no-default-features
 
               # Swift
               # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
@@ -973,6 +977,8 @@ jobs:
               run: cargo test --release
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
+            - name: Test Rust no_std
+              run: cargo test --release --no-default-features
 
     test_windows:
         name: Windows - ${{ matrix.os }}
@@ -1057,6 +1063,8 @@ jobs:
               run: cargo test --release
             - name: Build Rust with compile-time dispatch
               run: cargo build --release --no-default-features --features std
+            - name: Build Rust no_std
+              run: cargo build --release --no-default-features
 
     test_alpine:
         name: Alpine Linux
@@ -1119,6 +1127,8 @@ jobs:
               uses: dtolnay/rust-toolchain@stable
             - name: Test Rust with compile-time dispatch
               run: cargo test --release --no-default-features --features std
+            - name: Test Rust no_std
+              run: cargo test --release --no-default-features
     # Packaging surface - what a downstream distributor sees, not what our own build tree sees. vcpkg and Conan
     # unpack a tarball with no submodules, so the first half runs without `submodules: recursive`. The consumers
     # check spellings by linking them: an undefined name fails at generate time.
