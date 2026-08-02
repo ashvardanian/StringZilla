@@ -3351,6 +3351,13 @@ impl<'a, K: SegmenterKernel, P: SplitParts, E: EmptySegments, const STEPS: usize
                 && (s == 0 || self.starts[s] >= self.starts[s - 1] + self.lengths[s - 1])),
             "separator spans run past the region, overlap, or are out of order"
         );
+        // A batch cut short by `STEPS` must resume exactly at the end of its last separator: the bytes between
+        // that separator and wherever the kernel's own scan stopped belong to the next segment, and a resume
+        // offset past them drops them from the output.
+        debug_assert!(
+            self.separators < STEPS || consumed == self.starts[self.separators - 1] + self.lengths[self.separators - 1],
+            "segmenter resumed past the end of its last emitted separator"
+        );
         let eof = consumed == self.region;
         // Boundaries: `0`, then 2 per separator, plus the closing `region` at end-of-text.
         self.spans = 2 * self.separators + if eof { 1 } else { 0 };
@@ -4389,6 +4396,29 @@ mod tests {
         // Default policy keeps the empty segment between adjacent delimiters.
         let kept: Vec<&[u8]> = "a,,b".as_bytes().sz_utf8_split_delimiters().collect();
         assert_eq!(kept, vec![&b"a"[..], &b""[..], &b"b"[..]]);
+    }
+
+    #[test]
+    fn utf8_split_delimiters_sparse_batches() {
+        // Sparse delimiters with long undelimited runs: each batch fills on the last delimiter its vector window
+        // holds, and the letters between that delimiter and the window edge must survive into the next segment.
+        // Dense inputs cannot reach this path, since a filled batch there always leaves hits behind in the window.
+        for run in [16usize, 31, 62, 63, 64, 100] {
+            let text = format!("a {} c", "b".repeat(run));
+            let expected: Vec<&[u8]> = vec![b"a", text.as_bytes()[2..2 + run].as_ref(), b"c"];
+            for tiny in [
+                Utf8SplitDelimiters::<1>::with_steps(text.as_bytes()).collect::<Vec<_>>(),
+                Utf8SplitDelimiters::<2>::with_steps(text.as_bytes()).collect::<Vec<_>>(),
+                text.as_bytes().sz_utf8_split_delimiters().collect::<Vec<_>>(),
+            ] {
+                assert_eq!(tiny, expected, "run of {} undelimited bytes", run);
+            }
+            // Separators included, the split is lossless however small the batch.
+            let both: Vec<&[u8]> = Utf8SplitDelimiters::<1>::with_steps(text.as_bytes())
+                .with_separators()
+                .collect();
+            assert_eq!(both.concat(), text.as_bytes());
+        }
     }
 
     #[test]

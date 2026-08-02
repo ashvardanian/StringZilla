@@ -51,12 +51,11 @@
 #include <cstdlib> // `std::getenv`, `std::strtoul`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>  // `std::transform`
-#include <functional> // `std::function` (C++11-clean type erasure for the matcher callable)
-#include <iterator>   // `std::distance`
-#include <random>     // `std::random_device`
-#include <string>     // Baseline
-#include <vector>     // `std::vector`
+#include <algorithm> // `std::transform`
+#include <iterator>  // `std::distance`
+#include <random>    // `std::random_device`
+#include <string>    // Baseline
+#include <vector>    // `std::vector`
 
 #if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
@@ -121,6 +120,66 @@ static void check_utf8_unit_(                                                   
     };
     check_boundaries(newlines, newline_text, newline_length, expected_newlines);
     check_boundaries(whitespaces, whitespace_text, whitespace_length, expected_whitespaces);
+}
+
+/**
+ *  @brief Drain every match a segmenter emits over the whole input, resuming via `bytes_consumed` so an arbitrarily
+ *         small @p capacity yields the identical full match list. Offsets are absolute.
+ *
+ *  @p matcher is any callable with the `sz_utf8_segmenter_t` signature - a raw kernel pointer, or a lambda bound to
+ *  one method of a backend bundle - so newlines, whitespaces and delimiters all share this one driver.
+ */
+template <typename matcher_type_>
+static void drain_matches_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t length, sz_size_t capacity,
+                           std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
+    offsets.clear(), lengths.clear();
+    std::vector<sz_size_t> offset_batch(capacity ? capacity : 1), length_batch(capacity ? capacity : 1);
+    sz_size_t position = 0;
+    while (position < length) {
+        sz_size_t consumed = 0;
+        sz_size_t const emitted = matcher(text + position, length - position, offset_batch.data(), length_batch.data(),
+                                          capacity, &consumed);
+        assert(consumed <= length - position && "Segmenter consumed past the input");
+        for (sz_size_t index = 0; index != emitted; ++index)
+            offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
+        if (consumed == 0) break; // No forward progress: stop rather than spin.
+        position += consumed;
+    }
+}
+
+/**
+ *  @brief Reconstruct the SEGMENTS the C++/Python/Rust split iterators would yield - the gap before each match, plus
+ *         the trailing gap once the input is exhausted - advancing the suffix by `bytes_consumed` after every batch.
+ *
+ *  This is the consumer's view, and it sees what @ref drain_matches_ structurally cannot: a `bytes_consumed` that
+ *  overshoots the end of the last emitted match. The match list is identical either way, because the skipped span
+ *  holds no matches - but the caller derives the next segment's start from `bytes_consumed`, so those bytes silently
+ *  vanish from the segment that contains them.
+ */
+template <typename matcher_type_>
+static void reconstruct_segments_(matcher_type_ &&matcher, sz_cptr_t text, sz_size_t length, sz_size_t capacity,
+                                  std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
+    offsets.clear(), lengths.clear();
+    std::vector<sz_size_t> offset_batch(capacity ? capacity : 1), length_batch(capacity ? capacity : 1);
+    sz_size_t suffix = 0;
+    for (;;) {
+        sz_size_t const region = length - suffix;
+        sz_size_t consumed = 0;
+        sz_size_t const emitted = matcher(text + suffix, region, offset_batch.data(), length_batch.data(), capacity,
+                                          &consumed);
+        assert(consumed <= region && "Segmenter consumed past the input");
+        sz_size_t previous_end = 0;
+        for (sz_size_t index = 0; index != emitted; ++index) {
+            offsets.push_back(suffix + previous_end), lengths.push_back(offset_batch[index] - previous_end);
+            previous_end = offset_batch[index] + length_batch[index];
+        }
+        if (consumed == region) { // Exhausted: the trailing segment runs to end-of-text.
+            offsets.push_back(suffix + previous_end), lengths.push_back(region - previous_end);
+            break;
+        }
+        if (consumed == 0) break; // No forward progress: stop rather than spin.
+        suffix += consumed;
+    }
 }
 
 #pragma endregion // Helpers
@@ -376,25 +435,8 @@ void test_utf8_tokens_unit() {
                    w.size() == 3 && w[2] == "baz");
     }
 
-    // `utf8_split_delimiters`: the segments BETWEEN any punctuation/symbol/separator - the superset of whitespace tokens.
-    {
-        // "Hi, world" -> delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
-        let_assert(
-            auto d = sz::string_view("Hi, world").utf8_split_delimiters().template to<std::vector<std::string>>(),
-            d.size() == 3 && d[0] == "Hi" && d[2] == "world");
-        // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
-        let_assert(auto e = sz::string_view("a\xE2\x80\x94" "b")
-                                .utf8_split_delimiters()
-                                .skip_empty()
-                                .template to<std::vector<std::string>>(),
-                   e.size() == 2 && e[0] == "a" && e[1] == "b");
-    }
-
     // The kernel-named accessors yield the DELIMITER runs themselves (not the segments between).
     {
-        // `utf8_delimiters` on "Hi, world": the ',' and ' ' runs.
-        let_assert(auto d = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
-                   d.size() == 2 && d[0] == "," && d[1] == " ");
         // `utf8_newlines` on "a\nb\r\nc": the "\n" and "\r\n".
         let_assert(auto n = sz::string_view("a\nb\r\nc").utf8_newlines().template to<std::vector<std::string>>(),
                    n.size() == 2 && n[0] == "\n" && n[1] == "\r\n");
@@ -416,12 +458,6 @@ void test_utf8_tokens_unit() {
 
     // `.skip_empty()`: a compile-time, branchless variant that drops empty segments, matching Rust/Python.
     {
-        // "Hi, world" has an empty field between ',' and ' '; `.skip_empty()` drops it: "Hi", "world".
-        let_assert(auto d = sz::string_view("Hi, world")
-                                .utf8_split_delimiters()
-                                .skip_empty()
-                                .template to<std::vector<std::string>>(),
-                   d.size() == 2 && d[0] == "Hi" && d[1] == "world");
         // Whitespace tokens across a double space: "a  b" -> "a", "b" (the empty middle dropped).
         let_assert(
             auto t =
@@ -469,57 +505,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
                                   std::size_t min_text_length = 4000,
                                   std::size_t min_iterations = scale_iterations(10000)) {
 
-    // A boundary finder bound to one backend, type-erased so the helpers below stay C++11-clean (no generic
-    // lambda `auto` parameters, which are a C++14 feature).
-    using token_matcher_t =
-        std::function<sz_size_t(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *)>;
-
-    // Enumerate every delimiter via repeated streaming calls (resuming from `bytes_consumed`), so a small
-    // `capacity` exercises the SIMD vector loop, its resume logic, and the serial tail handoff.
-    auto enumerate = [](token_matcher_t const &matcher, sz_cptr_t data, sz_size_t length, sz_size_t capacity,
-                        std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
-        offsets.clear(), lengths.clear();
-        std::vector<sz_size_t> batch_offsets(capacity), batch_lengths(capacity);
-        sz_size_t base = 0;
-        while (base < length) {
-            sz_size_t consumed = 0;
-            sz_size_t got = matcher(data + base, length - base, batch_offsets.data(), batch_lengths.data(), capacity,
-                                    &consumed);
-            for (sz_size_t i = 0; i < got; ++i)
-                offsets.push_back(base + batch_offsets[i]), lengths.push_back(batch_lengths[i]);
-            if (got == 0 && consumed == 0) break;
-            base += consumed;
-        }
-    };
-
-    // Reconstruct the SEGMENTS the C++/Python/Rust split iterators would yield (gap before each delimiter, plus the
-    // trailing segment to end-of-text), advancing the suffix by `bytes_consumed`. This is the consumer's view: it
-    // catches a `bytes_consumed` that overshoots the last emitted delimiter (which the raw-delimiter enumeration
-    // above cannot see, since the skipped span has no delimiters), e.g. a batch that fills exactly at a window edge.
-    auto reconstruct_segments = [](token_matcher_t const &matcher, sz_cptr_t data, sz_size_t length, sz_size_t capacity,
-                                   std::vector<sz_size_t> &seg_offsets, std::vector<sz_size_t> &seg_lengths) {
-        seg_offsets.clear(), seg_lengths.clear();
-        std::vector<sz_size_t> batch_offsets(capacity), batch_lengths(capacity);
-        sz_size_t suffix = 0;
-        for (;;) {
-            sz_size_t region = length - suffix, consumed = 0;
-            sz_size_t delimiters = matcher(data + suffix, region, batch_offsets.data(), batch_lengths.data(), capacity,
-                                           &consumed);
-            sz_size_t previous_end = 0;
-            for (sz_size_t i = 0; i < delimiters; ++i) {
-                seg_offsets.push_back(suffix + previous_end), seg_lengths.push_back(batch_offsets[i] - previous_end);
-                previous_end = batch_offsets[i] + batch_lengths[i];
-            }
-            if (consumed == region) { // exhausted: the trailing segment runs to end-of-text
-                seg_offsets.push_back(suffix + previous_end), seg_lengths.push_back(region - previous_end);
-                break;
-            }
-            suffix += consumed;
-            if (consumed == 0) break;
-        }
-    };
-
-    // Adapt the bundle methods to the plain boundary-finder signature the enumerators expect.
+    // Adapt the bundle methods to the plain boundary-finder signature `drain_matches_`/`reconstruct_segments_` expect.
     auto reference_newlines = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
                                   sz_size_t capacity, sz_size_t *bytes_consumed) {
         return reference.newlines(data, length, offsets, lengths, capacity, bytes_consumed);
@@ -549,23 +535,23 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         std::vector<sz_size_t> reference_offsets, reference_lengths, candidate_offsets, candidate_lengths;
         for (sz_size_t capacity : capacities) {
             if (capacity == 0) continue;
-            enumerate(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
-            enumerate(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
+            drain_matches_(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
+            drain_matches_(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && "Mismatch in newline offsets");
             assert(reference_lengths == candidate_lengths && "Mismatch in newline lengths");
 
-            enumerate(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
-            enumerate(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
+            drain_matches_(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
+            drain_matches_(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && "Mismatch in whitespace offsets");
             assert(reference_lengths == candidate_lengths && "Mismatch in whitespace lengths");
 
             // Segment-level (iterator) equivalence: catches a `bytes_consumed` overshoot at a window-aligned fill.
-            reconstruct_segments(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
-            reconstruct_segments(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
+            reconstruct_segments_(reference_newlines, data, length, capacity, reference_offsets, reference_lengths);
+            reconstruct_segments_(candidate_newlines, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in newline segments");
-            reconstruct_segments(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
-            reconstruct_segments(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
+            reconstruct_segments_(reference_whitespaces, data, length, capacity, reference_offsets, reference_lengths);
+            reconstruct_segments_(candidate_whitespaces, data, length, capacity, candidate_offsets, candidate_lengths);
             assert(reference_offsets == candidate_offsets && reference_lengths == candidate_lengths &&
                    "Mismatch in whitespace segments");
         }
@@ -862,24 +848,33 @@ static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt1993
 }
 
 /**
- *  @brief Drain every delimiter a segmenter emits over the whole input, resuming via `bytes_consumed` so an
- *         arbitrarily small @p capacity yields the identical full match list. Offsets are absolute.
+ *  @brief The UTF-8 delimiter segmenters compiled on this target. The always-present `dispatched` entry keeps the
+ *         table non-empty on a baseline build with no SIMD tier, and the single ladder is shared by the unit,
+ *         safety and equivalence drivers so their ISA coverage cannot diverge. Only serial, Haswell, Ice Lake,
+ *         NEON and SVE2 implement `sz_utf8_delimiters`; every other target dispatches to serial.
  */
-static void drain_delimiters_(sz_utf8_segmenter_t finder, sz_cptr_t text, sz_size_t length, sz_size_t capacity,
-                              std::vector<sz_size_t> &offsets, std::vector<sz_size_t> &lengths) {
-    offsets.clear(), lengths.clear();
-    std::vector<sz_size_t> offset_batch(capacity ? capacity : 1), length_batch(capacity ? capacity : 1);
-    sz_size_t position = 0;
-    while (position < length) {
-        sz_size_t consumed = 0;
-        sz_size_t const emitted = finder(text + position, length - position, offset_batch.data(), length_batch.data(),
-                                         capacity, &consumed);
-        for (sz_size_t index = 0; index != emitted; ++index)
-            offsets.push_back(position + offset_batch[index]), lengths.push_back(length_batch[index]);
-        if (consumed == 0) break; // No forward progress: stop rather than spin.
-        position += consumed;
-    }
-}
+struct utf8_delimiters_backend_t {
+    char const *name;
+    sz_utf8_segmenter_t finder;
+};
+
+static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
+    {"dispatched", sz_utf8_delimiters},
+#if SZ_USE_HASWELL
+    {"haswell", sz_utf8_delimiters_haswell},
+#endif
+#if SZ_USE_ICELAKE
+    {"icelake", sz_utf8_delimiters_icelake},
+#endif
+#if SZ_USE_NEON
+    {"neon", sz_utf8_delimiters_neon},
+#endif
+#if SZ_USE_SVE2
+    {"sve2", sz_utf8_delimiters_sve2},
+#endif
+};
+
+#pragma region Unit
 
 /** @brief Known-answer unit tests for the UTF-8 delimiter segmenter on simple, hand-verifiable inputs. */
 void test_utf8_delimiters_unit() {
@@ -899,38 +894,90 @@ void test_utf8_delimiters_unit() {
         {"", 0, 0, 0, 0},                      // empty input
     };
 
-    struct {
-        sz_utf8_segmenter_t finder;
-        char const *name;
-    } const backends[] = {
-        {sz_utf8_delimiters, "dispatched"},      {sz_utf8_delimiters_serial, "serial"},
-#if SZ_USE_HASWELL
-        {sz_utf8_delimiters_haswell, "haswell"},
-#endif
-#if SZ_USE_ICELAKE
-        {sz_utf8_delimiters_icelake, "icelake"},
-#endif
-#if SZ_USE_NEON
-        {sz_utf8_delimiters_neon, "neon"},
-#endif
-#if SZ_USE_SVE2
-        {sz_utf8_delimiters_sve2, "sve2"},
-#endif
+    // Capacity-limited resume: when the output fills before the input is exhausted, `bytes_consumed` must land
+    // exactly on the end of the last emitted delimiter. A window whose delimiters fill the capacity exactly leaves
+    // no residue in the kernel's hit mask, and a driver keying the resume offset off that residue instead advances
+    // to the vector window's edge, swallowing every undelimited byte in between. Each probe therefore places its
+    // last emitted delimiter far from that edge, so the correct and the buggy answer differ.
+    struct resume_case_t {
+        std::string text;
+        sz_size_t capacity, expected_consumed;
     };
+    std::vector<resume_case_t> resume_cases;
+    {
+        // One ASCII space at byte 1, then 62 letters running past the widest vector window, then more text.
+        std::string text = "a ";
+        text.append(62, 'b');
+        text += " c";
+        resume_cases.push_back({text, 1u, 2u});
+    }
+    {
+        // Two delimiters, both well inside the first window; a capacity of 2 fills exactly on the second.
+        std::string text = "a b,";
+        text.append(60, 'c');
+        text += " d";
+        resume_cases.push_back({text, 2u, 4u});
+    }
+    {
+        // A multi-byte delimiter, U+2014 EM DASH, ending at byte 5, with letters running to the window edge.
+        std::string text = "ab\xE2\x80\x94";
+        text.append(59, 'd');
+        text += " e";
+        resume_cases.push_back({text, 1u, 5u});
+    }
 
     std::vector<sz_size_t> offsets, lengths;
-    for (auto const &backend : backends) {
-        sz_unused_(backend.name);
+    auto check_backend = [&](sz_utf8_segmenter_t finder) {
         for (auto const &one : cases) {
-            drain_delimiters_(backend.finder, one.text, one.length, one.length + 1, offsets, lengths);
+            drain_matches_(finder, one.text, one.length, one.length + 1, offsets, lengths);
             assert(offsets.size() == one.expected_count && "Delimiter count mismatch");
             if (one.expected_count) {
                 assert(offsets[0] == one.expected_offset && "Delimiter offset mismatch");
                 assert(lengths[0] == one.expected_length && "Delimiter length mismatch");
             }
         }
+        for (resume_case_t const &one : resume_cases) {
+            sz_size_t batch_offsets[4], batch_lengths[4], consumed = 0;
+            assert(one.capacity <= 4 && "Resume probe capacity outgrew its output buffers");
+            sz_size_t const emitted = finder(one.text.data(), (sz_size_t)one.text.size(), batch_offsets, batch_lengths,
+                                             one.capacity, &consumed);
+            assert(emitted == one.capacity && "Capacity-limited batch should fill the output");
+            assert(batch_offsets[emitted - 1] + batch_lengths[emitted - 1] == one.expected_consumed &&
+                   "Last emitted delimiter ends elsewhere than the probe expects");
+            assert(consumed == one.expected_consumed &&
+                   "Resume offset must be the end of the last emitted delimiter, not the vector window's edge");
+        }
+    };
+    check_backend(sz_utf8_delimiters_serial);
+    for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends) check_backend(backend.finder);
+
+    // The C++ range wrappers over the same kernel, on the same hand-verifiable inputs.
+    {
+        // "Hi, world" -> delimiters at ',' (byte 2) and ' ' (byte 3): segments "Hi", "", "world".
+        let_assert(
+            auto d = sz::string_view("Hi, world").utf8_split_delimiters().template to<std::vector<std::string>>(),
+            d.size() == 3 && d[0] == "Hi" && d[2] == "world");
+        // U+2014 EM DASH (E2 80 94) is a delimiter: "a—b" -> "a", "b".
+        let_assert(auto e = sz::string_view("a\xE2\x80\x94" "b")
+                                .utf8_split_delimiters()
+                                .skip_empty()
+                                .template to<std::vector<std::string>>(),
+                   e.size() == 2 && e[0] == "a" && e[1] == "b");
+        // The kernel-named accessor yields the DELIMITER runs themselves, not the segments between.
+        let_assert(auto r = sz::string_view("Hi, world").utf8_delimiters().template to<std::vector<std::string>>(),
+                   r.size() == 2 && r[0] == "," && r[1] == " ");
+        // `.skip_empty()` drops the empty field between ',' and ' ': "Hi", "world".
+        let_assert(auto s = sz::string_view("Hi, world")
+                                .utf8_split_delimiters()
+                                .skip_empty()
+                                .template to<std::vector<std::string>>(),
+                   s.size() == 2 && s[0] == "Hi" && s[1] == "world");
     }
 }
+
+#pragma endregion // Unit
+
+#pragma region Equivalence
 
 /**
  *  @brief Cross-checks the serial UTF-8 delimiter segmenter against a candidate SIMD backend on random,
@@ -943,31 +990,49 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
 
-    auto check = [&](std::string const &text) {
-        sz_cptr_t const data = text.data();
-        sz_size_t const length = (sz_size_t)text.size();
-        drain_delimiters_(finder_serial, data, length, length + 1, serial_offsets, serial_lengths);
-        drain_delimiters_(finder_candidate, data, length, length + 1, candidate_offsets, candidate_lengths);
+    auto check = [&](sz_cptr_t data, sz_size_t length) {
+        drain_matches_(finder_serial, data, length, length + 1, serial_offsets, serial_lengths);
+        drain_matches_(finder_candidate, data, length, length + 1, candidate_offsets, candidate_lengths);
         assert(candidate_offsets == serial_offsets && "Mismatch in delimiter offsets");
         assert(candidate_lengths == serial_lengths && "Mismatch in delimiter lengths");
         // Resume path: a capacity of 3 forces repeated re-entry; the accumulated list must still match.
-        drain_delimiters_(finder_candidate, data, length, 3u, resumed_offsets, resumed_lengths);
+        drain_matches_(finder_candidate, data, length, 3u, resumed_offsets, resumed_lengths);
         assert(resumed_offsets == serial_offsets && "Resume-path delimiter offsets diverged");
         assert(resumed_lengths == serial_lengths && "Resume-path delimiter lengths diverged");
+
+        // Segment-level (iterator) equivalence, mirroring the newline/whitespace differential: sweep the capacities
+        // that straddle the 64-byte vector window, so a batch filling exactly at a window edge is caught. The
+        // delimiter lists above stay identical under such a fill - only the segments shift.
+        sz_size_t const capacities[] = {length + 64, 65, 64, 63, 16, 3, 2, 1};
+        reconstruct_segments_(finder_serial, data, length, length + 64, serial_offsets, serial_lengths);
+        for (sz_size_t capacity : capacities) {
+            reconstruct_segments_(finder_candidate, data, length, capacity, candidate_offsets, candidate_lengths);
+            assert(candidate_offsets == serial_offsets && "Mismatch in delimiter segment offsets");
+            assert(candidate_lengths == serial_lengths && "Mismatch in delimiter segment lengths");
+        }
     };
 
     sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
-    for (sz_size_t codepoints : ladder) check(random_valid_utf8_(codepoints, rng));
+    for (sz_size_t codepoints : ladder) {
+        std::string const text = random_valid_utf8_(codepoints, rng);
+        check(text.data(), (sz_size_t)text.size());
+    }
 
-    std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 96);
+    std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 300);
     for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
         std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        // The probe buffer itself is handed to the kernels: copying it back into a fresh `std::string` would
+        // hand them whatever alignment the allocator picked, and the sweep would test one alignment repeatedly.
         for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, text.data(), text.size());
-            check(std::string(buffer, text.size()));
+            check(buffer, (sz_size_t)text.size());
         });
     }
 }
+
+#pragma endregion // Equivalence
+
+#pragma region Safety
 
 /** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
 static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
@@ -976,7 +1041,7 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
     std::vector<sz_size_t> offsets, lengths;
 
     auto check = [&](char const *input, std::size_t input_length) {
-        drain_delimiters_(finder, input, (sz_size_t)input_length, (sz_size_t)input_length + 1, offsets, lengths);
+        drain_matches_(finder, input, (sz_size_t)input_length, (sz_size_t)input_length + 1, offsets, lengths);
         sz_size_t previous_end = 0;
         for (std::size_t index = 0; index != offsets.size(); ++index) {
             assert(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
@@ -1012,31 +1077,9 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
     }
 }
 
-/**
- *  @brief The UTF-8 delimiter segmenters compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty (and `test_utf8_delimiters_equivalence` live) on a baseline build with no SIMD tier, and
- *         the single ladder is shared by the safety and equivalence drivers so their ISA coverage cannot diverge.
- */
-struct utf8_delimiters_backend_t {
-    char const *name;
-    sz_utf8_segmenter_t finder;
-};
+#pragma endregion // Safety
 
-static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
-    {"dispatched", sz_utf8_delimiters},
-#if SZ_USE_HASWELL
-    {"haswell", sz_utf8_delimiters_haswell},
-#endif
-#if SZ_USE_ICELAKE
-    {"icelake", sz_utf8_delimiters_icelake},
-#endif
-#if SZ_USE_NEON
-    {"neon", sz_utf8_delimiters_neon},
-#endif
-#if SZ_USE_SVE2
-    {"sve2", sz_utf8_delimiters_sve2},
-#endif
-};
+#pragma region Drivers
 
 /** @brief Drive the malformed-input safety probe through serial, dispatched, and every native backend. */
 void test_utf8_delimiters_safety() {
@@ -1049,9 +1092,11 @@ void test_utf8_delimiters_safety() {
 
 /** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */
 void test_utf8_delimiters_all() {
-    sz_size_t const inputs = (sz_size_t)scale_iterations(200);
+    sz_size_t const inputs = (sz_size_t)scale_iterations(2000);
     for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
         test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, backend.finder, inputs);
 }
+
+#pragma endregion // Drivers
 
 #pragma endregion // Delimiters

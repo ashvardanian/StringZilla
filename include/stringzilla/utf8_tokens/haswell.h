@@ -469,7 +469,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
             length_at_lane += ((decoded.four_byte_starts >> lane) & 1) * 3;
             match_offsets[count] = base + lane, match_lengths[count] = length_at_lane, ++count;
         }
-        if (count == matches_capacity && hits) { // output full mid-window: resume past the last emitted match
+        // Output buffer full: resume past the last emitted match, never at the window edge. The window's last hit
+        // can fill the capacity exactly, and the undelimited bytes between that match and the edge still belong to
+        // the caller's next segment, whose start is derived from `bytes_consumed`.
+        if (count == matches_capacity) {
             base = match_offsets[count - 1] + match_lengths[count - 1];
             if (bytes_consumed) *bytes_consumed = base;
             return count;
