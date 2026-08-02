@@ -91,7 +91,7 @@ pub struct IndexSpan {
 impl IndexSpan {
     /// Creates a new IndexSpan with the given offset and length.
     #[inline]
-    pub fn new(offset: usize, length: usize) -> Self {
+    pub const fn new(offset: usize, length: usize) -> Self {
         Self { offset, length }
     }
 
@@ -106,7 +106,7 @@ impl IndexSpan {
     /// assert_eq!(span.range(), 5..8);
     /// ```
     #[inline]
-    pub fn range(&self) -> core::ops::Range<usize> {
+    pub const fn range(&self) -> core::ops::Range<usize> {
         self.offset..self.offset + self.length
     }
 
@@ -137,7 +137,7 @@ impl IndexSpan {
     /// assert_eq!(span.end(), 8);
     /// ```
     #[inline]
-    pub fn end(&self) -> usize {
+    pub const fn end(&self) -> usize {
         self.offset + self.length
     }
 }
@@ -168,17 +168,22 @@ pub(crate) struct Utf8UncasedNeedleMetadata {
     kernel_id: u8,
 }
 
+impl Utf8UncasedNeedleMetadata {
+    /// The state that requests analysis on first use, usable in a `const` unlike the `Default` it backs.
+    pub(crate) const UNANALYZED: Self = Self {
+        offset_in_unfolded: 0,
+        length_in_unfolded: 0,
+        folded_slice: [0; 16],
+        folded_slice_length: 0,
+        probe_second: 0,
+        probe_third: 0,
+        kernel_id: 0, // sz_utf8_uncased_rune_unknown_k = 0, triggers analysis
+    };
+}
+
 impl Default for Utf8UncasedNeedleMetadata {
     fn default() -> Self {
-        Self {
-            offset_in_unfolded: 0,
-            length_in_unfolded: 0,
-            folded_slice: [0; 16],
-            folded_slice_length: 0,
-            probe_second: 0,
-            probe_third: 0,
-            kernel_id: 0, // sz_utf8_uncased_rune_unknown_k = 0, triggers analysis
-        }
+        Self::UNANALYZED
     }
 }
 
@@ -213,28 +218,28 @@ impl<'a> Utf8UncasedNeedle<'a> {
     ///
     /// The metadata will be computed lazily on first use.
     #[inline]
-    pub fn new(needle: &'a [u8]) -> Self {
+    pub const fn new(needle: &'a [u8]) -> Self {
         Self {
             needle,
-            metadata: UnsafeCell::new(Utf8UncasedNeedleMetadata::default()),
+            metadata: UnsafeCell::new(Utf8UncasedNeedleMetadata::UNANALYZED),
         }
     }
 
     /// Returns the needle bytes.
     #[inline]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub const fn as_bytes(&self) -> &[u8] {
         self.needle
     }
 
     /// Returns the length of the needle in bytes.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.needle.len()
     }
 
     /// Returns true if the needle is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.needle.is_empty()
     }
 
@@ -334,13 +339,13 @@ pub struct _SzSequence {
 impl Byteset {
     /// Initializes a bit-set to an empty collection (all characters banned).
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { bits: [0; 4] }
     }
 
     /// Initializes a bit-set to contain all ASCII characters.
     #[inline]
-    pub fn new_ascii() -> Self {
+    pub const fn new_ascii() -> Self {
         Self {
             bits: [u64::MAX, u64::MAX, 0, 0],
         }
@@ -348,42 +353,54 @@ impl Byteset {
 
     /// Adds a byte to the set.
     #[inline]
-    pub fn add_u8(&mut self, c: u8) {
-        let idx = (c >> 6) as usize; // Divide by 64.
-        let bit = c & 63; // Remainder modulo 64.
-        self.bits[idx] |= 1 << bit;
+    pub const fn add_u8(&mut self, byte: u8) {
+        let word = (byte >> 6) as usize; // Divide by 64.
+        let bit = byte & 63; // Remainder modulo 64.
+        self.bits[word] |= 1 << bit;
     }
 
     /// Adds a character to the set.
     ///
     /// This function assumes the character is in the ASCII range.
     #[inline]
-    pub fn add(&mut self, c: char) {
-        self.add_u8(c as u8);
+    pub const fn add(&mut self, character: char) {
+        self.add_u8(character as u8);
     }
 
     /// Inverts the bit-set so that all set bits become unset and vice versa.
     #[inline]
-    pub fn invert(&mut self) {
-        for b in self.bits.iter_mut() {
-            *b = !*b;
+    pub const fn invert(&mut self) {
+        let mut word = 0;
+        while word < 4 {
+            self.bits[word] = !self.bits[word];
+            word += 1;
         }
     }
 
     /// Returns a new Byteset with all bits inverted, leaving self unchanged.
     #[inline]
-    pub fn inverted(&self) -> Self {
+    pub const fn inverted(&self) -> Self {
         Self {
             bits: [!self.bits[0], !self.bits[1], !self.bits[2], !self.bits[3]],
         }
     }
 
     /// Constructs a Byteset from a slice of bytes.
+    ///
+    /// Usable in a `const`, so a hot loop can name a set instead of rebuilding one per call:
+    ///
+    /// ```rust
+    /// use stringzilla::sz::Byteset;
+    /// const WHITESPACE: Byteset = Byteset::from_bytes(b" \t\r\n");
+    /// assert_eq!(stringzilla::sz::find_byteset("ab cd", WHITESPACE), Some(2));
+    /// ```
     #[inline]
-    pub fn from_bytes(bytes: &[u8]) -> Self {
+    pub const fn from_bytes(bytes: &[u8]) -> Self {
         let mut set = Self::new();
-        for &b in bytes {
-            set.add_u8(b);
+        let mut index = 0;
+        while index < bytes.len() {
+            set.add_u8(bytes[index]);
+            index += 1;
         }
         set
     }
@@ -857,7 +874,7 @@ impl<const N: usize> FixedCString<N> {
     }
 
     /// Returns the raw pointer to the C string.
-    pub fn as_ptr(&self) -> *const u8 {
+    pub const fn as_ptr(&self) -> *const u8 {
         self.buf.as_ptr()
     }
 
@@ -2139,7 +2156,7 @@ pub struct Utf8View<'a> {
 
 impl<'a> Utf8View<'a> {
     /// Creates a new UTF-8 view (O(1) - no scanning).
-    pub fn new(octets: &'a [u8]) -> Self {
+    pub const fn new(octets: &'a [u8]) -> Self {
         Self {
             octets,
             cached_len: core::cell::Cell::new(None),
@@ -2157,7 +2174,7 @@ impl<'a> Utf8View<'a> {
     }
 
     /// Checks if the view is empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.octets.is_empty()
     }
 
@@ -2385,17 +2402,17 @@ pub struct ArgsortOptions {
 
 impl ArgsortOptions {
     /// Sort in descending order.
-    pub fn reversed(mut self) -> Self {
+    pub const fn reversed(mut self) -> Self {
         self.reverse = true;
         self
     }
     /// Order under Unicode case-folding instead of raw bytes.
-    pub fn uncased(mut self) -> Self {
+    pub const fn uncased(mut self) -> Self {
         self.uncased = true;
         self
     }
     /// Only fully order the leading `count` elements (top-K / partial sort).
-    pub fn top(mut self, count: usize) -> Self {
+    pub const fn top(mut self, count: usize) -> Self {
         self.top = Some(count);
         self
     }
@@ -4889,6 +4906,30 @@ mod tests {
         let matcher = MatcherType::RFind(b"aa");
         let matches: Vec<_> = RFindMatches::new(haystack, matcher).collect();
         assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
+    }
+
+    #[test]
+    fn const_apis() {
+        // Each constant is built at compile time, so dropping a `const fn` breaks the build, not this run.
+        const SPAN: sz::IndexSpan = sz::IndexSpan::new(6, 5);
+        const WHITESPACE: sz::Byteset = sz::Byteset::from_bytes(b" \t\r\n");
+        const NEEDLE: sz::Utf8UncasedNeedle = sz::Utf8UncasedNeedle::new(b"hello");
+        const TOP_TWO_DESCENDING: sz::ArgsortOptions = sz::ArgsortOptions {
+            reverse: false,
+            uncased: false,
+            top: None,
+        }
+        .reversed()
+        .top(2);
+
+        assert_eq!(SPAN.extract(b"Hello World"), b"World");
+        assert_eq!(sz::find_byteset("ab cd", WHITESPACE), Some(2));
+        assert_eq!(sz::utf8_uncased_search(b"say HELLO now", &NEEDLE), Some((4, 5)));
+
+        let fruits = ["banana", "apple", "cherry"];
+        let mut order = [0; 3];
+        sz::argsort(&fruits, &mut order, TOP_TWO_DESCENDING).expect("argsort failed");
+        assert_eq!(fruits[order[0]], "cherry");
     }
 
     #[test]

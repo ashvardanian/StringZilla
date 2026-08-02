@@ -24,6 +24,8 @@ links = "stringzilla"
 name = "stringzilla"
 publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
+# The `Byteset` mutators are `const fn` taking `&mut self`, which needs `const_mut_refs`, stable since 1.83.
+rust-version = "1.83"
 version = "5.0.7"
 
 [lib]
