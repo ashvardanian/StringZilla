@@ -582,6 +582,8 @@ SZ_API_RUNTIME sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed)
     return sz_hash_v128relaxed(text, length, seed);
 #elif SZ_USE_V128
     return sz_hash_v128(text, length, seed);
+#elif SZ_USE_RVVCRYPTO
+    return sz_hash_rvvcrypto(text, length, seed);
 #elif SZ_USE_RVV
     return sz_hash_rvv(text, length, seed);
 #elif SZ_USE_LASX
@@ -626,6 +628,8 @@ SZ_API_RUNTIME void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t non
     sz_fill_random_v128relaxed(text, length, nonce);
 #elif SZ_USE_V128
     sz_fill_random_v128(text, length, nonce);
+#elif SZ_USE_RVVCRYPTO
+    sz_fill_random_rvvcrypto(text, length, nonce);
 #elif SZ_USE_RVV
     sz_fill_random_rvv(text, length, nonce);
 #elif SZ_USE_LASX
@@ -652,6 +656,8 @@ SZ_API_RUNTIME void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_v128relaxed(state, seed);
 #elif SZ_USE_V128
     sz_hash_state_init_v128(state, seed);
+#elif SZ_USE_RVVCRYPTO
+    sz_hash_state_init_rvvcrypto(state, seed);
 #elif SZ_USE_RVV
     sz_hash_state_init_rvv(state, seed);
 #elif SZ_USE_LASX
@@ -678,6 +684,8 @@ SZ_API_RUNTIME void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text,
     sz_hash_state_update_v128relaxed(state, text, length);
 #elif SZ_USE_V128
     sz_hash_state_update_v128(state, text, length);
+#elif SZ_USE_RVVCRYPTO
+    sz_hash_state_update_rvvcrypto(state, text, length);
 #elif SZ_USE_RVV
     sz_hash_state_update_rvv(state, text, length);
 #elif SZ_USE_LASX
@@ -704,6 +712,8 @@ SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
     return sz_hash_state_digest_v128relaxed(state);
 #elif SZ_USE_V128
     return sz_hash_state_digest_v128(state);
+#elif SZ_USE_RVVCRYPTO
+    return sz_hash_state_digest_rvvcrypto(state);
 #elif SZ_USE_RVV
     return sz_hash_state_digest_rvv(state);
 #elif SZ_USE_LASX
@@ -728,6 +738,8 @@ SZ_API_RUNTIME sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state) {
 SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
 #if SZ_USE_V128
     sz_sha256_state_init_v128(state);
+#elif SZ_USE_RVVCRYPTO
+    sz_sha256_state_init_rvvcrypto(state);
 #elif SZ_USE_RVV
     sz_sha256_state_init_rvv(state);
 #elif SZ_USE_LASX
@@ -748,6 +760,8 @@ SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
 SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length) {
 #if SZ_USE_V128
     sz_sha256_state_update_v128(state, data, length);
+#elif SZ_USE_RVVCRYPTO
+    sz_sha256_state_update_rvvcrypto(state, data, length);
 #elif SZ_USE_RVV
     sz_sha256_state_update_rvv(state, data, length);
 #elif SZ_USE_LASX
@@ -768,6 +782,8 @@ SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t d
 SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
 #if SZ_USE_V128
     sz_sha256_state_digest_v128(state, digest);
+#elif SZ_USE_RVVCRYPTO
+    sz_sha256_state_digest_rvvcrypto(state, digest);
 #elif SZ_USE_RVV
     sz_sha256_state_digest_rvv(state, digest);
 #elif SZ_USE_LASX
