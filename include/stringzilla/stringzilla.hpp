@@ -949,7 +949,9 @@ class find_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1084,7 +1086,9 @@ class rfind_splits_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
-    iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
+    }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1250,7 +1254,9 @@ class utf8_runes_view {
     };
 
     iterator begin() const noexcept { return {string_view_type(haystack_)}; }
-    iterator end() const noexcept { return {string_view_type(haystack_), end_sentinel_type {}}; }
+    iterator end() const noexcept {
+        return {string_view_type(haystack_), end_sentinel_type {}};
+    }
     end_sentinel_type end_sentinel() const noexcept { return {}; }
 
     /** @brief Count UTF-8 characters in the string. */
@@ -3105,10 +3111,14 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief Find all occurrences of given characters. */
-    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept {
+        return {*this, {set}};
+    }
 
     using split_type = find_splits_view<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = rfind_splits_view<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
@@ -3130,10 +3140,14 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief Split around occurrences of given characters. */
-    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept {
+        return {*this, {set}};
+    }
 
     /**  @brief Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }

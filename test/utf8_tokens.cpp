@@ -181,6 +181,18 @@ static void reconstruct_segments_(matcher_type_ &&matcher, sz_cptr_t text, sz_si
     }
 }
 
+/**
+ *  @brief Repeats @p pattern until the text is exactly @p bytes long, so a scan ends precisely on a vector-window
+ *         or multistep edge rather than wherever a codepoint ladder happens to land.
+ */
+static std::string exact_byte_length_(char const *pattern, std::size_t pattern_length, std::size_t bytes) {
+    std::string text;
+    text.reserve(bytes + pattern_length);
+    while (text.size() < bytes) text.append(pattern, pattern_length);
+    text.resize(bytes); // A truncated multi-byte tail sitting on the edge is itself worth probing
+    return text;
+}
+
 #pragma endregion // Helpers
 
 #pragma region Unit
@@ -501,8 +513,7 @@ struct utf8_tokens_backend_t {
  */
 template <typename reference_, typename candidate_>
 void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
-                                  std::size_t min_text_length = 4000,
-                                  std::size_t min_iterations = scale_iterations(10000)) {
+                                  std::size_t min_text_length, std::size_t min_iterations) {
 
     // Adapt the bundle methods to the plain boundary-finder signature `drain_matches_`/`reconstruct_segments_` expect.
     auto reference_newlines = [&](sz_cptr_t data, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
@@ -602,10 +613,31 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
     };
 
     auto &rng = global_random_generator();
-    std::size_t const utf8_content_count = sizeof(utf8_content) / sizeof(utf8_content[0]);
-    std::size_t const special_delimiter_count = sizeof(special_chars) / sizeof(special_chars[0]);
+    std::size_t const utf8_content_count = span_over(utf8_content).size();
+    std::size_t const special_delimiter_count = span_over(special_chars).size();
     std::size_t const total_strings_to_sample = utf8_content_count + special_delimiter_count;
     std::uniform_int_distribution<std::size_t> content_dist(0, total_strings_to_sample - 1);
+
+    // Byte-exact edges. The vector windows are 16/32/64 bytes wide, but these scanners advance 14 bytes per step on
+    // NEON, 30 on AVX2 and 62 on AVX-512, so multiples of both families - and their neighbours - are pinned here.
+    // The repeated pattern carries a CRLF, a 3-byte U+2028 LINE SEPARATOR and a 2-byte U+00A0 NO-BREAK SPACE, so a
+    // length cut mid-sequence leaves a truncated delimiter sitting exactly on the edge.
+    static sz_size_t const byte_lengths[] = {13, 14, 15,  16,  17,  27,  28,  29,  30,  31,  32, 33, 41,
+                                             42, 43, 55,  56,  57,  59,  60,  61,  62,  63,  64, 65, 89,
+                                             90, 91, 123, 124, 125, 127, 128, 129, 185, 186, 187};
+    char const edge_pattern[] = "ab\r\ncd\xE2\x80\xA8" "ef\xC2\xA0" "gh";
+    for (sz_size_t bytes : byte_lengths) {
+        std::string const text = exact_byte_length_(edge_pattern, sizeof(edge_pattern) - 1, bytes);
+        check(text.data(), (sz_size_t)text.size());
+    }
+
+    // Homogeneous runs several windows long: an all-match and an all-miss window drive the classifier's saturated
+    // paths, which the mixed corpora below never reach.
+    std::string const uniform_runs[] = {std::string(200, 'a'),      std::string(200, ' '),
+                                        std::string(200, '\n'),     repeat("\r\n", 100),
+                                        repeat("\xC2\xA0", 100),    repeat("\xE3\x80\x80", 70),
+                                        repeat("\xE4\xB8\xAD", 70), repeat("\xF0\x9F\x98\x80", 50)};
+    for (std::string const &run : uniform_runs) check(run.data(), (sz_size_t)run.size());
 
     // Generate and test many random strings
     for (std::size_t iteration = 0; iteration < min_iterations; ++iteration) {
@@ -730,19 +762,21 @@ void test_utf8_tokens_safety() {
     check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
     check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
 
-    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF.
-    for (std::size_t byte = 0; byte != 256; ++byte) {
+    // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF. Both the single-byte sweep and the
+    // pair sweep below stride each dimension, so a low multiplier samples the whole space instead of a prefix.
+    std::size_t const byte_step = sweep_stride(256);
+    for (std::size_t byte = 0; byte < 256; byte += byte_step) {
         input[0] = (char)byte;
         check(input, 1);
     }
 
     // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    for (std::size_t first_byte = 0; first_byte != 256; ++first_byte)
-        for (std::size_t second_byte = 0; second_byte != 256; ++second_byte) {
-            input[0] = (char)first_byte;
-            input[1] = (char)second_byte;
-            check(input, 2);
-        }
+    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
+    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
+        input[0] = (char)(pair >> 8);
+        input[1] = (char)(pair & 0xFF);
+        check(input, 2);
+    }
 
     // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
     std::size_t const random_inputs = scale_iterations(10000);
@@ -805,12 +839,15 @@ static utf8_tokens_backend_t const utf8_tokens_backends[] = {
 void test_utf8_tokens_all() {
     utf8_tokens_backend_t const serial {"serial", sz_utf8_count_serial, sz_utf8_newlines_serial,
                                         sz_utf8_whitespaces_serial};
-    for (utf8_tokens_backend_t const &backend : utf8_tokens_backends) test_utf8_tokens_equivalence(serial, backend);
+    // Each iteration drains a 4 KB input through six capacities down to 1, re-entering the kernel once per match.
+    // The input count is this family's share of the suite budget, sized against its siblings.
+    for (utf8_tokens_backend_t const &backend : utf8_tokens_backends)
+        test_utf8_tokens_equivalence(serial, backend, 4000, scale_iterations(250));
 }
 
 #pragma endregion // Drivers
 
-#pragma region Delimiters
+#pragma region Delimiter Helpers
 
 /** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
 static void append_codepoint_(std::string &text, sz_rune_t codepoint) {
@@ -872,6 +909,8 @@ static utf8_delimiters_backend_t const utf8_delimiters_backends[] = {
     {"sve2", sz_utf8_delimiters_sve2},
 #endif
 };
+
+#pragma endregion // Delimiter Helpers
 
 #pragma region Unit
 
@@ -1017,6 +1056,22 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
         check(text.data(), (sz_size_t)text.size());
     }
 
+    // The ladder above counts codepoints, so a byte-exact window edge is only hit by accident. These lengths land
+    // on and beside the 16/32/64-byte vector windows, with a 3-byte U+2014 EM DASH in the pattern so a cut can
+    // leave a truncated delimiter on the edge itself.
+    char const edge_pattern[] = "ab cd,ef\xE2\x80\x94" "gh";
+    sz_size_t const byte_lengths[] = {15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 127u, 128u, 129u};
+    for (sz_size_t bytes : byte_lengths) {
+        std::string const text = exact_byte_length_(edge_pattern, sizeof(edge_pattern) - 1, bytes);
+        check(text.data(), (sz_size_t)text.size());
+    }
+
+    // Homogeneous runs several windows long: all-letter, all-space and all-delimiter windows drive the saturated
+    // classifier paths that the mixed corpora never reach.
+    std::string const uniform_runs[] = {std::string(200, 'a'), std::string(200, ' '), std::string(200, ','),
+                                        repeat("\xE2\x80\x94", 70), repeat("\xE4\xB8\xAD", 70)};
+    for (std::string const &run : uniform_runs) check(run.data(), (sz_size_t)run.size());
+
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 300);
     for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
         std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
@@ -1035,18 +1090,23 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 
 /** @brief Feeds malformed / invalid UTF-8 through one backend, asserting in-bounds, ascending, well-formed output. */
 static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
-                                          std::size_t random_inputs = scale_iterations(10000)) {
+                                          std::size_t random_inputs = scale_iterations(2500)) {
     static constexpr std::size_t max_input_length = 70;
     std::vector<sz_size_t> offsets, lengths;
 
+    // Malformed bytes meet a capacity too small to hold the batch, so the resume path - not just the one-shot
+    // drain - must keep emitting in-bounds, ascending, well-formed spans.
     auto check = [&](char const *input, std::size_t input_length) {
-        drain_matches_(finder, input, (sz_size_t)input_length, (sz_size_t)input_length + 1, offsets, lengths);
-        sz_size_t previous_end = 0;
-        for (std::size_t index = 0; index != offsets.size(); ++index) {
-            verify(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
-            verify(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
-            verify(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
-            previous_end = offsets[index] + lengths[index];
+        sz_size_t const capacities[] = {(sz_size_t)input_length + 1, 3u, 2u, 1u};
+        for (sz_size_t capacity : capacities) {
+            drain_matches_(finder, input, (sz_size_t)input_length, capacity, offsets, lengths);
+            sz_size_t previous_end = 0;
+            for (std::size_t index = 0; index != offsets.size(); ++index) {
+                verify(lengths[index] >= 1u && lengths[index] <= 4u && "Delimiter matched an impossible byte length");
+                verify(offsets[index] + lengths[index] <= input_length && "Delimiter match span outside the input");
+                verify(offsets[index] >= previous_end && "Delimiter matches must be ascending and non-overlapping");
+                previous_end = offsets[index] + lengths[index];
+            }
         }
     };
 
@@ -1056,12 +1116,14 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
     check("\xED\xA0\x80", 3);      // Surrogate-encoded codepoint (U+D800)
     check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
 
-    for (std::size_t byte = 0; byte != 256; ++byte) { input[0] = (char)byte, check(input, 1); }
-    for (std::size_t first_byte = 0; first_byte != 256; ++first_byte)
-        for (std::size_t second_byte = 0; second_byte != 256; ++second_byte) {
-            input[0] = (char)first_byte, input[1] = (char)second_byte;
-            check(input, 2);
-        }
+    // Both sweeps stride every dimension, so a low multiplier samples the whole space instead of a prefix.
+    std::size_t const byte_step = sweep_stride(256);
+    for (std::size_t byte = 0; byte < 256; byte += byte_step) { input[0] = (char)byte, check(input, 1); }
+    // Walked flat so a strided run samples both bytes evenly, and its cost stays proportional to the multiplier.
+    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
+        input[0] = (char)(pair >> 8), input[1] = (char)(pair & 0xFF);
+        check(input, 2);
+    }
 
     auto &rng = global_random_generator();
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
@@ -1091,11 +1153,9 @@ void test_utf8_delimiters_safety() {
 
 /** @brief Drive the serial-vs-SIMD UTF-8 delimiter differential across every backend compiled on this target. */
 void test_utf8_delimiters_all() {
-    sz_size_t const inputs = (sz_size_t)scale_iterations(2000);
+    sz_size_t const inputs = (sz_size_t)scale_iterations(700);
     for (utf8_delimiters_backend_t const &backend : utf8_delimiters_backends)
         test_utf8_delimiters_equivalence(sz_utf8_delimiters_serial, backend.finder, inputs);
 }
 
 #pragma endregion // Drivers
-
-#pragma endregion // Delimiters

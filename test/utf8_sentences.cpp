@@ -38,8 +38,6 @@ static utf8_unit_case_t const utf8_sentences_unit_cases[] = {
     {"One.\nTwo."_sv, {"One.\n"_sv, "Two."_sv}},    // ParaSep after terminator
     {"A! B? C."_sv, {"A! "_sv, "B? "_sv, "C."_sv}}, // multiple terminators
 };
-static constexpr std::size_t utf8_sentences_unit_cases_count = sizeof(utf8_sentences_unit_cases) /
-                                                               sizeof(utf8_sentences_unit_cases[0]);
 
 /**
  *  @brief The UTF-8 sentence-break segmenters compiled on this target. The always-present `dispatched` entry keeps
@@ -66,11 +64,9 @@ static utf8_segment_backend_t const utf8_sentences_backends[] = {
 void test_utf8_sentences_unit() {
     std::printf("  - testing UTF-8 sentence-break known-answer vectors...\n");
 
-    check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, utf8_sentences_unit_cases,
-                             utf8_sentences_unit_cases_count);
+    check_utf8_segment_unit_("sentence", sz_utf8_sentences_serial, span_over(utf8_sentences_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
-        check_utf8_segment_unit_("sentence", backend.finder, utf8_sentences_unit_cases,
-                                 utf8_sentences_unit_cases_count);
+        check_utf8_segment_unit_("sentence", backend.finder, span_over(utf8_sentences_unit_cases));
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's sentence segments.
     std::vector<std::string> const sentences =
@@ -119,8 +115,6 @@ static sz::string_view const utf8_sentences_motifs[] = {
     "A.\xCC\x80\xCC\x80 b"_sv,   // ATerm + stacked Extend marks then lowercase (SB8 across transparents)
     "End. \xE2\x80\x8C Next"_sv, // ATerm Sp then Format then Upper (SB8 neutral chain)
 };
-static constexpr std::size_t utf8_sentences_motifs_count = sizeof(utf8_sentences_motifs) /
-                                                           sizeof(utf8_sentences_motifs[0]);
 
 /** @brief ATerm + Close* + Sp* run @p link_count wide, then a Lower (SB8 continuation, no break), into @p out. */
 static void utf8_sentences_dense_aterm_sp_lower_(std::string &out, std::size_t link_count) {
@@ -181,38 +175,31 @@ static void utf8_sentences_straddles_(std::mt19937 & /*rng*/, std::size_t gap, u
     utf8_straddle_sb11_upper_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Sentence-biased random-corpus snippets: ATerm/STerm + space + case, abbreviations, numeric, CJK stop, ParaSep. */
+/** @brief Sentence-biased snippets: ATerm/STerm + space + case across scripts, numeric, CJK stop, ParaSep. */
 static char const *const utf8_sentences_snippets[] = {
     "End. Next ",               // ATerm + space + Upper (SB break)
     "end. next ",               // SB8: '. ' before Lower does not break
-    "(End.) ",                  // terminator + Close ')' + space
-    "Mr. ",                     // abbreviation-like
-    "U.S.A. ",                  // dotted acronym
     "3.14 ",                    // numeric ATerm (no break)
     "Item, ",                   // SContinue ',' continuation
     "\xE4\xB8\xAD\xE3\x80\x82", // CJK ideograph + ideographic full stop (STerm)
     "\xE2\x80\xA8",             // ParaSep U+2028
+    "\xCE\x9A\xCE\xB1\xCE\xBB\xCE\xAC\xCD\xBE \xCE\x9D\xCE\xB1\xCE\xB9 ", // Greek question mark U+037E + Upper
+    "\xD9\x85\xD8\xB1\xDB\x94 \xD9\x85\xD8\xB1\xD8\x9F Hi. ",             // Arabic U+06D4 / U+061F, RTL then LTR
+    "\xE0\xA4\xA8\xE0\xA4\xAE\xE0\xA5\xA4 \xD0\x94\xD0\xB0. ",            // Devanagari danda U+0964 + Cyrillic
 };
 
 /** @brief Sentence family alphabet: weights bias toward the family snippets and motifs (SB6/7/8/8a/9/10/11). */
 static utf8_corpus_alphabet_t const utf8_sentences_alphabet = {
-    utf8_sentences_snippets,
-    sizeof(utf8_sentences_snippets) / sizeof(utf8_sentences_snippets[0]),
-    utf8_default_boundary_codepoints,
-    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
-    {45, 15, 5, 30, 5}, // snippet, boundary, astral, motif, malformed
+    span_over(utf8_sentences_snippets),
+    span_over(utf8_default_boundary_codepoints),
+    {{45, 15, 5, 30, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the sentence family's differential corpora (motifs + dense + straddle + alphabet; no seam regressions). */
 static utf8_segment_corpora_t utf8_sentences_corpora_() {
-    utf8_segment_corpora_t corpora = {"sentence",
-                                      utf8_sentences_motifs,
-                                      utf8_sentences_motifs_count,
-                                      &utf8_sentences_dense_runs_,
-                                      &utf8_sentences_straddles_,
-                                      nullptr,
-                                      0,
-                                      &utf8_sentences_alphabet};
+    utf8_segment_corpora_t corpora = {
+        "sentence", span_over(utf8_sentences_motifs), &utf8_sentences_dense_runs_, &utf8_sentences_straddles_,
+        {},         &utf8_sentences_alphabet};
     return corpora;
 }
 
@@ -247,9 +234,8 @@ void test_utf8_sentences_rules() {
         "SB3", "SB4", "SB5", "SB6", "SB7", "SB8", "SB8a", "SB9", "SB10", "SB11", "SB998",
     };
     for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
-        check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, backend.finder, rule_cases,
-                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                                  sizeof(required_rules) / sizeof(required_rules[0]));
+        check_utf8_rule_coverage_("sentence", sz_utf8_sentences_serial, backend.finder, span_over(rule_cases),
+                                  span_over(required_rules));
 }
 
 #pragma endregion // Rule coverage
@@ -259,11 +245,9 @@ void test_utf8_sentences_rules() {
 /** @brief Malformed-input safety of the UTF-8 sentence kernels (serial / dispatched / icelake). */
 void test_utf8_sentences_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 sentence kernels...\n");
-    check_utf8_segment_safety_("sentence (serial)", sz_utf8_sentences_serial);
-    for (utf8_segment_backend_t const &backend : utf8_sentences_backends) {
-        std::string const label = std::string("sentence (") + backend.name + ")";
-        check_utf8_segment_safety_(label.c_str(), backend.finder);
-    }
+    utf8_segment_backend_t const serial_reference[] = {{"serial", sz_utf8_sentences_serial}};
+    check_utf8_segment_safety_("sentence", span_over(serial_reference));
+    check_utf8_segment_safety_("sentence", span_over(utf8_sentences_backends));
     std::printf("    sentence safety passed!\n");
 }
 
@@ -274,8 +258,8 @@ void test_utf8_sentences_safety() {
 /** @brief Serial-vs-ISA sentence differential over the hardened corpora (high-density + long-range). */
 void test_utf8_sentences_all() {
     utf8_segment_corpora_t const corpora = utf8_sentences_corpora_();
-    for (utf8_segment_backend_t const &backend : utf8_sentences_backends)
-        test_utf8_segment_equivalence_(sz_utf8_sentences_serial, backend.finder, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_sentences_serial, span_over(utf8_sentences_backends), corpora,
+                                   scale_iterations(90)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

@@ -5,7 +5,6 @@
 #include <tuple>   // `std::tuple`
 #include <utility> // `std::declval`
 
-
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity measures
 
 #if SZ_USE_CUDA
@@ -696,8 +695,9 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
         bench_result_t linear_local_baseline =
             bench_unary(env, name_linear_local_baseline, call_linear_local_baseline).log();
 
-        auto call_affine_global_baseline = similarities_callable<affine_needleman_wunsch_serial_t, forkunion_executor_t &>(
-            env, results_affine_global_baseline, shape, {blosum62_matrix32, blosum62_affine_cost}, pool);
+        auto call_affine_global_baseline =
+            similarities_callable<affine_needleman_wunsch_serial_t, forkunion_executor_t &>(
+                env, results_affine_global_baseline, shape, {blosum62_matrix32, blosum62_affine_cost}, pool);
         auto name_affine_global_baseline = "affine_needleman_wunsch_serial:"s + shape_label;
         bench_result_t affine_global_baseline =
             bench_unary(env, name_affine_global_baseline, call_affine_global_baseline).log();

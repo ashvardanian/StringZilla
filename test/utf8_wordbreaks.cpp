@@ -39,8 +39,6 @@ static utf8_unit_case_t const utf8_wordbreaks_unit_cases[] = {
     {"\xE4\xBD\xA0\xE5\xA5\xBD"_sv, {"\xE4\xBD\xA0"_sv, "\xE5\xA5\xBD"_sv}}, // CJK: each ideograph is its own word
     {"Hello, world!"_sv, {"Hello"_sv, ","_sv, " "_sv, "world"_sv, "!"_sv}},  // letter/punct/space boundaries
 };
-static constexpr std::size_t utf8_wordbreaks_unit_cases_count = sizeof(utf8_wordbreaks_unit_cases) /
-                                                                sizeof(utf8_wordbreaks_unit_cases[0]);
 
 /** @brief Known-answer property table for `sz_rune_is_word_char` (UAX-29 word-character classification). */
 static void test_utf8_wordbreaks_classification_() {
@@ -184,10 +182,9 @@ void test_utf8_wordbreaks_unit() {
     test_utf8_wordbreaks_classification_();
     test_utf8_wordbreaks_deferred_mid_();
 
-    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, utf8_wordbreaks_unit_cases,
-                             utf8_wordbreaks_unit_cases_count);
+    check_utf8_segment_unit_("word", sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-        check_utf8_segment_unit_("word", backend.finder, utf8_wordbreaks_unit_cases, utf8_wordbreaks_unit_cases_count);
+        check_utf8_segment_unit_("word", backend.finder, span_over(utf8_wordbreaks_unit_cases));
 
     // C++ range wrapper known-answer: `utf8_wordbreaks()` faithfully tiles the input into the UAX-29 segments
     // (words and the separators between them); concatenating them reconstructs the input.
@@ -235,8 +232,6 @@ static sz::string_view const utf8_wordbreaks_motifs[] = {
     "\xF0\x9F\x87\xBA\x61\xF0\x9F\x87\xB8"_sv, // RI ASCII RI: parity reset between flags
     "word\xC2\xB7word"_sv,                     // U+00B7 MIDDLE DOT as MidLetter between letters
 };
-static constexpr std::size_t utf8_wordbreaks_motifs_count = sizeof(utf8_wordbreaks_motifs) /
-                                                            sizeof(utf8_wordbreaks_motifs[0]);
 
 /**
  *  @brief Multi-window seam regressions (each > 64 bytes): WB15/16 Regional_Indicator parity and WB6/7/11/12
@@ -259,8 +254,6 @@ static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
     "\x8F\xBB\xCC\x88\xE2\x81\xA0\xCC\x80\xCC\x81\x27\x35\xCC\x80\xE4\xB8\xAD\xCC\x81\xE2\x80\x8D\xC3" //
     "\xA9\xE3\x80\x80\x35\x27"_sv,
 };
-static constexpr std::size_t utf8_wordbreaks_seam_regressions_count = sizeof(utf8_wordbreaks_seam_regressions) /
-                                                                      sizeof(utf8_wordbreaks_seam_regressions[0]);
 
 /** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
 static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
@@ -332,26 +325,26 @@ static char const *const utf8_wordbreaks_snippets[] = {
     "word\xC2\xB7word ",                // MIDDLE DOT MidLetter
     "a b ",
     "_a ",
+    "\xCE\xBA\xCE\xB1\xCE\xBB\xCE\xAC ",                 // Greek word carrying a tonos
+    "\xD0\x9C\xD0\xBE\xD1\x81\xD0\xBA\xD0\xB2\xD0\xB0 ", // Cyrillic word
+    "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7 ",         // Arabic word
+    "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7ok ",       // Arabic abutting Latin: WB5 across a bidi transition
 };
 
 /** @brief Word family alphabet: weights bias toward the family snippets and motifs (WB6/7/11/12/13/15/16). */
 static utf8_corpus_alphabet_t const utf8_wordbreaks_alphabet = {
-    utf8_wordbreaks_snippets,
-    sizeof(utf8_wordbreaks_snippets) / sizeof(utf8_wordbreaks_snippets[0]),
-    utf8_default_boundary_codepoints,
-    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
-    {40, 15, 10, 30, 5}, // snippet, boundary, astral, motif, malformed
+    span_over(utf8_wordbreaks_snippets),
+    span_over(utf8_default_boundary_codepoints),
+    {{40, 15, 10, 30, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the word family's differential corpora (motifs + dense + straddle + seam regressions + alphabet). */
 static utf8_segment_corpora_t utf8_wordbreaks_corpora_() {
     utf8_segment_corpora_t corpora = {"word",
-                                      utf8_wordbreaks_motifs,
-                                      utf8_wordbreaks_motifs_count,
+                                      span_over(utf8_wordbreaks_motifs),
                                       &utf8_wordbreaks_dense_runs_,
                                       &utf8_wordbreaks_straddles_,
-                                      utf8_wordbreaks_seam_regressions,
-                                      utf8_wordbreaks_seam_regressions_count,
+                                      span_over(utf8_wordbreaks_seam_regressions),
                                       &utf8_wordbreaks_alphabet};
     return corpora;
 }
@@ -405,9 +398,8 @@ void test_utf8_wordbreaks_rules() {
         "WB8", "WB9",  "WB10", "WB11", "WB12", "WB13", "WB13a", "WB13b", "WB15", "WB16", "WB999",
     };
     for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-        check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, backend.finder, rule_cases,
-                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                                  sizeof(required_rules) / sizeof(required_rules[0]));
+        check_utf8_rule_coverage_("word", sz_utf8_wordbreaks_serial, backend.finder, span_over(rule_cases),
+                                  span_over(required_rules));
 }
 
 #pragma endregion // Rule coverage
@@ -417,11 +409,9 @@ void test_utf8_wordbreaks_rules() {
 /** @brief Malformed-input safety of the UTF-8 word kernels (serial / dispatched / icelake). */
 void test_utf8_wordbreaks_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 word kernels...\n");
-    check_utf8_segment_safety_("word (serial)", sz_utf8_wordbreaks_serial);
-    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends) {
-        std::string const label = std::string("word (") + backend.name + ")";
-        check_utf8_segment_safety_(label.c_str(), backend.finder);
-    }
+    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_wordbreaks_serial}};
+    check_utf8_segment_safety_("word", span_over(serial_only));
+    check_utf8_segment_safety_("word", span_over(utf8_wordbreaks_backends));
     std::printf("    word safety passed!\n");
 }
 
@@ -431,9 +421,9 @@ void test_utf8_wordbreaks_safety() {
 
 /** @brief Serial-vs-ISA word differential over the hardened corpora (high-density + long-range + seam regressions). */
 void test_utf8_wordbreaks_all() {
-    utf8_segment_corpora_t const corpora = utf8_wordbreaks_corpora_();
-    for (utf8_segment_backend_t const &backend : utf8_wordbreaks_backends)
-        test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, backend.finder, corpora);
+    // The iteration count is this family's share of the suite budget, sized against its siblings.
+    test_utf8_segment_equivalence_(sz_utf8_wordbreaks_serial, span_over(utf8_wordbreaks_backends),
+                                   utf8_wordbreaks_corpora_(), scale_iterations(20));
 }
 
 #pragma endregion // Drivers

@@ -44,14 +44,12 @@ int main(int argc, char const **argv) {
     if (auto code = log_environment(); code != 0) return code;
     print_test_environment();
 
-    int failures = 0;
+    std::size_t failures = 0;
 
-    std::printf("\n=== Fingerprints ===\n");
     failures += run_test("test_fingerprints_unit", test_fingerprints_unit);
     failures += run_test("test_fingerprints_equivalence", test_fingerprints_equivalence);
     failures += run_test("test_fingerprints_safety", test_fingerprints_safety);
 
-    std::printf("\n=== Similarities ===\n");
     failures += run_test("test_similarities_unit", test_similarities_unit);
     failures += run_test("test_similarities_equivalence", test_similarities_equivalence);
     failures += run_test("test_similarities_cross_product", test_similarities_cross_product);
@@ -59,7 +57,7 @@ int main(int argc, char const **argv) {
     failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
 
     if (failures != 0) {
-        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
+        std::fprintf(stderr, "\n%zu test(s) failed.\n", failures);
         return 1;
     }
     std::printf("\nAll tests passed!\n");

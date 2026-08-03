@@ -81,12 +81,7 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/**
- *  @brief Compares two byte ranges and aborts with a localized diagnostic on the first mismatch.
- *  @param first First byte range to compare.
- *  @param second Second byte range to compare.
- *  @param size Number of bytes to compare in both ranges.
- */
+/** @brief Compares two byte ranges and aborts with a localized diagnostic on the first mismatch. */
 inline void expect_equality(char const *first, char const *second, std::size_t size) {
     if (std::memcmp(first, second, size) == 0) return;
     std::size_t mismatch_position = 0;
@@ -100,15 +95,10 @@ inline void expect_equality(char const *first, char const *second, std::size_t s
 /**
  *  @brief The sum of an arithmetic progression.
  *  @see https://en.wikipedia.org/wiki/Arithmetic_progression
- *  @param first First term of the progression.
- *  @param last Last term of the progression.
- *  @param step Distance between consecutive terms.
  */
 inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size_t step = 1) {
     std::size_t n = (last >= first) ? ((last - first) / step + 1) : 0;
-    // Return 0 if there are no terms
     if (n == 0) return 0;
-    // Compute the sum using the arithmetic sequence formula
     std::size_t sum = n / 2 * (2 * first + (n - 1) * step);
     // If n is odd, handle the remaining term separately to avoid overflow
     if (n % 2 == 1) sum += (2 * first + (n - 1) * step) / 2;
@@ -228,8 +218,6 @@ static void check_lookup_unit_(sz_lookup_t lookup) {
 
 #pragma endregion // Helpers
 
-#pragma region Unit
-
 #pragma region Arithmetic
 
 /**
@@ -312,6 +300,22 @@ void test_sequence_unit() {
         verify("banana"_sv == sequence.get_start(sequence.handle, 0));
         verify("apple"_sv == sequence.get_start(sequence.handle, 1));
         verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
+        verify(sequence.get_length(sequence.handle, 0) == 6);
+        verify(sequence.get_length(sequence.handle, 1) == 5);
+        verify(sequence.get_length(sequence.handle, 2) == 6);
+    }
+    // Empty sequences, empty members, and duplicates are all legal.
+    {
+        sz_sequence_t sequence;
+        sz_cptr_t strings[] = {"", "apple", "apple", ""};
+        sz_sequence_from_null_terminated_strings(strings, 0, &sequence);
+        verify(sequence.count == 0);
+        sz_sequence_from_null_terminated_strings(strings, 4, &sequence);
+        verify(sequence.count == 4);
+        verify(sequence.get_length(sequence.handle, 0) == 0);
+        verify(sequence.get_length(sequence.handle, 3) == 0);
+        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
+        verify("apple"_sv == sequence.get_start(sequence.handle, 2));
     }
     // Do the same for STL:
     {
@@ -462,8 +466,6 @@ void test_ascii_unit() {
  *  of `sz::memcpy`, `sz::memset`, and `sz::memmove` operations against their `std::` counterparts, using a large
  *  heap-allocated buffer to cover the larger-than-L2-cache code paths, various chunk sizes, overlapping regions, and
  *  both forward and backward traversals.
- *
- *  @param max_l2_size Size of the working buffers, chosen to exceed the L2 cache.
  */
 void test_memory_unit(std::size_t max_l2_size) {
 
@@ -473,75 +475,75 @@ void test_memory_unit(std::size_t max_l2_size) {
     check_memory_unit_(sz_copy, sz_move, sz_fill);                      // Dispatched (automatic kernel)
     check_memory_unit_(sz_copy_serial, sz_move_serial, sz_fill_serial); // Manual: serial kernel
 #if SZ_USE_HASWELL
-    check_memory_unit_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell); // Manual: Haswell kernel
+    check_memory_unit_(sz_copy_haswell, sz_move_haswell, sz_fill_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    check_memory_unit_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake); // Manual: Skylake kernel
+    check_memory_unit_(sz_copy_skylake, sz_move_skylake, sz_fill_skylake);
 #endif
 #if SZ_USE_NEON
-    check_memory_unit_(sz_copy_neon, sz_move_neon, sz_fill_neon); // Manual: NEON kernel
+    check_memory_unit_(sz_copy_neon, sz_move_neon, sz_fill_neon);
 #endif
 #if SZ_USE_SVE
-    check_memory_unit_(sz_copy_sve, sz_move_sve, sz_fill_sve); // Manual: SVE kernel
+    check_memory_unit_(sz_copy_sve, sz_move_sve, sz_fill_sve);
 #endif
 #if SZ_USE_V128
-    check_memory_unit_(sz_copy_v128, sz_move_v128, sz_fill_v128); // Manual: WASM SIMD128 kernel
+    check_memory_unit_(sz_copy_v128, sz_move_v128, sz_fill_v128);
 #endif
 #if SZ_USE_V128RELAXED
-    check_memory_unit_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed); // Manual: relaxed SIMD128 kernel
+    check_memory_unit_(sz_copy_v128relaxed, sz_move_v128relaxed, sz_fill_v128relaxed);
 #endif
 #if SZ_USE_RVV
-    check_memory_unit_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv); // Manual: RISC-V RVV kernel
+    check_memory_unit_(sz_copy_rvv, sz_move_rvv, sz_fill_rvv);
 #endif
 #if SZ_USE_LASX
-    check_memory_unit_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx); // Manual: LoongArch LASX kernel
+    check_memory_unit_(sz_copy_lasx, sz_move_lasx, sz_fill_lasx);
 #endif
 #if SZ_USE_POWERVSX
-    check_memory_unit_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx); // Manual: Power VSX kernel
+    check_memory_unit_(sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx);
 #endif
 
     // Lookup known-answers, through the dispatched C API and every natively-compiled backend.
     check_lookup_unit_(sz_lookup);        // Dispatched (automatic kernel)
     check_lookup_unit_(sz_lookup_serial); // Manual: serial kernel
 #if SZ_USE_HASWELL
-    check_lookup_unit_(sz_lookup_haswell); // Manual: Haswell kernel
+    check_lookup_unit_(sz_lookup_haswell);
 #endif
 #if SZ_USE_ICELAKE
-    check_lookup_unit_(sz_lookup_icelake); // Manual: Ice Lake kernel
+    check_lookup_unit_(sz_lookup_icelake);
 #endif
 #if SZ_USE_NEON
-    check_lookup_unit_(sz_lookup_neon); // Manual: NEON kernel
+    check_lookup_unit_(sz_lookup_neon);
 #endif
 #if SZ_USE_SVE
-    check_lookup_unit_(sz_lookup_sve); // Manual: SVE kernel
+    check_lookup_unit_(sz_lookup_sve);
 #endif
 #if SZ_USE_V128
-    check_lookup_unit_(sz_lookup_v128); // Manual: WASM SIMD128 kernel
+    check_lookup_unit_(sz_lookup_v128);
 #endif
 #if SZ_USE_V128RELAXED
-    check_lookup_unit_(sz_lookup_v128relaxed); // Manual: relaxed SIMD128 kernel
+    check_lookup_unit_(sz_lookup_v128relaxed);
 #endif
 #if SZ_USE_RVV
-    check_lookup_unit_(sz_lookup_rvv); // Manual: RISC-V RVV kernel
+    check_lookup_unit_(sz_lookup_rvv);
 #endif
 #if SZ_USE_LASX
-    check_lookup_unit_(sz_lookup_lasx); // Manual: LoongArch LASX kernel
+    check_lookup_unit_(sz_lookup_lasx);
 #endif
 #if SZ_USE_POWERVSX
-    check_lookup_unit_(sz_lookup_powervsx); // Manual: Power VSX kernel
+    check_lookup_unit_(sz_lookup_powervsx);
 #endif
 
     // C++ wrapper sanity: a couple of `sz::string` / `sz::string_view` known-answer reads alongside the C API.
     {
         sz::string_view const view = "Hello, World!"_sv;
-        verify(view.size() == 13u);              // Length matches the literal
-        verify(view.substr(7, 5) == "World"_sv); // Slice extracts the expected token
+        verify(view.size() == 13u);
+        verify(view.substr(7, 5) == "World"_sv);
         verify(view.front() == 'H' && view.back() == '!');
 
         sz::string const owned = "Hello, World!";
-        verify(owned.size() == 13u);                       // Owning string reports the same length
-        verify(owned == view);                             // Owning string equals the view
-        verify(sz::string("apple").compare("banana") < 0); // "apple" sorts before "banana"
+        verify(owned.size() == 13u);
+        verify(owned == view);
+        verify(sz::string("apple").compare("banana") < 0);
     }
 
     // The C++ movement wrappers must agree with the known-answers, including overlapping `memmove`.
@@ -643,7 +645,6 @@ void test_memory_unit(std::size_t max_l2_size) {
         sz::memmove((void *)(copy_sz.data() + new_offset), (void *)(copy_sz.data() + offset), fill_length);
         expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
 
-        // Put the delimiter
         copy_stl[new_offset] = '-';
         copy_sz[new_offset] = '-';
         dashed_length += fill_length + 1;
@@ -716,7 +717,6 @@ void test_memory_large_unit() {
             std::vector<char> buf_std(size);
             std::vector<char> buf_sz(size);
 
-            // Initialize both buffers identically
             for (std::size_t i = 0; i < size; i++) { buf_std[i] = buf_sz[i] = static_cast<char>('0' + (i % 10)); }
 
             // Move overlapping region forward
@@ -743,12 +743,12 @@ void test_stl_reads_unit() {
     using str = string_type;
 
     // Constructors.
-    verify(str().empty());             // Test default constructor
-    verify(str().size() == 0);         // Test default constructor
-    verify(str("").empty());           // Test default constructor
-    verify(str("").size() == 0);       // Test default constructor
-    verify(str("hello").size() == 5);  // Test constructor with c-string
-    verify(str("hello", 4) == "hell"); // Construct from substring
+    verify(str().empty());
+    verify(str().size() == 0);
+    verify(str("").empty());
+    verify(str("").size() == 0);
+    verify(str("hello").size() == 5);
+    verify(str("hello", 4) == "hell");
 
     // Element access.
     verify(str("rest")[0] == 'r');
@@ -850,42 +850,42 @@ void test_stl_reads_unit() {
     verify(str("hello").find_last_not_of("hel", 4) == 4);
 
     // Try longer strings to enforce SIMD.
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);  // first byte
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);  // first byte
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23); // last byte
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49); // last byte
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49);
 
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy") == 23);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY") == 49);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("yz") == 24);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("YZ") == 50);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy") == 23); // last match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY") == 49);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("yz") == 24);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("YZ") == 50);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY") == 49);
 
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz") == 23); // last match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ") == 49);
 
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA") == 23);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0") == 49);  // first match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA") == 23); // last match
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0") == 49); // last match
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0") == 49);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0") == 49);
 
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz") == 23); // sets
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ") == 49); // sets
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
-    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz") == 23);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ") == 49);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);
+    verify(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);
 
     // Using single-byte non-ASCII values, e.g., À (0xC0), Æ (0xC6). The `\xFA`/`0` boundary is
     // load-bearing: a literal hex digit after `\xFA` would extend the escape, so keep it split.
     {
         char const *non_ascii_set = "abcdefgh\x01\xC6ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\xC0\xFA" //
                                     "0123456789+-";                                                        // 68 bytes
-        verify(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);                                     // sets
-        verify(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);                                    // sets
-        verify(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);                                      // sets
-        verify(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);                                     // sets
+        verify(str(non_ascii_set, 68).find_first_of("\xC6\xC7") == 9);
+        verify(str(non_ascii_set, 68).find_first_of("\xC0\xC1") == 54);
+        verify(str(non_ascii_set, 68).find_last_of("\xC6\xC7") == 9);
+        verify(str(non_ascii_set, 68).find_last_of("\xC0\xC1") == 54);
     }
 
     // Boundary conditions.
@@ -928,39 +928,39 @@ void test_stl_reads_unit() {
 #endif
 
     // Compare with another `str`.
-    verify(str("test").compare(str("test")) == 0);   // Equal strings
-    verify(str("apple").compare(str("banana")) < 0); // "apple" is less than "banana"
-    verify(str("banana").compare(str("apple")) > 0); // "banana" is greater than "apple"
+    verify(str("test").compare(str("test")) == 0);
+    verify(str("apple").compare(str("banana")) < 0);
+    verify(str("banana").compare(str("apple")) > 0);
 
     // Compare with a C-string.
-    verify(str("test").compare("test") == 0); // Equal to C-string "test"
-    verify(str("alpha").compare("beta") < 0); // "alpha" is less than C-string "beta"
-    verify(str("beta").compare("alpha") > 0); // "beta" is greater than C-string "alpha"
+    verify(str("test").compare("test") == 0);
+    verify(str("alpha").compare("beta") < 0);
+    verify(str("beta").compare("alpha") > 0);
 
     // Compare substring with another `str`.
-    verify(str("hello world").compare(0, 5, str("hello")) == 0); // Substring "hello" is equal to "hello"
-    verify(str("hello world").compare(6, 5, str("earth")) > 0);  // Substring "world" is greater than "earth"
-    verify(str("hello world").compare(6, 5, str("worlds")) < 0); // Substring "world" is less than "worlds"
+    verify(str("hello world").compare(0, 5, str("hello")) == 0);
+    verify(str("hello world").compare(6, 5, str("earth")) > 0);
+    verify(str("hello world").compare(6, 5, str("worlds")) < 0);
     throws_verify(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
 
     // Compare substring with another `str`'s substring.
-    verify(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);      // Substring "hello" in both strings
-    verify(str("hello world").compare(6, 5, str("world peace"), 0, 5) == 0);    // Substring "world" in both strings
-    verify(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0); // Both substrings are "world"
+    verify(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);
+    verify(str("hello world").compare(6, 5, str("world peace"), 0, 5) == 0);
+    verify(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0);
 
     // Out of bounds cases for both compared strings.
     throws_verify(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
     throws_verify(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
 
     // Compare substring with a C-string.
-    verify(str("hello world").compare(0, 5, "hello") == 0); // Substring "hello" is equal to C-string "hello"
-    verify(str("hello world").compare(6, 5, "earth") > 0);  // Substring "world" is greater than C-string "earth"
-    verify(str("hello world").compare(6, 5, "worlds") < 0); // Substring "world" is greater than C-string "worlds"
+    verify(str("hello world").compare(0, 5, "hello") == 0);
+    verify(str("hello world").compare(6, 5, "earth") > 0);
+    verify(str("hello world").compare(6, 5, "worlds") < 0);
 
     // Compare substring with a C-string's prefix.
-    verify(str("hello world").compare(0, 5, "hello Ash", 5) == 0); // Substring "hello" in both strings
-    verify(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
-    verify(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
+    verify(str("hello world").compare(0, 5, "hello Ash", 5) == 0);
+    verify(str("hello world").compare(6, 5, "worlds", 5) == 0);
+    verify(str("hello world").compare(6, 5, "worlds", 6) < 0);
 
 #if SZ_IS_CPP20_ && defined(__cpp_lib_starts_ends_with)
     // Prefix and suffix checks against strings.
@@ -1004,7 +1004,7 @@ void test_stl_reads_unit() {
             str second_copy = second;
             first_copy.swap(second_copy);
             verify(first_copy == second && second_copy == first);
-            first_copy.swap(first_copy); // Swapping with itself.
+            first_copy.swap(first_copy);
             verify(first_copy == second);
         }
     }
@@ -1034,16 +1034,16 @@ void test_stl_updates_unit() {
     using str = string_type;
 
     // Constructors.
-    verify(str().empty());                             // Test default constructor
-    verify(str().size() == 0);                         // Test default constructor
-    verify(str("").empty());                           // Test default constructor
-    verify(str("").size() == 0);                       // Test default constructor
-    verify(str("hello").size() == 5);                  // Test constructor with c-string
-    verify(str("hello", 4) == "hell");                 // Construct from substring
-    verify(str(5, 'a') == "aaaaa");                    // Construct with count and character
-    verify(str({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
-    verify(str(str("hello"), 2) == "llo");             // Construct from another string suffix
-    verify(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
+    verify(str().empty());
+    verify(str().size() == 0);
+    verify(str("").empty());
+    verify(str("").size() == 0);
+    verify(str("hello").size() == 5);
+    verify(str("hello", 4) == "hell");
+    verify(str(5, 'a') == "aaaaa");
+    verify(str({'h', 'e', 'l', 'l', 'o'}) == "hello");
+    verify(str(str("hello"), 2) == "llo");
+    verify(str(str("hello"), 2, 2) == "ll");
 
     // Corner case constructors and search behaviors for long strings
     verify(str(258, '0').find(str(256, '1')) == str::npos);
@@ -1059,10 +1059,10 @@ void test_stl_updates_unit() {
     scope_verify(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
     scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
     scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
-    scope_verify(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
-    scope_verify(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
-    scope_verify(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
+    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");
+    scope_verify(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete");
+    scope_verify(str s = "obsolete", s.assign(s, 4), s == "lete");
+    scope_verify(str s = "obsolete", s.assign(s, 4, 3), s == "let");
 
     // Self-assignment is a special case of assignment.
     scope_verify(str s = "obsolete", s = s, s == "obsolete");
@@ -1187,15 +1187,33 @@ void test_stl_conversions_unit() {
         sz::string sz = stl;
         sz::string_view szv = stl;
         sz::string_span szs = stl;
+        verify(sz == "hello");
+        verify(szv == "hello");
+        verify(szs == "hello");
+        szs[0] = 'H'; // A span aliases the source, so this writes through
+        verify(stl == "Hello");
+        verify(szv == "Hello"); // And a view sees the mutation
+        verify(sz == "hello");  // While an owning copy predates it
         stl = sz;
-        stl = szv;
-        stl = szs;
+        verify(stl == "hello");
+    }
+    // From StringZilla views back into a fresh STL string.
+    {
+        sz::string const sz {"hello"};
+        std::string stl;
+        stl = sz;
+        verify(stl == "hello");
+        stl = sz::string_view {"world"};
+        verify(stl == "world");
     }
     // From an immutable STL string to StringZilla.
     {
         std::string const stl {"hello"};
-        [[maybe_unused]] sz::string const sz = stl;
-        [[maybe_unused]] sz::string_view const szv = stl;
+        sz::string const sz = stl;
+        sz::string_view const szv = stl;
+        verify(sz == "hello");
+        verify(szv == "hello");
+        verify(szv.data() == stl.data()); // A view borrows, a string owns
     }
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // From STL `string_view` to StringZilla and vice-versa.
@@ -1203,23 +1221,97 @@ void test_stl_conversions_unit() {
         std::string_view stl {"hello"};
         sz::string sz = stl;
         sz::string_view szv = stl;
+        verify(sz == "hello");
+        verify(szv == "hello");
         stl = sz;
+        verify(stl == "hello");
         stl = szv;
+        verify(stl == "hello");
     }
 #endif
 }
 
-/** @brief Tests constructing STL containers with StringZilla strings. */
+/** @brief Tests STL containers keyed by StringZilla strings, and STL containers ordered & hashed by `sz` functors. */
 void test_stl_containers_unit() {
-    std::map<sz::string, int> sorted_words_sz;
-    std::unordered_map<sz::string, int> words_sz;
-    verify(sorted_words_sz.empty());
-    verify(words_sz.empty());
 
+    // Byte order and length disagree across these: "Zebra" wins on its first byte despite being longer,
+    // and each prefix precedes its own extension.
+    char const *const ascending_keys[] = {"Zebra", "app", "apple", "apples", "banana"};
+
+    // The `sz::string` keys use the native ordering, the `std::string` keys go through `sz::less`.
+    std::map<sz::string, int> sorted_words_sz;
     std::map<std::string, int, sz::less> sorted_words_stl;
+    for (int insertion = 4; insertion >= 0; --insertion) { // Reverse order, so sorting has work to do
+        sorted_words_sz.emplace(ascending_keys[insertion], insertion);
+        sorted_words_stl.emplace(ascending_keys[insertion], insertion);
+    }
+    verify(sorted_words_sz.size() == 5);
+    verify(sorted_words_stl.size() == 5);
+
+    std::size_t rank_sz = 0;
+    for (auto const &entry : sorted_words_sz) {
+        verify(entry.first == ascending_keys[rank_sz]);
+        verify(entry.second == static_cast<int>(rank_sz));
+        ++rank_sz;
+    }
+    verify(rank_sz == 5);
+
+    std::size_t rank_stl = 0;
+    for (auto const &entry : sorted_words_stl) {
+        verify(entry.first == ascending_keys[rank_stl]);
+        verify(entry.second == static_cast<int>(rank_stl));
+        ++rank_stl;
+    }
+    verify(rank_stl == 5);
+
+    verify(sorted_words_sz.at("apple") == 2);
+    verify(sorted_words_stl.at("apple") == 2);
+    verify(sorted_words_sz.count("Apple") == 0); // Comparisons are case-sensitive
+    verify(sorted_words_stl.count("Apple") == 0);
+    verify(sorted_words_sz.count("appl") == 0); // A prefix of a present key is still absent
+    verify(sorted_words_sz.erase("app") == 1);
+    verify(sorted_words_sz.erase("app") == 0);
+    verify(sorted_words_sz.size() == 4);
+    verify(sorted_words_sz.begin()->first == "Zebra");
+    verify(sorted_words_sz.lower_bound("apple")->first == "apple");
+    verify(sorted_words_sz.upper_bound("apple")->first == "apples");
+
+    // Equal-valued keys assembled from different storage must hash alike and compare equal,
+    // so the second insertion collapses onto the first instead of adding a bucket.
+    std::unordered_map<sz::string, int> words_sz;
+    words_sz.emplace("banana", 7);
+    sz::string grown_sz = "bana";
+    grown_sz.append("na");
+    verify(std::hash<sz::string> {}(grown_sz) == std::hash<sz::string> {}(sz::string("banana")));
+    verify(words_sz.find(grown_sz) != words_sz.end());
+    verify(words_sz.emplace(grown_sz, 9).second == false);
+    verify(words_sz.at(grown_sz) == 7);
+    verify(words_sz.size() == 1);
+    verify(words_sz.find("bananas") == words_sz.end());
+
+    // The same, but with `std::string` keys routed through `sz::hash` and `sz::equal_to`.
     std::unordered_map<std::string, int, sz::hash, sz::equal_to> words_stl;
-    verify(sorted_words_stl.empty());
-    verify(words_stl.empty());
+    std::string const heap_key(200, 'x'); // Long enough to escape any small-string buffer
+    std::string grown_stl;
+    for (int repetition = 0; repetition < 200; ++repetition) grown_stl.push_back('x');
+    words_stl.emplace(heap_key, 7);
+    verify(sz::hash {}(heap_key) == sz::hash {}(grown_stl));
+    verify(sz::equal_to {}(heap_key, grown_stl));
+    verify(sz::equal_to {}(heap_key, "x") == false);
+    verify(words_stl.find(grown_stl) != words_stl.end());
+    verify(words_stl.emplace(grown_stl, 9).second == false);
+    verify(words_stl.at(grown_stl) == 7);
+    verify(words_stl.size() == 1);
+    verify(words_stl.find("xyz") == words_stl.end());
+
+    // Empty keys are valid, and order before everything else.
+    verify(sz::less {}("", "a"));
+    verify(sz::less {}("a", "") == false);
+    verify(sz::equal_to {}("", ""));
+    sorted_words_sz.emplace("", -1);
+    verify(sorted_words_sz.begin()->first == "");
+    words_stl.emplace("", -1);
+    verify(words_stl.at("") == -1);
 }
 
 #pragma endregion // STL Updates
@@ -1429,13 +1521,7 @@ void test_string_constructors_unit() {
     verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
-/**
- *  @brief Checks for memory leaks in the string class using the `accounting_allocator`.
- *
- *  @param length Number of characters in the base string under test.
- *  @param iterations Number of repetitions per allocation-balance block.
- *  @note The baseline iteration count (100) is scaled by `SZ_TEST_ITERATIONS_MULTIPLIER`.
- */
+/** @brief Checks for memory leaks in the string class using the `accounting_allocator`. */
 void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
 
     verify(accounting_allocator::counter_ref() == 0);
@@ -1504,10 +1590,7 @@ void test_memory_stability_unit(std::size_t length, std::size_t iterations) {
     verify(accounting_allocator::counter_ref() == 0);
 }
 
-/**
- *  @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`.
- *  @param repetitions Number of randomized append-then-erase cycles to run.
- */
+/** @brief Tests the correctness of the string class update methods, such as `push_back` and `erase`. */
 void test_string_updates_unit(std::size_t repetitions) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
@@ -1533,8 +1616,6 @@ void test_string_updates_unit(std::size_t repetitions) {
 }
 
 #pragma endregion // String Class
-
-#pragma endregion // Unit
 
 #pragma region Equivalence
 
@@ -1570,10 +1651,7 @@ inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
  *  Runs over `for_each_cacheline_offset_` so the destination (and source) buffers are exercised at every
  *  sub-cache-line alignment, across the representative length set, with embedded-NUL content and overlapping
  *  `move` regions, so a misaligned head/tail bug on any backend is caught against the reference.
- *
- *  @param reference  Reference movement backend wrapper (copy/move/fill).
- *  @param candidate  Candidate movement backend wrapper to validate against the reference.
- *  @param inputs     Number of random source patterns to fuzz at each length.
+ *  `inputs` is the number of random source patterns fuzzed at each length.
  */
 template <typename reference_, typename candidate_>
 void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -1636,10 +1714,7 @@ void test_memory_equivalence(reference_ reference, candidate_ candidate, sz_size
  *
  *  Runs over `for_each_cacheline_offset_` so the destination and source buffers are exercised at every
  *  sub-cache-line alignment, across the representative length set, against a shared case-mapping table.
- *
- *  @param reference  Reference lookup backend wrapper.
- *  @param candidate  Candidate lookup backend wrapper to validate against the reference.
- *  @param inputs     Number of random source patterns to fuzz at each length.
+ *  `inputs` is the number of random source patterns fuzzed at each length.
  */
 template <typename reference_, typename candidate_>
 void test_lookup_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {

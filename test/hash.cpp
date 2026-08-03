@@ -227,15 +227,11 @@ struct fill_random_from_sz_ {
  *
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
- *
- *  @param reference  Reference hashing backend wrapper (one-shot + streaming).
- *  @param candidate  Candidate hashing backend wrapper to validate against the reference.
- *  @param inputs     Number of random-length inputs to fuzz beyond the structured "abc" repetitions.
  */
 template <typename reference_, typename candidate_>
 void test_hash_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
 
-    auto test_on_seed = [&](std::string text, sz_u64_t seed) {
+    auto test_on_seed = [&](std::string const &text, sz_u64_t seed) {
         // Compute the entire hash at once, expecting the same output
         sz_u64_t result_base = reference(text.data(), text.size(), seed);
         sz_u64_t result_simd = candidate(text.data(), text.size(), seed);
@@ -281,8 +277,9 @@ void test_hash_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         std::numeric_limits<sz_u32_t>::max(), //
         std::numeric_limits<sz_u64_t>::max(), //
     };
+    // A fixed repeat ladder: `inputs` below already carries the multiplier, and scaling both would compound.
     for (auto seed : seeds)
-        for (std::size_t copies = 1; copies != scale_iterations(100); ++copies) //
+        for (std::size_t copies = 1; copies != 100; ++copies) //
             test_on_seed(repeat("abc", copies), seed);
 
     // Let's try truly random inputs of different lengths, placing each input at every sub-cache-line
@@ -304,9 +301,6 @@ void test_hash_equivalence(reference_ reference, candidate_ candidate, sz_size_t
  *  This is a single-backend self-consistency check: the candidate's `multiseed` must agree with its
  *  own `hash_one` for every seed, so a wrong shared constant in both is still caught against the
  *  per-seed reduction rather than a sibling backend.
- *
- *  @param candidate  Candidate multi-seed backend wrapper (batch + single-seed).
- *  @param inputs     Number of random-length inputs to fuzz beyond the structured length ladder.
  */
 template <typename candidate_>
 void test_hash_multiseed_equivalence(candidate_ candidate, sz_size_t inputs) {
@@ -352,10 +346,6 @@ void test_hash_multiseed_equivalence(candidate_ candidate, sz_size_t inputs) {
 /**
  *  @brief Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
  *         produces exactly the same output across a reference and a candidate implementation.
- *
- *  @param reference  Reference random-fill backend wrapper.
- *  @param candidate  Candidate random-fill backend wrapper to validate against the reference.
- *  @param inputs     Number of random-length inputs to fuzz beyond the structured length ladder.
  */
 template <typename reference_, typename candidate_>
 void test_random_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -383,10 +373,9 @@ void test_random_equivalence(reference_ reference, candidate_ candidate, sz_size
         for (auto length : lengths) //
             test_on_nonce(length, nonce);
 
-    // Beyond the structured ladder, fuzz a contiguous run of random lengths scaled by `inputs`,
-    // so `SZ_TESTS_MULTIPLIER` widens the swept range without dropping any baseline coverage.
-    sz_size_t const fuzzed_lengths = (sz_size_t)scale_iterations(inputs);
-    for (sz_size_t length = 0; length != fuzzed_lengths; ++length)
+    // Beyond the structured ladder, fuzz a contiguous run of random lengths. `inputs` arrives already scaled
+    // by the caller, so scaling it again here would make the dial multiplicative.
+    for (sz_size_t length = 0; length != inputs; ++length)
         for (auto nonce : nonces) //
             test_on_nonce(length, nonce);
 }
@@ -394,10 +383,7 @@ void test_random_equivalence(reference_ reference, candidate_ candidate, sz_size
 /**
  *  @brief Cross-checks SHA256 backends against each other (reference vs candidate) on random inputs,
  *         one-shot and incremental. The known-answer FIPS 180-4 vectors live in `test_hash_unit`.
- *
- *  @param reference  Reference SHA256 backend wrapper (init/update/digest).
- *  @param candidate  Candidate SHA256 backend wrapper to validate against the reference.
- *  @param inputs     Maximum input length (inclusive) to fuzz with random bytes.
+ *         `inputs` is the maximum length fuzzed, inclusive.
  */
 template <typename reference_, typename candidate_>
 void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -447,11 +433,11 @@ void test_hash_all() {
     hash_serial_t const hash_serial;
     sz_unused_(hash_serial); // Used only by the SIMD differential blocks below; unreferenced on no-SIMD-tier targets.
 
-    // Number of random-length inputs to fuzz per differential test, scaled by the global multiplier. Consumed only by
-    // the SIMD differential blocks below, so all three are unreferenced on targets with no compiled SIMD hash tier.
-    sz_size_t const hash_inputs = (sz_size_t)scale_iterations(200);
-    sz_size_t const random_inputs = (sz_size_t)scale_iterations(200);
-    sz_size_t const sha256_inputs = (sz_size_t)scale_iterations(256);
+    // Number of random-length inputs to fuzz per differential test. Each sweeps lengths `0..N` and hashes a buffer
+    // of that length, so the work is quadratic in the count and the baseline is scaled accordingly.
+    sz_size_t const hash_inputs = (sz_size_t)scale_iterations_quadratic(200);
+    sz_size_t const random_inputs = (sz_size_t)scale_iterations_quadratic(200);
+    sz_size_t const sha256_inputs = (sz_size_t)scale_iterations_quadratic(256);
     sz_unused_(hash_inputs), sz_unused_(random_inputs), sz_unused_(sha256_inputs);
 
     // Ensure the seed affects hash results
@@ -591,8 +577,9 @@ void test_hash_all() {
 
 /** @brief Drives `test_hash_multiseed_equivalence` across every hashing backend compiled on this target. */
 void test_hash_multiseed_all() {
-    // Cover the <= 64 byte ladder, the 64-byte boundary, and a few kilobytes of the wide path.
-    sz_size_t const lengths = (sz_size_t)scale_iterations(4096);
+    // Cover the <= 64 byte ladder, the 64-byte boundary, and into the wide path. Every length is hashed by
+    // every seeded kernel on every backend, so this count is the family's whole budget.
+    sz_size_t const lengths = (sz_size_t)scale_iterations_quadratic(512);
 
     test_hash_multiseed_equivalence(hash_multiseed_from_sz_<sz_hash_multiseed, sz_hash> {}, lengths);
 

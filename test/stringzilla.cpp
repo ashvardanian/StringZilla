@@ -124,25 +124,21 @@ int main(int argc, char const **argv) {
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
     print_test_environment();
 
-    int failures = 0;
+    std::size_t failures = 0;
 
-    std::printf("\n=== Basic Utilities ===\n");
     failures += run_test("test_arithmetic_unit", test_arithmetic_unit);
     failures += run_test("test_sequence_unit", test_sequence_unit);
     failures += run_test("test_allocator_unit", test_allocator_unit);
     failures += run_test("test_byteset_unit", test_byteset_unit);
 
-    std::printf("\n=== Hashing ===\n");
     failures += run_test("test_hash_unit", test_hash_unit);
     failures += run_test("test_hash_all", test_hash_all);
     failures += run_test("test_hash_multiseed_all", test_hash_multiseed_all);
 
-    std::printf("\n=== Sequence Algorithms ===\n");
     failures += run_test("test_sort_unit", test_sort_unit);
     failures += run_test("test_sort_all", test_sort_all);
     failures += run_test("test_intersect_unit", test_intersect_unit);
 
-    std::printf("\n=== Core APIs ===\n");
     failures += run_test("test_ascii_unit<sz::string>", test_ascii_unit<sz::string>);
     failures += run_test("test_ascii_unit<sz::string_view>", test_ascii_unit<sz::string_view>);
     failures += run_test("test_memory_unit", [] { test_memory_unit(); }); // ! Defaulted arg
@@ -150,7 +146,6 @@ int main(int argc, char const **argv) {
     failures += run_test("test_memory_all", test_memory_all);
     failures += run_test("test_memory_safety", test_memory_safety);
 
-    std::printf("\n=== STL Compatibility ===\n");
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     failures += run_test("test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
 #endif
@@ -162,29 +157,23 @@ int main(int argc, char const **argv) {
     failures += run_test("test_stl_conversions_unit", test_stl_conversions_unit);
     failures += run_test("test_stl_containers_unit", test_stl_containers_unit);
 
-    std::printf("\n=== StringZilla Extensions ===\n");
     failures += run_test("test_extensions_reads_unit<sz::string_view>", test_extensions_reads_unit<sz::string_view>);
     failures += run_test("test_extensions_reads_unit<sz::string>", test_extensions_reads_unit<sz::string>);
     failures += run_test("test_extensions_updates_unit", test_extensions_updates_unit);
 
-    std::printf("\n=== String Class Implementation ===\n");
     failures += run_test("test_string_constructors_unit", test_string_constructors_unit);
     failures += run_test("test_memory_stability_unit(1024)", [] { test_memory_stability_unit(1024); });
     failures += run_test("test_memory_stability_unit(14)", [] { test_memory_stability_unit(14); });
     failures += run_test("test_string_updates_unit", [] { test_string_updates_unit(); }); // ! Defaulted arg
 
-    std::printf("\n=== Search and Comparison ===\n");
     failures += run_test("test_compare_unit", test_compare_unit);
     failures += run_test("test_find_unit", test_find_unit);
     failures += run_test("test_find_all", test_find_all);
-    failures += run_test("test_lookup_fuzz", [] { test_lookup_fuzz(); }); // ! Defaulted args
+    failures += run_test("test_lookup_all", [] { test_lookup_all(); }); // ! Defaulted args
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
-    // Overloaded name (clean as-is) - left outside `run_test`, which needs a non-overloaded bare name.
-    std::printf("- test_find_misaligned_fuzz...\n");
-    test_find_misaligned_fuzz();
+    failures += run_test("test_find_misaligned_all", test_find_misaligned_all);
 #endif
 
-    std::printf("\n=== UTF-8 ===\n");
     failures += run_test("test_utf8_runes_unit", test_utf8_runes_unit);
     failures += run_test("test_utf8_runes_safety", test_utf8_runes_safety);
     failures += run_test("test_utf8_runes_all", test_utf8_runes_all);
@@ -214,13 +203,12 @@ int main(int argc, char const **argv) {
     failures += run_test("test_utf8_delimiters_safety", test_utf8_delimiters_safety);
     failures += run_test("test_utf8_delimiters_all", test_utf8_delimiters_all);
 
-    std::printf("\n=== Uncased UTF-8 ===\n");
     failures += run_test("test_uncased_unit", test_uncased_unit);
     failures += run_test("test_uncased_all", test_uncased_all);
     failures += run_test("test_uncased_safety", test_uncased_safety);
 
     if (failures != 0) {
-        std::fprintf(stderr, "\n%d test(s) failed.\n", failures);
+        std::fprintf(stderr, "\n%zu test(s) failed.\n", failures);
         return 1;
     }
     std::printf("\nAll tests passed!\n");

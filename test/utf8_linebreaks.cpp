@@ -36,8 +36,6 @@ static utf8_unit_case_t const utf8_linebreaks_unit_cases[] = {
     {"a\xE2\x80\xA8" "b"_sv, {"a\xE2\x80\xA8"_sv, "b"_sv}}, // U+2028 LINE SEPARATOR
     {"a\xE2\x80\xA9" "b"_sv, {"a\xE2\x80\xA9"_sv, "b"_sv}}, // U+2029 PARAGRAPH SEPARATOR
 };
-static constexpr std::size_t utf8_linebreaks_unit_cases_count = sizeof(utf8_linebreaks_unit_cases) /
-                                                                sizeof(utf8_linebreaks_unit_cases[0]);
 
 /**
  *  @brief The UTF-8 line-break segmenters compiled on this target. The always-present `dispatched` entry keeps the
@@ -64,11 +62,9 @@ static utf8_segment_backend_t const utf8_linebreaks_backends[] = {
 void test_utf8_linebreaks_unit() {
     std::printf("  - testing UTF-8 line-break known-answer vectors...\n");
 
-    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_serial, utf8_linebreaks_unit_cases,
-                             utf8_linebreaks_unit_cases_count);
+    check_utf8_segment_unit_("linewrap", sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
-        check_utf8_segment_unit_("linewrap", backend.finder, utf8_linebreaks_unit_cases,
-                                 utf8_linebreaks_unit_cases_count);
+        check_utf8_segment_unit_("linewrap", backend.finder, span_over(utf8_linebreaks_unit_cases));
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's segments.
     std::vector<std::string> const wrapped =
@@ -115,8 +111,6 @@ static sz::string_view const utf8_linebreaks_motifs[] = {
     "\xE3\x80\xAF\xE2\x80\x98" "a"_sv, // LB10/LB19: lone CM (U+302F, East-Asian) then Pi quote (U+2018) -- side bits cleared
     "\xCC\x88\xE2\x80\x9C"_sv,         // lone combining diaeresis (U+0308) then QU (U+201C)
 };
-static constexpr std::size_t utf8_linebreaks_motifs_count = sizeof(utf8_linebreaks_motifs) /
-                                                            sizeof(utf8_linebreaks_motifs[0]);
 
 /** @brief Mandatory-break-dense line run cycling CRLF/U+2028/U+2029/U+000B, @p link_count cycles (LB4/5), into @p out. */
 static void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_t link_count) {
@@ -173,27 +167,23 @@ static char const *const utf8_linebreaks_snippets[] = {
     "a-b",           // HY hyphen
     "1,234.5 ",      // numeric grouping
     "\xD7\x90-a",    // Hebrew letter + hyphen (LB21a)
+    "\xD8\xB9\xD8\xB1\xD8\xA8\xD9\x8A\xD8\x8C\xC2\xA0\xD8\xB3\xD9\x84\xD8\xA7\xD9\x85 abc", // Arabic IS+GL, RTL/LTR
+    "\xE6\x97\xA5\xE6\x9C\xAC\xE3\x80\x81\xEF\xBC\x88\xE8\xAA\x9E\xEF\xBC\x89", // U+3001 CL, U+FF08/U+FF09 OP/CL
+    "\xC2\xAB\xD0\x9C\xD0\xB8\xD1\x80\xC2\xBB\xCE\x91",                         // Cyrillic in guillemets (QU) + Greek
 };
 
 /** @brief Linewrap family alphabet: weights bias toward family snippets and motifs (LB mandatory/GL/HY/NU/nesting). */
 static utf8_corpus_alphabet_t const utf8_linebreaks_alphabet = {
-    utf8_linebreaks_snippets,
-    sizeof(utf8_linebreaks_snippets) / sizeof(utf8_linebreaks_snippets[0]),
-    utf8_default_boundary_codepoints,
-    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
-    {45, 15, 5, 30, 5}, // snippet, boundary, astral, motif, malformed
+    span_over(utf8_linebreaks_snippets),
+    span_over(utf8_default_boundary_codepoints),
+    {{45, 15, 5, 30, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the linewrap family's differential corpora (motifs + dense + straddle + alphabet). */
 static utf8_segment_corpora_t utf8_linebreaks_corpora_() {
-    utf8_segment_corpora_t corpora = {"linewrap",
-                                      utf8_linebreaks_motifs,
-                                      utf8_linebreaks_motifs_count,
-                                      &utf8_linebreaks_dense_runs_,
-                                      &utf8_linebreaks_straddles_,
-                                      nullptr,
-                                      0,
-                                      &utf8_linebreaks_alphabet};
+    utf8_segment_corpora_t corpora = {
+        "linewrap", span_over(utf8_linebreaks_motifs), &utf8_linebreaks_dense_runs_, &utf8_linebreaks_straddles_,
+        {},         &utf8_linebreaks_alphabet};
     return corpora;
 }
 
@@ -258,9 +248,8 @@ void test_utf8_linebreaks_rules() {
         "LB23a", "LB24",  "LB25", "LB26", "LB27", "LB28", "LB28a", "LB29",  "LB30", "LB30a", "LB30b", "LB31",
     };
     for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
-        check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, backend.finder, rule_cases,
-                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                                  sizeof(required_rules) / sizeof(required_rules[0]));
+        check_utf8_rule_coverage_("linewrap", sz_utf8_linebreaks_serial, backend.finder, span_over(rule_cases),
+                                  span_over(required_rules));
 }
 
 #pragma endregion // Rule coverage
@@ -270,11 +259,9 @@ void test_utf8_linebreaks_rules() {
 /** @brief Malformed-input safety of the UTF-8 line kernels (serial / dispatched / icelake). */
 void test_utf8_linebreaks_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 line kernels...\n");
-    check_utf8_segment_safety_("linewrap (serial)", sz_utf8_linebreaks_serial);
-    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends) {
-        std::string const label = std::string("linewrap (") + backend.name + ")";
-        check_utf8_segment_safety_(label.c_str(), backend.finder);
-    }
+    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_linebreaks_serial}};
+    check_utf8_segment_safety_("linewrap", span_over(serial_only));
+    check_utf8_segment_safety_("linewrap", span_over(utf8_linebreaks_backends));
     std::printf("    linewrap safety passed!\n");
 }
 
@@ -285,8 +272,8 @@ void test_utf8_linebreaks_safety() {
 /** @brief Serial-vs-ISA line differential over the hardened corpora (high-density + long-range). */
 void test_utf8_linebreaks_all() {
     utf8_segment_corpora_t const corpora = utf8_linebreaks_corpora_();
-    for (utf8_segment_backend_t const &backend : utf8_linebreaks_backends)
-        test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, backend.finder, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_linebreaks_serial, span_over(utf8_linebreaks_backends), corpora,
+                                   scale_iterations(25)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers

@@ -203,6 +203,45 @@ inline std::size_t scale_iterations(std::size_t baseline) noexcept {
     return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
 }
 
+/**
+ *  @brief Baseline for a loop whose work grows with the square of its trip count - a sweep over lengths that
+ *         re-scans a growing buffer, say - so that doubling the multiplier doubles the work, not quadruples it.
+ */
+inline std::size_t scale_iterations_quadratic(std::size_t baseline) noexcept {
+    std::size_t const work = scale_iterations(baseline * baseline);
+    std::size_t bound = 1;
+    while (bound * bound < work) ++bound;
+    return bound;
+}
+
+/**
+ *  @brief The @p step -th value of a rotation over @p count items that also advances a phase each full turn, so
+ *         crossing it with another rotation of the same length still reaches every pair.
+ */
+inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept {
+    return count ? (step + step / count) % count : 0;
+}
+
+/** @brief Views a C array as a `sz::span`, so tables pass as one argument and keep their length attached. */
+template <typename value_type_, std::size_t count_>
+constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
+    return span<value_type_ const>(array, count_);
+}
+
+/**
+ *  @brief Step for walking an exhaustive space, so `SZ_TESTS_MULTIPLIER` dials sweeps as well as loops.
+ *
+ *  Striding rather than truncating keeps the far end of the space - where the window-edge cases live -
+ *  reachable at a low multiplier. The sweep becomes complete at the `10x` stress point rather than at the
+ *  default, so a default run samples every space and a stress run covers them.
+ */
+inline std::size_t sweep_stride(std::size_t complete) noexcept {
+    double const coverage = get_iterations_multiplier() / 10.0;
+    if (coverage >= 1.0 || complete == 0) return 1;
+    std::size_t const wanted = static_cast<std::size_t>(complete * coverage);
+    return wanted < 1 ? complete : complete / wanted;
+}
+
 template <typename string_type_, typename other_string_type_>
 inline string_type_ to_str(other_string_type_ const &other) noexcept {
     return string_type_(other.data(), other.size());
@@ -276,8 +315,9 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
 template <typename body_type_>
 inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) noexcept {
     static constexpr std::size_t offsets[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 48, 63};
+    std::vector<char> storage(usable_length + 2 * SZ_CACHE_LINE_WIDTH + 1, '\0');
     for (std::size_t offset : offsets) {
-        std::vector<char> storage(usable_length + 2 * SZ_CACHE_LINE_WIDTH + 1, '\0');
+        std::fill(storage.begin(), storage.end(), '\0');
         char *pointer = storage.data();
         while (reinterpret_cast<std::uintptr_t>(pointer) % SZ_CACHE_LINE_WIDTH != offset) ++pointer;
         body(reinterpret_cast<sz_ptr_t>(pointer), offset);
@@ -425,23 +465,24 @@ inline int log_environment() {
             std::printf("Error retrieving properties for device %d: %s\n", i, cudaGetErrorString(cuda_error));
             continue;
         }
-        int count = 1;
+        std::size_t count = 1;
         for (int j = i + 1; j < device_count; ++j) {
             cudaDeviceProp next;
             if (cudaGetDeviceProperties(&next, j) == cudaSuccess && std::strcmp(next.name, prop.name) == 0) { ++count; }
             else { break; }
         }
         int warps_per_sm = prop.maxThreadsPerMultiProcessor / prop.warpSize;
-        int shared_memory_per_warp = (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / warps_per_sm) : 0;
-        std::printf("  - %d x %s\n", count, prop.name);
+        std::size_t shared_memory_per_warp =
+            (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / static_cast<std::size_t>(warps_per_sm)) : 0;
+        std::printf("  - %zu x %s\n", count, prop.name);
         std::printf("    Shared Memory per SM: %zu bytes\n", prop.sharedMemPerMultiprocessor);
         std::printf("    Maximum Threads per SM: %d\n", prop.maxThreadsPerMultiProcessor);
         std::printf("    Warp Size: %d threads\n", prop.warpSize);
         std::printf("    Max Warps per SM: %d warps\n", warps_per_sm);
-        std::printf("    Shared Memory per Warp: %d bytes\n", shared_memory_per_warp);
+        std::printf("    Shared Memory per Warp: %zu bytes\n", shared_memory_per_warp);
         std::printf("    Managed memory: %s\n", prop.managedMemory ? "yes" : "no");
         std::printf("    Unified addressing: %s\n", prop.unifiedAddressing ? "yes" : "no");
-        i += count - 1;
+        i += static_cast<int>(count) - 1;
     }
 #endif
     return 0;
@@ -522,7 +563,7 @@ inline bool test_should_run(char const *name) noexcept {
  *  of a bare `what()` at the top of `main`, and surfaces per-test durations so slow tests are obvious.
  */
 template <typename function_type_>
-inline int run_test(char const *name, function_type_ &&test_function) noexcept {
+inline std::size_t run_test(char const *name, function_type_ &&test_function) noexcept {
     if (!test_should_run(name)) {
         std::printf("- %s ... skipped (SZ_TESTS_FILTER)\n", name);
         std::fflush(stdout);
@@ -530,6 +571,9 @@ inline int run_test(char const *name, function_type_ &&test_function) noexcept {
     }
     std::printf("- %s ...\n", name);
     std::fflush(stdout);
+    // Reseed per test so inputs don't depend on which tests ran first, and `SZ_TESTS_FILTER` reproduces faithfully.
+    global_random_generator().seed(
+        static_cast<std::mt19937::result_type>(sz_hash(name, std::strlen(name), global_random_seed())));
     auto const start = std::chrono::steady_clock::now();
     try {
         test_function();
@@ -551,11 +595,8 @@ inline int run_test(char const *name, function_type_ &&test_function) noexcept {
 } // namespace stringzilla
 } // namespace ashvardanian
 
-#pragma region Cross-Translation-Unit Test Declarations
-
-/*  Fused from the former `test_stringzilla_decls.hpp`. These declarations live at global scope to
- *  match the TU definitions; the using-declaration makes `scale_iterations` visible for the default
- *  arguments below. */
+/*  Cross-translation-unit test declarations. These live at global scope to match the TU definitions;
+ *  the using-declaration makes `scale_iterations` visible for the default arguments below. */
 using ashvardanian::stringzilla::scripts::scale_iterations;
 
 #pragma region Basic Utilities
@@ -650,8 +691,8 @@ void test_string_updates_unit(std::size_t repetitions = 1024);
 void test_compare_unit();
 void test_find_unit();
 void test_find_all();
-void test_find_misaligned_fuzz();
-void test_lookup_fuzz(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
+void test_find_misaligned_all();
+void test_lookup_all(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);
 
 #pragma endregion // Search and Comparison
 
@@ -662,5 +703,3 @@ void test_sort_unit();
 void test_intersect_unit();
 
 #pragma endregion // Sequence Algorithms
-
-#pragma endregion // Cross-Translation-Unit Test Declarations

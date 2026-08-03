@@ -87,9 +87,9 @@ SZ_API_COMPTIME sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
  *  the hot WB4 skip loops. */
 enum {
     sz_utf8_word_break_ignorable_set_k = (1u << sz_utf8_word_break_extend_k) | (1u << sz_utf8_word_break_zwj_k) |
-                                         (1u << sz_utf8_word_break_format_k),
+        (1u << sz_utf8_word_break_format_k),
     sz_utf8_word_break_aletter_or_hebrew_set_k = (1u << sz_utf8_word_break_aletter_k) |
-                                                 (1u << sz_utf8_word_break_hebrew_letter_k),
+        (1u << sz_utf8_word_break_hebrew_letter_k),
     sz_utf8_word_break_mid_quotes_set_k = (1u << sz_utf8_word_break_mid_quotes_k),
 };
 

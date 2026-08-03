@@ -1708,7 +1708,6 @@ struct cuda_similarity_task {
         return (bytes_per_cell == one_byte_per_cell_k || bytes_per_cell == two_bytes_per_cell_k) &&
                shorter.size() <= register_text_limit_k && longer.size() <= register_text_limit_k;
     }
-
 };
 
 static_assert(std::is_trivially_destructible<cuda_similarity_task<char>>::value,
@@ -4011,9 +4010,9 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
                 affine_k ? (void const *)&affine_score_per_cuda_warp_<task_t, char_t, score_t, score_t,
                                                                       uniform_substitution_costs_t, objective_k,
                                                                       locality_k, capability_k>
-                         : (void const *)&score_per_cuda_warp_<task_t, char_t, score_t, score_t,
-                                                               uniform_substitution_costs_t, objective_k, locality_k,
-                                                               capability_k>,
+                         : (void const
+                                *)&score_per_cuda_warp_<task_t, char_t, score_t, score_t, uniform_substitution_costs_t,
+                                                        objective_k, locality_k, capability_k>,
                 0, (unsigned)warp_ceiling, false);
         };
         status = resolve_warp.template operator()<u8_t>(table.warp_tier.u8);
@@ -4355,20 +4354,13 @@ struct levenshtein_distances<gap_costs_type_, allocator_type_, capability_,
         cross_similarities_t cross_kind_copy = cross_kind;
         gap_costs_t gap_costs_copy = gap_costs_;
         gpu_specs_t specs_copy = specs;
-        void *materialize_args[14] = {(void *)&tasks_ptr,
-                                      (void *)&queries_ptr,
-                                      (void *)&candidates_ptr,
-                                      (void *)&queries_count,
-                                      (void *)&candidates_count,
-                                      (void *)&row_stride,
-                                      (void *)&cross_kind_copy,
-                                      (void *)&substitute_magnitude,
-                                      (void *)&gap_magnitude,
-                                      (void *)&gap_type_value,
-                                      (void *)&min_bytes_per_cell,
-                                      (void *)&widest_warp_bytes_per_cell,
-                                      (void *)&gap_costs_copy,
-                                      (void *)&specs_copy};
+        void *materialize_args[14] = {(void *)&tasks_ptr,          (void *)&queries_ptr,
+                                      (void *)&candidates_ptr,     (void *)&queries_count,
+                                      (void *)&candidates_count,   (void *)&row_stride,
+                                      (void *)&cross_kind_copy,    (void *)&substitute_magnitude,
+                                      (void *)&gap_magnitude,      (void *)&gap_type_value,
+                                      (void *)&min_bytes_per_cell, (void *)&widest_warp_bytes_per_cell,
+                                      (void *)&gap_costs_copy,     (void *)&specs_copy};
         unsigned const block = 256;
         unsigned const grid = static_cast<unsigned>((live_cells + block - 1) / block);
         CUresult materialize_error = cuda_launch_t {}
@@ -4736,11 +4728,13 @@ cuda_status_t levenshtein_distances<gap_costs_type_, allocator_type_, capability
         if (warp_group_count) {
             // Slots are indexed by `log2(bytes_per_cell)`; 8-byte cells have no warp kernel and are demoted to the
             // device tier during materialization.
-            warp_shapes_by_width_t const warp_shapes_by_log2_width = {
-                kernel_table.warp_tier.u8, kernel_table.warp_tier.u16, kernel_table.warp_tier.u32, {}};
-            cuda_status_t const warp_status =
-                cuda_launch_warp_groups_(buffers_, device_level_tasks, warp_group_count, warp_shapes_by_log2_width,
-                                         substituter_, gap_costs_, specs, executor);
+            warp_shapes_by_width_t const warp_shapes_by_log2_width = {kernel_table.warp_tier.u8,
+                                                                      kernel_table.warp_tier.u16,
+                                                                      kernel_table.warp_tier.u32,
+                                                                      {}};
+            cuda_status_t const warp_status = cuda_launch_warp_groups_(buffers_, device_level_tasks, warp_group_count,
+                                                                       warp_shapes_by_log2_width, substituter_,
+                                                                       gap_costs_, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
 
@@ -4988,20 +4982,13 @@ struct levenshtein_distances_utf8<gap_costs_type_, allocator_type_, capability_,
         cross_similarities_t cross_kind_copy = cross_kind;
         gap_costs_t gap_costs_copy = gap_costs_;
         gpu_specs_t specs_copy = specs;
-        void *materialize_args[14] = {(void *)&tasks_ptr,
-                                      (void *)&queries_ptr,
-                                      (void *)&candidates_ptr,
-                                      (void *)&queries_count,
-                                      (void *)&candidates_count,
-                                      (void *)&row_stride,
-                                      (void *)&cross_kind_copy,
-                                      (void *)&substitute_magnitude,
-                                      (void *)&gap_magnitude,
-                                      (void *)&gap_type_value,
-                                      (void *)&min_bytes_per_cell,
-                                      (void *)&widest_warp_bytes_per_cell,
-                                      (void *)&gap_costs_copy,
-                                      (void *)&specs_copy};
+        void *materialize_args[14] = {(void *)&tasks_ptr,          (void *)&queries_ptr,
+                                      (void *)&candidates_ptr,     (void *)&queries_count,
+                                      (void *)&candidates_count,   (void *)&row_stride,
+                                      (void *)&cross_kind_copy,    (void *)&substitute_magnitude,
+                                      (void *)&gap_magnitude,      (void *)&gap_type_value,
+                                      (void *)&min_bytes_per_cell, (void *)&widest_warp_bytes_per_cell,
+                                      (void *)&gap_costs_copy,     (void *)&specs_copy};
         unsigned const materialize_block = 256;
         unsigned const materialize_grid = static_cast<unsigned>((live_cells + materialize_block - 1) /
                                                                 materialize_block);
@@ -5894,11 +5881,13 @@ cuda_status_t cuda_weighted_run_trampoline_(                                    
         if (warp_group_count) {
             // Weighted cells floor at two bytes, so the one-byte slot is unused; 8-byte cells have no warp kernel and
             // are demoted to the device tier during materialization.
-            warp_shapes_by_width_t const warp_shapes_by_log2_width = {
-                {}, kernel_table.warp_tier.i16, kernel_table.warp_tier.i32, {}};
-            cuda_status_t const warp_status =
-                cuda_launch_warp_groups_(buffers, device_level_tasks, warp_group_count, warp_shapes_by_log2_width,
-                                         device_substituter, gap_costs, specs, executor);
+            warp_shapes_by_width_t const warp_shapes_by_log2_width = {{},
+                                                                      kernel_table.warp_tier.i16,
+                                                                      kernel_table.warp_tier.i32,
+                                                                      {}};
+            cuda_status_t const warp_status = cuda_launch_warp_groups_(buffers, device_level_tasks, warp_group_count,
+                                                                       warp_shapes_by_log2_width, device_substituter,
+                                                                       gap_costs, specs, executor);
             if (warp_status.status != status_t::success_k) return warp_status;
         }
 
@@ -5983,20 +5972,13 @@ cuda_status_t cuda_weighted_cross_(                                             
     cross_similarities_t cross_kind_copy = cross_kind;
     gap_costs_type_ gap_costs_copy = gap_costs;
     gpu_specs_t specs_copy = specs;
-    void *materialize_args[14] = {(void *)&tasks_ptr,
-                                  (void *)&queries_ptr,
-                                  (void *)&candidates_ptr,
-                                  (void *)&queries_count,
-                                  (void *)&candidates_count,
-                                  (void *)&row_stride,
-                                  (void *)&cross_kind_copy,
-                                  (void *)&substitute_magnitude,
-                                  (void *)&gap_magnitude,
-                                  (void *)&gap_type_value,
-                                  (void *)&min_bytes_per_cell,
-                                  (void *)&widest_warp_bytes_per_cell,
-                                  (void *)&gap_costs_copy,
-                                  (void *)&specs_copy};
+    void *materialize_args[14] = {(void *)&tasks_ptr,          (void *)&queries_ptr,
+                                  (void *)&candidates_ptr,     (void *)&queries_count,
+                                  (void *)&candidates_count,   (void *)&row_stride,
+                                  (void *)&cross_kind_copy,    (void *)&substitute_magnitude,
+                                  (void *)&gap_magnitude,      (void *)&gap_type_value,
+                                  (void *)&min_bytes_per_cell, (void *)&widest_warp_bytes_per_cell,
+                                  (void *)&gap_costs_copy,     (void *)&specs_copy};
     unsigned const block = 256;
     unsigned const grid = static_cast<unsigned>((live_cells + block - 1) / block);
     CUresult materialize_error = cuda_launch_t {}

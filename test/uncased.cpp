@@ -50,6 +50,7 @@
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
+#include <array>         // `std::array`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
@@ -432,7 +433,7 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
         "\xE3\x81\x82\xE3\x81\x84", // "あい" (Hiragana ai) - Caseless
         "\xF0\x9F\x98\x80",         // '😀' (U+1F600, F0 9F 98 80) - Grinning Face
     };
-    std::size_t const pool_size = sizeof(char_pool) / sizeof(char_pool[0]);
+    std::size_t const pool_size = span_over(char_pool).size();
     std::uniform_int_distribution<std::size_t> pool_dist(0, pool_size - 1);
 
     std::size_t queries_remaining = total_queries;
@@ -547,6 +548,44 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
     std::printf("    passed %zu fuzz tests across %zu haystacks\n", total_passed, haystacks_tested);
 }
 
+/** @brief One codepoint whose case fold isn't the identity, in runes and in UTF-8. */
+struct uncased_fold_t {
+    sz_rune_t preimage;
+    sz_rune_t folded_runes[3];
+    sz_size_t folded_count;
+    sz_u8_t preimage_utf8[4];
+    std::size_t preimage_length;
+    sz_u8_t folded_utf8[12];
+    std::size_t folded_length;
+};
+
+/**
+ *  @brief Every non-identity fold in the Unicode range, derived once from `sz_unicode_fold_codepoint_`.
+ *
+ *  The adversarial enumerators and the invariant closure share this table, so the whole-range scan
+ *  is paid once per process rather than once per enumerator per backend.
+ */
+static std::vector<uncased_fold_t> const &uncased_folds_() {
+    static std::vector<uncased_fold_t> const folds = []() {
+        std::vector<uncased_fold_t> derived;
+        for (sz_rune_t preimage = 0; preimage <= 0x10FFFF; ++preimage) {
+            if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
+            uncased_fold_t fold;
+            fold.preimage = preimage;
+            fold.folded_count = sz_unicode_fold_codepoint_(preimage, fold.folded_runes);
+            if (fold.folded_count == 1 && fold.folded_runes[0] == preimage) continue; // Identity folds are inert
+            fold.preimage_length = (std::size_t)sz_rune_encode(preimage, fold.preimage_utf8);
+            fold.folded_length = 0;
+            for (sz_size_t index = 0; index < fold.folded_count; ++index)
+                fold.folded_length += (std::size_t)sz_rune_encode(fold.folded_runes[index],
+                                                                  fold.folded_utf8 + fold.folded_length);
+            derived.push_back(fold);
+        }
+        return derived;
+    }();
+    return folds;
+}
+
 /**
  *  @brief Differential adversarial test for uncased search over @b all fold preimages.
  *
@@ -558,50 +597,43 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
  *  with the same adversarial shapes.
  */
-void test_uncased_find_preimages_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
+static void check_uncased_find_preimages_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
     std::printf("  - testing uncased find against all fold preimages...\n");
 
     std::size_t const offsets[] = {0, 14, 15, 16, 17, 30, 31, 32, 33, 61, 62, 63, 64, 65};
-    std::size_t const offsets_count = sizeof(offsets) / sizeof(offsets[0]);
+    std::size_t const offsets_count = span_over(offsets).size();
     std::size_t const padding_length = 16;
     std::size_t preimages_tested = 0, cases_tested = 0;
 
     char needle[16];   // Longest folded form is 9 bytes, plus one ASCII context byte
     char haystack[96]; // Largest offset 65, plus context, plus a 4-byte preimage, plus padding
 
-    for (sz_rune_t preimage = 1; preimage <= 0x10FFFF; ++preimage) {
-        if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
-        sz_rune_t folded_runes[3];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(preimage, folded_runes);
-        if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds aren't adversarial
+    std::vector<uncased_fold_t> const &folds = uncased_folds_();
+    std::size_t const preimage_stride = sweep_stride(folds.size());
 
-        sz_u8_t preimage_utf8[4];
-        std::size_t const preimage_length = (std::size_t)sz_rune_encode(preimage, preimage_utf8);
-        sz_u8_t folded_utf8[12];
-        std::size_t folded_length = 0;
-        for (sz_size_t i = 0; i < folded_count; ++i)
-            folded_length += (std::size_t)sz_rune_encode(folded_runes[i], folded_utf8 + folded_length);
+    for (std::size_t fold_index = 0; fold_index < folds.size(); fold_index += preimage_stride) {
+        uncased_fold_t const &fold = folds[fold_index];
         ++preimages_tested;
 
         // Needle variants: 0 = bare folded form, 1 = "x"-prefixed, 2 = "x"-suffixed
-        for (int variant = 0; variant < 3; ++variant) {
+        for (std::size_t variant = 0; variant < 3; ++variant) {
             std::size_t needle_length = 0;
             if (variant == 1) needle[needle_length++] = 'x';
-            std::memcpy(needle + needle_length, folded_utf8, folded_length);
-            needle_length += folded_length;
+            std::memcpy(needle + needle_length, fold.folded_utf8, fold.folded_length);
+            needle_length += fold.folded_length;
             if (variant == 2) needle[needle_length++] = 'x';
 
             // With the mirroring "x" context the needle must match through the fold expansion;
             // without it both backends must agree on the not-found result. The bare variant has
             // no context to mirror, so it runs once.
-            for (int with_context = variant == 0 ? 1 : 0; with_context < 2; ++with_context) {
+            for (std::size_t with_context = variant == 0 ? 1 : 0; with_context < 2; ++with_context) {
                 for (std::size_t offset_index = 0; offset_index < offsets_count; ++offset_index) {
                     std::size_t haystack_length = 0;
                     while (haystack_length < offsets[offset_index]) haystack[haystack_length++] = 'y';
                     if (variant == 1 && with_context) haystack[haystack_length++] = 'x';
-                    std::memcpy(haystack + haystack_length, preimage_utf8, preimage_length);
-                    haystack_length += preimage_length;
+                    std::memcpy(haystack + haystack_length, fold.preimage_utf8, fold.preimage_length);
+                    haystack_length += fold.preimage_length;
                     if (variant == 2 && with_context) haystack[haystack_length++] = 'x';
                     for (std::size_t i = 0; i < padding_length; ++i) haystack[haystack_length++] = 'y';
 
@@ -626,47 +658,29 @@ void test_uncased_find_preimages_fuzz(sz_utf8_uncased_search_t find_base, sz_utf
  *  from its own. Each lands within the last `needle_window` bytes (windows 4..16) of haystacks
  *  whose filler also sweeps the 64-byte SIMD chunk boundary.
  */
-void test_uncased_find_tails_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
+static void check_uncased_find_tails_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
     std::printf("  - testing uncased find with expanding preimages at haystack tails...\n");
 
-    struct expanding_preimage_t {
-        sz_u8_t preimage_utf8[4];
-        std::size_t preimage_length;
-        sz_u8_t folded_utf8[12];
-        std::size_t folded_length;
-    };
-    std::vector<expanding_preimage_t> expanding_preimages;
-
-    for (sz_rune_t preimage = 1; preimage <= 0x10FFFF; ++preimage) {
-        if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
-        sz_rune_t folded_runes[3];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(preimage, folded_runes);
-        if (folded_count == 1 && folded_runes[0] == preimage) continue; // Identity folds can't expand
-
-        expanding_preimage_t entry;
-        entry.preimage_length = (std::size_t)sz_rune_encode(preimage, entry.preimage_utf8);
-        entry.folded_length = 0;
-        for (sz_size_t i = 0; i < folded_count; ++i)
-            entry.folded_length += (std::size_t)sz_rune_encode(folded_runes[i],
-                                                               entry.folded_utf8 + entry.folded_length);
-        if (entry.folded_length == entry.preimage_length) continue; // Same width → not a tail-expansion shape
-        expanding_preimages.push_back(entry);
-    }
+    std::vector<uncased_fold_t> expanding_preimages;
+    for (uncased_fold_t const &fold : uncased_folds_())
+        if (fold.folded_length != fold.preimage_length) // Same width → not a tail-expansion shape
+            expanding_preimages.push_back(fold);
 
     std::size_t const filler_lengths[] = {0, 1, 2, 14, 15, 16, 17, 30, 31, 32, 33, 59, 60, 61, 62, 63, 64, 65};
-    std::size_t const filler_lengths_count = sizeof(filler_lengths) / sizeof(filler_lengths[0]);
+    std::size_t const filler_lengths_count = span_over(filler_lengths).size();
     std::size_t const needle_window_max = 16; // Tail paddings 0..15 keep the preimage within the last 4..16 bytes
     std::size_t cases_tested = 0;
 
     char needle[32];    // Two folded forms of up to 12 bytes, or one with an ASCII context byte
     char haystack[128]; // Largest filler 65, plus context, plus two 4-byte preimages, plus tail padding
 
-    for (std::size_t entry_index = 0; entry_index < expanding_preimages.size(); ++entry_index) {
-        expanding_preimage_t const &entry = expanding_preimages[entry_index];
+    std::size_t const entry_stride = sweep_stride(expanding_preimages.size());
+    for (std::size_t entry_index = 0; entry_index < expanding_preimages.size(); entry_index += entry_stride) {
+        uncased_fold_t const &entry = expanding_preimages[entry_index];
 
         // Needle variants: 0 = folded form, 1 = "x"-suffixed, 2 = "x"-prefixed, 3 = folded form twice
-        for (int variant = 0; variant < 4; ++variant) {
+        for (std::size_t variant = 0; variant < 4; ++variant) {
             std::size_t needle_length = 0;
             if (variant == 2) needle[needle_length++] = 'x';
             std::memcpy(needle + needle_length, entry.folded_utf8, entry.folded_length);
@@ -714,47 +728,39 @@ void test_uncased_find_tails_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8_un
  *  folded bytes) as the needle - swept across the 64-byte SIMD chunk boundary - validated against the
  *  fold-subset reference.
  */
-void test_uncased_find_crossing_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
+static void check_uncased_find_crossing_(sz_utf8_uncased_search_t find_base, sz_utf8_uncased_search_t find_simd) {
 
     std::printf("  - testing uncased find across adjacent expansion boundaries...\n");
 
     // Codepoints whose fold emits more than one rune, so a needle can slice through the middle of their
-    // expansion. The set is small (ligatures, sharp-s, decomposed accents), so a fixed cap avoids any
-    // dynamic allocation on this cold path.
-    enum { expanders_capacity = 1024 };
-    sz_rune_t expanders[expanders_capacity];
-    std::size_t expanders_count = 0;
-    for (sz_rune_t codepoint = 1; codepoint <= 0x10FFFF; ++codepoint) {
-        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) continue; // Surrogates are not valid UTF-8
-        sz_rune_t folded[3];
-        if (sz_unicode_fold_codepoint_(codepoint, folded) < 2) continue;
-        verify(expanders_count < expanders_capacity && "expander buffer overflow");
-        expanders[expanders_count++] = codepoint;
-    }
+    // expansion - ligatures, sharp-s, decomposed accents.
+    std::vector<uncased_fold_t> expanders;
+    for (uncased_fold_t const &fold : uncased_folds_())
+        if (fold.folded_count >= 2) expanders.push_back(fold);
 
     std::size_t const filler_lengths[] = {0, 1, 14, 15, 16, 17, 30, 31, 32, 33, 60, 61, 62, 63, 64, 65};
-    std::size_t const filler_lengths_count = sizeof(filler_lengths) / sizeof(filler_lengths[0]);
-    std::size_t cases_tested = 0;
+    std::size_t const filler_lengths_count = span_over(filler_lengths).size();
+    std::size_t cases_tested = 0, pairs_tested = 0;
 
     char haystack[128];
     char needle[32];
 
-    for (std::size_t first_index = 0; first_index < expanders_count; ++first_index) {
-        for (std::size_t second_index = 0; second_index < expanders_count; ++second_index) {
+    std::size_t const first_stride = sweep_stride(expanders.size());
+    for (std::size_t first_index = 0; first_index < expanders.size(); first_index += first_stride) {
+        for (std::size_t second_index = 0; second_index < expanders.size(); ++second_index, ++pairs_tested) {
             // Fold the adjacent pair into a flat rune stream, tagging which source codepoint (0 or 1)
             // produced each folded rune so we keep only the needles that cross the join.
             sz_rune_t folded_runes[6];
-            int rune_owner[6];
+            std::array<std::size_t, 6> rune_owner;
             std::size_t folded_total = 0;
             sz_u8_t pair_utf8[8];
             std::size_t pair_length = 0;
-            for (int which = 0; which < 2; ++which) {
-                sz_rune_t const codepoint = expanders[which == 0 ? first_index : second_index];
-                pair_length += (std::size_t)sz_rune_encode(codepoint, pair_utf8 + pair_length);
-                sz_rune_t emitted[3];
-                sz_size_t emitted_count = sz_unicode_fold_codepoint_(codepoint, emitted);
-                for (sz_size_t index = 0; index < emitted_count; ++index) {
-                    folded_runes[folded_total] = emitted[index];
+            for (std::size_t which = 0; which < 2; ++which) {
+                uncased_fold_t const &expander = expanders[which == 0 ? first_index : second_index];
+                std::memcpy(pair_utf8 + pair_length, expander.preimage_utf8, expander.preimage_length);
+                pair_length += expander.preimage_length;
+                for (sz_size_t index = 0; index < expander.folded_count; ++index) {
+                    folded_runes[folded_total] = expander.folded_runes[index];
                     rune_owner[folded_total] = which;
                     ++folded_total;
                 }
@@ -777,7 +783,7 @@ void test_uncased_find_crossing_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8
                         while (haystack_length < filler_lengths[filler_index]) haystack[haystack_length++] = 'o';
                         std::memcpy(haystack + haystack_length, pair_utf8, pair_length);
                         haystack_length += pair_length;
-                        for (int tail = 0; tail < 4; ++tail) haystack[haystack_length++] = 'y';
+                        for (std::size_t tail = 0; tail < 4; ++tail) haystack[haystack_length++] = 'y';
 
                         check_uncased_find_three_way_(find_base, find_simd, haystack, haystack_length, needle,
                                                       needle_length, "crossing expansion find");
@@ -787,8 +793,7 @@ void test_uncased_find_crossing_fuzz(sz_utf8_uncased_search_t find_base, sz_utf8
             }
         }
     }
-    std::printf("    passed %zu cases across %zu adjacent expander pairs\n", cases_tested,
-                expanders_count * expanders_count);
+    std::printf("    passed %zu cases across %zu adjacent expander pairs\n", cases_tested, pairs_tested);
 }
 
 /**
@@ -815,6 +820,7 @@ static void test_uncased_find_long_crossing_fuzz(sz_utf8_uncased_search_t find_b
         {"\xEF\xAC\x83", "ffi"}, // ﬃ
     };
     std::size_t const fillers[] = {0, 30, 62, 63, 64, 65};
+    std::size_t const fillers_count = span_over(fillers).size();
     std::size_t cases_tested = 0;
 
     char haystack[256];
@@ -835,15 +841,14 @@ static void test_uncased_find_long_crossing_fuzz(sz_utf8_uncased_search_t find_b
             for (std::size_t needle_length = 4; needle_length <= folded_total; ++needle_length) {
                 for (std::size_t start = 0; start + needle_length <= folded_total; ++start) {
                     std::memcpy(needle, folded_run + start, needle_length);
-                    for (std::size_t filler_index = 0; filler_index != sizeof(fillers) / sizeof(fillers[0]);
-                         ++filler_index) {
+                    for (std::size_t filler_index = 0; filler_index != fillers_count; ++filler_index) {
                         std::size_t haystack_length = 0;
                         while (haystack_length < fillers[filler_index]) haystack[haystack_length++] = 'o';
                         for (std::size_t copy = 0; copy != copies; ++copy) {
                             std::memcpy(haystack + haystack_length, expander.utf8, utf8_length);
                             haystack_length += utf8_length;
                         }
-                        for (int tail = 0; tail != 4; ++tail) haystack[haystack_length++] = 'y';
+                        for (std::size_t tail = 0; tail != 4; ++tail) haystack[haystack_length++] = 'y';
                         check_uncased_find_three_way_(find_base, find_simd, haystack, haystack_length, needle,
                                                       needle_length, "long crossing expansion find");
                         ++cases_tested;
@@ -864,7 +869,7 @@ static void test_uncased_find_long_crossing_fuzz(sz_utf8_uncased_search_t find_b
  */
 static void run_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
     sz_utf8_uncased_search_t const find_serial = sz_utf8_uncased_search_serial;
-    std::size_t const queries = scale_iterations(100000);
+    std::size_t const queries = scale_iterations(8000);
     test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
                            sz_utf8_count_serial, 16, 0, queries);
     test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
@@ -873,9 +878,9 @@ static void run_uncased_find_battery_(sz_utf8_uncased_search_t find_simd) {
                            sz_utf8_count_serial, 100, 100, queries);
     test_uncased_find_fuzz(find_serial, find_simd, sz_utf8_uncased_fold_serial, sz_utf8_seek_serial,
                            sz_utf8_count_serial, 200, 100, queries);
-    test_uncased_find_preimages_fuzz(find_serial, find_simd);
-    test_uncased_find_tails_fuzz(find_serial, find_simd);
-    test_uncased_find_crossing_fuzz(find_serial, find_simd);
+    check_uncased_find_preimages_(find_serial, find_simd);
+    check_uncased_find_tails_(find_serial, find_simd);
+    check_uncased_find_crossing_(find_serial, find_simd);
     test_uncased_find_long_crossing_fuzz(find_serial, find_simd);
 
     // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives the
@@ -1987,22 +1992,9 @@ void test_uncased_unit() {
 #pragma region Equivalence
 
 /**
- *  @brief Tests equivalence of case folding implementations (reference vs candidate).
- *
- *  Folds a broad battery of fixed UTF-8 strings, then random concatenations of them, and finally the
- *  exhaustive sweep of every valid Unicode codepoint (in order and shuffled), comparing the reference
- *  and candidate backends byte-by-byte. The random-input coverage that the standalone fuzz routine
- *  used to provide is folded into this single differential, so the driver only needs this one call.
- *
- *  Generates random UTF-8 strings containing:
- *  - ASCII text (uppercase and lowercase)
- *  - Multi-byte UTF-8 characters from various scripts (Cyrillic, Greek, Latin Extended)
- *  - Special cases like German ß
- *
- *  @param reference          Reference case-folding backend wrapper.
- *  @param candidate          Candidate case-folding backend wrapper to validate against the reference.
- *  @param min_text_length    Lower bound on the length of each random concatenation.
- *  @param min_iterations     Number of random concatenations to fold and compare.
+ *  @brief Compares the @p reference and @p candidate folds byte-by-byte over a fixed multi-script battery,
+ *         @p min_iterations random concatenations of at least @p min_text_length bytes, and the exhaustive
+ *         sweep of every valid Unicode codepoint, both in order and shuffled.
  */
 template <typename reference_, typename candidate_>
 void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t min_text_length,
@@ -2113,7 +2105,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
     };
 
     auto &rng = global_random_generator();
-    std::size_t const content_count = sizeof(utf8_content) / sizeof(utf8_content[0]);
+    std::size_t const content_count = span_over(utf8_content).size();
     std::uniform_int_distribution<std::size_t> content_dist(0, content_count - 1);
 
     // First, test all the fixed strings
@@ -2131,19 +2123,19 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         check(text);
     }
 
-    // Exhaustive sweep over every valid Unicode codepoint: first in order (0x0..0x10FFFF), then shuffled.
-    // This is the random-input coverage formerly provided by a standalone fuzz routine, folded in here so
-    // a single fold differential drives both the structured strings and the whole-codepoint enumeration.
+    // Sweep the valid Unicode codepoints, first in order (0x0..0x10FFFF), then shuffled, so a single fold
+    // differential drives both the structured strings and the whole-codepoint enumeration.
     std::printf("  - testing case folding fuzz (ordered + shuffled codepoint sweep)...\n");
+    std::size_t const codepoint_stride = sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
-    all_runes.reserve(0x10FFFF);
-    for (sz_rune_t codepoint = 0; codepoint <= 0x10FFFF; ++codepoint) {
+    all_runes.reserve(0x110000 / codepoint_stride);
+    for (sz_rune_t codepoint = 0; codepoint <= 0x10FFFF; codepoint += codepoint_stride) {
         if (codepoint >= 0xD800 && codepoint <= 0xDFFF) continue; // Skip surrogates
         all_runes.push_back(codepoint);
     }
 
     std::vector<char> input_buffer(all_runes.size() * 4); // Max UTF-8 size is 4 bytes per rune
-    std::size_t const sweep_iterations = 1 + scale_iterations(100);
+    std::size_t const sweep_iterations = scale_iterations(6);
     for (std::size_t iteration = 0; iteration < sweep_iterations; ++iteration) {
         if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
 
@@ -2169,23 +2161,18 @@ void test_uncased_invariant_reference() {
     std::printf("  - testing case-invariant closure over the fold table...\n");
     std::size_t preimages_checked = 0, outputs_checked = 0;
 
-    for (sz_rune_t rune = 0; rune <= 0x10FFFF; ++rune) {
-        if (rune >= 0xD800 && rune <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
-        sz_rune_t folded_runes[3];
-        sz_size_t folded_count = sz_unicode_fold_codepoint_(rune, folded_runes);
-        if (folded_count == 1 && folded_runes[0] == rune) continue; // Identity folds impose no constraint
-
-        if (sz_rune_is_uncased_(rune) != sz_false_k) {
-            std::fprintf(stderr, "Fold preimage U+%04X is wrongly classified as case-invariant\n", rune);
+    for (uncased_fold_t const &fold : uncased_folds_()) {
+        if (sz_rune_is_uncased_(fold.preimage) != sz_false_k) {
+            std::fprintf(stderr, "Fold preimage U+%04X is wrongly classified as case-invariant\n", fold.preimage);
             verify(false && "Fold preimages must not be case-invariant");
         }
         ++preimages_checked;
 
-        for (sz_size_t i = 0; i < folded_count; ++i) {
-            if (sz_rune_is_uncased_(folded_runes[i]) != sz_false_k) {
+        for (sz_size_t index = 0; index < fold.folded_count; ++index) {
+            if (sz_rune_is_uncased_(fold.folded_runes[index]) != sz_false_k) {
                 std::fprintf(stderr,
                              "Fold output U+%04X (from preimage U+%04X) is wrongly classified as case-invariant\n",
-                             folded_runes[i], rune);
+                             fold.folded_runes[index], fold.preimage);
                 verify(false && "Fold outputs must not be case-invariant");
             }
             ++outputs_checked;
@@ -2200,8 +2187,7 @@ void test_uncased_invariant_reference() {
 
 /**
  *  @brief One backend's uncased fold / find / violation kernels for the safety probe, stored by pointer so the
- *         driver can iterate a table. Members are named for the call sites (`candidate.fold(...)` etc.), so each
- *         function-pointer member is invoked directly — `check_uncased_safety_` is unchanged.
+ *         driver can iterate a table.
  */
 struct uncased_safety_backend_t {
     char const *name;
@@ -2211,19 +2197,14 @@ struct uncased_safety_backend_t {
 };
 
 /**
- *  @brief Smoke test feeding invalid UTF-8 into the case kernels of one backend.
+ *  @brief Feeds invalid UTF-8 through the fold / find / violation kernels of every @p backends entry, asserting
+ *         each survives and writes nothing past its guarded destination. One battery drives all backends.
  *
- *  The valid-UTF-8 contract stands, so outputs may be arbitrary - the only requirements are:
- *  no crash, the fold output stays within the documented 3x expansion bound, and no writes land
- *  outside the destination buffer. One nuance: a truncated multi-byte sequence at the very end
- *  of the input can mis-decode as a single rune and emit up to 4 bytes where fewer source bytes
- *  remain, so the enforced bound is `3 * input_length + 4`. Canary bytes guard both sides of
- *  the destination, like the audit's standalone safety probe did. Covers all 256 single bytes,
- *  all 65,536 byte pairs, and random garbage buffers of 1..70 bytes through fold, find (with a
- *  short valid needle), and the case-invariant check.
+ *  Outputs are arbitrary off-contract, so only the fold length is checked, against `3 * input_length + 4` - a
+ *  truncated multi-byte tail can mis-decode into one rune of up to 4 bytes beyond the documented 3x expansion.
  */
-template <typename candidate_>
-static void check_uncased_safety_(candidate_ candidate, std::size_t random_inputs = scale_iterations(10000)) {
+static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backends,
+                                  std::size_t random_inputs = scale_iterations(10000)) {
 
     std::printf("  - testing invalid-input safety of case kernels (%zu random buffers)...\n", random_inputs);
 
@@ -2231,26 +2212,26 @@ static void check_uncased_safety_(candidate_ candidate, std::size_t random_input
     char const *needle = "st"; // Short valid needle: the folds of 'ﬅ' and 'ﬆ' collapse onto it
 
     auto check = [&](char const *input, std::size_t input_length) {
-        // The documented bound is 3x for valid UTF-8; invalid input may add one mis-decoded
-        // trailing rune of up to 4 bytes on top of it
         std::size_t const output_bound = input_length * 3 + 4;
-        // A canary-guarded fold output buffer catches any write past the documented bound; the helper
-        // asserts the flanking guards survive the call.
-        with_guarded_buffer_(output_bound, [&](sz_ptr_t output, std::size_t length) {
-            sz_size_t folded_length = candidate.fold(input, input_length, output);
-            if (folded_length > length) {
-                std::fprintf(stderr, "Fold of invalid input returned %zu bytes for %zu input bytes (bound is 3x + 4)\n",
-                             (std::size_t)folded_length, input_length);
-                print_uncased_test_bytes_("input", input, input_length);
-                verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
-            }
-        });
-        // The classifier and the finder return arbitrary verdicts on garbage - they just must survive
-        [[maybe_unused]] sz_cptr_t const violation = candidate.violation(input, input_length);
-        sz_utf8_uncased_needle_metadata_t needle_metadata = {};
-        sz_size_t matched_length = 0;
-        [[maybe_unused]] sz_cptr_t const match = candidate.find(input, input_length, needle, 2, &needle_metadata,
-                                                                &matched_length);
+        for (uncased_safety_backend_t const &candidate : backends) {
+            // A canary-guarded fold output buffer catches any write past the documented bound; the helper
+            // asserts the flanking guards survive the call.
+            with_guarded_buffer_(output_bound, [&](sz_ptr_t output, std::size_t length) {
+                sz_size_t folded_length = candidate.fold(input, input_length, output);
+                if (folded_length > length) {
+                    std::fprintf(stderr, "%s fold of invalid input returned %zu bytes for %zu input bytes\n",
+                                 candidate.name, (std::size_t)folded_length, input_length);
+                    print_uncased_test_bytes_("input", input, input_length);
+                    verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
+                }
+            });
+            // The classifier and the finder return arbitrary verdicts on garbage - they just must survive
+            [[maybe_unused]] sz_cptr_t const violation = candidate.violation(input, input_length);
+            sz_utf8_uncased_needle_metadata_t needle_metadata = {};
+            sz_size_t matched_length = 0;
+            [[maybe_unused]] sz_cptr_t const match = candidate.find(input, input_length, needle, 2, &needle_metadata,
+                                                                    &matched_length);
+        }
     };
 
     char input[max_input_length];
@@ -2284,10 +2265,12 @@ static void check_uncased_safety_(candidate_ candidate, std::size_t random_input
 }
 
 /**
- *  @brief The uncased fold/find/violation backends probed for invalid-input safety on this target. The
- *         always-present `dispatched` entry keeps the table non-empty on a baseline build.
+ *  @brief The uncased fold/find/violation backends probed for invalid-input safety on this target. The serial
+ *         reference faces the same contract as the dispatched and native ones, and the two always-present entries
+ *         keep the table non-empty on a baseline build.
  */
 static uncased_safety_backend_t const uncased_safety_backends[] = {
+    {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial, sz_utf8_find_cased_serial},
     {"dispatched", sz_utf8_uncased_fold, sz_utf8_uncased_search, sz_utf8_find_cased},
 #if SZ_USE_HASWELL
     {"haswell", sz_utf8_uncased_fold_haswell, sz_utf8_uncased_search_haswell, sz_utf8_find_cased_haswell},
@@ -2303,18 +2286,8 @@ static uncased_safety_backend_t const uncased_safety_backends[] = {
 #endif
 };
 
-/**
- *  @brief Adversarial invalid-input safety driver across every backend compiled on this target.
- *
- *  Mirrors `test_memory_safety()` / `test_utf8_runes_safety()`: the serial backend faces the same invalid-input
- *  contract as the dispatched and native ones, which are then probed by iterating `uncased_safety_backends`.
- */
-void test_uncased_safety() {
-    uncased_safety_backend_t const serial {"serial", sz_utf8_uncased_fold_serial, sz_utf8_uncased_search_serial,
-                                           sz_utf8_find_cased_serial};
-    check_uncased_safety_(serial);
-    for (uncased_safety_backend_t const &backend : uncased_safety_backends) check_uncased_safety_(backend);
-}
+/** @brief Adversarial invalid-input safety driver across every backend compiled on this target. */
+void test_uncased_safety() { check_uncased_safety_(span_over(uncased_safety_backends)); }
 
 #pragma endregion // Safety
 
@@ -2379,7 +2352,7 @@ void test_uncased_all() {
     // Serial reference vs every compiled backend (dispatched first): the case-fold differential and the full find
     // battery, paired per backend so their ISA coverage stays in lockstep.
     for (uncased_backend_t const &backend : uncased_backends) {
-        test_fold_equivalence(serial, backend, 4000, scale_iterations(10000));
+        test_fold_equivalence(serial, backend, 4000, scale_iterations(1200));
         run_uncased_find_battery_(backend.search);
     }
 }

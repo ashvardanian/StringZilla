@@ -32,7 +32,7 @@ The project is split into the following parts:
 
 For minimal test coverage, check the following scripts:
 
-- `test/stringzilla.cpp` - tests C++ API (not underlying C) against STL.
+- `test/stringzilla.cpp` - drives every per-ISA C kernel directly, spot-checking the C++ wrappers in the `_unit` tier.
 - `test/*.py` - tests the Python API against native strings, split per kernel family (`test_string.py`, `test_find.py`, `test_sort.py`, `test_hash.py`, `test_uncased.py`, `test_utf8_*.py`) mirroring the C++ translation units, with shared helpers in `test_helpers.py` / `test_utf8_helpers.py`.
 - `test/stringzilla.js`.
 
@@ -183,6 +183,26 @@ build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neo
 
 Note, that Address Sanitizers have a hard time with masked load and store instructions in AVX-512 and SVE.
 
+#### Test Tiers
+
+Every kernel family registers its tests with a fixed set of suffixes, and there are no other tiers.
+Do not invent a fifth one - fold the new case into whichever tier already owns that kind of assertion.
+
+| Tier      | Asserts against                                                                          | Uses the multiplier |
+| :-------- | :--------------------------------------------------------------------------------------- | :------------------ |
+| `_unit`   | hand-written literal expectations only                                                   | no                  |
+| `_rules`  | one motif per spec rule id, plus a coverage gate asserting every required rule was hit   | no                  |
+| `_safety` | survival only - in bounds, `bytes_consumed <= length`, no crash on malformed input       | yes                 |
+| `_all`    | the serial-vs-ISA differential, plus invariants that hold independently of any reference | yes                 |
+
+The load-bearing rule is that `_unit` may never derive its expectations by calling another backend.
+If the reference is wrong, a derived expectation is wrong with it, and the test passes anyway.
+Likewise `_safety` never asserts content correctness - only that the kernel stayed inside its buffer and returned.
+
+The `_rules` tier exists only for families with a Unicode rule table - wordbreaks, graphemes, sentences, and linebreaks.
+Families without one - runes, tokens, delimiters, and norm - register three tiers rather than four.
+Registration order is `_unit`, then `_rules` where it applies, then `_safety`, then `_all`.
+
 The C++ and Python test suites support environment variables for reproducible stress testing and CI fuzzing:
 
 | Variable              | Description                                         | Default |
@@ -192,7 +212,13 @@ The C++ and Python test suites support environment variables for reproducible st
 | `SZ_TESTS_FILTER`     | ECMAScript regex over test names; only matches run  |   (all) |
 
 Each test has its own baseline iteration count tuned for its operation complexity.
-The multiplier scales all baselines proportionally - use `0.1` for quick smoke tests or `10` for thorough stress testing.
+`SZ_TESTS_MULTIPLIER` is the suite's only tuning knob, and two helpers in `test/stringzilla.hpp` put work under it.
+`scale_iterations(baseline)` scales a loop count and floors at 1, so a baseline small enough for the floor to swallow the multiplier is effectively a constant - don't use tiny baselines on expensive loops.
+`sweep_stride(complete)` gives the step for walking an exhaustive space, such as every byte value, every byte pair, or every window phase.
+A sweep becomes complete at the `10x` stress point rather than at the default, so a default run samples every space evenly and a nightly or farm run covers them exhaustively.
+
+The intended operating points are a short default run for local iteration, `10x` for nightly CI, and `100x` for a stress farm.
+Sizing is relative rather than absolute: each family gets a comparable share of the budget, so no single test dominates a run on any machine.
 Each top-level test is also wall-clock timed and reported as `- name ... ok (N.NN s)`, so slow tests are obvious.
 
 ```bash
@@ -217,6 +243,10 @@ SZ_TESTS_SEED=42 pytest test/ --ignore=test/stringzillas.py -v
 
 When a test fails, note the seed from the output and re-run with that exact seed to reproduce the issue.
 This is particularly useful for debugging SIMD edge cases that only manifest with specific input patterns.
+
+`SZ_TESTS_SEED` selects the seed, which is printed at startup, and `run_test` reseeds the shared generator per test from the test name.
+A test's inputs therefore never depend on which tests ran before it, so `SZ_TESTS_SEED` together with `SZ_TESTS_FILTER` is a faithful reproduction recipe.
+Assertions use `verify`, `let_verify`, `scope_verify`, and `throws_verify`, deliberately independent of `NDEBUG`, because a plain `assert` compiles out in Release builds and silently disables the checks.
 
 The scalable-vector backends must stay correct at every hardware vector length, and the CI `test_cross_qemu` matrix sweeps them all.
 The same sweep runs locally with user-mode QEMU - on an Arm host that covers NEON-only dispatch plus SVE at 128/256/512 bits, and cross-compilers unlock the RISC-V, x86, LoongArch, and POWER backends too:

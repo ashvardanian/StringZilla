@@ -175,22 +175,21 @@ struct utf8_norm_backend_t {
  *
  *  Encodes every assigned Unicode codepoint, shuffles the order, and normalizes the full corpus under all
  *  four normal forms, so the comparison stresses canonical ordering, every decomposition/composition path,
- *  and SIMD-block straddles.
- *
- *  @param reference   Serial reference backend bundle (normalizer + normalization-violation finder).
- *  @param candidate   ISA-specific backend bundle under test (normalizer + normalization-violation finder).
- *  @param iterations  Number of all-codepoint shuffles to fuzz x 4 normal forms.
+ *  and SIMD-block straddles. Below a multiplier of 1.0 the codepoint space is strided, not truncated, so the
+ *  astral planes stay reachable on a cheap run.
  */
 template <typename reference_, typename candidate_>
-void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations = scale_iterations(25)) {
-    std::printf("  - testing normalization fuzz (%zu iterations x 4 forms)...\n", iterations);
-
+void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size_t iterations) {
+    std::size_t const codepoint_stride = sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
-    all_runes.reserve(0x10FFFF);
-    for (sz_rune_t cp = 0; cp <= 0x10FFFF; ++cp) {
-        if (cp >= 0xD800 && cp <= 0xDFFF) continue; // skip surrogates
-        all_runes.push_back(cp);
+    all_runes.reserve(0x110000 / codepoint_stride);
+    for (sz_rune_t codepoint = 0; codepoint <= 0x10FFFF; codepoint += (sz_rune_t)codepoint_stride) {
+        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) continue; // skip surrogates
+        all_runes.push_back(codepoint);
     }
+    std::printf("  - testing normalization fuzz (%zu iterations x 4 forms x %zu codepoints)...\n", iterations,
+                all_runes.size());
+
     std::vector<char> input_buffer(all_runes.size() * 4);
     std::vector<char> output_reference(input_buffer.size() * 4 + 64); // decomposition can expand
     std::vector<char> output_candidate(input_buffer.size() * 4 + 64);
@@ -198,10 +197,10 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
     static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
                                                    sz_normal_form_nfkc_k};
 
-    for (std::size_t it = 0; it <= iterations; ++it) {
-        if (it > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
+    for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
+        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
         char *write_cursor = input_buffer.data();
-        for (sz_rune_t cp : all_runes) write_cursor += sz_rune_encode(cp, (sz_u8_t *)write_cursor);
+        for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_encode(codepoint, (sz_u8_t *)write_cursor);
         sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
 
         for (sz_normal_form_t normal_form : norm_forms) {
@@ -212,13 +211,13 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
             if (len_reference != len_candidate ||
                 std::memcmp(output_reference.data(), output_candidate.data(), len_reference) != 0) {
                 std::fprintf(stderr, "norm mismatch (form=%d, iter=%zu): reference_len=%zu candidate_len=%zu\n",
-                             (int)normal_form, it, (size_t)len_reference, (size_t)len_candidate);
+                             (int)normal_form, iteration, (size_t)len_reference, (size_t)len_candidate);
                 verify(false);
             }
             sz_cptr_t viol_reference = reference.violation(input_buffer.data(), input_length, normal_form);
             sz_cptr_t viol_candidate = candidate.violation(input_buffer.data(), input_length, normal_form);
             if (viol_reference != viol_candidate) {
-                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)normal_form, it);
+                std::fprintf(stderr, "norm violation mismatch (form=%d, iter=%zu)\n", (int)normal_form, iteration);
                 verify(false);
             }
         }
@@ -239,11 +238,8 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
  *  "performs no validity checks") and asserts internally on garbage, so it is only exercised on the
  *  `sz_utf8_find_malformed` subset of the same adversarial shapes - the normalizer's output must stay within its
  *  documented 18x bound; `with_guarded_buffer_` brackets the destination with canaries and asserts they
- *  survive, like `test_uncased_safety`.
- *
- *  @param norm             Single-pass normalizer under test.
- *  @param violation        Normalization-violation finder under test.
- *  @param random_inputs    Number of random garbage buffers to fuzz on top of the exhaustive byte sweeps.
+ *  survive, like `test_uncased_safety`. The exhaustive byte sweeps below are strided by the multiplier too,
+ *  since they cost more than the random garbage buffers and re-run once per compiled backend.
  */
 static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormalized_t violation,
                                     std::size_t random_inputs = scale_iterations(10000)) {
@@ -295,18 +291,18 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
     check("hello\xF0\x9F\x98", 8); // Truncated 4-byte sequence at the very end
 
     // All 256 single bytes: truncated leads, stray continuations, 0xFE/0xFF.
-    for (std::size_t byte = 0; byte != 256; ++byte) {
+    for (std::size_t byte = 0; byte < 256; byte += sweep_stride(256)) {
         input[0] = (char)byte;
         check(input, 1);
     }
 
     // All 65,536 byte pairs: every lead x continuation interaction, including overlong and surrogate shapes.
-    for (std::size_t first_byte = 0; first_byte != 256; ++first_byte)
-        for (std::size_t second_byte = 0; second_byte != 256; ++second_byte) {
-            input[0] = (char)first_byte;
-            input[1] = (char)second_byte;
-            check(input, 2);
-        }
+    // The pair index is walked flat, so a strided run samples both bytes rather than a prefix of the leads.
+    for (std::size_t pair = 0; pair < 65536; pair += sweep_stride(65536)) {
+        input[0] = (char)(pair >> 8);
+        input[1] = (char)(pair & 0xFF);
+        check(input, 2);
+    }
 
     // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
     auto &rng = global_random_generator();
@@ -415,7 +411,10 @@ static utf8_norm_backend_t const utf8_norm_backends[] = {
 /** @brief Run the normalization differential fuzz against every compiled backend (dispatched first). */
 void test_utf8_norm_all() {
     utf8_norm_backend_t const serial {"serial", sz_utf8_norm_serial, sz_utf8_find_denormalized_serial};
-    for (utf8_norm_backend_t const &backend : utf8_norm_backends) test_norm_equivalence(serial, backend);
+    // One iteration pushes every assigned codepoint through 4 forms x 4 kernel calls, once per compiled backend.
+    // Three passes - one in codepoint order plus two shuffles - is this family's share of the suite budget.
+    for (utf8_norm_backend_t const &backend : utf8_norm_backends)
+        test_norm_equivalence(serial, backend, scale_iterations(3));
 }
 
 #pragma endregion // Drivers

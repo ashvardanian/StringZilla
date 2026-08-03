@@ -1523,8 +1523,7 @@ void test_similarities_cross_product() {
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
         auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
-                                                                arrow_strings_view_t candidates,
-                                                            sz_size_t *out) {
+                                                                arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_affine_oracle(queries, candidates, cell);
         };
@@ -1591,7 +1590,6 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(haswell_levenshtein(), unit_baseline, haswell_long_pairs,
                                                    haswell_long_pairs);
 
-
         // Haswell NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (16 lanes), cell-by-cell vs the
         // serial oracle. Many candidates per query fill the lanes; the symmetric case mirrors the lower triangle.
         auto haswell_nonunit_levenshtein = [&]() {
@@ -1608,8 +1606,8 @@ void test_similarities_cross_product() {
             return levenshtein_distances<affine_gap_costs_t, malloc_t, sz_caps_sh_k> {nonunit_uniform, nonunit_affine};
         };
         levenshtein_baselines_t const affine_baseline {nonunit_uniform, nonunit_affine};
-        check_cross_product_cell_exact_<sz_size_t>(haswell_affine_levenshtein(), affine_baseline,
-                                                   haswell_small_queries, haswell_small_candidates);
+        check_cross_product_cell_exact_<sz_size_t>(haswell_affine_levenshtein(), affine_baseline, haswell_small_queries,
+                                                   haswell_small_candidates);
         check_symmetric_cell_exact_(haswell_affine_levenshtein(), square_set);
     }
 
@@ -1662,8 +1660,7 @@ void test_similarities_cross_product() {
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
         auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
-                                                                arrow_strings_view_t candidates,
-                                                            sz_size_t *out) {
+                                                                arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_affine_oracle(queries, candidates, cell);
         };
@@ -1694,13 +1691,11 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sh_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
         fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 16, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
@@ -1739,7 +1734,6 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), unit_baseline, neon_small_queries,
                                                    neon_small_candidates);
         check_cross_product_cell_exact_<sz_size_t>(neon_levenshtein(), unit_baseline, neon_long_pairs, neon_long_pairs);
-
 
         // NEON NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (8 lanes), cell-by-cell vs the serial
         // oracle. Many candidates per query fill the 8 lanes; the symmetric case mirrors the lower triangle.
@@ -1804,8 +1798,7 @@ void test_similarities_cross_product() {
         levenshtein_distances_utf8<affine_gap_costs_t, malloc_t, sz_cap_serial_k> utf8_affine_oracle {nonunit_uniform,
                                                                                                       nonunit_affine};
         auto const utf8_affine_baseline = [&utf8_affine_oracle](arrow_strings_view_t queries,
-                                                                arrow_strings_view_t candidates,
-                                                            sz_size_t *out) {
+                                                                arrow_strings_view_t candidates, sz_size_t *out) {
             strided_rows<sz_size_t> const cell {out, 1, 1, 1};
             return utf8_affine_oracle(queries, candidates, cell);
         };
@@ -1834,13 +1827,11 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sn_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
         fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
@@ -1883,7 +1874,6 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), unit_baseline, rvv_small_queries,
                                                    rvv_small_candidates);
         check_cross_product_cell_exact_<sz_size_t>(rvv_levenshtein(), unit_baseline, rvv_long_pairs, rvv_long_pairs);
-
 
         // RVV NON-UNIT byte Levenshtein: the new `u16` candidate-lane batch (8 lanes), cell-by-cell vs the serial
         // oracle. Many candidates per query fill the 8 lanes; the symmetric case mirrors the lower triangle.
@@ -1955,13 +1945,11 @@ void test_similarities_cross_product() {
         check_cross_product_cell_exact_<sz_ssize_t>(
             needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         check_cross_product_cell_exact_<sz_ssize_t>(
             smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, malloc_t, sz_caps_sr_k> {
                 blosum62_matrix, blosum62_affine_cost},
-            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries,
-            wide_nw_candidates);
+            smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, wide_nw_queries, wide_nw_candidates);
         fuzzy_config_t const wide_lev_queries {"ABC", /* batch */ 2, /* min */ 700, /* max */ 700};
         fuzzy_config_t const wide_lev_candidates {"ABC", /* batch */ 8, /* min */ 700, /* max */ 700};
         check_cross_product_cell_exact_<sz_size_t>(
@@ -2067,7 +2055,7 @@ void test_similarities_cross_product() {
         cuda_executor_t {}, first_gpu_specs);
     check_cross_product_cell_exact_<sz_ssize_t>(
         smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                                blosum62_linear_cost},
+                                                                                                 blosum62_linear_cost},
         smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, weighted_mid_200, empty_set,
         cuda_executor_t {}, first_gpu_specs);
 

@@ -5,7 +5,6 @@
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`
 
-
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 
 #if SZ_USE_CUDA
@@ -104,7 +103,6 @@ struct fingerprint_callable {
 };
 
 void bench_fingerprints(environment_t const &env) {
-
 
 #if SZ_USE_CUDA
     gpu_specs_t specs;
@@ -269,7 +267,7 @@ void bench_fingerprints(environment_t const &env) {
     bench_result_t floating_serial_result =                                                    //
         bench_nullary(                                                                         //
             env, "floating_serial", basic_rolling_f64_serial_call,                             //
-            fingerprint_callable<floating_serial_t, forkunion_executor_t &>(                       //
+            fingerprint_callable<floating_serial_t, forkunion_executor_t &>(                   //
                 tape, min_hashes_accelerated, min_counts_accelerated, *floating_serial, pool), //
             callable_no_op_t {},                                                               // preprocessing
             fingerprints_equality_t {})                                                        // equality check
@@ -279,7 +277,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_HASWELL
     bench_nullary(                                                                          //
         env, "floating_haswell", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_haswell_t, forkunion_executor_t &>(                       //
+        fingerprint_callable<floating_haswell_t, forkunion_executor_t &>(                   //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_haswell, pool), //
         callable_no_op_t {},                                                                // preprocessing
         fingerprints_equality_t {})                                                         // equality check
@@ -290,7 +288,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     bench_nullary(                                                                          //
         env, "floating_skylake", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_skylake_t, forkunion_executor_t &>(                       //
+        fingerprint_callable<floating_skylake_t, forkunion_executor_t &>(                   //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_skylake, pool), //
         callable_no_op_t {},                                                                // preprocessing
         fingerprints_equality_t {})                                                         // equality check
@@ -301,7 +299,7 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_NEON
     bench_nullary(                                                                       //
         env, "floating_neon", basic_rolling_f64_serial_call,                             //
-        fingerprint_callable<floating_neon_t, forkunion_executor_t &>(                       //
+        fingerprint_callable<floating_neon_t, forkunion_executor_t &>(                   //
             tape, min_hashes_accelerated, min_counts_accelerated, *floating_neon, pool), //
         callable_no_op_t {},                                                             // preprocessing
         fingerprints_equality_t {})                                                      // equality check

@@ -238,16 +238,14 @@ using tokens_t = std::vector<token_view_t, stringzillas::unified_alloc<token_vie
 template <typename is_separator_callback_type_>
 tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separator) {
 
-    // First, let's count the number of separators to minimize the number of allocations.
     std::size_t separator_count = 0;
     for (std::size_t i = 0; i < str.length(); ++i)
         if (is_separator(str[i])) separator_count++;
 
-    // Now, let's allocate the vector with the right size.
     std::size_t const token_upper_bound = separator_count + 1;
     tokens_t tokens(token_upper_bound);
 
-    // Now, let's split the string into non-empty tokens.
+    // Empty tokens are dropped, so the count is an upper bound until the trailing resize.
     std::size_t tokens_found = 0;
     for (std::size_t start = 0, end = 0; end <= str.length(); ++end)
         if (end == str.length() || is_separator(str[end])) {
@@ -255,7 +253,6 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
             start = end + 1;
         }
 
-    // Now, let's resize the vector to the actual number of tokens found.
     tokens.resize(tokens_found);
     return tokens;
 }

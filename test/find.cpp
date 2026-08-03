@@ -448,10 +448,6 @@ struct byteset_backend_t {
  *  The candidate must resolve every needle to the identical pointer the reference does, or both must
  *  return `SZ_NULL`. Each haystack is replayed at every sub-cacheline alignment via
  *  `for_each_cacheline_offset_`, so a needle straddling a 64-byte boundary is always exercised.
- *
- *  @param reference  Reference search backend wrapper (the serial kernel in the drivers).
- *  @param candidate  Candidate search backend wrapper to validate against the reference.
- *  @param inputs     Number of random haystack/needle pairs to fuzz beyond the structured edge cases.
  */
 template <typename reference_, typename candidate_>
 void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -502,10 +498,6 @@ void test_search_equivalence(reference_ reference, candidate_ candidate, sz_size
  *  The candidate must resolve every byteset to the identical pointer the reference does, or both must
  *  return `SZ_NULL`. Each haystack is replayed at every sub-cacheline alignment via
  *  `for_each_cacheline_offset_`, so a match straddling a 64-byte boundary is always exercised.
- *
- *  @param reference  Reference byteset-search backend wrapper (the serial kernel in the drivers).
- *  @param candidate  Candidate byteset-search backend wrapper to validate against the reference.
- *  @param inputs     Number of random haystacks to fuzz beyond the structured edge cases.
  */
 template <typename reference_, typename candidate_>
 void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -559,30 +551,30 @@ void test_byteset_equivalence(reference_ reference, candidate_ candidate, sz_siz
     }
 }
 
+#pragma endregion // Equivalence
+
+#pragma region Safety
+
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
 /**
  *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl
- *         in a haystack formed of @p haystack_pattern repeated from one to `max_repeats` times.
- *
- *  @param haystack_pattern The pattern repeated to synthesize the haystack.
- *  @param needle_stl The needle searched for, also used as the STL ground-truth needle.
- *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
+ *         in a haystack formed of @p haystack_pattern repeated from one to `max_repeats` times,
+ *         misaligned by @p misalignment bytes within the cacheline.
  */
 template <typename stl_matcher_, typename sz_matcher_>
-void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_view needle_stl,
-                               std::size_t misalignment) {
-    std::size_t const max_repeats = scale_iterations(128);
+void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
+    // Each repetition re-scans the whole growing haystack, so the work is quadratic in this count, and it is
+    // multiplied again by every case, misalignment and matcher family.
+    std::size_t const max_repeats = scale_iterations_quadratic(40);
 
     // Allocate a buffer to store the haystack with enough padding to mis-align it.
     std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * SZ_CACHE_LINE_WIDTH;
     std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
     char *haystack = haystack_buffer.data();
 
-    // Skip the misaligned part.
     while (reinterpret_cast<std::uintptr_t>(haystack) % SZ_CACHE_LINE_WIDTH != misalignment) ++haystack;
 
-    /// Helper container to store the offsets of the matches. Useful during debugging :)
     std::vector<std::size_t> offsets_stl, offsets_sz;
 
     for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
@@ -596,10 +588,8 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
         ASAN_POISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
 #endif
 
-        // Append the new repetition to our buffer.
         std::memcpy(haystack + repeats * haystack_pattern.size(), haystack_pattern.data(), haystack_pattern.size());
 
-        // Convert to string views
         auto haystack_stl = std::string_view(haystack, haystack_length);
         auto haystack_sz = sz::string_view(haystack, haystack_length);
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
@@ -629,7 +619,6 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
             std::printf("\n");
         };
 
-        // Compare results
         for (std::size_t match_idx = 0; begin_stl != end_stl && begin_sz != end_sz;
              ++begin_stl, ++begin_sz, ++match_idx) {
             auto match_stl = *begin_stl;
@@ -642,7 +631,6 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
             }
         }
 
-        // If one range is not finished, assert failure
         if (count_stl != count_sz) {
             print_all_matches();
             verify(false);
@@ -663,148 +651,135 @@ void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_vi
 /**
  *  @brief Evaluates the correctness of a "matcher", searching for all the occurrences of the @p needle_stl,
  *         as a substring, as a set of allowed characters, or as a set of disallowed characters, in a haystack.
- *
- *  @param haystack_pattern The pattern repeated to synthesize the haystack.
- *  @param needle_stl The needle searched for, also used as the STL ground-truth needle.
- *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
  */
-void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_view needle_stl,
-                               std::size_t misalignment) {
+void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
 
-    test_find_misaligned_fuzz<                                                       //
+    check_find_misaligned_<                                                          //
         sz::find_matches_view<std::string_view, sz::matcher_find<std::string_view>>, //
         sz::find_matches_view<sz::string_view, sz::matcher_find<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                         //
+    check_find_misaligned_<                                                            //
         sz::rfind_matches_view<std::string_view, sz::matcher_rfind<std::string_view>>, //
         sz::rfind_matches_view<sz::string_view, sz::matcher_rfind<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                                //
+    check_find_misaligned_<                                                                   //
         sz::find_matches_view<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
         sz::find_matches_view<sz::string_view, sz::matcher_find_first_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                                //
+    check_find_misaligned_<                                                                   //
         sz::rfind_matches_view<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
         sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                                    //
+    check_find_misaligned_<                                                                       //
         sz::find_matches_view<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
         sz::find_matches_view<sz::string_view, sz::matcher_find_first_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_find_misaligned_fuzz<                                                                    //
+    check_find_misaligned_<                                                                       //
         sz::rfind_matches_view<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
         sz::rfind_matches_view<sz::string_view, sz::matcher_find_last_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 }
 
-/**
- *  @brief Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets.
- *
- *  @param haystack_pattern The pattern repeated to synthesize the haystack.
- *  @param needle_stl The needle searched for, also used as the STL ground-truth needle.
- */
-void test_find_misaligned_fuzz(std::string_view haystack_pattern, std::string_view needle_stl) {
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 0);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 1);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 2);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 3);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 63);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 24);
-    test_find_misaligned_fuzz(haystack_pattern, needle_stl, 33);
+/** @brief Replays the misaligned-repetition search across a fixed sweep of intra-cacheline offsets. */
+void check_find_misaligned_(std::string_view haystack_pattern, std::string_view needle_stl) {
+    check_find_misaligned_(haystack_pattern, needle_stl, 0);
+    check_find_misaligned_(haystack_pattern, needle_stl, 1);
+    check_find_misaligned_(haystack_pattern, needle_stl, 2);
+    check_find_misaligned_(haystack_pattern, needle_stl, 3);
+    check_find_misaligned_(haystack_pattern, needle_stl, 63);
+    check_find_misaligned_(haystack_pattern, needle_stl, 24);
+    check_find_misaligned_(haystack_pattern, needle_stl, 33);
 }
 
 /**
  *  @brief Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
  *         Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
  */
-void test_find_misaligned_fuzz() {
+void test_find_misaligned_all() {
     // When haystack is only formed of needles:
-    test_find_misaligned_fuzz("a", "a");
-    test_find_misaligned_fuzz("ab", "ab");
-    test_find_misaligned_fuzz("abc", "abc");
-    test_find_misaligned_fuzz("abcd", "abcd");
-    test_find_misaligned_fuzz({sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
-    test_find_misaligned_fuzz({sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
-                              {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
-    test_find_misaligned_fuzz({sz::ascii_printables(), sizeof(sz::ascii_printables())},
-                              {sz::ascii_printables(), sizeof(sz::ascii_printables())});
+    check_find_misaligned_("a", "a");
+    check_find_misaligned_("ab", "ab");
+    check_find_misaligned_("abc", "abc");
+    check_find_misaligned_("abcd", "abcd");
+    check_find_misaligned_({sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
+    check_find_misaligned_({sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
+                           {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
+    check_find_misaligned_({sz::ascii_printables(), sizeof(sz::ascii_printables())},
+                           {sz::ascii_printables(), sizeof(sz::ascii_printables())});
 
     // When we are dealing with NULL characters inside the string
-    test_find_misaligned_fuzz("\0", "\0");
-    test_find_misaligned_fuzz("a\0", "a\0");
-    test_find_misaligned_fuzz("ab\0", "ab");
-    test_find_misaligned_fuzz("ab\0", "ab\0");
-    test_find_misaligned_fuzz("abc\0", "abc");
-    test_find_misaligned_fuzz("abc\0", "abc\0");
-    test_find_misaligned_fuzz("abcd\0", "abcd");
+    check_find_misaligned_("\0", "\0");
+    check_find_misaligned_("a\0", "a\0");
+    check_find_misaligned_("ab\0", "ab");
+    check_find_misaligned_("ab\0", "ab\0");
+    check_find_misaligned_("abc\0", "abc");
+    check_find_misaligned_("abc\0", "abc\0");
+    check_find_misaligned_("abcd\0", "abcd");
 
     // When searching for all-null needles in a haystack with no null bytes.
     // This exercises the SIMD tail path where masked-off lanes are zeroed:
     // if the needle characters are also zero, spurious matches appear at
     // invalid offsets beyond the haystack, causing OOB reads.
-    test_find_misaligned_fuzz("a", {"\0\0", 2});
-    test_find_misaligned_fuzz("a", {"\0\0\0", 3});
-    test_find_misaligned_fuzz("a", {"\0\0\0\0", 4});
-    test_find_misaligned_fuzz("a", {"\0\0\0\0\0", 5});
-    test_find_misaligned_fuzz("abcd", {"\0\0", 2});
-    test_find_misaligned_fuzz("abcd", {"\0\0\0\0", 4});
+    check_find_misaligned_("a", {"\0\0", 2});
+    check_find_misaligned_("a", {"\0\0\0", 3});
+    check_find_misaligned_("a", {"\0\0\0\0", 4});
+    check_find_misaligned_("a", {"\0\0\0\0\0", 5});
+    check_find_misaligned_("abcd", {"\0\0", 2});
+    check_find_misaligned_("abcd", {"\0\0\0\0", 4});
 
     // When haystack is formed of equidistant needles:
-    test_find_misaligned_fuzz("ab", "a");
-    test_find_misaligned_fuzz("abc", "a");
-    test_find_misaligned_fuzz("abcd", "a");
+    check_find_misaligned_("ab", "a");
+    check_find_misaligned_("abc", "a");
+    check_find_misaligned_("abcd", "a");
 
     // When matches occur in between pattern words:
-    test_find_misaligned_fuzz("ab", "ba");
-    test_find_misaligned_fuzz("abc", "ca");
-    test_find_misaligned_fuzz("abcd", "da");
+    check_find_misaligned_("ab", "ba");
+    check_find_misaligned_("abc", "ca");
+    check_find_misaligned_("abcd", "da");
 
     // Examples targeted exactly against the Raita heuristic,
     // which matches the first, the last, and the middle characters with SIMD.
-    test_find_misaligned_fuzz("aaabbccc", "aaabbccc");
-    test_find_misaligned_fuzz("axabbcxc", "aaabbccc");
-    test_find_misaligned_fuzz("axabbcxcaaabbccc", "aaabbccc");
+    check_find_misaligned_("aaabbccc", "aaabbccc");
+    check_find_misaligned_("axabbcxc", "aaabbccc");
+    check_find_misaligned_("axabbcxcaaabbccc", "aaabbccc");
 }
 
 #endif
 
-/**
- *  @brief Evaluates the correctness of look-up table transforms using random lookup tables.
- *
- *  @param lookup_tables_to_try The number of random lookup tables to try.
- *  @param slices_per_table The number of random inputs to test per lookup table.
- */
-void test_lookup_fuzz(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
+/** @brief Evaluates the correctness of look-up table transforms using random lookup tables. */
+void test_lookup_all(std::size_t lookup_tables_to_try, std::size_t slices_per_table) {
 
-    std::string body, transformed;
-    body.resize(1024 * 1024); // 1MB
-    transformed.resize(1024 * 1024);
-    std::generate(body.begin(), body.end(), []() { return (char)(std::rand() % 256); });
+    std::size_t const body_length = 1024 * 1024;
+    std::string body(body_length, '\0'), transformed(body_length, '\0');
+    randomize_string(&body[0], body_length);
+    std::uniform_int_distribution<int> byte_distribution(0, 255);
 
-    for (std::size_t lookup_table_variation = 0; lookup_table_variation != lookup_tables_to_try;
-         ++lookup_table_variation) {
-        sz::look_up_table lut;
-        for (std::size_t i = 0; i < 256; ++i) lut[(char)i] = (char)(std::rand() % 256);
+    // One scaled count over the whole slice budget, so the cost tracks the multiplier linearly rather than
+    // compounding across nested loops. A fresh table every `slices_per_table` slices keeps the original mix.
+    sz::look_up_table lut;
+    for (std::size_t slice = 0; slice != scale_iterations(lookup_tables_to_try * slices_per_table); ++slice) {
+        if (slice % slices_per_table == 0)
+            for (std::size_t index = 0; index < 256; ++index)
+                lut[(char)index] = (char)byte_distribution(global_random_generator());
 
-        for (std::size_t slice_idx = 0; slice_idx != slices_per_table; ++slice_idx) {
-            std::size_t slice_offset = std::rand() % (body.length());
-            std::size_t slice_length = std::rand() % (body.length() - slice_offset);
+        std::uniform_int_distribution<std::size_t> offset_distribution(0, body_length - 1);
+        std::size_t const slice_offset = offset_distribution(global_random_generator());
+        std::uniform_int_distribution<std::size_t> length_distribution(0, body_length - slice_offset - 1);
+        std::size_t const slice_length = length_distribution(global_random_generator());
 
-            sz::lookup<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
-                             const_cast<char *>(transformed.data()) + slice_offset);
-            for (std::size_t i = 0; i != slice_length; ++i) {
-                verify(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
-            }
-        }
+        sz::lookup<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
+                         &transformed[0] + slice_offset);
+        for (std::size_t index = 0; index != slice_length; ++index)
+            verify(transformed[slice_offset + index] == lut[body[slice_offset + index]]);
     }
 }
 
-#pragma endregion // Equivalence
+#pragma endregion // Safety
 
 #pragma region Drivers
 

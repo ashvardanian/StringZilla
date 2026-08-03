@@ -156,25 +156,24 @@ void test_sort_unit() {
         sz_sequence_t const sequence = sort_sequence_from_(fruits);
         std::vector<sz_sorted_idx_t> const expected = {1u, 0u, 2u};
 
-        check_sort_unit_(sz_sequence_argsort, &sequence, expected);        // Dispatched (automatic kernel)
-        check_sort_unit_(sz_sequence_argsort_serial, &sequence, expected); // Manual propagation to the serial kernel
+        check_sort_unit_(sz_sequence_argsort, &sequence, expected);
+        check_sort_unit_(sz_sequence_argsort_serial, &sequence, expected);
 #if SZ_USE_HASWELL
-        check_sort_unit_(sz_sequence_argsort_haswell, &sequence, expected); // Manual: haswell kernel
+        check_sort_unit_(sz_sequence_argsort_haswell, &sequence, expected);
 #endif
 #if SZ_USE_SKYLAKE
-        check_sort_unit_(sz_sequence_argsort_skylake, &sequence, expected); // Manual: skylake kernel
+        check_sort_unit_(sz_sequence_argsort_skylake, &sequence, expected);
 #endif
 #if SZ_USE_SVE
-        check_sort_unit_(sz_sequence_argsort_sve, &sequence, expected); // Manual: sve kernel
+        check_sort_unit_(sz_sequence_argsort_sve, &sequence, expected);
 #endif
 #if SZ_USE_NEON
-        check_sort_unit_(sz_sequence_argsort_neon, &sequence, expected); // Manual: neon kernel
+        check_sort_unit_(sz_sequence_argsort_neon, &sequence, expected);
 #endif
 #if SZ_USE_RVV
-        check_sort_unit_(sz_sequence_argsort_rvv, &sequence, expected); // Manual: rvv kernel
+        check_sort_unit_(sz_sequence_argsort_rvv, &sequence, expected);
 #endif
 
-        // C++ wrapper must agree with the dispatched C API on the same permutation.
         verify(sz::argsort(fruits) == std::vector<sz::sorted_idx_t>({1u, 0u, 2u}));
     }
 
@@ -184,25 +183,24 @@ void test_sort_unit() {
         sz_sequence_t const sequence = sort_sequence_from_(words);
         std::vector<sz_sorted_idx_t> const expected = {1u, 0u};
 
-        check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);        // Dispatched (automatic kernel)
-        check_sort_unit_(sz_sequence_argsort_uncased_serial, &sequence, expected); // Manual: serial kernel
+        check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);
+        check_sort_unit_(sz_sequence_argsort_uncased_serial, &sequence, expected);
 #if SZ_USE_HASWELL
-        check_sort_unit_(sz_sequence_argsort_uncased_haswell, &sequence, expected); // Manual: haswell kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_haswell, &sequence, expected);
 #endif
 #if SZ_USE_SKYLAKE
-        check_sort_unit_(sz_sequence_argsort_uncased_skylake, &sequence, expected); // Manual: skylake kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_skylake, &sequence, expected);
 #endif
 #if SZ_USE_SVE
-        check_sort_unit_(sz_sequence_argsort_uncased_sve, &sequence, expected); // Manual: sve kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_sve, &sequence, expected);
 #endif
 #if SZ_USE_NEON
-        check_sort_unit_(sz_sequence_argsort_uncased_neon, &sequence, expected); // Manual: neon kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_neon, &sequence, expected);
 #endif
 #if SZ_USE_RVV
-        check_sort_unit_(sz_sequence_argsort_uncased_rvv, &sequence, expected); // Manual: rvv kernel
+        check_sort_unit_(sz_sequence_argsort_uncased_rvv, &sequence, expected);
 #endif
 
-        // C++ wrapper must agree on the case-folded ordering.
         verify(sz::argsort_utf8_uncased(words) == std::vector<sz::sorted_idx_t>({1u, 0u}));
     }
 
@@ -217,13 +215,12 @@ void test_sort_unit() {
         // unspecified, so the helper collects pairs into a set before comparing against the known intersection.
         std::set<std::pair<std::size_t, std::size_t>> const expected_pairs = {{1u, 2u}, {2u, 0u}};
 
-        check_intersect_unit_(sz_sequence_intersect, &first_sequence, &second_sequence, expected_pairs); // Dispatched
+        check_intersect_unit_(sz_sequence_intersect, &first_sequence, &second_sequence, expected_pairs);
         check_intersect_unit_(sz_sequence_intersect_serial, &first_sequence, &second_sequence, expected_pairs);
 #if SZ_USE_ICELAKE
         check_intersect_unit_(sz_sequence_intersect_icelake, &first_sequence, &second_sequence, expected_pairs);
 #endif
 
-        // C++ wrapper must surface the same matched pairs.
         sz::intersect_result_t const result = sz::intersect(first, second);
         verify(result.first_offsets.size() == 2u && result.second_offsets.size() == 2u);
         std::set<std::pair<std::size_t, std::size_t>> wrapper_pairs;
@@ -280,17 +277,15 @@ void test_sort_unit() {
     let_verify(auto result = sz::argsort(strs_t({"100", "1", "10", "1000", "11", "111", "101", "110"})),
                result == order_t({1u, 2u, 0u, 3u, 6u, 4u, 7u, 5u}));
 
-    // Real names with varied lengths and prefixes (this one is already correct)
+    // Real names with varied lengths and prefixes
     let_verify(auto result = sz::argsort(
                    strs_t({"Anna", "Andrew", "Alex", "Bob", "Bobby", "Charlie", "Chris", "David", "Dan"})),
                result == order_t({2u, 1u, 0u, 3u, 4u, 5u, 6u, 8u, 7u}));
 
-    // Dataset sizes and the fuzzy-experiment repeat count are routed through `scale_iterations`, so
-    // `SZ_TESTS_MULTIPLIER` can shrink them for quick smoke runs or grow them for thorough CI sweeps. The largest
-    // size crosses 100k strings to exercise the large-input partitioning path.
-    std::size_t const dataset_sizes[] = {scale_iterations(10u), scale_iterations(100u), scale_iterations(1000u),
-                                         scale_iterations(10000u), scale_iterations(100000u)};
-    std::size_t const experiment_count = scale_iterations(10u);
+    // Known-answer sizes stay fixed: this is the `_unit` tier, so it must cost the same at every multiplier.
+    // The largest crosses 100k strings to exercise the large-input partitioning path.
+    std::size_t const dataset_sizes[] = {10u, 100u, 1000u, 10000u, 100000u};
+    std::size_t const experiment_count = 10u;
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
@@ -300,7 +295,6 @@ void test_sort_unit() {
             for (std::size_t i = 0; i < dataset_size; ++i)
                 dataset.push_back(sz::scripts::random_string(string_length, "ab", 2));
 
-            // Run several iterations of fuzzy tests.
             for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
                 std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
                 auto order = sz::argsort(dataset);
@@ -315,7 +309,6 @@ void test_sort_unit() {
         dataset.reserve(dataset_size);
         for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 6, "ab", 2));
 
-        // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
@@ -331,7 +324,6 @@ void test_sort_unit() {
         for (std::size_t i = 0; i < dataset_size; ++i)
             dataset.push_back(sz::scripts::random_string(min_length + i % 32, "ab", 2));
 
-        // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
@@ -345,7 +337,6 @@ void test_sort_unit() {
         dataset.reserve(dataset_size);
         for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "ab\0", 3));
 
-        // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::argsort(dataset);
@@ -420,9 +411,7 @@ void test_sort_unit() {
     verify(sz::argsort_utf8_uncased(mixed, 0, true) == reference_order(folded, true));
 }
 
-/**
- *  @brief Tests array intersection functionality.
- */
+/** @brief Known-answer intersection pairs through the dispatched API, every native kernel, and the C++ wrapper. */
 void test_intersect_unit() {
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
@@ -522,8 +511,7 @@ void test_intersect_unit() {
 
 /**
  *  @brief One backend's byte + uncased sequence arg-sort kernels, stored by pointer so the differential driver can
- *         iterate a table. The members are named for the call sites (`reference.argsort(...)`,
- *         `reference.argsort_uncased(...)`), so each function-pointer member is invoked directly.
+ *         iterate a table.
  */
 struct sequence_sort_backend_t {
     char const *name;
@@ -532,17 +520,11 @@ struct sequence_sort_backend_t {
 };
 
 /**
- *  @brief Demands a candidate sort backend produce results identical to the reference backend, across many inputs.
+ *  @brief Demands a candidate sort backend produce results identical to the reference backend, where `inputs` is a
+ *         baseline repetition count routed through `scale_iterations`, not a dataset size.
  *
  *  Both the byte and uncased arg-sorts are @b stable, so for any input the permutation is unique - the candidate
  *  and reference `order` arrays must match exactly across ascending, descending, and top-K modes.
- *
- *  Mirrors `test_hash_equivalence` & friends: one generic checker, invoked once per ISA under `SZ_USE_*`.
- *
- *  @param reference The serial backend treated as ground truth (a `sequence_sort_from_sz_` instance).
- *  @param candidate The SIMD backend under scrutiny (a `sequence_sort_from_sz_` instance).
- *  @param inputs Baseline per-dataset repetition count; routed through `scale_iterations` so
- *               `SZ_TESTS_MULTIPLIER` can shrink it for quick smoke runs or grow it for thorough CI sweeps.
  */
 template <typename reference_, typename candidate_>
 void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -551,14 +533,16 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
     using strs_t = std::vector<std::string>;
     auto &generator = global_random_generator();
 
-    // Each repetition draws a fresh battery of datasets and re-verifies it, so a larger `inputs` (scaled by
-    // `SZ_TESTS_MULTIPLIER`) widens the fuzzing coverage with new random data rather than merely enlarging a
-    // single fixed dataset. The datasets span the vectorized block, the scalar tail, and the slack-region
-    // boundaries; sizes are deliberately > 32 so the QuickSort partition (not the insertion-sort fallback) is
-    // exercised, and the 100k-string size crosses into the large-input partitioning path.
+    // Each repetition draws fresh random datasets and covers one top-K mode, so a larger `inputs` widens the
+    // fuzzing coverage rather than enlarging a fixed dataset. The datasets span the vectorized block, the scalar
+    // tail, and the slack-region boundaries, and the largest crosses into the large-input partitioning path.
     for (std::size_t repetition = 0; repetition < repetition_count; ++repetition) {
         std::vector<strs_t> datasets;
-        for (std::size_t count : {33u, 64u, 100u, 1000u, 5000u, 100000u}) {
+        for (std::size_t full_count : {33u, 64u, 100u, 1000u, 5000u, 100000u}) {
+            // Only the repetition count rides the multiplier; scaling the sizes too would make the dial
+            // multiplicative, so a 10x run would cost a hundredfold. Never below 33, so the QuickSort partition
+            // rather than the insertion-sort fallback keeps running.
+            std::size_t const count = std::max<std::size_t>(33, full_count);
             strs_t fixed_dups; // Short strings over a tiny alphabet => many exact duplicates (fills the equal region).
             for (std::size_t i = 0; i < count; ++i) fixed_dups.push_back(sz::scripts::random_string(i % 5, "ab", 2));
             datasets.push_back(fixed_dups);
@@ -585,23 +569,22 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
             sequence.get_length = sort_sequence_get_length_;
 
             std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
-            for (sz_size_t top : {sz_size_t(0), sz_size_t(1), (sz_size_t)(count / 3), (sz_size_t)count}) {
-                for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
-                    std::size_t const head = (top != 0 && top < count) ? top : count;
+            sz_size_t const top_modes[] = {0, 1, (sz_size_t)(count / 3), (sz_size_t)count};
+            sz_size_t const top = top_modes[repetition % 4];
+            for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
+                std::size_t const head = (top != 0 && top < count) ? top : count;
 
-                    // Byte arg-sort: stable, so the permutations must match exactly over the ordered prefix.
-                    reference.argsort(&sequence, nullptr, order_reference.data(), top, reverse);
-                    candidate.argsort(&sequence, nullptr, order_candidate.data(), top, reverse);
-                    for (std::size_t i = 0; i < head; ++i)
-                        verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
+                // Byte arg-sort: stable, so the permutations must match exactly over the ordered prefix.
+                reference.argsort(&sequence, nullptr, order_reference.data(), top, reverse);
+                candidate.argsort(&sequence, nullptr, order_candidate.data(), top, reverse);
+                for (std::size_t i = 0; i < head; ++i)
+                    verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
 
-                    // Uncased arg-sort: also stable, same exact-match requirement.
-                    reference.argsort_uncased(&sequence, nullptr, order_reference.data(), top, reverse);
-                    candidate.argsort_uncased(&sequence, nullptr, order_candidate.data(), top, reverse);
-                    for (std::size_t i = 0; i < head; ++i)
-                        verify(order_reference[i] == order_candidate[i] &&
-                               "SIMD uncased arg-sort disagrees with serial");
-                }
+                // Uncased arg-sort: also stable, same exact-match requirement.
+                reference.argsort_uncased(&sequence, nullptr, order_reference.data(), top, reverse);
+                candidate.argsort_uncased(&sequence, nullptr, order_candidate.data(), top, reverse);
+                for (std::size_t i = 0; i < head; ++i)
+                    verify(order_reference[i] == order_candidate[i] && "SIMD uncased arg-sort disagrees with serial");
             }
         }
     }
@@ -613,7 +596,7 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
 /**
  *  @brief The sequence arg-sort backends compiled on this target. The always-present `dispatched` entry keeps the
- *         table non-empty on a baseline build; the differential runs serial vs each.
+ *         table non-empty on a baseline build.
  */
 static sequence_sort_backend_t const sequence_sort_backends[] = {
     {"dispatched", sz_sequence_argsort, sz_sequence_argsort_uncased},
@@ -637,8 +620,8 @@ static sequence_sort_backend_t const sequence_sort_backends[] = {
 /** @brief Runs `test_sort_equivalence` (serial reference vs every compiled backend, dispatched first). */
 void test_sort_all() {
     sequence_sort_backend_t const serial {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
-    // One repetition at multiplier 1.0; `SZ_TESTS_MULTIPLIER` widens the fuzzing coverage from here.
-    constexpr sz_size_t repetitions = 1;
+    // Four repetitions at multiplier 1.0, one per top-K mode; `SZ_TESTS_MULTIPLIER` dials both ways from here.
+    constexpr sz_size_t repetitions = 4;
     for (sequence_sort_backend_t const &backend : sequence_sort_backends)
         test_sort_equivalence(serial, backend, repetitions);
 }

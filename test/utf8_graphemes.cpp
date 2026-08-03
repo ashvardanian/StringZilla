@@ -46,8 +46,6 @@ static utf8_unit_case_t const utf8_graphemes_unit_cases[] = {
     {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv,
      {"\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7"_sv}}, // Indic consonant + virama + consonant -> one cluster (GB9c InCB)
 };
-static constexpr std::size_t utf8_graphemes_unit_cases_count = sizeof(utf8_graphemes_unit_cases) /
-                                                               sizeof(utf8_graphemes_unit_cases[0]);
 
 /**
  *  @brief The UTF-8 grapheme-cluster segmenters compiled on this target. The always-present `dispatched` entry keeps
@@ -74,11 +72,9 @@ static utf8_segment_backend_t const utf8_graphemes_backends[] = {
 void test_utf8_graphemes_unit() {
     std::printf("  - testing UTF-8 grapheme-cluster known-answer vectors...\n");
 
-    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, utf8_graphemes_unit_cases,
-                             utf8_graphemes_unit_cases_count);
+    check_utf8_segment_unit_("grapheme", sz_utf8_graphemes_serial, span_over(utf8_graphemes_unit_cases));
     for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
-        check_utf8_segment_unit_("grapheme", backend.finder, utf8_graphemes_unit_cases,
-                                 utf8_graphemes_unit_cases_count);
+        check_utf8_segment_unit_("grapheme", backend.finder, span_over(utf8_graphemes_unit_cases));
 
     // C++ range wrapper known-answer: the view must faithfully expose the kernel's clusters.
     std::vector<std::string> const clusters =
@@ -141,8 +137,6 @@ static sz::string_view const utf8_graphemes_motifs[] = {
     "\xE0\xA0\x80\xF0\x9F\x98\x80"_sv, // U+0800 (cold 3-byte) + astral emoji: cold cascade and astral together
     "\xDF\xBF\xE0\xA0\x80"_sv,         // page-LUT edge: last 2-byte U+07FF abutting first 3-byte U+0800
 };
-static constexpr std::size_t utf8_graphemes_motifs_count = sizeof(utf8_graphemes_motifs) /
-                                                           sizeof(utf8_graphemes_motifs[0]);
 
 /** @brief A pictograph ZWJ chain @p link_count deep, every other link followed by VS16 (GB11), into @p out (cleared). */
 static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::size_t link_count) {
@@ -159,9 +153,10 @@ static void utf8_graphemes_dense_zwj_pictograph_chain_(std::string &out, std::si
 /** @brief One base letter followed by @p link_count combining marks (GB9 Extend run), into @p out (cleared first). */
 static void utf8_graphemes_dense_combining_marks_(std::string &out, std::size_t link_count) {
     out.clear();
-    static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323}; // acute, grave, diaeresis, cedilla, dot
-    append_codepoint_(out, 0x0061);                                            // base 'a'
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, marks[index % 5u]);
+    static sz_rune_t const marks[] = {0x0301, 0x0300, 0x0308, 0x0327, 0x0323, // acute, grave, diaeresis, cedilla, dot
+                                      0x0651, 0x093C, 0x0E48, 0x1D16E};       // shadda, nukta, Thai mai ek, astral flag
+    append_codepoint_(out, 0x0061);                                           // base 'a'
+    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, marks[index % 9u]);
 }
 
 /** @brief @p link_count emoji each followed by a skin-tone modifier drawn from @p rng (GB9 Extend), into @p out. */
@@ -231,37 +226,38 @@ static void utf8_graphemes_straddles_(std::mt19937 &rng, std::size_t gap, utf8_r
     sink(context, scratch.data(), scratch.size());
 }
 
-/** @brief Grapheme-biased random-corpus snippets: emoji ZWJ sequences, combining marks, skin-tone, jamo, conjuncts. */
+/** @brief Grapheme-biased snippets: ZWJ sequences, jamo, conjuncts, and mark stacks in Arabic/Greek/Cyrillic/Thai. */
 static char const *const utf8_graphemes_snippets[] = {
-    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9", // woman ZWJ woman (GB11 emoji-ZWJ sequence)
-    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD",             // thumbs-up + skin-tone modifier (GB9 Extend)
-    "e\xCC\x81",                                    // base 'e' + combining acute (GB9)
-    "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8",         // Hangul L+V+T jamo (GB6/7/8)
-    "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7",         // Devanagari consonant + virama + consonant (GB9c)
-    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8",             // regional-indicator pair (GB12/13)
-    "\r\n",                                         // CRLF (GB3)
-    "abc",                                          // plain ASCII (GB999)
+    "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA9",     // woman ZWJ woman (GB11 emoji-ZWJ sequence)
+    "\xF0\x9F\x91\x8D\xF0\x9F\x8F\xBD",                 // thumbs-up + skin-tone modifier (GB9 Extend)
+    "e\xCC\x81",                                        // base 'e' + combining acute (GB9)
+    "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8",             // Hangul L+V+T jamo (GB6/7/8)
+    "\xE0\xA4\x95\xE0\xA5\x8D\xE0\xA4\xB7",             // Devanagari consonant + virama + consonant (GB9c)
+    "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8",                 // regional-indicator pair (GB12/13)
+    "\r\n",                                             // CRLF (GB3)
+    "abc",                                              // plain ASCII (GB999)
+    "\xD8\xA8\xD9\x91\xD9\x8E",                         // Arabic beh + shadda + fatha (stacked Extend marks)
+    "\xCE\xB1\xCC\x94\xCC\x81",                         // Greek alpha + rough breathing + acute
+    "\xD0\xB8\xCC\x86",                                 // Cyrillic i + combining breve
+    "\xE0\xB8\x81\xE0\xB8\xB4\xE0\xB9\x88",             // Thai ko kai + sara i + mai ek
+    "\xF0\x9D\x85\x97\xF0\x9D\x85\xA5\xF0\x9D\x85\xAE", // astral notehead + stem (SpacingMark) + flag (Extend)
 };
 
 /** @brief Grapheme family alphabet: weights bias toward astral/motif clusters (GB9/9c/11/12/13). */
 static utf8_corpus_alphabet_t const utf8_graphemes_alphabet = {
-    utf8_graphemes_snippets,
-    sizeof(utf8_graphemes_snippets) / sizeof(utf8_graphemes_snippets[0]),
-    utf8_default_boundary_codepoints,
-    sizeof(utf8_default_boundary_codepoints) / sizeof(utf8_default_boundary_codepoints[0]),
-    {35, 15, 25, 20, 5}, // snippet, boundary, astral, motif, malformed
+    span_over(utf8_graphemes_snippets),
+    span_over(utf8_default_boundary_codepoints),
+    {{35, 15, 25, 20, 5}}, // snippet, boundary, astral, motif, malformed
 };
 
 /** @brief Assemble the grapheme family's differential corpora (motifs + dense + straddle; no seam regressions). */
 static utf8_segment_corpora_t utf8_graphemes_corpora_() {
     utf8_segment_corpora_t corpora = {
         "grapheme",
-        utf8_graphemes_motifs,
-        utf8_graphemes_motifs_count,
+        span_over(utf8_graphemes_motifs),
         &utf8_graphemes_dense_runs_,
         &utf8_graphemes_straddles_,
-        nullptr, // no fixed seam regressions for graphemes
-        0,
+        {}, // no fixed seam regressions for graphemes
         &utf8_graphemes_alphabet,
     };
     return corpora;
@@ -302,23 +298,20 @@ void test_utf8_graphemes_rules() {
         "GB3", "GB4", "GB5", "GB6", "GB7", "GB8", "GB9", "GB9a", "GB9b", "GB9c", "GB11", "GB12", "GB13", "GB999",
     };
     for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
-        check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, backend.finder, rule_cases,
-                                  sizeof(rule_cases) / sizeof(rule_cases[0]), required_rules,
-                                  sizeof(required_rules) / sizeof(required_rules[0]));
+        check_utf8_rule_coverage_("grapheme", sz_utf8_graphemes_serial, backend.finder, span_over(rule_cases),
+                                  span_over(required_rules));
 }
 
 #pragma endregion // Rule coverage
 
 #pragma region Safety
 
-/** @brief Malformed-input safety of the UTF-8 grapheme kernels (serial / dispatched / icelake). */
+/** @brief Malformed-input safety of the UTF-8 grapheme kernels: the serial reference and every compiled ISA. */
 void test_utf8_graphemes_safety() {
     std::printf("  - testing malformed-input safety of UTF-8 grapheme kernels...\n");
-    check_utf8_segment_safety_("grapheme (serial)", sz_utf8_graphemes_serial);
-    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends) {
-        std::string const label = std::string("grapheme (") + backend.name + ")";
-        check_utf8_segment_safety_(label.c_str(), backend.finder);
-    }
+    utf8_segment_backend_t const serial_only[] = {{"serial", sz_utf8_graphemes_serial}};
+    check_utf8_segment_safety_("grapheme", span_over(serial_only));
+    check_utf8_segment_safety_("grapheme", span_over(utf8_graphemes_backends));
     std::printf("    grapheme safety passed!\n");
 }
 
@@ -329,8 +322,8 @@ void test_utf8_graphemes_safety() {
 /** @brief Serial-vs-ISA grapheme differential over the hardened corpora (high-density + long-range). */
 void test_utf8_graphemes_all() {
     utf8_segment_corpora_t const corpora = utf8_graphemes_corpora_();
-    for (utf8_segment_backend_t const &backend : utf8_graphemes_backends)
-        test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, backend.finder, corpora);
+    test_utf8_segment_equivalence_(sz_utf8_graphemes_serial, span_over(utf8_graphemes_backends), corpora,
+                                   scale_iterations(8)); // This family's share of the suite budget
 }
 
 #pragma endregion // Drivers
