@@ -222,6 +222,57 @@ struct fill_random_from_sz_ {
     void operator()(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) const noexcept { generate_(text, length, nonce); }
 };
 
+/** @brief Wraps a byte-summing backend by its kernel pointer. */
+template <sz_bytesum_t bytesum_>
+struct bytesum_from_sz_ {
+    sz_u64_t operator()(sz_cptr_t text, sz_size_t length) const noexcept { return bytesum_(text, length); }
+};
+
+/**
+ *  @brief Cross-checks a byte-summing backend against a reference across lengths and alignments.
+ *
+ *  The wide kernels split a buffer into an unaligned head, an aligned body, and a tail, so sweeping
+ *  cache-line offsets is what reaches the head and tail paths at all. The AVX-512 tiers additionally
+ *  switch to non-temporal loads and bidirectional traversal past a megabyte, which only one oversized
+ *  input reaches. `inputs` arrives already scaled by the caller.
+ */
+template <typename reference_, typename candidate_>
+void test_bytesum_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
+
+    // A sum of bytes is order-independent, so a run of one repeated byte must total `length * byte` on
+    // any backend. This invariant holds without consulting the reference at all.
+    std::vector<std::size_t> const uniform_lengths = {0, 1, 63, 64, 65, 4096};
+    for (auto length : uniform_lengths) {
+        std::string const uniform(length, static_cast<char>(0xA5));
+        verify(candidate(uniform.data(), static_cast<sz_size_t>(length)) == static_cast<sz_u64_t>(length) * 0xA5ull);
+    }
+
+    // The fixed ladder covers the sub-register, register, cache-line, and multi-block tiers; each length
+    // is walked across cache-line offsets so the head and tail paths see every misalignment.
+    std::vector<std::size_t> const lengths = {1, 11, 23, 31, 32, 33, 63, 64, 65, 127, 128, 129, 1000};
+    for (auto length : lengths)
+        for_each_cacheline_offset_(length, [&](sz_ptr_t pointer, std::size_t offset) {
+            sz_unused_(offset);
+            randomize_string(pointer, length);
+            verify(reference(pointer, static_cast<sz_size_t>(length)) ==
+                   candidate(pointer, static_cast<sz_size_t>(length)));
+        });
+
+    // Beyond the ladder, fuzz a contiguous run of random lengths at a single alignment.
+    std::string text;
+    for (sz_size_t length = 0; length != inputs; ++length) {
+        text.resize(length);
+        randomize_string(&text[0], length);
+        verify(reference(text.data(), length) == candidate(text.data(), length));
+    }
+
+    // One oversized input, since the Skylake and Ice Lake kernels take a different branch past a megabyte.
+    // The trailing bytes keep the buffer off a page boundary so the head and tail still have work to do.
+    std::string huge(1024ull * 1024ull + 129ull, '\0');
+    randomize_string(&huge[0], huge.size());
+    verify(reference(huge.data(), (sz_size_t)huge.size()) == candidate(huge.data(), (sz_size_t)huge.size()));
+}
+
 /**
  *  @brief Hashes a string and compares the output between a reference and a candidate hashing backend.
  *
@@ -443,6 +494,47 @@ void test_hash_all() {
     // Ensure the seed affects hash results
     verify(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
     verify(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
+
+    // Byte sums carry their own backend set - Haswell, NEON, SVE and the WASM tiers all provide one where
+    // the AES-based hash does not - so they need a differential sweep of their own.
+    using bytesum_serial_t = bytesum_from_sz_<sz_bytesum_serial>;
+    bytesum_serial_t const bytesum_serial;
+    sz_size_t const bytesum_inputs = (sz_size_t)scale_iterations_quadratic(200);
+    sz_unused_(bytesum_serial), sz_unused_(bytesum_inputs);
+
+#if SZ_USE_HASWELL
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_haswell> {}, bytesum_inputs);
+#endif
+#if SZ_USE_SKYLAKE
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_skylake> {}, bytesum_inputs);
+#endif
+#if SZ_USE_ICELAKE
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_icelake> {}, bytesum_inputs);
+#endif
+#if SZ_USE_NEON
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_neon> {}, bytesum_inputs);
+#endif
+#if SZ_USE_SVE
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_sve> {}, bytesum_inputs);
+#endif
+#if SZ_USE_SVE2
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_sve2> {}, bytesum_inputs);
+#endif
+#if SZ_USE_V128
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_v128> {}, bytesum_inputs);
+#endif
+#if SZ_USE_V128RELAXED
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_v128relaxed> {}, bytesum_inputs);
+#endif
+#if SZ_USE_RVV
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_rvv> {}, bytesum_inputs);
+#endif
+#if SZ_USE_LASX
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_lasx> {}, bytesum_inputs);
+#endif
+#if SZ_USE_POWERVSX
+    test_bytesum_equivalence(bytesum_serial, bytesum_from_sz_<sz_bytesum_powervsx> {}, bytesum_inputs);
+#endif
 
 #if SZ_USE_WESTMERE
     test_hash_equivalence(hash_serial,
