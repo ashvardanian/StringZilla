@@ -576,6 +576,21 @@ inline bool test_should_run(char const *name) noexcept {
 }
 
 /**
+ *  @brief Reseeds the global generator from the global seed and a test name.
+ *
+ *  Mixing happens in `std::seed_seq`, whose output the standard specifies exactly, rather than in `sz_hash` or
+ *  `std::hash`. The harness must not draw its inputs through the kernels it validates, and it must land on the
+ *  same stream everywhere, or `SZ_TESTS_SEED=7` stops meaning the same bytes on Arm as it does on x86.
+ */
+inline void seed_generator_for_test(char const *name) noexcept {
+    std::vector<std::uint32_t> entropy {static_cast<std::uint32_t>(global_random_seed())};
+    for (char const *character = name; *character; ++character)
+        entropy.push_back(static_cast<std::uint32_t>(static_cast<unsigned char>(*character)));
+    std::seed_seq sequence(entropy.begin(), entropy.end());
+    global_random_generator().seed(sequence);
+}
+
+/**
  *  @brief Runs one named test: honors `SZ_TESTS_FILTER`, wall-clock times it, and reports the outcome.
  *  @return The number of failures (0 on success or when skipped, 1 on a thrown exception).
  *
@@ -593,8 +608,7 @@ inline std::size_t run_test(char const *name, function_type_ &&test_function) no
     std::printf("- %s ...\n", name);
     std::fflush(stdout);
     // Reseed per test so inputs don't depend on which tests ran first, and `SZ_TESTS_FILTER` reproduces faithfully.
-    global_random_generator().seed(
-        static_cast<std::mt19937::result_type>(sz_hash(name, std::strlen(name), global_random_seed())));
+    seed_generator_for_test(name);
     auto const start = std::chrono::steady_clock::now();
     try {
         test_function();
