@@ -159,9 +159,9 @@ void test_hash_unit() {
                            sz_sha256_state_digest, vector.message, vector.digest_hex);
         check_sha256_unit_(sz_sha256_state_init_serial, sz_sha256_state_update_serial, // Manual: serial kernel
                            sz_sha256_state_digest_serial, vector.message, vector.digest_hex);
-#if SZ_USE_ICELAKE
-        check_sha256_unit_(sz_sha256_state_init_icelake, sz_sha256_state_update_icelake, // Manual: icelake kernel
-                           sz_sha256_state_digest_icelake, vector.message, vector.digest_hex);
+#if SZ_USE_GOLDMONT
+        check_sha256_unit_(sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont, // Manual: goldmont kernel
+                           sz_sha256_state_digest_goldmont, vector.message, vector.digest_hex);
 #endif
     }
 
@@ -740,12 +740,6 @@ void test_hash_all() {
     sha256_serial_t const sha256_serial;
     sz_unused_(sha256_serial);
 
-#if SZ_USE_ICELAKE
-    test_sha256_equivalence(sha256_serial,
-                            sha256_from_sz_<sz_sha256_state_init_icelake, sz_sha256_state_update_icelake,
-                                            sz_sha256_state_digest_icelake> {},
-                            sha256_inputs);
-#endif
 #if SZ_USE_GOLDMONT
     test_sha256_equivalence(sha256_serial,
                             sha256_from_sz_<sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont,

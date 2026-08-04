@@ -89,10 +89,6 @@ SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps) {
         impl->hash_state_update = sz_hash_state_update_icelake;
         impl->hash_state_digest = sz_hash_state_digest_icelake;
         impl->fill_random = sz_fill_random_icelake;
-
-        impl->sha256_state_init = sz_sha256_state_init_icelake;
-        impl->sha256_state_update = sz_sha256_state_update_icelake;
-        impl->sha256_state_digest = sz_sha256_state_digest_icelake;
     }
 #endif
 

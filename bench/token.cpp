@@ -591,12 +591,6 @@ void bench_sha256(environment_t const &env) {
                                            sz_sha256_state_digest_serial> {env};
     bench_result_t base = bench_unary(env, "sz_sha256_serial", validator).log();
 
-#if SZ_USE_ICELAKE
-    bench_unary(env, "sz_sha256_icelake", validator,
-                sha256_stream_from_sz<sz_sha256_state_init_icelake, sz_sha256_state_update_icelake,
-                                      sz_sha256_state_digest_icelake> {env})
-        .log(base);
-#endif
 #if SZ_USE_GOLDMONT
     bench_unary(env, "sz_sha256_goldmont", validator,
                 sha256_stream_from_sz<sz_sha256_state_init_goldmont, sz_sha256_state_update_goldmont,

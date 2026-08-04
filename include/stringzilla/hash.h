@@ -518,16 +518,6 @@ SZ_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cpt
 /** @copydoc sz_hash_state_digest */
 SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state);
 
-/** @copydoc sz_sha256_state_init */
-SZ_API_COMPTIME void sz_sha256_state_init_icelake(sz_sha256_state_t *state);
-
-/** @copydoc sz_sha256_state_update */
-SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_sha256_state_digest */
-SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state,
-                                                    sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]);
-
 #endif
 
 #if SZ_USE_NEON
@@ -849,8 +839,6 @@ SZ_API_RUNTIME void sz_sha256_state_init(sz_sha256_state_t *state) {
     sz_sha256_state_init_powervsx(state);
 #elif SZ_USE_NEONSHA
     sz_sha256_state_init_neonsha(state);
-#elif SZ_USE_ICELAKE
-    sz_sha256_state_init_icelake(state);
 #elif SZ_USE_GOLDMONT
     sz_sha256_state_init_goldmont(state);
 #else
@@ -871,8 +859,6 @@ SZ_API_RUNTIME void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t d
     sz_sha256_state_update_powervsx(state, data, length);
 #elif SZ_USE_NEONSHA
     sz_sha256_state_update_neonsha(state, data, length);
-#elif SZ_USE_ICELAKE
-    sz_sha256_state_update_icelake(state, data, length);
 #elif SZ_USE_GOLDMONT
     sz_sha256_state_update_goldmont(state, data, length);
 #else
@@ -894,8 +880,6 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
     sz_sha256_state_digest_powervsx(state, digest);
 #elif SZ_USE_NEONSHA
     sz_sha256_state_digest_neonsha(state, digest);
-#elif SZ_USE_ICELAKE
-    sz_sha256_state_digest_icelake(state, digest);
 #elif SZ_USE_GOLDMONT
     sz_sha256_state_digest_goldmont(state, digest);
 #else
