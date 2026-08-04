@@ -17,11 +17,19 @@ Run:
 
 import hashlib
 import hmac
+from array import array
 
 import pytest
 
 import stringzilla as sz
 from stringzilla import Str
+
+# NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
+# other than `ImportError`.
+try:
+    import numpy as np
+except:  # noqa: E722
+    pass
 
 from test.sz_helpers import (
     SEED_VALUES,
@@ -34,7 +42,6 @@ from test.sz_helpers import (
     VECTOR_WIDTH_LENGTHS,
     differential_bodies,
 )
-
 
 # region Unit
 
@@ -164,6 +171,108 @@ def test_sha256(length: int, seed_value: int):
     assert h1.digest() == h2.digest() == expected
 
 
+@pytest.mark.parametrize("lanes_count", [0, 1, 7, 8, 9, 15, 16, 17, 33])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_sha256_lanes(lanes_count: int, seed_value: int):
+    """`sz.Sha256s` matches per-message `hashlib.sha256` across lane counts, ragged lengths and streaming."""
+
+    seed_random_generators(seed_value)
+
+    # Lengths span empty lanes, sub-block lanes, block-boundary straddles and multi-block lanes
+    lengths = [(index * 137) % 4096 for index in range(lanes_count)]
+    messages = [get_random_string(length=length).encode() for length in lengths]
+    expected = [hashlib.sha256(message).digest() for message in messages]
+
+    lanes = sz.Sha256s(lanes_count)
+    assert len(lanes) == lanes_count
+
+    # Feed every lane in three uneven slices, so buffered partial blocks carry across calls
+    offsets = [0] * lanes_count
+    for call_index in range(3):
+        chunks = []
+        for lane_index in range(lanes_count):
+            remaining = len(messages[lane_index]) - offsets[lane_index]
+            take = remaining if call_index == 2 else remaining // 3
+            chunks.append(messages[lane_index][offsets[lane_index] : offsets[lane_index] + take])
+            offsets[lane_index] += take
+        lanes.update(chunks)
+
+    assert lanes.digest() == expected
+
+    # Digesting must not consume the state, so a second call agrees with the first
+    assert lanes.digest() == expected
+
+    # Every lane's digest is also reachable on its own, and as hex
+    assert [lane.digest() for lane in lanes] == expected
+    assert lanes.hexdigest() == [digest.hex() for digest in expected]
+
+    # Copying forks the lanes: advancing one copy must not disturb the other
+    clone = lanes.copy()
+    clone.update([b"!"] * lanes_count)
+    assert clone.digest() == [hashlib.sha256(message + b"!").digest() for message in messages]
+    assert lanes.digest() == expected
+
+    # Reset returns every lane to the empty message
+    lanes.reset()
+    assert lanes.digest() == [hashlib.sha256(b"").digest()] * lanes_count
+
+
+@pytest.mark.parametrize("lanes_count", [0, 1, 8, 17])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_sha256_lanes_strs(lanes_count: int, seed_value: int):
+    """`sz.Sha256s.update` reads a `Strs` in place, in both its tape and reordered layouts."""
+
+    seed_random_generators(seed_value)
+    messages = [get_random_string(length=(index * 137) % 4096) for index in range(lanes_count)]
+
+    for texts in (sz.Strs(messages), sz.Strs(messages).shuffled()):
+        expected = [hashlib.sha256(str(text).encode()).digest() for text in texts]
+        assert sz.Sha256s(lanes_count).update(texts).digest() == expected
+
+
+@pytest.mark.skipif("np" not in globals(), reason="NumPy is not installed")
+@pytest.mark.parametrize("lanes_count", [0, 1, 8, 17])
+def test_sha256_digests_into_matrix(lanes_count: int):
+    """Digests land in a caller's `(lanes, 32)` byte matrix, one row per lane, with no allocation."""
+
+    messages = [f"message-{index}".encode() * (index + 1) for index in range(lanes_count)]
+    expected = [hashlib.sha256(message).digest() for message in messages]
+
+    lanes = sz.Sha256s(lanes_count)
+    digests = np.empty((lanes_count, sz.Sha256.digest_length), np.uint8)
+    assert lanes.update(messages).digest(out=digests) is digests
+    assert [bytes(row) for row in digests] == expected
+
+
+def test_sha256_lanes_recycling():
+    """A finished lane can be replaced mid-stream without disturbing the lanes around it."""
+
+    lanes = sz.Sha256s(4)
+    lanes.update([b"aa", b"bb", b"cc", b"dd"])
+    lanes[1] = sz.Sha256()
+    lanes.update([b"11", b"22", b"33", b"44"])
+
+    digests = lanes.digest()
+    assert digests[1] == hashlib.sha256(b"22").digest(), "the recycled lane kept its old data"
+    assert digests[0] == hashlib.sha256(b"aa11").digest(), "a neighbouring lane was disturbed"
+    assert digests[3] == hashlib.sha256(b"dd44").digest(), "a neighbouring lane was disturbed"
+
+
+def test_sha256_lanes_errors():
+    """`sz.Sha256s` rejects mismatched lane counts and unusable output buffers."""
+
+    with pytest.raises(ValueError):
+        sz.Sha256s(2).update([b"only-one-chunk"])
+    with pytest.raises(ValueError):
+        sz.Sha256s(2).update(sz.Strs(["only-one-chunk"]))
+    with pytest.raises(ValueError):
+        sz.Sha256s(2).digest(out=bytearray(63))
+    with pytest.raises(TypeError):
+        sz.Sha256s(2).digest(out=array("Q", [0] * 8))
+    with pytest.raises(TypeError):
+        sz.Sha256s(2)[0] = b"not-a-hasher"
+
+
 # endregion Unit
 
 
@@ -205,6 +314,39 @@ def test_hmac_sha256(key_length: int, message_length: int, seed_value: int):
     assert result_str == expected
 
 
+@pytest.mark.parametrize("messages_count", [0, 1, 8, 17, 129])
+@pytest.mark.parametrize("key_length", [16, 65])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_hmac_sha256_many(messages_count: int, key_length: int, seed_value: int):
+    """`sz.hmac_sha256` authenticates many messages under one key, matching the one-at-a-time result."""
+
+    seed_random_generators(seed_value)
+    key = get_random_string(length=key_length).encode()
+    messages = [get_random_string(length=(index * 37) % 512) for index in range(messages_count)]
+    expected = [hmac.new(key, message.encode(), hashlib.sha256).digest() for message in messages]
+
+    # Both a plain sequence and a `Strs`, whose tape is read in place
+    assert sz.hmac_sha256(key, [message.encode() for message in messages]) == expected
+    assert sz.hmac_sha256(key, sz.Strs(messages)) == expected
+
+
+@pytest.mark.skipif("np" not in globals(), reason="NumPy is not installed")
+def test_hmac_sha256_into_matrix():
+    """Tags land in a caller's `(messages, 32)` byte matrix, one row per message."""
+
+    key = b"secret"
+    messages = [f"message-{index}".encode() for index in range(9)]
+    expected = [hmac.new(key, message, hashlib.sha256).digest() for message in messages]
+
+    tags = np.empty((len(messages), sz.Sha256.digest_length), np.uint8)
+    assert sz.hmac_sha256(key, messages, out=tags) is tags
+    assert [bytes(row) for row in tags] == expected
+
+    one = bytearray(sz.Sha256.digest_length)
+    sz.hmac_sha256(key, messages[0], out=one)
+    assert bytes(one) == expected[0]
+
+
 def test_hmac_sha256_kwargs():
     """`sz.hmac_sha256` accepts positional, keyword, and mixed arguments interchangeably, and rejects
     missing, duplicate, or unknown keyword arguments with TypeError."""
@@ -231,7 +373,7 @@ def test_hmac_sha256_kwargs():
     assert result_reversed == expected
 
     # Missing argument
-    with pytest.raises(TypeError, match="expects exactly 2 arguments"):
+    with pytest.raises(TypeError, match="missing required arguments"):
         sz.hmac_sha256(key=key)
 
     # Duplicate argument
@@ -242,8 +384,8 @@ def test_hmac_sha256_kwargs():
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         sz.hmac_sha256(key=key, unknown=b"test")
 
-    # Too many arguments (3 args)
-    with pytest.raises(TypeError, match="expects exactly 2 arguments"):
+    # An unknown keyword is named, rather than reported as a bad argument count
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
         sz.hmac_sha256(key=key, message=message, unknown=b"test")
 
 

@@ -34,7 +34,7 @@ The batch engines accept `sz.Strs` collections and NumPy arrays, so NumPy is req
 
 ## Types
 
-The `stringzilla` module exposes five public types: `Str`, `Strs`, `File`, the incremental hashers `Hasher` and `Sha256`, plus a family of UTF-8 iterator types.
+The `stringzilla` module exposes six public types: `Str`, `Strs`, `File`, the incremental hashers `Hasher`, `Sha256` and `Sha256s`, plus a family of UTF-8 iterator types.
 
 ### `Str`
 
@@ -355,6 +355,30 @@ a = sz.Sha256().update(b"ab")
 assert a.copy().update(b"c").hexdigest() == sz.Sha256().update(b"abc").hexdigest()
 ```
 
+### `Sha256s` for Many Messages at Once
+
+Digesting one message is a serial dependency chain, but independent messages compress in parallel lanes — sixteen at a time on AVX-512, eight on AVX2.
+`Sha256s(lanes)` holds one hasher per lane, with `update(chunks)` taking exactly one chunk per lane and `digest(out=None)`, `hexdigest()`, `reset()`, `copy()` and `len()` behaving as on `Sha256`.
+Lanes are workers rather than messages: `lanes[i]` reads one as a `Sha256`, and `lanes[i] = sz.Sha256()` retires a finished lane while the others keep streaming.
+
+`sz.hmac_sha256(key, message, out=None)` takes either one message or a collection, authenticating a batch of tokens sharing a secret through the same kernels.
+
+Both accept a `Strs`, read in place whatever its layout, and an `out` buffer of bytes — a `(count, 32)` `numpy.uint8` matrix receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
+The GIL is released around the kernel, so several threads digest concurrently.
+
+```python
+import numpy as np
+import stringzilla as sz
+
+texts = sz.Strs(["alpha", "beta", "gamma"])
+lanes = sz.Sha256s(len(texts))
+digests = np.empty((len(lanes), sz.Sha256.digest_length), np.uint8)
+lanes.update(texts).digest(out=digests)
+
+tags = sz.hmac_sha256(b"secret", texts)   # one 32-byte tag per message
+assert tags[0] == sz.hmac_sha256(b"secret", "alpha")
+```
+
 ## Sorting, Intersecting, and Sampling
 
 These operate on a `Strs` collection and return new collections or index tuples, leaving the original unchanged.
@@ -566,19 +590,19 @@ hashes, counts = engine(docs)
 `Str`, along with the matching module-level functions, exposes lazy iterators over Unicode boundaries.
 Each yields `Str` views into the original buffer, so segmentation stays allocation-free, except `utf8_codepoints`, which yields `int` code points.
 
-| Method / function                                      | Standard                         | Yields                                                                                 |
-| ------------------------------------------------------ | -------------------------------- | -------------------------------------------------------------------------------------- |
-| `utf8_codepoints(string)`                              | scalar values                    | `int` code points; ill-formed bytes decode to `U+FFFD`, so iteration never raises.     |
-| `utf8_graphemes(string, skip_empty=False)`             | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
-| `utf8_wordbreaks(string, skip_empty=False)`            | TR29 word boundaries             | all UAX-29 word segments (words and the separators between them; they tile).            |
-| `utf8_sentences(string, skip_empty=False)`             | TR29 sentence boundaries         | sentences.                                                                             |
-| `utf8_linebreaks(string, skip_empty=False)`             | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
-| `utf8_split_newlines(string, skip_empty=False, with_separators=False)` | 7 Unicode newlines + CRLF | content BETWEEN hard newlines (LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, CRLF).          |
-| `utf8_newlines(string, skip_empty=False)`              | 7 Unicode newlines + CRLF        | the newline runs themselves (the separators).                                          |
-| `utf8_split_whitespaces(string, skip_empty=False, with_separators=False)` | 25 Unicode `"White_Space"` | content BETWEEN whitespace runs, like `str.split()` with no separator.            |
-| `utf8_whitespaces(string, skip_empty=False)`           | 25 Unicode `"White_Space"` chars | the whitespace runs themselves (the separators).                                       |
-| `utf8_split_delimiters(string, skip_empty=False, with_separators=False)` | punctuation/symbol/separator | content BETWEEN any Unicode delimiter (superset of whitespace).                  |
-| `utf8_delimiters(string, skip_empty=False)`            | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
+| Method / function                                                         | Standard                         | Yields                                                                                 |
+| ------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------- |
+| `utf8_codepoints(string)`                                                 | scalar values                    | `int` code points; ill-formed bytes decode to `U+FFFD`, so iteration never raises.     |
+| `utf8_graphemes(string, skip_empty=False)`                                | TR29 grapheme clusters           | user-perceived characters such as a base plus combining marks, or emoji ZWJ sequences. |
+| `utf8_wordbreaks(string, skip_empty=False)`                               | TR29 word boundaries             | all UAX-29 word segments (words and the separators between them; they tile).           |
+| `utf8_sentences(string, skip_empty=False)`                                | TR29 sentence boundaries         | sentences.                                                                             |
+| `utf8_linebreaks(string, skip_empty=False)`                               | UAX14 line-break opportunities   | soft-wrap segments.                                                                    |
+| `utf8_split_newlines(string, skip_empty=False, with_separators=False)`    | 7 Unicode newlines + CRLF        | content BETWEEN hard newlines (LF, VT, FF, CR, NEL, `U+2028`, `U+2029`, CRLF).         |
+| `utf8_newlines(string, skip_empty=False)`                                 | 7 Unicode newlines + CRLF        | the newline runs themselves (the separators).                                          |
+| `utf8_split_whitespaces(string, skip_empty=False, with_separators=False)` | 25 Unicode `"White_Space"`       | content BETWEEN whitespace runs, like `str.split()` with no separator.                 |
+| `utf8_whitespaces(string, skip_empty=False)`                              | 25 Unicode `"White_Space"` chars | the whitespace runs themselves (the separators).                                       |
+| `utf8_split_delimiters(string, skip_empty=False, with_separators=False)`  | punctuation/symbol/separator     | content BETWEEN any Unicode delimiter (superset of whitespace).                        |
+| `utf8_delimiters(string, skip_empty=False)`                               | punctuation/symbol/separator     | the delimiter runs themselves (the separators).                                        |
 
 Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) yields the **separators**, while `split_*` yields the content **between** them.
 `skip_empty` drops empty segments; `with_separators=True` interleaves both losslessly (concatenation reproduces the input), replacing the old `keepends`.
