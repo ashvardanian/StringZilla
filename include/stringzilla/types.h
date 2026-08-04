@@ -1125,6 +1125,12 @@ typedef void (*sz_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, 
 /** @brief Signature of `sz_sha256_state_digest`. */
 typedef void (*sz_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *);
 
+/** @brief Signature of `sz_sha256_multistate_update`. */
+typedef void (*sz_sha256_multistate_update_t)(struct sz_sha256_state_t *, struct sz_sequence_t const *);
+
+/** @brief Signature of `sz_sha256_multistate_digest`. */
+typedef void (*sz_sha256_multistate_digest_t)(struct sz_sha256_state_t const *, sz_size_t, sz_u8_t *);
+
 /** @brief Signature of `sz_aes256_key_init`. */
 typedef void (*sz_aes256_key_init_t)(struct sz_aes256_key_t *, sz_u8_t const *);
 
@@ -1400,6 +1406,15 @@ typedef struct sz_sequence_t {
 SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
                                                               sz_sequence_t *sequence);
 
+/**
+ *  @brief Initiates the sequence structure from an array of pointer-length pairs, like `sz_string_view_t[]`.
+ *  @param views Pointer to the array of views, which must outlive @p sequence.
+ *  @param count Number of views in the array.
+ *  @param sequence Sequence structure to initialize.
+ */
+SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                   sz_sequence_t *sequence);
+
 #pragma endregion
 
 #pragma region Helper Functions
@@ -1593,6 +1608,20 @@ SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bs
 #define sz_u32_popcount_neon_(x) (__builtin_popcount(x)) // no ACLE popcount intrinsic exists
 #define sz_u64_popcount_neon_(x) (__builtin_popcountll(x))
 #endif
+
+/**
+ *  @brief Returns @p pointer unchanged, hiding its origin so table reads stay memory operands.
+ *
+ *  Left visible, a `static const` table folds into immediates and every constant costs a `vpbroadcastd`
+ *  where an AVX-512 `{1toN}` embedded broadcast would have been free. No use outside x86, which has no
+ *  equivalent operand to protect.
+ */
+SZ_HELPER_INLINE void const *sz_x86_hide_pointer_origin_(void const *pointer) {
+#if defined(__GNUC__)
+    __asm__("" : "+r"(pointer));
+#endif
+    return pointer;
+}
 
 /** @brief Reverse the 64 bits of @p value (bit `i` moves to bit `63 - i`): swap adjacent bits, then bit-pairs
  *         within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only byte-compress
@@ -2048,6 +2077,24 @@ SZ_API_COMPTIME void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, 
     sequence->count = count;
     sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;
     sequence->get_length = sz_sequence_from_null_terminated_strings_get_length_;
+}
+
+SZ_API_COMPTIME sz_cptr_t sz_sequence_from_string_views_get_start_(void const *handle, sz_size_t i) {
+    sz_string_view_t const *views = (sz_string_view_t const *)handle;
+    return views[i].start;
+}
+
+SZ_API_COMPTIME sz_size_t sz_sequence_from_string_views_get_length_(void const *handle, sz_size_t i) {
+    sz_string_view_t const *views = (sz_string_view_t const *)handle;
+    return views[i].length;
+}
+
+SZ_API_COMPTIME void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                   sz_sequence_t *sequence) {
+    sequence->handle = views;
+    sequence->count = count;
+    sequence->get_start = sz_sequence_from_string_views_get_start_;
+    sequence->get_length = sz_sequence_from_string_views_get_length_;
 }
 
 #pragma endregion

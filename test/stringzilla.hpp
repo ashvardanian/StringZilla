@@ -371,6 +371,27 @@ inline std::string random_string(std::size_t length, std::vector<std::string> co
     return result;
 }
 
+/** @brief Reads the start of a member string, for `sz_sequence_t` views over a `std::vector<std::string>`. */
+inline sz_cptr_t sequence_get_start_(void const *handle, sz_sorted_idx_t index) {
+    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].data();
+}
+
+/** @brief Reads the length of a member string, for `sz_sequence_t` views over a `std::vector<std::string>`. */
+inline sz_size_t sequence_get_length_(void const *handle, sz_sorted_idx_t index) {
+    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].size();
+}
+
+/** @brief Fills an `sz_sequence_t` view over a `std::vector<std::string>` via the shared accessor helpers. */
+inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
+    sz_sequence_t sequence;
+    sequence.handle = &strings;
+    sequence.count = (sz_size_t)strings.size();
+    sequence.get_start = sequence_get_start_;
+    sequence.get_length = sequence_get_length_;
+    return sequence;
+}
+
+
 struct fuzzy_config_t {
     std::string alphabet = "ABC"; // ? Drawn one UTF-8 character at a time, so `"αβγ"` yields valid multi-byte text.
     std::size_t batch_size = 16;

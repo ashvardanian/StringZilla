@@ -81,24 +81,6 @@ using namespace std::literals; // for ""sv
 
 #pragma region Helpers
 
-/** @brief Wraps a `std::vector<std::string>` as an `sz_sequence_t` so C backends can be called directly. */
-static sz_cptr_t sort_sequence_get_start_(void const *handle, sz_sorted_idx_t index) {
-    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].data();
-}
-static sz_size_t sort_sequence_get_length_(void const *handle, sz_sorted_idx_t index) {
-    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].size();
-}
-
-/** @brief Fills an `sz_sequence_t` view over a `std::vector<std::string>` via the shared accessor helpers. */
-static sz_sequence_t sort_sequence_from_(std::vector<std::string> const &strings) {
-    sz_sequence_t sequence;
-    sequence.handle = &strings;
-    sequence.count = (sz_size_t)strings.size();
-    sequence.get_start = sort_sequence_get_start_;
-    sequence.get_length = sort_sequence_get_length_;
-    return sequence;
-}
-
 /** @brief Runs one sequence arg-sort backend over `sequence` and asserts the produced permutation matches `expected`. */
 static void check_sort_unit_(sz_sequence_argsort_t argsort, sz_sequence_t const *sequence,
                              std::vector<sz_sorted_idx_t> const &expected) {
@@ -153,7 +135,7 @@ void test_sort_unit() {
     // so the permutation is {1, 0, 2}. Check the dispatched API and every natively-compiled kernel.
     {
         std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
-        sz_sequence_t const sequence = sort_sequence_from_(fruits);
+        sz_sequence_t const sequence = sequence_from_(fruits);
         std::vector<sz_sorted_idx_t> const expected = {1u, 0u, 2u};
 
         check_sort_unit_(sz_sequence_argsort, &sequence, expected);
@@ -180,7 +162,7 @@ void test_sort_unit() {
     // Uncased UTF-8 arg-sort: {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
     {
         std::vector<std::string> const words = {"Banana", "apple"};
-        sz_sequence_t const sequence = sort_sequence_from_(words);
+        sz_sequence_t const sequence = sequence_from_(words);
         std::vector<sz_sorted_idx_t> const expected = {1u, 0u};
 
         check_sort_unit_(sz_sequence_argsort_uncased, &sequence, expected);
@@ -208,8 +190,8 @@ void test_sort_unit() {
     {
         std::vector<std::string> const first = {"apple", "banana", "cherry"};
         std::vector<std::string> const second = {"cherry", "date", "banana"};
-        sz_sequence_t const first_sequence = sort_sequence_from_(first);
-        sz_sequence_t const second_sequence = sort_sequence_from_(second);
+        sz_sequence_t const first_sequence = sequence_from_(first);
+        sz_sequence_t const second_sequence = sequence_from_(second);
 
         // The matched pairs by (first index, second index): banana=(1,2) and cherry=(2,0). Output order is
         // unspecified, so the helper collects pairs into a set before comparing against the known intersection.
@@ -451,9 +433,9 @@ void test_intersect_unit() {
             check_intersect_unit_(sz_sequence_intersect_icelake, first_sequence, second_sequence, expected_pairs);
 #endif
         };
-        sz_sequence_t const abcd_sequence = sort_sequence_from_(abcd);
-        sz_sequence_t const dcba_sequence = sort_sequence_from_(dcba);
-        sz_sequence_t const abs_sequence = sort_sequence_from_(abs);
+        sz_sequence_t const abcd_sequence = sequence_from_(abcd);
+        sz_sequence_t const dcba_sequence = sequence_from_(dcba);
+        sz_sequence_t const abs_sequence = sequence_from_(abs);
 
         // Identity check
         {
@@ -565,8 +547,8 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
             sz_sequence_t sequence;
             sequence.handle = &dataset;
             sequence.count = count;
-            sequence.get_start = sort_sequence_get_start_;
-            sequence.get_length = sort_sequence_get_length_;
+            sequence.get_start = sequence_get_start_;
+            sequence.get_length = sequence_get_length_;
 
             std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
             sz_size_t const top_modes[] = {0, 1, (sz_size_t)(count / 3), (sz_size_t)count};

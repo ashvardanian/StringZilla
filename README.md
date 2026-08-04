@@ -578,6 +578,10 @@ Where the AES hash leans on the AES round instructions, SHA-256 leans on the ded
 The API is a three-call streaming state — `sz_sha256_state_init`, `sz_sha256_state_update`, `sz_sha256_state_digest` — so arbitrarily long inputs can be absorbed in chunks without buffering the whole message.
 Each backend is also exposed under its own suffix, like `sz_sha256_state_update_neonsha`, for the same manual-dispatch reasons as the rest of the library.
 
+Digesting one message is a serial dependency chain — 32 dependent `SHA256RNDS2` at 4 cycles each — so no wider instruction set can accelerate it, and the SHA-NI path already sits within 15% of that hardware floor.
+Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update` exposes.
+That lane-parallel form roughly doubles single-message SHA-NI throughput, and on an AVX-512 CPU without SHA-NI it is about ten times the scalar path.
+
 ### AES-256 Encryption
 
 Most cipher libraries are built for a socket: a stream arrives in order, gets authenticated, and is consumed once.
@@ -608,7 +612,6 @@ Per-backend numbers are in [`include/stringzilla/cipher/README.md`](include/stri
 
 [faq-fips197]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
 [faq-gcm]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
-
 ### Random Generation
 
 StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.

@@ -435,7 +435,8 @@ SZ_API_COMPTIME void sz_sha256_state_update_powervsx(sz_sha256_state_t *state, s
     sz_sha256_state_update_serial(state, data, length);
 }
 
-SZ_API_COMPTIME void sz_sha256_state_digest_powervsx(sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(32)]) {
+SZ_API_COMPTIME void sz_sha256_state_digest_powervsx(sz_sha256_state_t const *state,
+                                                     sz_u8_t digest[sz_at_least_(SZ_SHA256_DIGEST_LENGTH)]) {
     sz_sha256_state_digest_serial(state, digest);
 }
 

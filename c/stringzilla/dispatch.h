@@ -51,6 +51,8 @@ typedef struct sz_implementations_t {
     sz_sha256_state_init_t sha256_state_init;
     sz_sha256_state_update_t sha256_state_update;
     sz_sha256_state_digest_t sha256_state_digest;
+    sz_sha256_multistate_update_t sha256_multistate_update;
+    sz_sha256_multistate_digest_t sha256_multistate_digest;
 
     sz_aes256_key_init_t aes256_key_init;
     sz_aes256_gcm_key_init_t aes256_gcm_key_init;
