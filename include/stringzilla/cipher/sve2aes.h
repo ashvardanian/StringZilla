@@ -10,6 +10,14 @@
  *  kernel here is written against a fixed lane count: each one reads `svcntb` and derives its step from
  *  it, and the single compile-time constant is the sixteen-byte block. Round keys reach every segment
  *  through a quadword broadcast load, one instruction whatever the width.
+ *
+ *  The fourteen rounds themselves are written out rather than driven by a loop over the round index,
+ *  which is the one thing here that is fixed at compile time. A round loop leaves the unrolling to the
+ *  optimizer, which only does it reliably at `-O3` — GCC 15 emitted 85 AES round instructions across the
+ *  Arm backends at `-O2` against 530 at `-O3`. Since `SZ_API_COMPTIME` kernels are `static inline` and
+ *  compile into whichever translation unit consumes them, a looped kernel makes its own throughput a
+ *  property of the caller's build flags. See `cipher/icelake.h`, where the same change was worth 2.1x to
+ *  2.9x at `-O2` and nothing at all at `-O3`.
  */
 #ifndef STRINGZILLA_CIPHER_SVE2AES_H_
 #define STRINGZILLA_CIPHER_SVE2AES_H_
@@ -81,10 +89,21 @@ SZ_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t co
 SZ_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t const *key, svuint8_t blocks_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     sz_u8_t const *schedule = (sz_u8_t const *)&key->round_keys[0];
-    sz_size_t round_index;
-    for (round_index = 0; round_index != 13; ++round_index)
-        blocks_u8x = svaesmc_u8(
-            svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + round_index * SZ_AES_BLOCK_LENGTH)));
+    // The thirteen fused rounds are written out rather than looped, because a loop leaves the
+    // unrolling to the optimizer and the optimizer only does it at `-O3`.
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 0 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 1 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 2 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 3 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 4 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 5 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 6 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 7 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 8 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 9 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 10 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 11 * SZ_AES_BLOCK_LENGTH)));
+    blocks_u8x = svaesmc_u8(svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 12 * SZ_AES_BLOCK_LENGTH)));
     blocks_u8x = svaese_u8(blocks_u8x, svld1rq_u8(all_b8x, schedule + 13 * SZ_AES_BLOCK_LENGTH));
     return sveor_u8_x(all_b8x, blocks_u8x, svld1rq_u8(all_b8x, schedule + 14 * SZ_AES_BLOCK_LENGTH));
 }
@@ -666,8 +685,6 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *s
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const subkey_u8x = sz_ghash_load_sve2aes_(state->key.powers);
     svuint8_t accumulator_u8x = sz_ghash_load_sve2aes_(state->accumulator);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t padded_vec, lengths_vec;
     sz_size_t byte_index;
 
@@ -681,10 +698,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *s
                                                    subkey_u8x);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator_u8x = sz_ghash_absorb_sve2aes_(accumulator_u8x, sz_ghash_load_sve2aes_(&lengths_vec.u8s[0]),
                                                subkey_u8x);
 

@@ -3,6 +3,20 @@
  *  @file include/stringzilla/cipher/icelake.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  The fourteen AES rounds are written out here rather than driven by a loop over the round index, and
+ *  the block groups are named registers rather than an indexed array. Both are deliberate. A round loop
+ *  leaves the unrolling to the optimizer, which only does it reliably at `-O3`: GCC 15 emitted 35 AES
+ *  round instructions across this file at `-O2` against 390 at `-O3`, because the thirteen-iteration
+ *  loop body exceeds the completely-peel budget at the lower level. An indexed group array then spills
+ *  to the stack instead of staying in `zmm` registers, so every round reloads its operands.
+ *
+ *  The cost was 2.1x to 2.9x of counter-mode throughput on a Sapphire Rapids core at `-O2`, and that
+ *  matters here because `SZ_API_COMPTIME` kernels are `static inline` and compile into whichever
+ *  translation unit consumes them, at whatever flags that consumer was built with. Writing the rounds
+ *  out costs fourteen lines and makes the kernel's throughput a property of the code rather than of the
+ *  caller's build. The `-O3` numbers were unchanged by the rewrite, which is the evidence that this is
+ *  about removing a dependency on the optimizer and not about a new algorithm.
  */
 #ifndef STRINGZILLA_CIPHER_ICELAKE_H_
 #define STRINGZILLA_CIPHER_ICELAKE_H_
@@ -114,10 +128,20 @@ SZ_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t co
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const *key, __m128i block_xmm) {
-    sz_size_t round_index;
-    block_xmm = _mm_xor_si128(block_xmm, _mm_loadu_epi32(key->round_keys));
-    for (round_index = 1; round_index != 14; ++round_index)
-        block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + round_index * 4));
+    block_xmm = _mm_xor_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 0));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 4));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 8));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 12));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 16));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 20));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 24));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 28));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 32));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 36));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 40));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 44));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 48));
+    block_xmm = _mm_aesenc_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 52));
     return _mm_aesenclast_si128(block_xmm, _mm_loadu_epi32(key->round_keys + 56));
 }
 
@@ -127,9 +151,46 @@ SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const 
  *  @param wide_keys_vec Receives fifteen registers, one per round.
  */
 SZ_HELPER_INLINE void sz_aes256_round_keys_wide_icelake_(sz_aes256_key_t const *key, sz_u512_vec_t *wide_keys_vec) {
-    sz_size_t round_index;
-    for (round_index = 0; round_index != 15; ++round_index)
-        wide_keys_vec[round_index].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + round_index * 4));
+    wide_keys_vec[0].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 0));
+    wide_keys_vec[1].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 4));
+    wide_keys_vec[2].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 8));
+    wide_keys_vec[3].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 12));
+    wide_keys_vec[4].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 16));
+    wide_keys_vec[5].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 20));
+    wide_keys_vec[6].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 24));
+    wide_keys_vec[7].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 28));
+    wide_keys_vec[8].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 32));
+    wide_keys_vec[9].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 36));
+    wide_keys_vec[10].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 40));
+    wide_keys_vec[11].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 44));
+    wide_keys_vec[12].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 48));
+    wide_keys_vec[13].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 52));
+    wide_keys_vec[14].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 56));
+}
+
+/**
+ *  @brief Applies the thirteen middle rounds and the last round to one four-block group.
+ *
+ *  The rounds are written out rather than looped. A `for` loop over the round index leaves the
+ *  unrolling to the optimizer, and the optimizer only does it reliably at `-O3`: GCC 15 emits 35 AES
+ *  round instructions across this file at `-O2` against 390 at `-O3`, so a looped kernel makes its own
+ *  throughput a property of the caller's build flags rather than of the code.
+ */
+SZ_HELPER_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_zmm, sz_u512_vec_t const *wide_keys_vec) {
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[1].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[2].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[3].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[4].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[5].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[6].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[7].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[8].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[9].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[10].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[11].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[12].zmm);
+    block_zmm = _mm512_aesenc_epi128(block_zmm, wide_keys_vec[13].zmm);
+    return _mm512_aesenclast_epi128(block_zmm, wide_keys_vec[14].zmm);
 }
 
 /** @brief Reverses the trailing four bytes of each 128-bit lane, its own inverse. */
@@ -184,38 +245,47 @@ SZ_HELPER_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters, sz_u512
     __m512i const counter_swap = _mm512_load_si512(sz_aes256_counter_swap_icelake_());
     __m512i const step_four = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 4);
     __m512i const step_sixteen = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 16);
-    sz_size_t produced = 0, round_index, group_index;
+    sz_size_t produced = 0;
 
     if (length >= 256) {
-        __m512i groups[4], keystream[4];
-        groups[0] = counters;
-        groups[1] = _mm512_add_epi32(groups[0], step_four);
-        groups[2] = _mm512_add_epi32(groups[1], step_four);
-        groups[3] = _mm512_add_epi32(groups[2], step_four);
+        __m512i first_group = counters;
+        __m512i second_group = _mm512_add_epi32(first_group, step_four);
+        __m512i third_group = _mm512_add_epi32(second_group, step_four);
+        __m512i fourth_group = _mm512_add_epi32(third_group, step_four);
         for (; produced + 256 <= length; produced += 256) {
-            for (group_index = 0; group_index != 4; ++group_index)
-                keystream[group_index] = _mm512_xor_si512(_mm512_shuffle_epi8(groups[group_index], counter_swap),
-                                                          wide_keys_vec[0].zmm);
-            for (round_index = 1; round_index != 14; ++round_index)
-                for (group_index = 0; group_index != 4; ++group_index)
-                    keystream[group_index] = _mm512_aesenc_epi128(keystream[group_index],
-                                                                  wide_keys_vec[round_index].zmm);
-            for (group_index = 0; group_index != 4; ++group_index) {
-                keystream[group_index] = _mm512_aesenclast_epi128(keystream[group_index], wide_keys_vec[14].zmm);
-                _mm512_storeu_si512(
-                    output + produced + group_index * 64,
-                    _mm512_xor_si512(keystream[group_index], _mm512_loadu_si512(text + produced + group_index * 64)));
-                groups[group_index] = _mm512_add_epi32(groups[group_index], step_sixteen);
-            }
+            // Four groups stay in named registers rather than an indexed array, so the four independent
+            // round chains interleave in the scheduler instead of spilling to the stack.
+            __m512i first_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(first_group, counter_swap),
+                                                       wide_keys_vec[0].zmm);
+            __m512i second_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(second_group, counter_swap),
+                                                        wide_keys_vec[0].zmm);
+            __m512i third_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(third_group, counter_swap),
+                                                       wide_keys_vec[0].zmm);
+            __m512i fourth_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(fourth_group, counter_swap),
+                                                        wide_keys_vec[0].zmm);
+            first_keystream = sz_aes256_rounds_wide_icelake_(first_keystream, wide_keys_vec);
+            second_keystream = sz_aes256_rounds_wide_icelake_(second_keystream, wide_keys_vec);
+            third_keystream = sz_aes256_rounds_wide_icelake_(third_keystream, wide_keys_vec);
+            fourth_keystream = sz_aes256_rounds_wide_icelake_(fourth_keystream, wide_keys_vec);
+            _mm512_storeu_si512(output + produced + 0,
+                                _mm512_xor_si512(first_keystream, _mm512_loadu_si512(text + produced + 0)));
+            _mm512_storeu_si512(output + produced + 64,
+                                _mm512_xor_si512(second_keystream, _mm512_loadu_si512(text + produced + 64)));
+            _mm512_storeu_si512(output + produced + 128,
+                                _mm512_xor_si512(third_keystream, _mm512_loadu_si512(text + produced + 128)));
+            _mm512_storeu_si512(output + produced + 192,
+                                _mm512_xor_si512(fourth_keystream, _mm512_loadu_si512(text + produced + 192)));
+            first_group = _mm512_add_epi32(first_group, step_sixteen);
+            second_group = _mm512_add_epi32(second_group, step_sixteen);
+            third_group = _mm512_add_epi32(third_group, step_sixteen);
+            fourth_group = _mm512_add_epi32(fourth_group, step_sixteen);
         }
-        counters = groups[0];
+        counters = first_group;
     }
 
     for (; produced + 64 <= length; produced += 64) {
         __m512i keystream = _mm512_xor_si512(_mm512_shuffle_epi8(counters, counter_swap), wide_keys_vec[0].zmm);
-        for (round_index = 1; round_index != 14; ++round_index)
-            keystream = _mm512_aesenc_epi128(keystream, wide_keys_vec[round_index].zmm);
-        keystream = _mm512_aesenclast_epi128(keystream, wide_keys_vec[14].zmm);
+        keystream = sz_aes256_rounds_wide_icelake_(keystream, wide_keys_vec);
         _mm512_storeu_si512(output + produced, _mm512_xor_si512(keystream, _mm512_loadu_si512(text + produced)));
         counters = _mm512_add_epi32(counters, step_four);
     }
@@ -224,9 +294,7 @@ SZ_HELPER_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters, sz_u512
         sz_size_t const remaining = length - produced;
         __mmask64 const tail_mask = sz_u64_mask_until_(remaining);
         __m512i keystream = _mm512_xor_si512(_mm512_shuffle_epi8(counters, counter_swap), wide_keys_vec[0].zmm);
-        for (round_index = 1; round_index != 14; ++round_index)
-            keystream = _mm512_aesenc_epi128(keystream, wide_keys_vec[round_index].zmm);
-        keystream = _mm512_aesenclast_epi128(keystream, wide_keys_vec[14].zmm);
+        keystream = sz_aes256_rounds_wide_icelake_(keystream, wide_keys_vec);
         _mm512_mask_storeu_epi8(output + produced, tail_mask,
                                 _mm512_xor_si512(keystream, _mm512_maskz_loadu_epi8(tail_mask, text + produced)));
         counters = _mm512_add_epi32(
@@ -613,63 +681,75 @@ SZ_HELPER_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out, __m12
     __m512i const step_four = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 4);
     __m512i const step_eight = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 8);
     __m128i const eighth_power_xmm = _mm512_castsi512_si128(powers_high);
-    __m512i counters[2], keystream[2], pending[2];
     sz_size_t const stages = blocks / 8;
-    sz_size_t stage_index, round_index, group_index, produced = 0;
+    sz_size_t stage_index, produced = 0;
 
-    counters[0] = *counters_out;
-    counters[1] = _mm512_add_epi32(counters[0], step_four);
-    pending[0] = pending[1] = _mm512_setzero_si512();
+    __m512i first_counter = *counters_out;
+    __m512i second_counter = _mm512_add_epi32(first_counter, step_four);
+    __m512i first_pending = _mm512_setzero_si512(), second_pending = _mm512_setzero_si512();
 
     for (stage_index = 0; stage_index != stages; ++stage_index) {
-        for (group_index = 0; group_index != 2; ++group_index)
-            keystream[group_index] = _mm512_xor_si512(_mm512_shuffle_epi8(counters[group_index], counter_swap),
-                                                      wide_keys_vec[0].zmm);
+        __m512i first_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(first_counter, counter_swap),
+                                                   wide_keys_vec[0].zmm);
+        __m512i second_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(second_counter, counter_swap),
+                                                    wide_keys_vec[0].zmm);
+        // The previous stage's hash lands between the first round key and the rounds themselves, so the
+        // carry-less multipliers and the cipher units issue against each other rather than in sequence.
         if (stage_index != 0)
-            *accumulator_xmm = sz_ghash_stage_icelake_(*accumulator_xmm, pending[0], pending[1], powers_high,
+            *accumulator_xmm = sz_ghash_stage_icelake_(*accumulator_xmm, first_pending, second_pending, powers_high,
                                                        powers_low, eighth_power_xmm);
-        for (round_index = 1; round_index != 14; ++round_index)
-            for (group_index = 0; group_index != 2; ++group_index)
-                keystream[group_index] = _mm512_aesenc_epi128(keystream[group_index], wide_keys_vec[round_index].zmm);
-        for (group_index = 0; group_index != 2; ++group_index) {
-            __m512i const loaded = _mm512_loadu_si512(text + produced + group_index * 64);
-            __m512i const stored = _mm512_xor_si512(
-                loaded, _mm512_aesenclast_epi128(keystream[group_index], wide_keys_vec[14].zmm));
-            _mm512_storeu_si512(output + produced + group_index * 64, stored);
-            pending[group_index] = _mm512_shuffle_epi8(_mm512_mask_blend_epi64(cipher_mask, loaded, stored), reverse);
-            counters[group_index] = _mm512_add_epi32(counters[group_index], step_eight);
-        }
+        first_keystream = sz_aes256_rounds_wide_icelake_(first_keystream, wide_keys_vec);
+        second_keystream = sz_aes256_rounds_wide_icelake_(second_keystream, wide_keys_vec);
+
+        __m512i const first_loaded = _mm512_loadu_si512(text + produced + 0);
+        __m512i const first_stored = _mm512_xor_si512(first_loaded, first_keystream);
+        _mm512_storeu_si512(output + produced + 0, first_stored);
+        first_pending = _mm512_shuffle_epi8(_mm512_mask_blend_epi64(cipher_mask, first_loaded, first_stored), reverse);
+        first_counter = _mm512_add_epi32(first_counter, step_eight);
+
+        __m512i const second_loaded = _mm512_loadu_si512(text + produced + 64);
+        __m512i const second_stored = _mm512_xor_si512(second_loaded, second_keystream);
+        _mm512_storeu_si512(output + produced + 64, second_stored);
+        second_pending = _mm512_shuffle_epi8(_mm512_mask_blend_epi64(cipher_mask, second_loaded, second_stored),
+                                             reverse);
+        second_counter = _mm512_add_epi32(second_counter, step_eight);
         produced += 128;
     }
     if (stages != 0)
-        *accumulator_xmm = sz_ghash_stage_icelake_(*accumulator_xmm, pending[0], pending[1], powers_high, powers_low,
-                                                   eighth_power_xmm);
+        *accumulator_xmm = sz_ghash_stage_icelake_(*accumulator_xmm, first_pending, second_pending, powers_high,
+                                                   powers_low, eighth_power_xmm);
 
     if (blocks % 8 != 0) {
         sz_size_t const tail_blocks = blocks % 8;
         sz_size_t const tail_bytes = tail_blocks * SZ_AES_BLOCK_LENGTH;
-        sz_size_t const tail_groups = (tail_bytes + 63) / 64;
         sz_align_(64) sz_u8_t staged_bytes[128];
-        for (group_index = 0; group_index != tail_groups; ++group_index)
-            keystream[group_index] = _mm512_xor_si512(_mm512_shuffle_epi8(counters[group_index], counter_swap),
-                                                      wide_keys_vec[0].zmm);
-        for (round_index = 1; round_index != 14; ++round_index)
-            for (group_index = 0; group_index != tail_groups; ++group_index)
-                keystream[group_index] = _mm512_aesenc_epi128(keystream[group_index], wide_keys_vec[round_index].zmm);
-        for (group_index = 0; group_index != tail_groups; ++group_index) {
-            sz_size_t const covered_bytes = group_index * 64;
-            __mmask64 const group_mask = sz_u64_clamp_mask_until_(tail_bytes - covered_bytes);
-            __m512i const loaded = _mm512_maskz_loadu_epi8(group_mask, text + produced + covered_bytes);
-            __m512i const stored = _mm512_xor_si512(
-                loaded, _mm512_aesenclast_epi128(keystream[group_index], wide_keys_vec[14].zmm));
-            _mm512_mask_storeu_epi8(output + produced + covered_bytes, group_mask, stored);
-            _mm512_store_si512(staged_bytes + covered_bytes, _mm512_mask_blend_epi64(cipher_mask, loaded, stored));
+        __mmask64 const first_mask = sz_u64_clamp_mask_until_(tail_bytes);
+        __m512i first_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(first_counter, counter_swap),
+                                                   wide_keys_vec[0].zmm);
+        first_keystream = sz_aes256_rounds_wide_icelake_(first_keystream, wide_keys_vec);
+        {
+            __m512i const loaded = _mm512_maskz_loadu_epi8(first_mask, text + produced);
+            __m512i const stored = _mm512_xor_si512(loaded, first_keystream);
+            _mm512_mask_storeu_epi8(output + produced, first_mask, stored);
+            _mm512_store_si512(staged_bytes, _mm512_mask_blend_epi64(cipher_mask, loaded, stored));
+        }
+        // A tail of five blocks or more spills into a second group; four or fewer never does, and
+        // encrypting a group that stores nothing would cost thirteen rounds for no bytes.
+        if (tail_bytes > 64) {
+            __mmask64 const second_mask = sz_u64_clamp_mask_until_(tail_bytes - 64);
+            __m512i second_keystream = _mm512_xor_si512(_mm512_shuffle_epi8(second_counter, counter_swap),
+                                                        wide_keys_vec[0].zmm);
+            second_keystream = sz_aes256_rounds_wide_icelake_(second_keystream, wide_keys_vec);
+            __m512i const loaded = _mm512_maskz_loadu_epi8(second_mask, text + produced + 64);
+            __m512i const stored = _mm512_xor_si512(loaded, second_keystream);
+            _mm512_mask_storeu_epi8(output + produced + 64, second_mask, stored);
+            _mm512_store_si512(staged_bytes + 64, _mm512_mask_blend_epi64(cipher_mask, loaded, stored));
         }
         *accumulator_xmm = sz_ghash_absorb_blocks_icelake_(*accumulator_xmm, staged_bytes, tail_blocks, powers_high,
                                                            powers_low);
-        counters[0] = _mm512_add_epi32(counters[0], _mm512_maskz_set1_epi32((__mmask16)0x8888u, (int)tail_blocks));
+        first_counter = _mm512_add_epi32(first_counter, _mm512_maskz_set1_epi32((__mmask16)0x8888u, (int)tail_blocks));
     }
-    *counters_out = counters[0];
+    *counters_out = first_counter;
 }
 
 /**
@@ -749,10 +829,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *s
                                                 reverse_xmm);
     __m128i accumulator_xmm = _mm_shuffle_epi8(_mm_maskz_loadu_epi8((__mmask16)0xFFFFu, state->accumulator),
                                                reverse_xmm);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t lengths_vec;
-    sz_size_t byte_index;
 
     //  Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     //  or the message's own trailing ciphertext bytes otherwise.
@@ -762,10 +839,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *s
         accumulator_xmm = sz_ghash_multiply_icelake_(_mm_xor_si128(accumulator_xmm, padded_xmm), subkey_xmm);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator_xmm = sz_ghash_multiply_icelake_(
         _mm_xor_si128(accumulator_xmm, _mm_shuffle_epi8(lengths_vec.xmm, reverse_xmm)), subkey_xmm);
     _mm_mask_storeu_epi8(tag, (__mmask16)0xFFFFu,

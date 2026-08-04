@@ -3,6 +3,10 @@
  *  @file include/stringzilla/cipher/v128relaxed.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  The round loop stays a loop here for the reason spelled out in `cipher/v128.h`: with no cipher
+ *  instruction to keep fed, the round body is a forty-operation emulated substitution, so unrolling
+ *  would multiply the module size and buy no throughput.
  */
 #ifndef STRINGZILLA_CIPHER_V128RELAXED_H_
 #define STRINGZILLA_CIPHER_V128RELAXED_H_

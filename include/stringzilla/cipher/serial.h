@@ -260,6 +260,30 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_
 }
 
 /**
+ *  @brief Fills the closing hash block with the associated-data and message bit lengths, big-endian.
+ *  @param lengths_vec Receives the sixteen bytes.
+ *  @param associated_length Bytes of associated data absorbed.
+ *  @param text_length Bytes of message absorbed.
+ *
+ *  Every backend closes its hash with this block, so it lives here rather than eight times over. Both
+ *  words go in through the union's `u64s[]` as two byte-reverses and two stores. Written byte by byte
+ *  the shift-and-truncate pattern is only recognised as a byteswap by GCC on x86: clang emitted about
+ *  thirty-five instructions for it, GCC on aarch64 about thirty, and the union then took a
+ *  store-forwarding stall when the vector load read back what the scalar stores had just written.
+ */
+SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, sz_u64_t associated_length,
+                                                    sz_u64_t text_length) {
+    sz_u64_t const associated_bits = associated_length * 8, text_bits = text_length * 8;
+#if SZ_IS_BIG_ENDIAN_
+    lengths_vec->u64s[0] = associated_bits;
+    lengths_vec->u64s[1] = text_bits;
+#else
+    lengths_vec->u64s[0] = sz_u64_bytes_reverse(associated_bits);
+    lengths_vec->u64s[1] = sz_u64_bytes_reverse(text_bits);
+#endif
+}
+
+/**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
  *  Ordinary stores followed by one barrier, rather than writes through a `volatile` view: `volatile`
@@ -390,20 +414,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *sta
 /** @brief Pads whatever is still pending, folds in the length block, and masks out the tag. */
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_serial_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     sz_aes256_gcm_state_t finishing = *state;
-    sz_u8_t lengths[16];
-    sz_u64_t const associated_bits = finishing.associated_length * 8;
-    sz_u64_t const text_bits = finishing.text_length * 8;
+    sz_u128_vec_t lengths_vec;
     sz_size_t byte_index;
 
     // Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     // or the message's own trailing ciphertext bytes otherwise.
     sz_aes256_gcm_flush_partial_serial_(&finishing);
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
-    sz_ghash_absorb_serial_(finishing.accumulator, lengths, finishing.key.powers);
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, finishing.associated_length, finishing.text_length);
+    sz_ghash_absorb_serial_(finishing.accumulator, lengths_vec.u8s, finishing.key.powers);
 
     for (byte_index = 0; byte_index != 16; ++byte_index)
         tag[byte_index] = (sz_u8_t)(finishing.accumulator[byte_index] ^ finishing.tag_mask[byte_index]);

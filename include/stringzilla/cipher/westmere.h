@@ -3,6 +3,14 @@
  *  @file include/stringzilla/cipher/westmere.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  The fourteen AES rounds are written out rather than driven by a loop over the round index. A round
+ *  loop leaves the unrolling to the optimizer, which only does it reliably at `-O3` — GCC 15 emitted 35
+ *  AES round instructions across the x86 cipher surface at `-O2` against 390 at `-O3`, because a
+ *  thirteen-iteration body exceeds the completely-peel budget at the lower level. Since `SZ_API_COMPTIME`
+ *  kernels are `static inline` and compile into whichever translation unit consumes them, a looped
+ *  kernel makes its own throughput a property of the caller's build flags. See `cipher/icelake.h`, where
+ *  the same change was worth 2.1x to 2.9x at `-O2` and nothing at all at `-O3`.
  */
 #ifndef STRINGZILLA_CIPHER_WESTMERE_H_
 #define STRINGZILLA_CIPHER_WESTMERE_H_
@@ -113,11 +121,29 @@ SZ_HELPER_INLINE __m128i sz_aes256_round_key_westmere_(sz_aes256_key_t const *ke
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const *key, __m128i block) {
-    sz_size_t round_index;
     block = _mm_xor_si128(block, sz_aes256_round_key_westmere_(key, 0));
-    for (round_index = 1; round_index != 14; ++round_index)
-        block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, round_index));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 1));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 2));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 3));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 4));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 5));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 6));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 7));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 8));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 9));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 10));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 11));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 12));
+    block = _mm_aesenc_si128(block, sz_aes256_round_key_westmere_(key, 13));
     return _mm_aesenclast_si128(block, sz_aes256_round_key_westmere_(key, 14));
+}
+
+/** @brief Applies one middle round to all four chains, so the four issue back to back. */
+SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec, __m128i round_key) {
+    blocks_vec->xmms[0] = _mm_aesenc_si128(blocks_vec->xmms[0], round_key);
+    blocks_vec->xmms[1] = _mm_aesenc_si128(blocks_vec->xmms[1], round_key);
+    blocks_vec->xmms[2] = _mm_aesenc_si128(blocks_vec->xmms[2], round_key);
+    blocks_vec->xmms[3] = _mm_aesenc_si128(blocks_vec->xmms[3], round_key);
 }
 
 /**
@@ -132,19 +158,26 @@ SZ_HELPER_INLINE __m128i sz_aes256_block_encrypt_westmere_(sz_aes256_key_t const
 SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_t const *key,
                                                                   sz_u512_vec_t blocks_vec) {
     __m128i round_key = sz_aes256_round_key_westmere_(key, 0);
-    sz_size_t round_index;
 
     blocks_vec.xmms[0] = _mm_xor_si128(blocks_vec.xmms[0], round_key);
     blocks_vec.xmms[1] = _mm_xor_si128(blocks_vec.xmms[1], round_key);
     blocks_vec.xmms[2] = _mm_xor_si128(blocks_vec.xmms[2], round_key);
     blocks_vec.xmms[3] = _mm_xor_si128(blocks_vec.xmms[3], round_key);
-    for (round_index = 1; round_index != 14; ++round_index) {
-        round_key = sz_aes256_round_key_westmere_(key, round_index);
-        blocks_vec.xmms[0] = _mm_aesenc_si128(blocks_vec.xmms[0], round_key);
-        blocks_vec.xmms[1] = _mm_aesenc_si128(blocks_vec.xmms[1], round_key);
-        blocks_vec.xmms[2] = _mm_aesenc_si128(blocks_vec.xmms[2], round_key);
-        blocks_vec.xmms[3] = _mm_aesenc_si128(blocks_vec.xmms[3], round_key);
-    }
+    // The thirteen middle rounds are written out rather than looped, because a loop leaves the
+    // unrolling to the optimizer and the optimizer only does it at `-O3`.
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 1));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 2));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 3));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 4));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 5));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 6));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 7));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 8));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 9));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 10));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 11));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 12));
+    sz_aes256_blocks_round_westmere_(&blocks_vec, sz_aes256_round_key_westmere_(key, 13));
     round_key = sz_aes256_round_key_westmere_(key, 14);
     blocks_vec.xmms[0] = _mm_aesenclast_si128(blocks_vec.xmms[0], round_key);
     blocks_vec.xmms[1] = _mm_aesenclast_si128(blocks_vec.xmms[1], round_key);
@@ -625,8 +658,6 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const
                                                      sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const subkey = sz_ghash_load_westmere_(state->key.powers);
     __m128i accumulator = sz_ghash_load_westmere_(state->accumulator);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t lengths_vec;
     sz_size_t byte_index;
 
@@ -640,10 +671,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_westmere_(sz_aes256_gcm_state_t const
         accumulator = sz_ghash_absorb_westmere_(accumulator, sz_ghash_reflect_westmere_(padded_vec.xmm), subkey);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator = sz_ghash_absorb_westmere_(accumulator, sz_ghash_reflect_westmere_(lengths_vec.xmm), subkey);
 
     _mm_storeu_si128((__m128i *)tag, _mm_xor_si128(sz_ghash_reflect_westmere_(accumulator),

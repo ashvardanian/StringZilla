@@ -3,6 +3,13 @@
  *  @file include/stringzilla/cipher/powervsx.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  The fourteen AES rounds are written out rather than driven by a loop over the round index, for the
+ *  same reason the eight lanes are. A round loop leaves the unrolling to the optimizer, which only does
+ *  it reliably at `-O3`, and `SZ_API_COMPTIME` kernels are `static inline` and compile into whichever
+ *  translation unit consumes them — so a looped kernel makes its own throughput a property of the
+ *  caller's build flags. See `cipher/icelake.h`, where the same change was worth 2.1x to 2.9x at `-O2`
+ *  and nothing at all at `-O3`.
  */
 #ifndef STRINGZILLA_CIPHER_POWERVSX_H_
 #define STRINGZILLA_CIPHER_POWERVSX_H_
@@ -210,6 +217,19 @@ SZ_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t c
 
 #pragma region Block Encryption
 
+/** @brief Applies one middle round to all eight chains, so the eight issue back to back. */
+SZ_HELPER_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigned char *blocks_vec,
+                                                       __vector unsigned char round_key_vec) {
+    blocks_vec[0] = vec_cipher_be(blocks_vec[0], round_key_vec);
+    blocks_vec[1] = vec_cipher_be(blocks_vec[1], round_key_vec);
+    blocks_vec[2] = vec_cipher_be(blocks_vec[2], round_key_vec);
+    blocks_vec[3] = vec_cipher_be(blocks_vec[3], round_key_vec);
+    blocks_vec[4] = vec_cipher_be(blocks_vec[4], round_key_vec);
+    blocks_vec[5] = vec_cipher_be(blocks_vec[5], round_key_vec);
+    blocks_vec[6] = vec_cipher_be(blocks_vec[6], round_key_vec);
+    blocks_vec[7] = vec_cipher_be(blocks_vec[7], round_key_vec);
+}
+
 /**
  *  @brief Encrypts one block with the expanded schedule.
  *  @param key The expanded schedule.
@@ -218,10 +238,20 @@ SZ_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t c
  */
 SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes256_key_t const *key,
                                                                           __vector unsigned char block_vec) {
-    sz_size_t round_index;
     block_vec = vec_xor(block_vec, sz_aes256_round_key_powervsx_(key, 0));
-    for (round_index = 1; round_index != 14; ++round_index)
-        block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, round_index));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 1));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 2));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 3));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 4));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 5));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 6));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 7));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 8));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 9));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 10));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 11));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 12));
+    block_vec = vec_cipher_be(block_vec, sz_aes256_round_key_powervsx_(key, 13));
     return vec_cipherlast_be(block_vec, sz_aes256_round_key_powervsx_(key, 14));
 }
 
@@ -236,12 +266,13 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes
  *
  *  The lanes are written out rather than counted through, because a loop over the group keeps its
  *  subscript live and the compiler then holds the group in memory, storing and reloading all eight blocks
- *  once per round. Constant subscripts let it scalarize the group into eight registers instead.
+ *  once per round. Constant subscripts let it scalarize the group into eight registers instead. The
+ *  rounds are written out for the same reason the lanes are, and because a loop leaves the unrolling to
+ *  the optimizer, which only does it at `-O3`.
  */
 SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *key,
                                                          __vector unsigned char *blocks_vec) {
     __vector unsigned char round_key_vec = sz_aes256_round_key_powervsx_(key, 0);
-    sz_size_t round_index;
 
     blocks_vec[0] = vec_xor(blocks_vec[0], round_key_vec);
     blocks_vec[1] = vec_xor(blocks_vec[1], round_key_vec);
@@ -251,17 +282,19 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *
     blocks_vec[5] = vec_xor(blocks_vec[5], round_key_vec);
     blocks_vec[6] = vec_xor(blocks_vec[6], round_key_vec);
     blocks_vec[7] = vec_xor(blocks_vec[7], round_key_vec);
-    for (round_index = 1; round_index != 14; ++round_index) {
-        round_key_vec = sz_aes256_round_key_powervsx_(key, round_index);
-        blocks_vec[0] = vec_cipher_be(blocks_vec[0], round_key_vec);
-        blocks_vec[1] = vec_cipher_be(blocks_vec[1], round_key_vec);
-        blocks_vec[2] = vec_cipher_be(blocks_vec[2], round_key_vec);
-        blocks_vec[3] = vec_cipher_be(blocks_vec[3], round_key_vec);
-        blocks_vec[4] = vec_cipher_be(blocks_vec[4], round_key_vec);
-        blocks_vec[5] = vec_cipher_be(blocks_vec[5], round_key_vec);
-        blocks_vec[6] = vec_cipher_be(blocks_vec[6], round_key_vec);
-        blocks_vec[7] = vec_cipher_be(blocks_vec[7], round_key_vec);
-    }
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 1));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 2));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 3));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 4));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 5));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 6));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 7));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 8));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 9));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 10));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 11));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 12));
+    sz_aes256_blocks_round_powervsx_(blocks_vec, sz_aes256_round_key_powervsx_(key, 13));
     round_key_vec = sz_aes256_round_key_powervsx_(key, 14);
     blocks_vec[0] = vec_cipherlast_be(blocks_vec[0], round_key_vec);
     blocks_vec[1] = vec_cipherlast_be(blocks_vec[1], round_key_vec);
@@ -900,10 +933,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *s
 SZ_HELPER_AUTO void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     __vector unsigned char const subkey_vec = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char accumulator_vec = sz_aes256_block_load_powervsx_(state->accumulator);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t lengths_vec;
-    sz_size_t byte_index;
 
     //  Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     //  or the message's own trailing ciphertext bytes otherwise.
@@ -911,10 +941,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *
         accumulator_vec = sz_aes256_gcm_flush_partial_powervsx_(state->partial, state->buffered, accumulator_vec,
                                                                 subkey_vec);
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator_vec = sz_ghash_absorb_powervsx_(accumulator_vec, sz_aes256_block_load_powervsx_(lengths_vec.u8s),
                                                 subkey_vec);
 

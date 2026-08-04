@@ -3,6 +3,15 @@
  *  @file include/stringzilla/cipher/v128.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  Every other backend writes its fourteen AES rounds out rather than looping over the round index,
+ *  because a loop leaves the unrolling to the optimizer and the optimizer only does it at `-O3`. This
+ *  backend keeps the loop, and the difference is the round body. Elsewhere a round is one instruction on
+ *  a dedicated cipher unit with several cycles of latency, so unrolling is what keeps that unit fed.
+ *  Here there is no cipher instruction at all: a round is a tower-field substitution of some forty
+ *  operations, long enough that the loop overhead rounds to nothing and short enough on latency that
+ *  there is no stall to hide. Unrolling would multiply the module by thirteen and buy no throughput.
+ *  The cost worth attacking in this file is the operation count itself, not the loop around it.
  */
 #ifndef STRINGZILLA_CIPHER_V128_H_
 #define STRINGZILLA_CIPHER_V128_H_
@@ -734,8 +743,6 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128_(sz_aes256_gcm_state_t *state
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_v128_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     v128_t const subkey_vec = wasm_v128_load(state->key.powers);
     v128_t accumulator_vec = wasm_v128_load(state->accumulator);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t lengths_vec;
     sz_size_t byte_index;
 
@@ -749,10 +756,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_v128_(sz_aes256_gcm_state_t const *st
         accumulator_vec = sz_ghash_absorb_v128_(accumulator_vec, padded_vec.v128, subkey_vec);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator_vec = sz_ghash_absorb_v128_(accumulator_vec, lengths_vec.v128, subkey_vec);
 
     wasm_v128_store(tag, wasm_v128_xor(accumulator_vec, wasm_v128_load(state->tag_mask)));

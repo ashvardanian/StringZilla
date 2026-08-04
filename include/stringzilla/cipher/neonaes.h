@@ -3,6 +3,13 @@
  *  @file include/stringzilla/cipher/neonaes.h
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
+ *
+ *  The fourteen AES rounds are written out rather than driven by a loop over the round index. A round
+ *  loop leaves the unrolling to the optimizer, which only does it reliably at `-O3` — GCC 15 emitted 85
+ *  AES round instructions across this backend at `-O2` against 530 at `-O3`. Since `SZ_API_COMPTIME`
+ *  kernels are `static inline` and compile into whichever translation unit consumes them, a looped
+ *  kernel makes its own throughput a property of the caller's build flags. See `cipher/icelake.h`, where
+ *  the same change was worth 2.1x to 2.9x at `-O2` and nothing at all at `-O3`.
  */
 #ifndef STRINGZILLA_CIPHER_NEONAES_H_
 #define STRINGZILLA_CIPHER_NEONAES_H_
@@ -187,11 +194,33 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_round_key_neonaes_(sz_aes256_key_t const *
  *  @return The ciphertext block.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t block_u8x16) {
-    sz_size_t round_index;
-    for (round_index = 0; round_index != 13; ++round_index)
-        block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, round_index)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 0)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 1)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 2)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 3)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 4)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 5)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 6)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 7)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 8)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 9)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 10)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 11)));
+    block_u8x16 = vaesmcq_u8(vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 12)));
     block_u8x16 = vaeseq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 13));
     return veorq_u8(block_u8x16, sz_aes256_round_key_neonaes_(key, 14));
+}
+
+/** @brief Applies one fused round to all eight chains, so the eight issue back to back. */
+SZ_HELPER_INLINE void sz_aes256_blocks_round_neonaes_(uint8x16_t *blocks_u8x16, uint8x16_t round_key_u8x16) {
+    blocks_u8x16[0] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[0], round_key_u8x16));
+    blocks_u8x16[1] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[1], round_key_u8x16));
+    blocks_u8x16[2] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[2], round_key_u8x16));
+    blocks_u8x16[3] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[3], round_key_u8x16));
+    blocks_u8x16[4] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[4], round_key_u8x16));
+    blocks_u8x16[5] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[5], round_key_u8x16));
+    blocks_u8x16[6] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[6], round_key_u8x16));
+    blocks_u8x16[7] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[7], round_key_u8x16));
 }
 
 /**
@@ -205,19 +234,22 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_block_encrypt_neonaes_(sz_aes256_key_t con
  */
 SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *key, uint8x16_t *blocks_u8x16) {
     uint8x16_t round_key_u8x16;
-    sz_size_t round_index;
 
-    for (round_index = 0; round_index != 13; ++round_index) {
-        round_key_u8x16 = sz_aes256_round_key_neonaes_(key, round_index);
-        blocks_u8x16[0] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[0], round_key_u8x16));
-        blocks_u8x16[1] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[1], round_key_u8x16));
-        blocks_u8x16[2] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[2], round_key_u8x16));
-        blocks_u8x16[3] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[3], round_key_u8x16));
-        blocks_u8x16[4] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[4], round_key_u8x16));
-        blocks_u8x16[5] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[5], round_key_u8x16));
-        blocks_u8x16[6] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[6], round_key_u8x16));
-        blocks_u8x16[7] = vaesmcq_u8(vaeseq_u8(blocks_u8x16[7], round_key_u8x16));
-    }
+    // The thirteen fused rounds are written out rather than looped, because a loop leaves the
+    // unrolling to the optimizer and the optimizer only does it at `-O3`.
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 0));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 1));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 2));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 3));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 4));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 5));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 6));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 7));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 8));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 9));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 10));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 11));
+    sz_aes256_blocks_round_neonaes_(blocks_u8x16, sz_aes256_round_key_neonaes_(key, 12));
 
     round_key_u8x16 = sz_aes256_round_key_neonaes_(key, 13);
     blocks_u8x16[0] = vaeseq_u8(blocks_u8x16[0], round_key_u8x16);
@@ -794,8 +826,6 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
 SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
     uint8x16_t accumulator_u8x16 = sz_ghash_load_neonaes_(state->accumulator);
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     sz_u128_vec_t lengths_vec;
     sz_size_t byte_index;
 
@@ -810,10 +840,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const 
                                                      subkey_u8x16);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        lengths_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        lengths_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
     accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_reflect_neonaes_(lengths_vec.u8x16),
                                                  subkey_u8x16);
 

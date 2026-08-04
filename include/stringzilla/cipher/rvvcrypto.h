@@ -16,6 +16,12 @@
  *  a block is one instruction with no reduction left to defer, so the hash is a plain serial chain over
  *  `powers[0 .. 16)`, which is `H^1`. The remaining seven powers are never read.
  *
+ *  The fourteen rounds are written out rather than driven by a loop over the round index. A round loop
+ *  leaves the unrolling to the optimizer, which only does it reliably at `-O3`, and `SZ_API_COMPTIME`
+ *  kernels are `static inline` and compile into whichever translation unit consumes them — so a looped
+ *  kernel makes its own throughput a property of the caller's build flags. See `cipher/icelake.h`, where
+ *  the same change was worth 2.1x to 2.9x at `-O2` and nothing at all at `-O3`.
+ *
  *  Aggregating across element groups is expressible, since a wide `vgmul.vv` multiplies every 128-bit
  *  group of a register at once, but it does not pay. Folding `N` products back into one accumulator costs
  *  a descending-power gather plus `2 log2(N)` slide and exclusive-or instructions on top of the multiply,
@@ -166,14 +172,39 @@ SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t 
  *  @param block_u32m1 The 16 plaintext bytes.
  *  @return The 16 ciphertext bytes.
  */
+/** @brief Applies one middle round to a single block, reading its round key from the schedule. */
+SZ_HELPER_INLINE vuint32m1_t sz_aes256_round_rvvcrypto_(vuint32m1_t block_u32m1, sz_u32_t const *round_key,
+                                                        sz_size_t vector_length) {
+    return __riscv_vaesem_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(round_key, vector_length), vector_length);
+}
+
+/** @brief Applies one middle round to every element group, broadcasting its round key across them. */
+SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_u32m4, sz_u32_t const *round_key,
+                                                             vuint32m4_t broadcast_offsets_u32m4,
+                                                             sz_size_t vector_length) {
+    return __riscv_vaesem_vv_u32m4(
+        blocks_u32m4, __riscv_vluxei32_v_u32m4(round_key, broadcast_offsets_u32m4, vector_length), vector_length);
+}
+
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m1_t block_u32m1) {
     sz_size_t const vector_length = 4;
-    sz_size_t round_index;
-    block_u32m1 = __riscv_vxor_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(key->round_keys, vector_length),
+    block_u32m1 = __riscv_vxor_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(key->round_keys + 0, vector_length),
                                         vector_length);
-    for (round_index = 1; round_index != 14; ++round_index)
-        block_u32m1 = __riscv_vaesem_vv_u32m1(
-            block_u32m1, __riscv_vle32_v_u32m1(key->round_keys + round_index * 4, vector_length), vector_length);
+    // The thirteen middle rounds are written out rather than looped, because a loop leaves the
+    // unrolling to the optimizer and the optimizer only does it at `-O3`.
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 4, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 8, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 12, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 16, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 20, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 24, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 28, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 32, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 36, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 40, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 44, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 48, vector_length);
+    block_u32m1 = sz_aes256_round_rvvcrypto_(block_u32m1, key->round_keys + 52, vector_length);
     return __riscv_vaesef_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(key->round_keys + 56, vector_length),
                                    vector_length);
 }
@@ -189,14 +220,35 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t 
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_blocks_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m4_t blocks_u32m4,
                                                                  vuint32m4_t broadcast_offsets_u32m4,
                                                                  sz_size_t vector_length) {
-    sz_size_t round_index;
     blocks_u32m4 = __riscv_vxor_vv_u32m4(
         blocks_u32m4, __riscv_vluxei32_v_u32m4(key->round_keys, broadcast_offsets_u32m4, vector_length), vector_length);
-    for (round_index = 1; round_index != 14; ++round_index)
-        blocks_u32m4 = __riscv_vaesem_vv_u32m4(
-            blocks_u32m4,
-            __riscv_vluxei32_v_u32m4(key->round_keys + round_index * 4, broadcast_offsets_u32m4, vector_length),
-            vector_length);
+    // Written out rather than looped, for the same reason as the single-block path above.
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 4, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 8, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 12, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 16, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 20, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 24, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 28, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 32, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 36, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 40, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 44, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 48, broadcast_offsets_u32m4,
+                                                   vector_length);
+    blocks_u32m4 = sz_aes256_round_wide_rvvcrypto_(blocks_u32m4, key->round_keys + 52, broadcast_offsets_u32m4,
+                                                   vector_length);
     return __riscv_vaesef_vv_u32m4(
         blocks_u32m4, __riscv_vluxei32_v_u32m4(key->round_keys + 56, broadcast_offsets_u32m4, vector_length),
         vector_length);
@@ -589,8 +641,6 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
  *  @param tag Receives the 16 authentication bytes.
  */
 SZ_HELPER_AUTO void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const *state, sz_u8_t tag[sz_at_least_(16)]) {
-    sz_u64_t const associated_bits = state->associated_length * 8;
-    sz_u64_t const text_bits = state->text_length * 8;
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_u128_vec_t staged_block_vec;
@@ -607,10 +657,7 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const 
             accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(staged_block_vec.u8s), subkey_u32m1);
     }
 
-    for (byte_index = 0; byte_index != 8; ++byte_index) {
-        staged_block_vec.u8s[byte_index] = (sz_u8_t)(associated_bits >> (56 - byte_index * 8));
-        staged_block_vec.u8s[8 + byte_index] = (sz_u8_t)(text_bits >> (56 - byte_index * 8));
-    }
+    sz_aes256_gcm_lengths_serial_(&staged_block_vec, state->associated_length, state->text_length);
     accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(accumulator_u32m1,
                                                    sz_aes256_block_load_rvvcrypto_(staged_block_vec.u8s), subkey_u32m1);
     accumulator_u32m1 = __riscv_vxor_vv_u32m1(accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(state->tag_mask), 4);
