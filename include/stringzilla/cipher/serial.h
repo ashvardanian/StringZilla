@@ -15,6 +15,18 @@
 extern "C" {
 #endif
 
+/*  Optimize this tier for size. The round function is a table-driven scalar loop that no amount of
+ *  unrolling makes competitive with AES-NI, so what it expands into is pure footprint - 41 KB of
+ *  `.text` under GCC, 6 KB under Clang, against 3 KB apiece once the compilers stop widening it.
+ *  The scope is exact: the annotation reaches functions alone, leaving the types and tables untouched,
+ *  and neither compiler moves a byte of the vector backends that include them. */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((minsize)), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
+
 /*  This backend exists so every target has a correct implementation, and so the vector backends have a
  *  reference to be differentiated against. It is not the fast path anywhere.
  *
@@ -514,6 +526,12 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t con
 }
 
 #pragma endregion // One Shot Interface
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 
 #ifdef __cplusplus
 }

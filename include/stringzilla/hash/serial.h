@@ -15,6 +15,18 @@
 extern "C" {
 #endif
 
+/*  Optimize this tier for size. It emulates the AES round in scalar code and runs only where no AES
+ *  instruction exists, so what the unrolled form buys is footprint rather than throughput - 78 KB of
+ *  `.text` under GCC, 15 KB under Clang, against 7 KB and 6 KB once the compilers stop widening it.
+ *  The scope is exact: the annotation reaches functions alone, leaving the state types below and the
+ *  tables untouched, and neither compiler moves a byte of the vector backends that include them. */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((minsize)), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC optimize("Os")
+#endif
+
 /**
  *  @brief Internal aligned working states for hashing - the vector-typed counterparts of the packed public
  *         `sz_hash_state_t`. `sz_hash_state_aligned_t` is the full four-lane state; `sz_hash_state_aligned_for_short_t`
@@ -950,6 +962,12 @@ SZ_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u
             *text++ = generated_vec.u8s[byte_index];
     }
 }
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 
 #ifdef __cplusplus
 }
