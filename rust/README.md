@@ -489,9 +489,17 @@ assert_eq!(seen.len(), 2);
 ### SHA-256 and HMAC
 
 `hmac_sha256` computes a keyed HMAC-SHA-256 over a message, returning a 32-byte tag.
+`hmac_sha256_multistate` authenticates many messages under one key at once — a batch of tokens or webhook bodies sharing a secret — running both the message pass and HMAC's outer wrap through the lane-parallel kernels.
+It allocates nothing, so it works under `no_std`: `states` is scratch of one state per message, reused for both passes, and only `tags` is written for keeps.
 
 ```rust
-pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32];
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> Sha256Digest;
+pub fn hmac_sha256_multistate<Element: AsRef<[u8]>>(
+    key: &[u8],
+    messages: &[Element],
+    states: &mut [Sha256],
+    tags: &mut [Sha256Digest],
+) -> Result<(), Status>;
 ```
 
 `Sha256` supports one-shot and incremental hashing, returning a 32-byte digest:

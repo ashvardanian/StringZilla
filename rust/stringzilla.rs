@@ -277,6 +277,9 @@ pub struct Hasher {
 /// Bytes in a SHA256 digest, fixed by FIPS 180-4.
 pub const SHA256_DIGEST_LENGTH: usize = 32;
 
+/// Bytes in a SHA256 message block, fixed by FIPS 180-4.
+pub const SHA256_BLOCK_LENGTH: usize = 64;
+
 /// One SHA256 digest, as produced by [`Sha256::digest`] and [`sha256_multistate_digest`].
 pub type Sha256Digest = [u8; SHA256_DIGEST_LENGTH];
 
@@ -993,35 +996,112 @@ pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest])
 /// let mac = hmac_sha256(key, message);
 /// assert_eq!(mac.len(), 32);
 /// ```
-pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
-    // Prepare key: hash if > 64 bytes, zero-pad to 64 bytes
-    let mut key_pad = [0u8; 64];
-    if key.len() > 64 {
-        let key_hash = Sha256::hash(key);
-        key_pad[..32].copy_from_slice(&key_hash);
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> Sha256Digest {
+    let (mut inner, outer) = _hmac_sha256_primed(key);
+    inner.update(message);
+    _hmac_sha256_wrap(&inner, &outer)
+}
+
+/// Primes the inner and outer states with the HMAC key pads, per FIPS 198-1.
+///
+/// The message enters only the inner hash, as the suffix of the ipad block, so authenticating many
+/// messages under one key is as lane-parallel as digesting them: prime once, then broadcast.
+fn _hmac_sha256_primed(key: &[u8]) -> (Sha256, Sha256) {
+    // Keys longer than one block are replaced by their digest; shorter ones are zero-padded.
+    let mut key_pad = [0u8; SHA256_BLOCK_LENGTH];
+    if key.len() > SHA256_BLOCK_LENGTH {
+        key_pad[..SHA256_DIGEST_LENGTH].copy_from_slice(&Sha256::hash(key));
     } else {
         key_pad[..key.len()].copy_from_slice(key);
     }
 
-    // Compute inner hash: SHA256((key ^ 0x36) || message)
-    let mut inner_hasher = Sha256::new();
-    let mut inner_pad = [0u8; 64];
-    for i in 0..64 {
-        inner_pad[i] = key_pad[i] ^ 0x36;
+    let mut block = [0u8; SHA256_BLOCK_LENGTH];
+    let mut inner = Sha256::new();
+    for byte_index in 0..SHA256_BLOCK_LENGTH {
+        block[byte_index] = key_pad[byte_index] ^ 0x36;
     }
-    inner_hasher.update(&inner_pad);
-    inner_hasher.update(message);
-    let inner_hash = inner_hasher.digest();
+    inner.update(&block);
 
-    // Compute outer hash: SHA256((key ^ 0x5c) || inner_hash)
-    let mut outer_hasher = Sha256::new();
-    let mut outer_pad = [0u8; 64];
-    for i in 0..64 {
-        outer_pad[i] = key_pad[i] ^ 0x5c;
+    let mut outer = Sha256::new();
+    for byte_index in 0..SHA256_BLOCK_LENGTH {
+        block[byte_index] = key_pad[byte_index] ^ 0x5c;
     }
-    outer_hasher.update(&outer_pad);
-    outer_hasher.update(&inner_hash);
-    outer_hasher.digest()
+    outer.update(&block);
+
+    // The pads are derived from the secret, so don't leave them on the stack for the next frame. The
+    // writes are volatile because nothing reads them afterwards and a plain assignment is a dead store.
+    unsafe {
+        core::ptr::write_volatile(&mut key_pad, [0u8; SHA256_BLOCK_LENGTH]);
+        core::ptr::write_volatile(&mut block, [0u8; SHA256_BLOCK_LENGTH]);
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    (inner, outer)
+}
+
+/// Wraps the inner state's digest with the primed outer state, completing one tag.
+fn _hmac_sha256_wrap(inner: &Sha256, outer: &Sha256) -> Sha256Digest {
+    let mut wrapping = *outer;
+    wrapping.update(&inner.digest());
+    wrapping.digest()
+}
+
+/// Authenticates many messages under one key at once, one message per lane.
+///
+/// Authenticating one message is a serial dependency chain, but independent messages compress in
+/// parallel lanes - sixteen at a time on AVX-512, eight on AVX2 - and both the message pass and HMAC's
+/// outer wrap ride those same kernels. Intended for batches of short messages, such as tokens or
+/// webhook bodies sharing a secret; there is no streaming form, since the message never spans calls.
+///
+/// Borrows the caller's storage throughout and allocates nothing, so it works under `no_std`. `states`
+/// is scratch of one state per message, reused for both passes; only `tags` is written for keeps.
+///
+/// # Errors
+///
+/// Returns [`Status::BadAlloc`] unless `messages`, `states` and `tags` all have the same length.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::stringzilla as sz;
+///
+/// let messages: Vec<String> = vec!["alpha".into(), "beta".into()];
+/// let mut states = vec![sz::Sha256::new(); messages.len()];
+/// let mut tags = vec![[0u8; 32]; messages.len()];
+///
+/// sz::hmac_sha256_multistate(b"secret", &messages, &mut states, &mut tags).unwrap();
+/// assert_eq!(tags[0], sz::hmac_sha256(b"secret", b"alpha"));
+/// ```
+pub fn hmac_sha256_multistate<Element: AsRef<[u8]>>(
+    key: &[u8],
+    messages: &[Element],
+    states: &mut [Sha256],
+    tags: &mut [Sha256Digest],
+) -> Result<(), Status> {
+    if messages.len() != states.len() || messages.len() != tags.len() {
+        return Err(Status::BadAlloc);
+    }
+    if messages.is_empty() {
+        return Ok(());
+    }
+
+    let (inner, outer) = _hmac_sha256_primed(key);
+    for state in states.iter_mut() {
+        *state = inner;
+    }
+    sha256_multistate_update(states, messages)?;
+    sha256_multistate_digest(states, tags)?;
+
+    // Second pass: every lane absorbs its own inner digest, read straight out of `tags`.
+    for state in states.iter_mut() {
+        *state = outer;
+    }
+    {
+        let inner_digests = &*tags;
+        sha256_multistate_update_by(states, |lane_index| &inner_digests[lane_index][..])?;
+    }
+
+    // Safe to overwrite in place: every inner digest has already been absorbed into its lane.
+    sha256_multistate_digest(states, tags)
 }
 
 /// Standard Hasher trait to interoperate with `std::collections`.
@@ -6074,6 +6154,39 @@ mod tests {
             0x97, 0xc4, 0x93, 0x71, 0x56, 0x53, 0xc6, 0xc7, 0x12, 0x14, 0x42, 0x92, 0xc5, 0xad,
         ];
         assert_eq!(mac, expected);
+    }
+
+    #[test]
+    fn hmac_sha256_multistate_matches_single() {
+        // Lane counts bracketing both vector widths, with ragged lengths, an empty message, and keys on
+        // either side of the one-block boundary where the key is replaced by its own digest.
+        for key_length in [0usize, 16, 64, 65, 200] {
+            let key: Vec<u8> = (0..key_length).map(|index| (index % 251) as u8).collect();
+            for lanes_count in [1usize, 7, 8, 9, 16, 17, 33] {
+                let messages: Vec<Vec<u8>> = (0..lanes_count)
+                    .map(|lane_index| vec![b'a' + (lane_index % 26) as u8; lane_index * 137 % 5000])
+                    .collect();
+
+                let mut states = vec![sz::Sha256::new(); lanes_count];
+                let mut tags = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; lanes_count];
+                sz::hmac_sha256_multistate(&key, &messages, &mut states, &mut tags).expect("one tag per message");
+
+                for lane_index in 0..lanes_count {
+                    assert_eq!(tags[lane_index], sz::hmac_sha256(&key, &messages[lane_index]));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hmac_sha256_multistate_size_checks() {
+        let messages: Vec<&[u8]> = vec![b"a".as_slice(), b"b".as_slice()];
+        let mut states = vec![sz::Sha256::new(); 2];
+        let mut too_few = vec![[0u8; sz::SHA256_DIGEST_LENGTH]; 1];
+        assert_eq!(
+            sz::hmac_sha256_multistate(b"k", &messages, &mut states, &mut too_few),
+            Err(sz::Status::BadAlloc)
+        );
     }
 
     #[test]
