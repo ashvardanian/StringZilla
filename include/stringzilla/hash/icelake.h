@@ -755,9 +755,10 @@ SZ_HELPER_AUTO void sz_sha256_process_block_icelake_(sz_u32_t hash[sz_at_least_(
 }
 
 SZ_API_COMPTIME void sz_sha256_state_init_icelake(sz_sha256_state_t *state_ptr) {
-    // Vectorize the load/store of 8x u32s using 1x 256-bit AVX load
+    // Vectorize the load/store of 8x u32s using 2x 128-bit SSE loads
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_lddqu_si256((__m256i const *)initial_hash));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_lddqu_si128((__m128i const *)&initial_hash[0]));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_lddqu_si128((__m128i const *)&initial_hash[4]));
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
@@ -782,15 +783,14 @@ SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr
     sz_size_t const body_length = length - head_length - tail_length;
 
     // Copy hash to aligned local buffer
-    sz_align_(32) sz_u32_t hash[8];
-    _mm256_store_si256((__m256i *)hash, _mm256_lddqu_si256((__m256i const *)state_ptr->hash));
+    sz_align_(16) sz_u32_t hash[8];
+    _mm_store_si128((__m128i *)&hash[0], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[0]));
+    _mm_store_si128((__m128i *)&hash[4], _mm_lddqu_si128((__m128i const *)&state_ptr->hash[4]));
 
     // Process head to complete the current block
     if (head_length) {
-        __mmask64 head_mask_m64 = sz_u64_clamp_mask_until_(head_length);
-        _mm512_mask_storeu_epi8(&state_ptr->block[state_ptr->block_length], head_mask_m64,
-                                _mm512_maskz_loadu_epi8(head_mask_m64, input));
-        state_ptr->block_length += head_length;
+        for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
+            state_ptr->block[state_ptr->block_length++] = input[byte_index];
         sz_sha256_process_block_icelake_(hash, state_ptr->block);
         state_ptr->block_length = 0;
         input += head_length;
@@ -802,14 +802,13 @@ SZ_API_COMPTIME void sz_sha256_state_update_icelake(sz_sha256_state_t *state_ptr
         sz_sha256_process_block_icelake_(hash, input);
 
     // Process tail (remaining bytes into block buffer)
-    if (tail_length) {
-        __mmask64 tail_mask_m64 = sz_u64_clamp_mask_until_(tail_length);
-        _mm512_mask_storeu_epi8(state_ptr->block, tail_mask_m64, _mm512_maskz_loadu_epi8(tail_mask_m64, input));
-        state_ptr->block_length = tail_length;
-    }
+    for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
+        state_ptr->block[byte_index] = input[byte_index];
+    state_ptr->block_length = tail_length;
 
     // Copy hash back
-    _mm256_storeu_si256((__m256i *)state_ptr->hash, _mm256_load_si256((__m256i const *)hash));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[0], _mm_load_si128((__m128i const *)&hash[0]));
+    _mm_storeu_si128((__m128i *)&state_ptr->hash[4], _mm_load_si128((__m128i const *)&hash[4]));
 }
 
 SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *state_ptr,
@@ -822,18 +821,24 @@ SZ_API_COMPTIME void sz_sha256_state_digest_icelake(sz_sha256_state_t const *sta
 
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (state.block_length > 56) {
-        // Zero remaining bytes using AVX-512 masked store
+        // Zero remaining bytes using 128-bit vectorized writes
         sz_size_t remaining = SZ_SHA256_BLOCK_LENGTH - state.block_length;
-        __mmask64 remaining_mask_m64 = sz_u64_clamp_mask_until_(remaining);
-        _mm512_mask_storeu_epi8(&state.block[state.block_length], remaining_mask_m64, _mm512_setzero_si512());
+        sz_size_t xmm_bytes = (remaining / 16) * 16;
+        for (sz_size_t byte_index = 0; byte_index < xmm_bytes; byte_index += 16)
+            _mm_storeu_si128((__m128i *)&state.block[state.block_length + byte_index], _mm_setzero_si128());
+        for (sz_size_t byte_index = xmm_bytes; byte_index < remaining; ++byte_index)
+            state.block[state.block_length + byte_index] = 0;
         sz_sha256_process_block_icelake_(state.hash, state.block);
         state.block_length = 0;
     }
 
-    // Pad with zeros until we have 56 bytes using AVX-512 masked store
+    // Pad with zeros until we have 56 bytes
     sz_size_t remaining = 56 - state.block_length;
-    __mmask64 remaining_mask_m64 = sz_u64_clamp_mask_until_(remaining);
-    _mm512_mask_storeu_epi8(&state.block[state.block_length], remaining_mask_m64, _mm512_setzero_si512());
+    sz_size_t xmm_bytes = (remaining / 16) * 16;
+    for (sz_size_t byte_index = 0; byte_index < xmm_bytes; byte_index += 16)
+        _mm_storeu_si128((__m128i *)&state.block[state.block_length + byte_index], _mm_setzero_si128());
+    for (sz_size_t byte_index = xmm_bytes; byte_index < remaining; ++byte_index)
+        state.block[state.block_length + byte_index] = 0;
 
     // Append the 64-bit length in bits (big-endian)
     sz_u64_t bit_length = state.total_length * 8;
