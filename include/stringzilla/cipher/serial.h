@@ -100,9 +100,17 @@ SZ_HELPER_INLINE void sz_aes256_substitute_and_shift_serial_(sz_u8_t const *bloc
         shifted[byte_index] = sbox[block[source_of[byte_index]]];
 }
 
+/**
+ *  @brief Smears the most significant bit of @p value across the whole byte.
+ *  @return All ones when the bit was set, all zeros otherwise.
+ *
+ *  Negating a zero-or-one replicates it, which is how a byte selects a value without a branch.
+ */
+SZ_HELPER_INLINE sz_u8_t sz_u8_top_bit_smear_(sz_u8_t value) { return (sz_u8_t)(0u - (sz_u8_t)(value >> 7)); }
+
 /** @brief Doubles a byte in `GF(2^8)` under the AES reduction polynomial. */
 SZ_HELPER_INLINE sz_u8_t sz_aes256_gf_double_serial_(sz_u8_t value) {
-    return (sz_u8_t)((sz_u8_t)(value << 1) ^ (sz_u8_t)(0x1Bu & (sz_u8_t)(0u - (sz_u8_t)(value >> 7))));
+    return (sz_u8_t)((sz_u8_t)(value << 1) ^ (sz_u8_t)(0x1Bu & sz_u8_top_bit_smear_(value)));
 }
 
 /**
@@ -125,12 +133,12 @@ SZ_HELPER_AUTO void sz_aes256_block_encrypt_serial_(sz_aes256_key_t const *key, 
         for (column_index = 0; column_index != 4; ++column_index) {
             sz_u8_t const *column = shifted + column_index * 4;
             sz_u8_t const parity = (sz_u8_t)(column[0] ^ column[1] ^ column[2] ^ column[3]);
-            sz_u8_t const first = column[0];
+            sz_u8_t const first_byte = column[0];
             sz_u8_t mixed[4];
             mixed[0] = (sz_u8_t)(column[0] ^ parity ^ sz_aes256_gf_double_serial_((sz_u8_t)(column[0] ^ column[1])));
             mixed[1] = (sz_u8_t)(column[1] ^ parity ^ sz_aes256_gf_double_serial_((sz_u8_t)(column[1] ^ column[2])));
             mixed[2] = (sz_u8_t)(column[2] ^ parity ^ sz_aes256_gf_double_serial_((sz_u8_t)(column[2] ^ column[3])));
-            mixed[3] = (sz_u8_t)(column[3] ^ parity ^ sz_aes256_gf_double_serial_((sz_u8_t)(column[3] ^ first)));
+            mixed[3] = (sz_u8_t)(column[3] ^ parity ^ sz_aes256_gf_double_serial_((sz_u8_t)(column[3] ^ first_byte)));
             for (byte_index = 0; byte_index != 4; ++byte_index) {
                 sz_size_t const target = column_index * 4 + byte_index;
                 sz_u32_t const round_key = key->round_keys[round_index * 4 + column_index];
@@ -401,9 +409,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *sta
         {
             sz_u8_t const plaintext_byte = input_bytes[produced];
             sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-            sz_u8_t const ciphertext = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
+            sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
             output_bytes[produced] = transformed;
-            sz_aes256_gcm_hash_byte_serial_(state, ciphertext);
+            sz_aes256_gcm_hash_byte_serial_(state, ciphertext_byte);
             ++state->keystream_used;
             ++state->text_length;
             ++produced;

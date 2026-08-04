@@ -4,12 +4,8 @@
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
  *
- *  The fourteen AES rounds are written out rather than driven by a loop over the round index. A round
- *  loop leaves the unrolling to the optimizer, which only does it reliably at `-O3` — GCC 15 emitted 85
- *  AES round instructions across this backend at `-O2` against 530 at `-O3`. Since `SZ_API_COMPTIME`
- *  kernels are `static inline` and compile into whichever translation unit consumes them, a looped
- *  kernel makes its own throughput a property of the caller's build flags. See `cipher/icelake.h`, where
- *  the same change was worth 2.1x to 2.9x at `-O2` and nothing at all at `-O3`.
+ *  The fourteen rounds are written out rather than looped, for the reason `cipher/icelake.h` spells out.
+ *  GCC 15 emitted 85 AES round instructions here at `-O2` against 530 at `-O3`.
  */
 #ifndef STRINGZILLA_CIPHER_NEONAES_H_
 #define STRINGZILLA_CIPHER_NEONAES_H_
@@ -282,11 +278,10 @@ SZ_HELPER_INLINE void sz_aes256_blocks_encrypt_neonaes_(sz_aes256_key_t const *k
  *  @return The counter block for index zero.
  */
 SZ_HELPER_INLINE uint8x16_t sz_aes256_counter_base_neonaes_(sz_u8_t const *nonce) {
-    sz_u128_vec_t base_vec;
-    sz_size_t byte_index;
-    base_vec.u8x16 = vdupq_n_u8(0);
-    for (byte_index = 0; byte_index != 12; ++byte_index) base_vec.u8s[byte_index] = nonce[byte_index];
-    return base_vec.u8x16;
+    // Only twelve bytes are readable and NEON has no masked load, so this reads eight then four.
+    uint8x16_t const leading_u8x16 = vcombine_u8(vld1_u8(nonce), vdup_n_u8(0));
+    return vreinterpretq_u8_u32(
+        vld1q_lane_u32((sz_u32_t const *)(void const *)(nonce + 8), vreinterpretq_u32_u8(leading_u8x16), 2));
 }
 
 /**
@@ -379,6 +374,20 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_reflect_neonaes_(uint8x16_t block_u8x16) {
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
     return sz_ghash_reflect_neonaes_(vld1q_u8(block));
+}
+
+/**
+ *  @brief Loads a pending block with everything past @p buffered forced to zero.
+ *  @param block A sixteen-byte field, so the full-width load is always safe.
+ *  @param buffered How many bytes are live, below sixteen.
+ *
+ *  A lane-identity compare rather than a byte loop, which the compilers lowered to branchy scalar
+ *  stores and a store-forwarding stall.
+ */
+SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, sz_size_t buffered) {
+    uint8x16_t const lane_ids_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const keep_u8x16 = vcltq_u8(lane_ids_u8x16, vdupq_n_u8((sz_u8_t)buffered));
+    return sz_ghash_reflect_neonaes_(vandq_u8(vld1q_u8(block), keep_u8x16));
 }
 
 /**
@@ -697,9 +706,9 @@ SZ_HELPER_INLINE uint8x16_t sz_aes256_gcm_spend_neonaes_(sz_aes256_gcm_state_t *
     for (byte_index = 0; byte_index != count; ++byte_index) {
         sz_u8_t const plaintext_byte = input[byte_index];
         sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-        sz_u8_t const ciphertext = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
+        sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
         output[byte_index] = transformed;
-        state->partial[state->buffered] = ciphertext;
+        state->partial[state->buffered] = ciphertext_byte;
         ++state->buffered;
         ++state->keystream_used;
         if (state->buffered == SZ_AES_BLOCK_LENGTH) {
@@ -734,7 +743,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
     sz_u128_vec_t counter_vec;
     uint8x16_t accumulator_u8x16;
     sz_u32_t block_index;
-    sz_size_t produced = 0, byte_index, lane_index;
+    sz_size_t produced = 0, lane_index;
 
     if (length == 0) return;
     sz_ghash_descending_powers_neonaes_(state->key.powers, powers_u8x16);
@@ -742,12 +751,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_neonaes_(sz_aes256_gcm_state_t *st
 
     // Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && state->buffered != 0) {
-        sz_u128_vec_t padded_vec;
-        padded_vec.u8x16 = vld1q_u8(state->partial);
-        for (byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
-            padded_vec.u8s[byte_index] = 0;
-        accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_reflect_neonaes_(padded_vec.u8x16),
-                                                     subkey_u8x16);
+        accumulator_u8x16 = sz_ghash_absorb_neonaes_(
+            accumulator_u8x16, sz_ghash_load_padded_neonaes_(state->partial, state->buffered), subkey_u8x16);
         state->buffered = 0;
     }
 
@@ -827,17 +832,12 @@ SZ_HELPER_INLINE void sz_aes256_gcm_digest_neonaes_(sz_aes256_gcm_state_t const 
     uint8x16_t const subkey_u8x16 = sz_ghash_load_neonaes_(state->key.powers);
     uint8x16_t accumulator_u8x16 = sz_ghash_load_neonaes_(state->accumulator);
     sz_u128_vec_t lengths_vec;
-    sz_size_t byte_index;
 
     // Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     // or the message's own trailing ciphertext bytes otherwise.
     if (state->buffered != 0) {
-        sz_u128_vec_t padded_vec;
-        padded_vec.u8x16 = vld1q_u8(state->partial);
-        for (byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
-            padded_vec.u8s[byte_index] = 0;
-        accumulator_u8x16 = sz_ghash_absorb_neonaes_(accumulator_u8x16, sz_ghash_reflect_neonaes_(padded_vec.u8x16),
-                                                     subkey_u8x16);
+        accumulator_u8x16 = sz_ghash_absorb_neonaes_(
+            accumulator_u8x16, sz_ghash_load_padded_neonaes_(state->partial, state->buffered), subkey_u8x16);
     }
 
     sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);

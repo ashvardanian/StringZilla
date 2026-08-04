@@ -4,9 +4,7 @@
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
  *
- *  The round loop stays a loop here for the reason spelled out in `cipher/v128.h`: with no cipher
- *  instruction to keep fed, the round body is a forty-operation emulated substitution, so unrolling
- *  would multiply the module size and buy no throughput.
+ *  The round loop stays a loop, for the reason `cipher/v128.h` spells out.
  */
 #ifndef STRINGZILLA_CIPHER_V128RELAXED_H_
 #define STRINGZILLA_CIPHER_V128RELAXED_H_
@@ -45,75 +43,76 @@ extern "C" {
 
 /**
  *  @brief Evaluates a map linear over `GF(2)` on all sixteen lanes at once.
- *  @param low_table_vec The map's value on each low nibble.
- *  @param high_table_vec The map's value on each high nibble.
- *  @param bytes_vec The sixteen inputs.
- *  @return `low_table_vec[byte & 0xF] ^ high_table_vec[byte >> 4]` in every lane.
+ *  @param low_table_u8x16 The map's value on each low nibble.
+ *  @param high_table_u8x16 The map's value on each high nibble.
+ *  @param bytes_u8x16 The sixteen inputs.
+ *  @return `low_table_u8x16[byte & 0xF] ^ high_table_u8x16[byte >> 4]` in every lane.
  *
  *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the
  *  relaxed form's implementation-defined case is unreachable.
  */
-SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_vec, v128_t high_table_vec,
-                                                          v128_t bytes_vec) {
-    v128_t const low_nibbles_vec = wasm_v128_and(bytes_vec, wasm_i8x16_splat((sz_i8_t)0x0F));
-    v128_t const high_nibbles_vec = wasm_u8x16_shr(bytes_vec, 4);
-    return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(low_table_vec, low_nibbles_vec),
-                         wasm_i8x16_relaxed_swizzle(high_table_vec, high_nibbles_vec));
+SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16,
+                                                          v128_t bytes_u8x16) {
+    v128_t const low_nibbles_u8x16 = wasm_v128_and(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
+    v128_t const high_nibbles_u8x16 = wasm_u8x16_shr(bytes_u8x16, 4);
+    return wasm_v128_xor(wasm_i8x16_relaxed_swizzle(low_table_u8x16, low_nibbles_u8x16),
+                         wasm_i8x16_relaxed_swizzle(high_table_u8x16, high_nibbles_u8x16));
 }
 
 /**
  *  @brief Multiplies sixteen pairs of `GF(2^4)` elements under `x^4 + x + 1`.
- *  @param first_vec One operand per lane, each below sixteen.
- *  @param second_vec The other operand per lane, each below sixteen.
+ *  @param first_u8x16 One operand per lane, each below sixteen.
+ *  @param second_u8x16 The other operand per lane, each below sixteen.
  *  @return The product per lane.
  *
  *  The two logarithm lookups take nibbles and may be relaxed. The two antilogarithm lookups may not:
  *  they are handed a sum that runs to twenty-eight and that same sum less sixteen, and they rely on
  *  a baseline swizzle answering zero outside its table, which is also how a zero operand is handled.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_vec, v128_t second_vec) {
-    v128_t const logarithm_table_vec = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
-    v128_t const exponent_low_table_vec = wasm_v128_load(sz_aes256_nibble_exponent_low_v128_());
-    v128_t const exponent_high_table_vec = wasm_v128_load(sz_aes256_nibble_exponent_high_v128_());
-    v128_t const logarithm_sum_vec = wasm_i8x16_add(wasm_i8x16_relaxed_swizzle(logarithm_table_vec, first_vec),
-                                                    wasm_i8x16_relaxed_swizzle(logarithm_table_vec, second_vec));
+SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
+    v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
+    v128_t const exponent_low_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_low_v128_());
+    v128_t const exponent_high_table_u8x16 = wasm_v128_load(sz_aes256_nibble_exponent_high_v128_());
+    v128_t const logarithm_sum_u8x16 = wasm_i8x16_add(wasm_i8x16_relaxed_swizzle(logarithm_table_u8x16, first_u8x16),
+                                                      wasm_i8x16_relaxed_swizzle(logarithm_table_u8x16, second_u8x16));
     return wasm_v128_xor(
-        wasm_i8x16_swizzle(exponent_low_table_vec, logarithm_sum_vec),
-        wasm_i8x16_swizzle(exponent_high_table_vec, wasm_i8x16_sub(logarithm_sum_vec, wasm_i8x16_splat(16))));
+        wasm_i8x16_swizzle(exponent_low_table_u8x16, logarithm_sum_u8x16),
+        wasm_i8x16_swizzle(exponent_high_table_u8x16, wasm_i8x16_sub(logarithm_sum_u8x16, wasm_i8x16_splat(16))));
 }
 
 /**
  *  @brief Applies the substitution box of FIPS 197 to all sixteen bytes of a block.
- *  @param bytes_vec The sixteen inputs.
+ *  @param bytes_u8x16 The sixteen inputs.
  *  @return The substituted bytes.
  *
  *  The same tower-field construction the `_v128` kernel uses, with every provably in-range swizzle
  *  taken in its relaxed form. The norm, its inverse and both halves of the inverse are `GF(2^4)`
  *  elements, so each of them is a legal index by construction.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_vec) {
-    v128_t const mapped_vec = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
-                                                                wasm_v128_load(sz_aes256_tower_forward_high_v128_()),
-                                                                bytes_vec);
-    v128_t const high_nibbles_vec = wasm_u8x16_shr(mapped_vec, 4);
-    v128_t const low_nibbles_vec = wasm_v128_and(mapped_vec, wasm_i8x16_splat((sz_i8_t)0x0F));
+SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
+    v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
+                                                                  wasm_v128_load(sz_aes256_tower_forward_high_v128_()),
+                                                                  bytes_u8x16);
+    v128_t const high_nibbles_u8x16 = wasm_u8x16_shr(mapped_u8x16, 4);
+    v128_t const low_nibbles_u8x16 = wasm_v128_and(mapped_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
 
     // The tower field's norm, `high^2 * N ^ high * low ^ low^2`, is what has to be inverted in `GF(2^4)`.
-    v128_t const high_scaled_vec = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_square_scaled_v128_()),
-                                                              high_nibbles_vec);
-    v128_t const crossed_vec = sz_aes256_nibble_multiply_v128relaxed_(high_nibbles_vec, low_nibbles_vec);
-    v128_t const low_squared_vec = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_square_v128_()),
-                                                              low_nibbles_vec);
-    v128_t const tower_norm_vec = wasm_v128_xor(wasm_v128_xor(high_scaled_vec, crossed_vec), low_squared_vec);
-    v128_t const norm_inverse_vec = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_inverse_v128_()),
-                                                               tower_norm_vec);
+    v128_t const high_scaled_u8x16 = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_square_scaled_v128_()),
+                                                                high_nibbles_u8x16);
+    v128_t const crossed_u8x16 = sz_aes256_nibble_multiply_v128relaxed_(high_nibbles_u8x16, low_nibbles_u8x16);
+    v128_t const low_squared_u8x16 = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_square_v128_()),
+                                                                low_nibbles_u8x16);
+    v128_t const tower_norm_u8x16 = wasm_v128_xor(wasm_v128_xor(high_scaled_u8x16, crossed_u8x16), low_squared_u8x16);
+    v128_t const tower_norm_inverse_u8x16 = wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_nibble_inverse_v128_()),
+                                                                       tower_norm_u8x16);
 
-    v128_t const high_inverse_vec = sz_aes256_nibble_multiply_v128relaxed_(high_nibbles_vec, norm_inverse_vec);
-    v128_t const low_inverse_vec = sz_aes256_nibble_multiply_v128relaxed_(
-        wasm_v128_xor(high_nibbles_vec, low_nibbles_vec), norm_inverse_vec);
+    v128_t const high_inverse_u8x16 = sz_aes256_nibble_multiply_v128relaxed_(high_nibbles_u8x16,
+                                                                             tower_norm_inverse_u8x16);
+    v128_t const low_inverse_u8x16 = sz_aes256_nibble_multiply_v128relaxed_(
+        wasm_v128_xor(high_nibbles_u8x16, low_nibbles_u8x16), tower_norm_inverse_u8x16);
     return wasm_v128_xor(
-        wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_low_v128_()), low_inverse_vec),
-        wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_vec));
+        wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_low_v128_()), low_inverse_u8x16),
+        wasm_i8x16_relaxed_swizzle(wasm_v128_load(sz_aes256_substituted_high_v128_()), high_inverse_u8x16));
 }
 
 #pragma endregion // Substitution Box
@@ -122,74 +121,74 @@ SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_vec) {
 
 /**
  *  @brief Builds the schedule's rotated and substituted word against a round constant.
- *  @param previous_vec The four schedule words immediately before the new quadruple.
+ *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @param round_constant The round constant for this step.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_vec, sz_u8_t round_constant) {
-    v128_t const last_word_vec = wasm_i32x4_shuffle(previous_vec, previous_vec, 3, 3, 3, 3);
-    v128_t const rotated_vec = wasm_i8x16_shuffle(last_word_vec, last_word_vec, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8,
-                                                  13, 14, 15, 12);
-    return wasm_v128_xor(sz_aes256_substitute_v128relaxed_(rotated_vec), wasm_i32x4_splat((sz_i32_t)round_constant));
+SZ_HELPER_AUTO v128_t sz_aes256_key_turn_v128relaxed_(v128_t previous_u8x16, sz_u8_t round_constant) {
+    v128_t const last_word_u8x16 = wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3);
+    v128_t const rotated_u8x16 = wasm_i8x16_shuffle(last_word_u8x16, last_word_u8x16, 1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11,
+                                                    8, 13, 14, 15, 12);
+    return wasm_v128_xor(sz_aes256_substitute_v128relaxed_(rotated_u8x16), wasm_i32x4_splat((sz_i32_t)round_constant));
 }
 
 /**
  *  @brief Builds the schedule's plainly substituted word, the step an AES-256 schedule interleaves.
- *  @param previous_vec The four schedule words immediately before the new quadruple.
+ *  @param previous_u8x16 The four schedule words immediately before the new quadruple.
  *  @return The finished word, broadcast across all four lanes.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_vec) {
-    return sz_aes256_substitute_v128relaxed_(wasm_i32x4_shuffle(previous_vec, previous_vec, 3, 3, 3, 3));
+SZ_HELPER_AUTO v128_t sz_aes256_key_half_turn_v128relaxed_(v128_t previous_u8x16) {
+    return sz_aes256_substitute_v128relaxed_(wasm_i32x4_shuffle(previous_u8x16, previous_u8x16, 3, 3, 3, 3));
 }
 
 SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
-    v128_t even_round_key_vec = wasm_v128_load(secret);
-    v128_t odd_round_key_vec = wasm_v128_load(secret + 16);
+    v128_t even_round_key_u8x16 = wasm_v128_load(secret);
+    v128_t odd_round_key_u8x16 = wasm_v128_load(secret + 16);
 
     // An AES-256 schedule alternates two steps: a rotated substitution against a round constant, and
     // a plain substitution. Seven of the first and six of the second follow the two round keys the
     // secret supplies, and each fold turns one substituted word into a whole round key.
-    wasm_v128_store(&key->round_keys[0], even_round_key_vec);
-    wasm_v128_store(&key->round_keys[4], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x01));
-    wasm_v128_store(&key->round_keys[8], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[12], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x02));
-    wasm_v128_store(&key->round_keys[16], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[20], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x04));
-    wasm_v128_store(&key->round_keys[24], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[28], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x08));
-    wasm_v128_store(&key->round_keys[32], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[36], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x10));
-    wasm_v128_store(&key->round_keys[40], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[44], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x20));
-    wasm_v128_store(&key->round_keys[48], even_round_key_vec);
-    odd_round_key_vec = sz_aes256_key_fold_v128_(odd_round_key_vec,
-                                                 sz_aes256_key_half_turn_v128relaxed_(even_round_key_vec));
-    wasm_v128_store(&key->round_keys[52], odd_round_key_vec);
-    even_round_key_vec = sz_aes256_key_fold_v128_(even_round_key_vec,
-                                                  sz_aes256_key_turn_v128relaxed_(odd_round_key_vec, 0x40));
-    wasm_v128_store(&key->round_keys[56], even_round_key_vec);
+    wasm_v128_store(&key->round_keys[0], even_round_key_u8x16);
+    wasm_v128_store(&key->round_keys[4], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x01));
+    wasm_v128_store(&key->round_keys[8], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[12], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x02));
+    wasm_v128_store(&key->round_keys[16], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[20], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x04));
+    wasm_v128_store(&key->round_keys[24], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[28], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x08));
+    wasm_v128_store(&key->round_keys[32], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[36], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x10));
+    wasm_v128_store(&key->round_keys[40], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[44], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x20));
+    wasm_v128_store(&key->round_keys[48], even_round_key_u8x16);
+    odd_round_key_u8x16 = sz_aes256_key_fold_v128_(odd_round_key_u8x16,
+                                                   sz_aes256_key_half_turn_v128relaxed_(even_round_key_u8x16));
+    wasm_v128_store(&key->round_keys[52], odd_round_key_u8x16);
+    even_round_key_u8x16 = sz_aes256_key_fold_v128_(even_round_key_u8x16,
+                                                    sz_aes256_key_turn_v128relaxed_(odd_round_key_u8x16, 0x40));
+    wasm_v128_store(&key->round_keys[56], even_round_key_u8x16);
 }
 
 #pragma endregion // Key Schedule
@@ -199,17 +198,17 @@ SZ_API_COMPTIME void sz_aes256_key_init_v128relaxed(sz_aes256_key_t *key, sz_u8_
 /**
  *  @brief Encrypts one block with the expanded schedule.
  *  @param key The expanded schedule.
- *  @param block_vec The plaintext block.
+ *  @param block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-SZ_HELPER_AUTO v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_vec) {
+SZ_HELPER_AUTO v128_t sz_aes256_block_encrypt_v128relaxed_(sz_aes256_key_t const *key, v128_t block_u8x16) {
     sz_size_t round_index;
-    block_vec = wasm_v128_xor(block_vec, sz_aes256_round_key_v128_(key, 0));
+    block_u8x16 = wasm_v128_xor(block_u8x16, sz_aes256_round_key_v128_(key, 0));
     for (round_index = 1; round_index != 14; ++round_index)
-        block_vec = wasm_v128_xor(
-            sz_aes256_mix_columns_v128_(sz_aes256_shift_rows_v128_(sz_aes256_substitute_v128relaxed_(block_vec))),
+        block_u8x16 = wasm_v128_xor(
+            sz_aes256_mix_columns_v128_(sz_aes256_shift_rows_v128_(sz_aes256_substitute_v128relaxed_(block_u8x16))),
             sz_aes256_round_key_v128_(key, round_index));
-    return wasm_v128_xor(sz_aes256_shift_rows_v128_(sz_aes256_substitute_v128relaxed_(block_vec)),
+    return wasm_v128_xor(sz_aes256_shift_rows_v128_(sz_aes256_substitute_v128relaxed_(block_u8x16)),
                          sz_aes256_round_key_v128_(key, 14));
 }
 
@@ -222,7 +221,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
                                                    sz_ptr_t output) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
-    v128_t const counter_base_vec = sz_aes256_counter_base_v128_(nonce);
+    v128_t const counter_base_u8x16 = sz_aes256_counter_base_v128_(nonce);
     sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
@@ -231,23 +230,23 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
     if (within_block != 0 && length != 0) {
         sz_u128_vec_t keystream_vec;
         keystream_vec.v128 = sz_aes256_block_encrypt_v128relaxed_(
-            key, sz_aes256_counter_block_v128_(counter_base_vec, block_index));
+            key, sz_aes256_counter_block_v128_(counter_base_u8x16, block_index));
         for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
         ++block_index;
     }
 
     for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH, ++block_index) {
-        v128_t const original_vec = wasm_v128_load(input_bytes + produced);
-        v128_t const keystream_vec = sz_aes256_block_encrypt_v128relaxed_(
-            key, sz_aes256_counter_block_v128_(counter_base_vec, block_index));
-        wasm_v128_store(output_bytes + produced, wasm_v128_xor(original_vec, keystream_vec));
+        v128_t const original_u8x16 = wasm_v128_load(input_bytes + produced);
+        v128_t const keystream_u8x16 = sz_aes256_block_encrypt_v128relaxed_(
+            key, sz_aes256_counter_block_v128_(counter_base_u8x16, block_index));
+        wasm_v128_store(output_bytes + produced, wasm_v128_xor(original_u8x16, keystream_u8x16));
     }
 
     if (produced != length) {
         sz_u128_vec_t keystream_vec;
         keystream_vec.v128 = sz_aes256_block_encrypt_v128relaxed_(
-            key, sz_aes256_counter_block_v128_(counter_base_vec, block_index));
+            key, sz_aes256_counter_block_v128_(counter_base_u8x16, block_index));
         for (within_block = 0; produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
     }
@@ -259,16 +258,16 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_v128relaxed(sz_aes256_key_t const *key, s
 
 SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key,
                                                         sz_u8_t const secret[sz_at_least_(32)]) {
-    v128_t subkey_vec, power_vec;
+    v128_t subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
     sz_aes256_key_init_v128relaxed(&key->block, secret);
-    subkey_vec = sz_aes256_block_encrypt_v128relaxed_(&key->block, wasm_u64x2_splat(0));
-    power_vec = subkey_vec;
-    wasm_v128_store(&key->powers[0], power_vec);
+    subkey_u8x16 = sz_aes256_block_encrypt_v128relaxed_(&key->block, wasm_u64x2_splat(0));
+    power_u8x16 = subkey_u8x16;
+    wasm_v128_store(&key->powers[0], power_u8x16);
     for (power_index = 1; power_index != 8; ++power_index) {
-        power_vec = sz_ghash_multiply_v128_(power_vec, subkey_vec);
-        wasm_v128_store(&key->powers[power_index * SZ_AES_BLOCK_LENGTH], power_vec);
+        power_u8x16 = sz_ghash_multiply_v128_(power_u8x16, subkey_u8x16);
+        wasm_v128_store(&key->powers[power_index * SZ_AES_BLOCK_LENGTH], power_u8x16);
     }
 }
 
@@ -279,15 +278,15 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_v128relaxed(sz_aes256_gcm_key_t *key
 /** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                        sz_u8_t const nonce[sz_at_least_(12)]) {
-    v128_t initial_vec;
+    v128_t initial_u8x16;
 
     state->key = *key;
 
     // With a twelve-byte nonce the initial counter block is the nonce followed by a one, and the value
     // encrypted under it masks the finished hash. Data blocks start one past it.
-    initial_vec = sz_aes256_counter_block_v128_(sz_aes256_counter_base_v128_(nonce), 1u);
-    wasm_v128_store(state->tag_mask, sz_aes256_block_encrypt_v128relaxed_(&state->key.block, initial_vec));
-    wasm_v128_store(state->counter, initial_vec);
+    initial_u8x16 = sz_aes256_counter_block_v128_(sz_aes256_counter_base_v128_(nonce), 1u);
+    wasm_v128_store(state->tag_mask, sz_aes256_block_encrypt_v128relaxed_(&state->key.block, initial_u8x16));
+    wasm_v128_store(state->counter, initial_u8x16);
     wasm_v128_store(state->accumulator, wasm_u64x2_splat(0));
     wasm_v128_store(state->partial, wasm_u64x2_splat(0));
     wasm_v128_store(state->keystream, wasm_u64x2_splat(0));
@@ -315,14 +314,14 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
                                                            sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
-    v128_t const subkey_vec = wasm_v128_load(state->key.powers);
+    v128_t const subkey_u8x16 = wasm_v128_load(state->key.powers);
     sz_u128_vec_t counter_vec;
-    v128_t accumulator_vec;
+    v128_t accumulator_u8x16;
     sz_u32_t block_index;
     sz_size_t produced = 0, byte_index;
 
     if (length == 0) return;
-    accumulator_vec = wasm_v128_load(state->accumulator);
+    accumulator_u8x16 = wasm_v128_load(state->accumulator);
 
     // Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && state->buffered != 0) {
@@ -330,7 +329,7 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
         padded_vec.v128 = wasm_v128_load(state->partial);
         for (byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
             padded_vec.u8s[byte_index] = 0;
-        accumulator_vec = sz_ghash_absorb_v128_(accumulator_vec, padded_vec.v128, subkey_vec);
+        accumulator_u8x16 = sz_ghash_absorb_v128_(accumulator_u8x16, padded_vec.v128, subkey_u8x16);
         state->buffered = 0;
     }
 
@@ -340,36 +339,36 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t
     if (state->keystream_used != SZ_AES_BLOCK_LENGTH) {
         sz_size_t const available_bytes = SZ_AES_BLOCK_LENGTH - state->keystream_used;
         sz_size_t const taken_bytes = length < available_bytes ? length : available_bytes;
-        accumulator_vec = sz_aes256_gcm_spend_v128_(state, input_bytes, output_bytes, taken_bytes, accumulator_vec,
-                                                    subkey_vec, direction);
+        accumulator_u8x16 = sz_aes256_gcm_spend_v128_(state, input_bytes, output_bytes, taken_bytes, accumulator_u8x16,
+                                                      subkey_u8x16, direction);
         produced = taken_bytes;
     }
 
     for (; produced + SZ_AES_BLOCK_LENGTH <= length; produced += SZ_AES_BLOCK_LENGTH) {
-        v128_t const original_vec = wasm_v128_load(input_bytes + produced);
-        v128_t counter_block_vec, keystream_vec, transformed_vec, ciphertext_vec;
+        v128_t const original_u8x16 = wasm_v128_load(input_bytes + produced);
+        v128_t counter_block_u8x16, keystream_u8x16, transformed_u8x16, ciphertext_u8x16;
         block_index += 1;
-        counter_block_vec = sz_aes256_counter_block_v128_(counter_vec.v128, block_index);
-        keystream_vec = sz_aes256_block_encrypt_v128relaxed_(&state->key.block, counter_block_vec);
-        transformed_vec = wasm_v128_xor(original_vec, keystream_vec);
-        ciphertext_vec = direction == sz_aes256_gcm_decrypting_k ? original_vec : transformed_vec;
-        wasm_v128_store(output_bytes + produced, transformed_vec);
-        accumulator_vec = sz_ghash_absorb_v128_(accumulator_vec, ciphertext_vec, subkey_vec);
+        counter_block_u8x16 = sz_aes256_counter_block_v128_(counter_vec.v128, block_index);
+        keystream_u8x16 = sz_aes256_block_encrypt_v128relaxed_(&state->key.block, counter_block_u8x16);
+        transformed_u8x16 = wasm_v128_xor(original_u8x16, keystream_u8x16);
+        ciphertext_u8x16 = direction == sz_aes256_gcm_decrypting_k ? original_u8x16 : transformed_u8x16;
+        wasm_v128_store(output_bytes + produced, transformed_u8x16);
+        accumulator_u8x16 = sz_ghash_absorb_v128_(accumulator_u8x16, ciphertext_u8x16, subkey_u8x16);
     }
 
     if (produced != length) {
-        v128_t counter_block_vec, keystream_vec;
+        v128_t counter_block_u8x16, keystream_u8x16;
         block_index += 1;
-        counter_block_vec = sz_aes256_counter_block_v128_(counter_vec.v128, block_index);
-        keystream_vec = sz_aes256_block_encrypt_v128relaxed_(&state->key.block, counter_block_vec);
-        wasm_v128_store(state->keystream, keystream_vec);
+        counter_block_u8x16 = sz_aes256_counter_block_v128_(counter_vec.v128, block_index);
+        keystream_u8x16 = sz_aes256_block_encrypt_v128relaxed_(&state->key.block, counter_block_u8x16);
+        wasm_v128_store(state->keystream, keystream_u8x16);
         state->keystream_used = 0;
-        accumulator_vec = sz_aes256_gcm_spend_v128_(state, input_bytes + produced, output_bytes + produced,
-                                                    length - produced, accumulator_vec, subkey_vec, direction);
+        accumulator_u8x16 = sz_aes256_gcm_spend_v128_(state, input_bytes + produced, output_bytes + produced,
+                                                      length - produced, accumulator_u8x16, subkey_u8x16, direction);
     }
 
     state->text_length += length;
-    wasm_v128_store(state->accumulator, accumulator_vec);
+    wasm_v128_store(state->accumulator, accumulator_u8x16);
     wasm_v128_store(state->counter, sz_aes256_counter_block_v128_(counter_vec.v128, block_index));
 }
 

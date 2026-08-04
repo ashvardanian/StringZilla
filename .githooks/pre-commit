@@ -40,6 +40,21 @@ if [ -n "$laundering" ]; then
   exit 1
 fi
 
+# Pointer laundering through an integer, as in `(unsigned char *)(void *)(sz_size_t)pointer`. Routing a
+# pointer through an integer type to shed `const` or to satisfy an intrinsic's signature hides exactly the
+# mismatch a reader needs to see, and it defeats provenance tracking in the optimizer and in sanitizers.
+# Cast to the pointer type you mean, once. If an intrinsic genuinely wants a non-const pointer, a single
+# `(T *)` is honest; the chain through `sz_size_t` / `uintptr_t` / `size_t` is not.
+pointer_laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | grep -E '\([[:space:]]*(sz_size_t|sz_u64_t|uintptr_t|size_t|unsigned long|long)[[:space:]]*\)[[:space:]]*[A-Za-z_]' \
+  | grep -E '\)[[:space:]]*\([[:space:]]*(void|[A-Za-z_][A-Za-z_0-9]*)[[:space:]]*\*' || true)
+if [ -n "$pointer_laundering" ]; then
+  echo "pre-commit: pointer cast through an integer type (cast to the pointer type you mean, once):" >&2
+  echo "$pointer_laundering" >&2
+  echo "Bypass with --no-verify only if intentional." >&2
+  exit 1
+fi
+
 # Dashes in `#pragma region` / `#pragma endregion` names: clang-format parses the trailing text as an
 # expression and rewrites `X-Y` into `X - Y`, desyncing region/endregion pairs. Use spaces in region names instead.
 pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
@@ -158,5 +173,64 @@ if [ -n "$raw_assert" ]; then
   echo "Bypass with --no-verify only if intentional." >&2
   exit 1
 fi
+
+# SIMD register naming in cipher/*.h: every raw fixed-width register (x86 __m128i/__m256i/__m512i, NEON
+# uint8x16_t, WASM v128_t, Power __vector unsigned char/int) carries a `_<dtype>x<lanes>` suffix
+# (`_u8x16`/`_u8x32`/`_u8x64`); SVE scalable registers (svuint8_t etc) carry `_<dtype>x`; RVV registers
+# (vuint32m1_t etc) carry `_<dtype>m<lmul>`; x86 k-masks (__mmask8/16/32/64) carry `_m<n>`; SVE/RVV
+# predicates (svbool_t/vbool<n>_t) carry `_b<n>x`/`_b<n>`. One exception: locals typed sz_u128_vec_t /
+# sz_u256_vec_t / sz_u512_vec_t (the union wrapper types) always keep a bare `_vec` suffix instead - they
+# are not raw registers, and this check never looks at that type name in the first place. Scoped to
+# cipher/*.h, added lines only, so legacy violations migrate on their own schedule; grandfather one line
+# with a trailing `// sz-nolint: naming`.
+cipher_naming_awk='
+BEGIN {
+    na = split(added, ar, "\n")
+    for (j = 1; j <= na; j++) if (ar[j] != "") ADDED[ar[j]] = 1
+}
+{
+    if (match($0, /^[0-9]+:/)) { lineno = substr($0, 1, RLENGTH - 1); content = substr($0, RLENGTH + 1) }
+    else next
+    if (!(lineno in ADDED)) next
+
+    line = content
+    gsub(/\/\/.*/, "", line)
+    gsub(/__vector unsigned char/, "__vector_uchar", line)
+    gsub(/__vector unsigned int/, "__vector_uint", line)
+    n = split(line, tok, /[[:space:]]+/)
+    for (i = 1; i <= n; i++) {
+        t = tok[i]
+        is_raw = (t ~ /^(__m128i|__m256i|__m512i|__mmask(8|16|32|64)|uint8x16_t|v128_t|svuint(8|32|64)_t|svbool_t|vuint32m[14]_t|vbool[0-9]+_t|__vector_uchar|__vector_uint)$/)
+        if (!is_raw) continue
+        name = tok[i + 1]
+        if (name ~ /^const,?$/) name = tok[i + 2]
+        if (name == "") continue
+        if (name ~ /\(/) continue
+        sub(/[=;,)*].*/, "", name)
+        if (name == "" || name ~ /[^A-Za-z0-9_]/) continue
+        suffix_ok = (name ~ /_[a-z]{1,2}[0-9]{1,2}(x[0-9]*|m[0-9])$/) || (name ~ /_m[0-9]+$/) || (name ~ /_b[0-9]+x?$/)
+        if (!suffix_ok) print fname":"lineno": "t" -> "name
+    }
+}
+'
+while IFS= read -r file; do
+    case "$file" in
+    */cipher/serial.h | */cipher/tables.h) continue ;;
+    */cipher/*.h) ;;
+    *) continue ;;
+    esac
+    added_nums=$(git diff --cached --unified=0 -- "$file" \
+        | awk '/^@@/ { for (i = 1; i <= NF; i++) if ($i ~ /^\+[0-9]/) { split(substr($i, 2), p, ","); s = p[1]; c = (p[2] == "" ? 1 : p[2]); for (k = 0; k < c; k++) print s + k; break } }')
+    [ -n "$added_nums" ] || continue
+    cipher_naming=$(git show ":$file" 2> /dev/null \
+        | grep -nv 'sz-nolint: naming' \
+        | awk -v added="$added_nums" -v fname="$file" "$cipher_naming_awk" || true)
+    if [ -n "$cipher_naming" ]; then
+        echo "pre-commit: $file has a SIMD register missing its dtype x lanes / mask suffix:" >&2
+        printf '%s\n' "$cipher_naming" | head -10 >&2
+        echo "Bypass with --no-verify only if intentional, or grandfather with '// sz-nolint: naming'." >&2
+        exit 1
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACM -- 'include/stringzilla/cipher/*.h')
 
 exit 0

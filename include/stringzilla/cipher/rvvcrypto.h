@@ -16,11 +16,7 @@
  *  a block is one instruction with no reduction left to defer, so the hash is a plain serial chain over
  *  `powers[0 .. 16)`, which is `H^1`. The remaining seven powers are never read.
  *
- *  The fourteen rounds are written out rather than driven by a loop over the round index. A round loop
- *  leaves the unrolling to the optimizer, which only does it reliably at `-O3`, and `SZ_API_COMPTIME`
- *  kernels are `static inline` and compile into whichever translation unit consumes them — so a looped
- *  kernel makes its own throughput a property of the caller's build flags. See `cipher/icelake.h`, where
- *  the same change was worth 2.1x to 2.9x at `-O2` and nothing at all at `-O3`.
+ *  The fourteen rounds are written out rather than looped, for the reason `cipher/icelake.h` spells out.
  *
  *  Aggregating across element groups is expressible, since a wide `vgmul.vv` multiplies every 128-bit
  *  group of a register at once, but it does not pay. Folding `N` products back into one accumulator costs
@@ -109,6 +105,34 @@ SZ_HELPER_INLINE vuint32m1_t sz_aes256_group_extract_rvvcrypto_(vuint32m4_t bloc
  *  same block in every element group, which is what the `.vv` form of an AES round expects when it is
  *  transforming several counter blocks under one round key.
  */
+/**
+ *  @brief Copies the twelve nonce bytes into the leading bytes of a counter block.
+ *  @param counter_block Receives the nonce; its trailing index word is left for the caller to write.
+ *  @param nonce The twelve nonce bytes.
+ *
+ *  The destination is a sixteen-byte buffer that a later load reads back, not a register, so this is a
+ *  length-limited load paired with a length-limited store. Both stop at twelve, which is all the
+ *  contract promises, and twenty-four scalar accesses become two vector ones.
+ */
+SZ_HELPER_INLINE void sz_aes256_counter_nonce_store_rvvcrypto_(sz_u8_t *counter_block, sz_u8_t const *nonce) {
+    __riscv_vse8_v_u8m1(counter_block, __riscv_vle8_v_u8m1(nonce, 12), 12);
+}
+
+/**
+ *  @brief Loads a partial block zero-padded to the full sixteen bytes.
+ *  @param partial The pending bytes.
+ *  @param buffered How many of them are live, below sixteen.
+ *  @return The block, with everything past @p buffered zero.
+ *
+ *  A length-limited load reads the live bytes and a merge supplies zeroes above them, so the padding
+ *  is implicit and neither a staging buffer nor a byte loop is needed.
+ */
+SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_load_padded_rvvcrypto_(sz_u8_t const *partial, sz_size_t buffered) {
+    vuint8m1_t const zeros_u8m1 = __riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH);
+    vuint8m1_t const loaded_u8m1 = __riscv_vle8_v_u8m1_tu(zeros_u8m1, partial, buffered);
+    return __riscv_vreinterpret_v_u8m1_u32m1(loaded_u8m1);
+}
+
 SZ_HELPER_INLINE vuint32m4_t sz_aes256_broadcast_offsets_rvvcrypto_(sz_size_t vector_length) {
     vuint32m4_t const lane_index_u32m4 = __riscv_vid_v_u32m4(vector_length);
     return __riscv_vsll_vx_u32m4(__riscv_vand_vx_u32m4(lane_index_u32m4, 3, vector_length), 2, vector_length);
@@ -166,12 +190,6 @@ SZ_API_COMPTIME void sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t 
  *  exactly what the unit-stride load feeding a `.vs` form would cost, so nothing is given up by staying
  *  on the `.vv` forms and both compilers then agree. */
 
-/**
- *  @brief Encrypts one block held in element group zero.
- *  @param key The expanded schedule.
- *  @param block_u32m1 The 16 plaintext bytes.
- *  @return The 16 ciphertext bytes.
- */
 /** @brief Applies one middle round to a single block, reading its round key from the schedule. */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_round_rvvcrypto_(vuint32m1_t block_u32m1, sz_u32_t const *round_key,
                                                         sz_size_t vector_length) {
@@ -186,6 +204,12 @@ SZ_HELPER_INLINE vuint32m4_t sz_aes256_round_wide_rvvcrypto_(vuint32m4_t blocks_
         blocks_u32m4, __riscv_vluxei32_v_u32m4(round_key, broadcast_offsets_u32m4, vector_length), vector_length);
 }
 
+/**
+ *  @brief Encrypts one block held in element group zero.
+ *  @param key The expanded schedule.
+ *  @param block_u32m1 The 16 plaintext bytes.
+ *  @return The 16 ciphertext bytes.
+ */
 SZ_HELPER_INLINE vuint32m1_t sz_aes256_block_encrypt_rvvcrypto_(sz_aes256_key_t const *key, vuint32m1_t block_u32m1) {
     sz_size_t const vector_length = 4;
     block_u32m1 = __riscv_vxor_vv_u32m1(block_u32m1, __riscv_vle32_v_u32m1(key->round_keys + 0, vector_length),
@@ -393,9 +417,9 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key, sz_
     sz_u128_vec_t counter_block_vec, keystream_block_vec;
     sz_u32_t block_index = (sz_u32_t)(byte_offset / SZ_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % SZ_AES_BLOCK_LENGTH);
-    sz_size_t produced = 0, byte_index;
+    sz_size_t produced = 0;
 
-    for (byte_index = 0; byte_index != 12; ++byte_index) counter_block_vec.u8s[byte_index] = nonce[byte_index];
+    sz_aes256_counter_nonce_store_rvvcrypto_(counter_block_vec.u8s, nonce);
     sz_aes256_counter_index_store_rvvcrypto_(counter_block_vec.u8s, block_index);
 
     while (produced != length) {
@@ -462,15 +486,17 @@ SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_rvvcrypto_(sz_aes256_gcm_state_t
 /** @brief Prepares the payload both directions share: counter block, tag mask and empty carries. */
 SZ_HELPER_INLINE void sz_aes256_gcm_begin_rvvcrypto_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
                                                      sz_u8_t const nonce[sz_at_least_(12)]) {
-    sz_size_t byte_index;
+    vuint32m1_t const zeros_u32m1 = __riscv_vreinterpret_v_u8m1_u32m1(__riscv_vmv_v_x_u8m1(0, SZ_AES_BLOCK_LENGTH));
 
     state->key = *key;
-    for (byte_index = 0; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
-        state->accumulator[byte_index] = 0, state->partial[byte_index] = 0, state->keystream[byte_index] = 0;
+    // Three sixteen-byte fields cleared as three vector stores rather than forty-eight scalar ones.
+    sz_aes256_block_store_rvvcrypto_(state->accumulator, zeros_u32m1);
+    sz_aes256_block_store_rvvcrypto_(state->partial, zeros_u32m1);
+    sz_aes256_block_store_rvvcrypto_(state->keystream, zeros_u32m1);
 
     // With a twelve-byte nonce the initial counter block is the nonce followed by a one, and the value
     // encrypted under it masks the finished hash. Data blocks start one past it.
-    for (byte_index = 0; byte_index != 12; ++byte_index) state->counter[byte_index] = nonce[byte_index];
+    sz_aes256_counter_nonce_store_rvvcrypto_(state->counter, nonce);
     sz_aes256_counter_index_store_rvvcrypto_(state->counter, 1u);
     sz_aes256_block_store_rvvcrypto_(
         state->tag_mask,
@@ -527,15 +553,11 @@ SZ_HELPER_AUTO void sz_aes256_gcm_associate_rvvcrypto_(sz_aes256_gcm_state_t *st
 SZ_HELPER_AUTO vuint32m1_t sz_aes256_gcm_flush_partial_rvvcrypto_(sz_aes256_gcm_state_t *state,
                                                                   vuint32m1_t accumulator_u32m1,
                                                                   vuint32m1_t subkey_u32m1) {
-    sz_u128_vec_t padded_block_vec;
-    sz_size_t byte_index = 0;
+    vuint32m1_t padded_u32m1;
     if (state->buffered == 0) return accumulator_u32m1;
-    for (; byte_index != (sz_size_t)state->buffered; ++byte_index)
-        padded_block_vec.u8s[byte_index] = state->partial[byte_index];
-    for (; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index) padded_block_vec.u8s[byte_index] = 0;
+    padded_u32m1 = sz_aes256_block_load_padded_rvvcrypto_(state->partial, (sz_size_t)state->buffered);
     state->buffered = 0;
-    return sz_ghash_absorb_rvvcrypto_(accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(padded_block_vec.u8s),
-                                      subkey_u32m1);
+    return sz_ghash_absorb_rvvcrypto_(accumulator_u32m1, padded_u32m1, subkey_u32m1);
 }
 
 /**
@@ -617,9 +639,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_rvvcrypto_(sz_aes256_gcm_state_t *
             {
                 sz_u8_t const plaintext_byte = input_bytes[produced];
                 sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-                sz_u8_t const ciphertext = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
+                sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
                 output_bytes[produced] = transformed;
-                state->partial[state->buffered++] = ciphertext;
+                state->partial[state->buffered++] = ciphertext_byte;
                 if (state->buffered == SZ_AES_BLOCK_LENGTH) {
                     accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(
                         accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(state->partial), subkey_u32m1);
@@ -644,18 +666,14 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t const 
     vuint32m1_t const subkey_u32m1 = sz_aes256_block_load_rvvcrypto_(state->key.powers);
     vuint32m1_t accumulator_u32m1 = sz_aes256_block_load_rvvcrypto_(state->accumulator);
     sz_u128_vec_t staged_block_vec;
-    sz_size_t byte_index;
 
     // Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     // or the message's own trailing ciphertext bytes otherwise. The state is not ours to modify, so the
-    // pending bytes are padded in a local block rather than in `partial`.
-    if (state->buffered != 0) {
-        for (byte_index = 0; byte_index != (sz_size_t)state->buffered; ++byte_index)
-            staged_block_vec.u8s[byte_index] = state->partial[byte_index];
-        for (; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index) staged_block_vec.u8s[byte_index] = 0;
+    // padding is implicit in the load rather than written back into `partial`.
+    if (state->buffered != 0)
         accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(
-            accumulator_u32m1, sz_aes256_block_load_rvvcrypto_(staged_block_vec.u8s), subkey_u32m1);
-    }
+            accumulator_u32m1, sz_aes256_block_load_padded_rvvcrypto_(state->partial, (sz_size_t)state->buffered),
+            subkey_u32m1);
 
     sz_aes256_gcm_lengths_serial_(&staged_block_vec, state->associated_length, state->text_length);
     accumulator_u32m1 = sz_ghash_absorb_rvvcrypto_(accumulator_u32m1,

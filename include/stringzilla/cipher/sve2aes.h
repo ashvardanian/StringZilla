@@ -11,13 +11,8 @@
  *  it, and the single compile-time constant is the sixteen-byte block. Round keys reach every segment
  *  through a quadword broadcast load, one instruction whatever the width.
  *
- *  The fourteen rounds themselves are written out rather than driven by a loop over the round index,
- *  which is the one thing here that is fixed at compile time. A round loop leaves the unrolling to the
- *  optimizer, which only does it reliably at `-O3` — GCC 15 emitted 85 AES round instructions across the
- *  Arm backends at `-O2` against 530 at `-O3`. Since `SZ_API_COMPTIME` kernels are `static inline` and
- *  compile into whichever translation unit consumes them, a looped kernel makes its own throughput a
- *  property of the caller's build flags. See `cipher/icelake.h`, where the same change was worth 2.1x to
- *  2.9x at `-O2` and nothing at all at `-O3`.
+ *  The fourteen rounds are the one thing here fixed at compile time, so they are written out rather than
+ *  looped, for the reason `cipher/icelake.h` spells out.
  */
 #ifndef STRINGZILLA_CIPHER_SVE2AES_H_
 #define STRINGZILLA_CIPHER_SVE2AES_H_
@@ -131,14 +126,16 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz
  *  @return The same counter block in every segment.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t const *nonce, sz_u32_t block_index) {
-    sz_u128_vec_t block_vec;
-    sz_size_t byte_index;
-    for (byte_index = 0; byte_index != 12; ++byte_index) block_vec.u8s[byte_index] = nonce[byte_index];
-    block_vec.u8s[12] = (sz_u8_t)(block_index >> 24);
-    block_vec.u8s[13] = (sz_u8_t)(block_index >> 16);
-    block_vec.u8s[14] = (sz_u8_t)(block_index >> 8);
-    block_vec.u8s[15] = (sz_u8_t)(block_index >> 0);
-    return svld1rq_u8(svptrue_b8(), &block_vec.u8s[0]);
+    // Assembled in the leading segment, then broadcast. A predicated load alone would fill only the
+    // first twelve lanes of the register and leave every segment above the first holding a zero counter
+    // block - correct at a 128-bit vector length, wrong at every width above it.
+    svbool_t const leading_b8x = svwhilelt_b8_u64(0, 12);
+    svuint8_t const nonce_u8x = svld1_u8(leading_b8x, nonce);
+    svuint32_t const index_u32x = svreinterpret_u32_u8(nonce_u8x);
+    svbool_t const trailing_b32x = svcmpeq_n_u32(svptrue_b32(), svindex_u32(0, 1), 3);
+    svuint8_t const block_u8x = svreinterpret_u8_u32(
+        svsel_u32(trailing_b32x, svdup_n_u32(sz_u32_bytes_reverse(block_index)), index_u32x));
+    return svdupq_lane_u8(block_u8x, 0);
 }
 
 /**
@@ -239,6 +236,18 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_reflect_sve2aes_(svuint8_t block_u8x) {
 /** @brief Loads one hash block from the tag's bit order into the multiplier's, leaving the rest zero. */
 SZ_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svptrue_pat_b8(SV_VL16), block));
+}
+
+/**
+ *  @brief Loads a pending block with everything past @p buffered forced to zero.
+ *  @param block A sixteen-byte field, so the full-width load is always safe.
+ *  @param buffered How many bytes are live, below sixteen.
+ *
+ *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging
+ *  buffer, and nothing written back into the caller's state.
+ */
+SZ_HELPER_INLINE svuint8_t sz_ghash_load_padded_sve2aes_(sz_u8_t const *block, sz_size_t buffered) {
+    return sz_ghash_reflect_sve2aes_(svld1_u8(svwhilelt_b8_u64(0, buffered), block));
 }
 
 /** @brief Stores the leading segment of a reflected value back in the tag's bit order. */
@@ -558,9 +567,9 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *s
     for (byte_index = 0; byte_index != count; ++byte_index) {
         sz_u8_t const plaintext_byte = input[byte_index];
         sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-        sz_u8_t const ciphertext = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
+        sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
         output[byte_index] = transformed;
-        state->partial[state->buffered] = ciphertext;
+        state->partial[state->buffered] = ciphertext_byte;
         ++state->buffered;
         ++state->keystream_used;
         if (state->buffered == SZ_AES_BLOCK_LENGTH) {
@@ -601,16 +610,15 @@ SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *st
     sz_size_t pass_blocks = group_blocks;
     svuint8_t accumulator_u8x, counter_u8x, last_keystream_u8x = svdup_n_u8(0);
     sz_u32_t block_index;
-    sz_size_t produced = 0, pass_count = 0, byte_index;
+    sz_size_t produced = 0, pass_count = 0;
 
     if (length == 0) return;
     accumulator_u8x = sz_ghash_load_sve2aes_(state->accumulator);
 
     //  Associated data ends the moment the first message byte arrives, and its tail needs padding.
     if (state->text_length == 0 && state->buffered != 0) {
-        for (byte_index = state->buffered; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index)
-            state->partial[byte_index] = 0;
-        accumulator_u8x = sz_ghash_absorb_sve2aes_(accumulator_u8x, sz_ghash_load_sve2aes_(state->partial), subkey_u8x);
+        accumulator_u8x = sz_ghash_absorb_sve2aes_(
+            accumulator_u8x, sz_ghash_load_padded_sve2aes_(state->partial, state->buffered), subkey_u8x);
         state->buffered = 0;
     }
 
@@ -685,17 +693,13 @@ SZ_HELPER_AUTO void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *s
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const subkey_u8x = sz_ghash_load_sve2aes_(state->key.powers);
     svuint8_t accumulator_u8x = sz_ghash_load_sve2aes_(state->accumulator);
-    sz_u128_vec_t padded_vec, lengths_vec;
-    sz_size_t byte_index;
+    sz_u128_vec_t lengths_vec;
 
     //  Whatever is still pending gets padded here: an associated-data tail when the message was empty,
     //  or the message's own trailing ciphertext bytes otherwise.
     if (state->buffered != 0) {
-        for (byte_index = 0; byte_index != state->buffered; ++byte_index)
-            padded_vec.u8s[byte_index] = state->partial[byte_index];
-        for (; byte_index != SZ_AES_BLOCK_LENGTH; ++byte_index) padded_vec.u8s[byte_index] = 0;
-        accumulator_u8x = sz_ghash_absorb_sve2aes_(accumulator_u8x, sz_ghash_load_sve2aes_(&padded_vec.u8s[0]),
-                                                   subkey_u8x);
+        accumulator_u8x = sz_ghash_absorb_sve2aes_(
+            accumulator_u8x, sz_ghash_load_padded_sve2aes_(state->partial, state->buffered), subkey_u8x);
     }
 
     sz_aes256_gcm_lengths_serial_(&lengths_vec, state->associated_length, state->text_length);
