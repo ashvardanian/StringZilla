@@ -973,7 +973,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_lasx_t sz_utf8_rune_decode_window_lasx_(sz_u8
     __m256i next1_low_u8x32, next1_high_u8x32, next2_low_u8x32, next2_high_u8x32, next3_low_u8x32, next3_high_u8x32;
     sz_utf8_forward_neighbours_lasx_(window_low_u8x32, window_high_u8x32, &next1_low_u8x32, &next1_high_u8x32,
                                      &next2_low_u8x32, &next2_high_u8x32, &next3_low_u8x32, &next3_high_u8x32);
-    (void)next3_low_u8x32, (void)next3_high_u8x32; // Only next1/next2 feed the 2-/3-byte reconstruction.
+    sz_unused_(next3_low_u8x32), sz_unused_(next3_high_u8x32); // Only next1/next2 feed the 2-/3-byte reconstruction.
 
     sz_u64_t const loaded_mask = result.loaded >= 64 ? ~(sz_u64_t)0 : (((sz_u64_t)1 << result.loaded) - 1);
 

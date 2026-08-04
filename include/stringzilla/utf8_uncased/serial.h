@@ -1015,7 +1015,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_serial( //
     sz_cptr_t needle, sz_size_t needle_length,           //
     sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
 
-    (void)needle_metadata; // Only used by SIMD kernels for debugging
+    sz_unused_(needle_metadata); // Only used by SIMD kernels for debugging
 
     if (needle_length == 0) {
         *match_length = 0;

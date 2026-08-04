@@ -75,6 +75,23 @@ EOF
   exit 1
 fi
 
+# Discarding a value via `(void)expr;` instead of a named mechanism. This codebase already has one:
+# `sz_unused_(x)` (types.h), used 50+ times for an unused parameter or local kept for a shared signature.
+# For a declaration site (a parameter or a single local you never read), `SZ_MAYBE_UNUSED` is the
+# alternative. A bare `(void)x;` statement is neither greppable as an intentional marker nor consistent
+# with either existing convention.
+void_discard=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
+  | grep -nE '^\+' | code_only \
+  | grep -E '\(void\)[A-Za-z_][A-Za-z_0-9]*[[:space:]]*[,;]' || true)
+if [ -n "$void_discard" ]; then
+  cat >&2 <<EOF
+pre-commit: '(void)expr;' discard (use sz_unused_(x) for a statement, or SZ_MAYBE_UNUSED on the declaration):
+$void_discard
+Bypass with --no-verify only if intentional.
+EOF
+  exit 1
+fi
+
 # Dashes in `#pragma region` / `#pragma endregion` names: clang-format parses the trailing text as an
 # expression and rewrites `X-Y` into `X - Y`, desyncing region/endregion pairs. Use spaces in region names instead.
 pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \

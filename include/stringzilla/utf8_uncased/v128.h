@@ -137,7 +137,7 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t 
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
         v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
-        (void)next_u8x16;
+        sz_unused_(next_u8x16);
         v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
                                                      wasm_i8x16_splat((sz_i8_t)0x80));
         v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));

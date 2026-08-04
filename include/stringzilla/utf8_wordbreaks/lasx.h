@@ -461,8 +461,8 @@ SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_lasx_
         __m256i next1_low_u8x32, next1_high_u8x32, next2_low_u8x32, next2_high_u8x32, next3_low_u8x32, next3_high_u8x32;
         sz_utf8_forward_neighbours_lasx_(raw_low_u8x32, raw_high_u8x32, &next1_low_u8x32, &next1_high_u8x32,
                                          &next2_low_u8x32, &next2_high_u8x32, &next3_low_u8x32, &next3_high_u8x32);
-        (void)next2_low_u8x32, (void)next2_high_u8x32, (void)next3_low_u8x32,
-            (void)next3_high_u8x32; // only next1 gates the second byte
+        sz_unused_(next2_low_u8x32), sz_unused_(next2_high_u8x32), sz_unused_(next3_low_u8x32),
+            sz_unused_(next3_high_u8x32); // only next1 gates the second byte
         sz_u64_t const next1_at_least_a0 = sz_utf8_word_break_byte_ge_lasx_(next1_low_u8x32, next1_high_u8x32, 0xA0);
         sz_u64_t const next1_at_least_90 = sz_utf8_word_break_byte_ge_lasx_(next1_low_u8x32, next1_high_u8x32, 0x90);
         sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_lasx_(raw_low_u8x32, raw_high_u8x32, 0xC0) |
