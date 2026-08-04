@@ -445,16 +445,15 @@
 #endif
 
 /**
- *  LLVM 18 split the `evex512` target feature out of the AVX-512 family (the AVX10 transition): in
- *  per-function `target` attributes, `avx512f` alone now grants only 256-bit EVEX forms, and ZMM codegen
- *  requires naming `evex512` explicitly. Older Clang treats the token as unknown and DROPS the whole
- *  attribute (`-Wignored-attributes`, a hard error under `-Werror`), so the AVX-512 kernels fork their
- *  pragmas on this one condition. Apple Clang versions its own way: Apple Clang 17 is LLVM-19-based and
- *  already needs the token. Every shipped AVX-512 CPU is 512-bit capable, so the feature is semantically
- *  implied by the Skylake and Ice Lake tiers - this is purely an encoding-model fork, never a codegen
- *  difference on real hardware.
+ *  LLVM 18 through 22 carry `evex512` as a separate target feature, split out of AVX-512 for the AVX10
+ *  transition; ZMM codegen in a per-function `target` attribute needs it named. LLVM 17 and older never
+ *  knew the token, LLVM 23 retired it again, and Clang drops the WHOLE attribute over one unknown
+ *  feature - `-Wignored-attributes`, silently costing every AVX-512 kernel - so the fork is a closed
+ *  version window, not a floor. Apple Clang 17 is LLVM-19-based and sits inside it. The same window is
+ *  spelled out in `probes/x86_skylake.c` and `probes/x86_icelake.c`, which stay freestanding for Cargo.
  */
-#if defined(__clang__) && (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
+#if defined(__clang__) && __clang_major__ < 23 && \
+    (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
 #define SZ_CLANG_HAS_EVEX512_ (1)
 #else
 #define SZ_CLANG_HAS_EVEX512_ (0)
