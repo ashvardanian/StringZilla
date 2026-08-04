@@ -560,7 +560,10 @@ struct duration_histogram {
 
     inline count_t &operator[](double seconds) {
         auto bin_float = std::log(seconds / min_seconds) / std::log(max_seconds / min_seconds) * bins.size();
-        std::size_t bin = std::min(bins.size(), static_cast<std::size_t>(bin_float));
+        // A call quicker than `min_seconds` makes the logarithm negative, and casting that to an unsigned
+        // type wraps to something enormous, so the low end is clamped before the cast rather than after.
+        // The high end clamps to the last slot: `bins.size()` is one past it.
+        std::size_t bin = bin_float <= 0 ? 0 : std::min(bins.size() - 1, static_cast<std::size_t>(bin_float));
         return bins[bin];
     }
 };
