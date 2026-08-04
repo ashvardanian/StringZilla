@@ -17,10 +17,10 @@ extern "C" {
 
 #if SZ_USE_HASWELL
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2", "bmi", "bmi2", "popcnt")
+#pragma GCC target("avx2", "bmi", "bmi2", "popcnt", "lzcnt")
 #endif
 
 #pragma region UAX 29 Sentence Boundaries forward kernel
@@ -252,9 +252,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_
                                (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
                                (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                               valid;
-    sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+    sz_size_t limit = straddle ? (sz_size_t)_tzcnt_u64(straddle) : loaded;
     if ((bytes_after[0] & 0xC0) == 0x80) {
-        sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes));
+        sz_size_t const last_lead = (sz_size_t)(63 - (int)_lzcnt_u64(start_bytes));
         if (last_lead < limit) limit = last_lead;
     }
     return limit > 0 ? limit : loaded;
@@ -362,7 +362,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
             sz_u64_t remaining = dense_start_lanes;
             sz_size_t dense_index = 0;
             while (remaining) {
-                sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+                sz_size_t const lane = (sz_size_t)_tzcnt_u64(remaining);
                 remaining = _blsr_u64(remaining);
                 dense_classes[dense_index++] = class_bytes[lane];
             }
@@ -397,7 +397,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_haswell(         //
         if (dense_adv >= dense_count) { byte_adv = complete_limit ? complete_limit : loaded; }
         else {
             sz_u64_t const upto = _pdep_u64((1ull << dense_adv), dense_start_lanes);
-            byte_adv = (sz_size_t)sz_u64_ctz(upto);
+            byte_adv = (sz_size_t)_tzcnt_u64(upto);
         }
 
         sentences = sz_utf8_rune_drain_forward_haswell_(boundary_lanes, position, sentence_starts, sentence_lengths,

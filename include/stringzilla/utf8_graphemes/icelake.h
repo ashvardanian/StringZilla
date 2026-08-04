@@ -391,7 +391,7 @@ SZ_HELPER_AUTO sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( /
         sz_u64_t const four = _cvtmask64_u64(decoded.four_byte_starts);
         sz_u64_t const overrun = (two & ~sz_u64_mask_until_(loaded - 1)) | (three & ~sz_u64_mask_until_(loaded - 2)) |
                                  (four & ~sz_u64_mask_until_(loaded - 3));
-        byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+        byte_span = overrun ? (sz_size_t)_tzcnt_u64(overrun) : loaded;
         start_lanes &= sz_u64_mask_until_(byte_span);
     }
 

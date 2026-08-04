@@ -279,9 +279,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_run
                                (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
                                (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                               valid;
-    sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+    sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz_neon_(straddle) : loaded;
     if ((bytes_after[0] & 0xC0) == 0x80) {
-        sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes));
+        sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz_neon_(start_bytes));
         if (last_lead < limit) limit = last_lead;
     }
     return limit > 0 ? limit : loaded;
@@ -375,13 +375,13 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
         //  shuffles (NEON has no `vpcompressb`).
         sz_u64_t const complete_mask = sz_u64_mask_until_serial_(complete_limit);
         sz_u64_t const dense_start_lanes = start_bytes & complete_mask;
-        sz_size_t const dense_count = (sz_size_t)sz_u64_popcount(dense_start_lanes);
+        sz_size_t const dense_count = (sz_size_t)sz_u64_popcount_neon_(dense_start_lanes);
         sz_u8_t dense_classes[64];
         {
             sz_u64_t remaining = dense_start_lanes;
             sz_size_t dense_index = 0;
             while (remaining) {
-                sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+                sz_size_t const lane = (sz_size_t)sz_u64_ctz_neon_(remaining);
                 remaining &= remaining - 1; // clear the lowest set bit
                 dense_classes[dense_index++] = class_bytes[lane];
             }
@@ -416,7 +416,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_neon(            //
         if (dense_adv >= dense_count) { byte_adv = complete_limit ? complete_limit : loaded; }
         else {
             sz_u64_t const upto = sz_sentence_break_pdep_neon_((1ull << dense_adv), dense_start_lanes);
-            byte_adv = (sz_size_t)sz_u64_ctz(upto);
+            byte_adv = (sz_size_t)sz_u64_ctz_neon_(upto);
         }
 
         sentences = sz_utf8_rune_drain_forward_neon_(boundary_lanes, position, sentence_starts, sentence_lengths,

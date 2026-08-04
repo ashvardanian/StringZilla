@@ -20,10 +20,10 @@ extern "C" {
  */
 #if SZ_USE_HASWELL
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2")
+#pragma GCC target("avx2", "bmi", "bmi2", "lzcnt")
 #endif
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
@@ -34,7 +34,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t hay
     while (haystack_length >= 32) {
         haystack_vec.ymm = _mm256_lddqu_si256((__m256i const *)haystack);
         matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
-        if (matches_mask) return haystack + sz_u32_ctz(matches_mask);
+        if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
         haystack += 32, haystack_length -= 32;
     }
 
@@ -49,7 +49,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t ha
     while (haystack_length >= 32) {
         haystack_vec.ymm = _mm256_lddqu_si256((__m256i const *)(haystack + haystack_length - 32));
         matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
-        if (matches_mask) return haystack + haystack_length - 1 - sz_u32_clz(matches_mask);
+        if (matches_mask) return haystack + haystack_length - 1 - (int)_lzcnt_u32(matches_mask);
         haystack_length -= 32;
     }
 
@@ -85,7 +85,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
-            int potential_offset = sz_u32_ctz(matches_vec.u32);
+            int potential_offset = (int)_tzcnt_u32(matches_vec.u32);
             if (sz_equal_haswell(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_vec.u32 &= matches_vec.u32 - 1;
@@ -126,7 +126,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystac
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
-            int potential_offset = sz_u32_clz(matches_vec.u32);
+            int potential_offset = (int)_lzcnt_u32(matches_vec.u32);
             if (sz_equal_haswell(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             matches_vec.u32 &= ~(1u << (31 - potential_offset));
@@ -232,7 +232,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t leng
         matches_vec.ymm = _mm256_cmpeq_epi8(matches_vec.ymm, _mm256_setzero_si256());
         int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);
         if (matches_mask) {
-            int offset = sz_u32_ctz(matches_mask);
+            int offset = (int)_tzcnt_u32(matches_mask);
             return text + offset;
         }
         else { text += 32, length -= 32; }
@@ -292,7 +292,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t len
         int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);
         if (matches_mask) {
             // Highest set bit = last matching byte in the window.
-            int offset = 31 - sz_u32_clz((sz_u32_t)matches_mask);
+            int offset = 31 - (int)_lzcnt_u32((sz_u32_t)matches_mask);
             return window + offset;
         }
         else { length -= 32; }

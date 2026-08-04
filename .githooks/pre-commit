@@ -49,9 +49,11 @@ fi
 laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
   | grep -nE '^\+' | code_only | grep -E '&\*' || true)
 if [ -n "$laundering" ]; then
-  echo "pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):" >&2
-  echo "$laundering" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):
+$laundering
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -65,9 +67,11 @@ pointer_laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.h
   | grep -E '\([[:space:]]*(sz_size_t|sz_u64_t|uintptr_t|size_t|unsigned long|long)[[:space:]]*\)[[:space:]]*[A-Za-z_]' \
   | grep -E '\)[[:space:]]*\([[:space:]]*(void|[A-Za-z_][A-Za-z_0-9]*)[[:space:]]*\*' || true)
 if [ -n "$pointer_laundering" ]; then
-  echo "pre-commit: pointer cast through an integer type (cast to the pointer type you mean, once):" >&2
-  echo "$pointer_laundering" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: pointer cast through an integer type (cast to the pointer type you mean, once):
+$pointer_laundering
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -76,9 +80,11 @@ fi
 pragma_dashes=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
   | grep -nE '^\+' | grep -E '#pragma[[:space:]]+(region|endregion)' | grep -E '[A-Za-z0-9] *- *[A-Za-z0-9]' || true)
 if [ -n "$pragma_dashes" ]; then
-  echo "pre-commit: dash in a #pragma region/endregion name (clang-format rewrites 'X-Y' to 'X - Y'); use spaces:" >&2
-  echo "$pragma_dashes" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: dash in a #pragma region/endregion name (clang-format rewrites 'X-Y' to 'X - Y'); use spaces:
+$pragma_dashes
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -92,10 +98,12 @@ libc=$(git diff --cached --no-color -U0 -- 'include/stringzilla' ':(exclude)incl
   | grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' \
   | grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
 if [ -n "$libc" ]; then
-  echo "pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC)." >&2
-  echo "Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:" >&2
-  echo "$libc" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: LibC string/memory symbol in staged include/stringzilla changes (StringZilla supersedes LibC).
+Use sz_copy / sz_fill / sz_move / sz_equal, or a sz_u(128|256|512)_vec_t union .u8s[] staging buffer:
+$libc
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -109,9 +117,11 @@ workflow_names=$(git diff --cached --no-color -U0 -- '.github/workflows/*.yml' '
   | grep -E '^\+( {8}name:| *- name:)' \
   | grep -E '[()]|name:[[:space:]]*["'"'"']?[a-z]' || true)
 if [ -n "$workflow_names" ]; then
-  echo "pre-commit: workflow job/step names must avoid parentheses and start with an uppercase letter:" >&2
-  echo "$workflow_names" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: workflow job/step names must avoid parentheses and start with an uppercase letter:
+$workflow_names
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -123,9 +133,11 @@ scaffolding=$(git diff --cached --no-color -U0 \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
   | grep -E '^\+(def (vector_width_bracketing_strings|malformed_utf8_corpus|boundary_strings|differential_bodies|get_random_string|is_equal_strings|seed_random_generators|scale_iterations|unaligned_views|run_across_backends|assert_backends_agree|run_across_engines|assert_engines_agree|device_scope_and_capabilities|generate_string_batches|capability_sweep|forced_capabilities)\(|(SEED_VALUES|ITERATIONS_MULTIPLIER)[[:space:]]*=)' || true)
 if [ -n "$scaffolding" ]; then
-  echo "pre-commit: shared test scaffolding redefined outside test/sz_helpers.py; import it instead:" >&2
-  echo "$scaffolding" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: shared test scaffolding redefined outside test/sz_helpers.py; import it instead:
+$scaffolding
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -135,9 +147,11 @@ seedlists=$(git diff --cached --no-color -U0 -- 'test/*.py' \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
   | grep -E 'parametrize\(.*"seed_value".*,[[:space:]]*\[' || true)
 if [ -n "$seedlists" ]; then
-  echo "pre-commit: parametrize seed_value over test.sz_helpers.SEED_VALUES, not a literal list:" >&2
-  echo "$seedlists" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: parametrize seed_value over test.sz_helpers.SEED_VALUES, not a literal list:
+$seedlists
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
@@ -147,31 +161,57 @@ frozen_fuzz=$(git diff --cached --no-color -U0 -- 'test/*.py' \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
   | grep -E 'for _ in range\([0-9]' || true)
 if [ -n "$frozen_fuzz" ]; then
-  echo "pre-commit: frozen fuzz-loop count; wrap it as 'for _ in range(scale_iterations(N)):'" >&2
-  echo "$frozen_fuzz" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: frozen fuzz-loop count; wrap it as 'for _ in range(scale_iterations(N)):'
+$frozen_fuzz
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 
-# Serial bit-op helpers and raw compiler builtins inside ISA-specific kernel files are a symptom of not
-# leveraging the platform: masks were materialized into a scalar just to count or scan them, when native
-# mask/lane instructions do it in place (RVV `vcpop.m`/`vfirst.m`, x86 `popcnt` on a fresh movemask is fine
-# but a `k`-register `kortest`/`vpopcnt` path may be cheaper, NEON `cnt`+`addv`). `sz_u64_clz` stays exempt:
-# find-last-set has no mask-native counterpart on any of our targets.
-serial_bitops=$(git diff --cached --no-color -U0 \
+# sz_u32_ctz/sz_u64_ctz/sz_u32_clz/sz_u64_clz/sz_u32_popcount/sz_u64_popcount (types.h) exist for
+# serial.h and for every ISA that has no reason to bypass them: WASM/PowerVSX/LoongArch/RVV builtins carry
+# no target-feature-gating risk on those platforms, so the wrapper is the right, searchable, internal-name
+# call there - only x86 (real feature-gated named intrinsics) and SVE2 (predicate-domain ACLE forms, no
+# MSVC target) and NEON (MSVC/ARM64 has no __builtin_*/ACLE) have a genuine reason to bypass it.
+
+# x86 named intrinsics required - westmere/goldmont/haswell/skylake/icelake: the wrapper AND the ISA-agnostic
+# __builtin_ctz/clz/popcount are both banned. x86 has real named, feature-gated intrinsics
+# (_tzcnt_u32/64, _lzcnt_u32/64, _mm_popcnt_u32/64) - use them directly so a missing bmi/lzcnt/popcnt
+# pragma flag is a compile error, not __builtin_ctz's silent bsf downgrade (find/haswell.h shipped that
+# exact bug once).
+x86_wrapper=$(git diff --cached --no-color -U0 \
   -- 'include/stringzilla/*/westmere.h' 'include/stringzilla/*/goldmont.h' 'include/stringzilla/*/haswell.h' \
-     'include/stringzilla/*/skylake.h' 'include/stringzilla/*/icelake.h' 'include/stringzilla/*/neon.h' \
-     'include/stringzilla/*/sve.h' 'include/stringzilla/*/sve2.h' 'include/stringzilla/*/rvv.h' \
-     'include/stringzilla/*/rvvcrypto.h' 'include/stringzilla/*/v128.h' 'include/stringzilla/*/lasx.h' \
-     'include/stringzilla/*/powervsx.h' 'include/stringzillas/*/*.hpp' ':(exclude)include/stringzillas/*/serial.hpp' \
+     'include/stringzilla/*/skylake.h' 'include/stringzilla/*/icelake.h' \
   | grep -nE '^\+' | grep -vE '^\+\+\+' | code_only \
-  | grep -E 'sz_u(32|64)_(popcount|ctz)|__builtin_(popcount|ctz|clz|ffs|parity)' || true)
-if [ -n "$serial_bitops" ]; then
-  echo "pre-commit: serial bit-op helper or raw __builtin_* in a staged ISA kernel file." >&2
-  echo "Prefer the native mask/lane instruction (vcpop.m / vfirst.m on RVV, kortest / popcnt-on-movemask on x86," >&2
-  echo "cnt+addv on NEON) over materializing a mask into a scalar just to count or scan it:" >&2
-  echo "$serial_bitops" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  | grep -E 'sz_u(32|64)_(ctz|clz|popcount)\(|__builtin_(ctz|clz|popcount)' || true)
+
+# ACLE required on SVE2 - sve/sve2.h have no MSVC target, so __clz/__clz(__rbit(x))/__builtin_popcount (or
+# predicate-domain svcntp_b8/svbrkb_b_z) are the direct form there; only the wrapper is banned.
+other_wrapper=$(git diff --cached --no-color -U0 \
+  -- 'include/stringzilla/*/sve.h' 'include/stringzilla/*/sve2.h' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E 'sz_u(32|64)_(ctz|clz|popcount)\(' || true)
+
+# NEON needs the MSVC-safe macros - neon.h bans both the generic wrapper AND bare __builtin_ctz/clz/popcount. Real MSVC/ARM64
+# compiles these files and has no __builtin_*/ACLE support, so every NEON file must go through the
+# sz_u32_ctz_neon_/sz_u32_clz_neon_/sz_u32_popcount_neon_ (and 64-bit) macros defined once in types.h,
+# which branch _MSC_VER vs ACLE internally - calling __builtin_ctz bare compiles fine on GCC/Clang but
+# breaks the real MSVC/ARM64 build silently.
+neon_wrapper=$(git diff --cached --no-color -U0 \
+  -- 'include/stringzilla/*/neon.h' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' | code_only \
+  | grep -E 'sz_u(32|64)_(ctz|clz|popcount)\(|__builtin_(ctz|clz|popcount)' || true)
+
+if [ -n "$x86_wrapper" ] || [ -n "$other_wrapper" ] || [ -n "$neon_wrapper" ]; then
+  cat >&2 <<EOF
+pre-commit: sz_u32_ctz/clz/popcount (or a bare __builtin_ctz/clz/popcount on x86) in a staged ISA kernel
+file. Call the platform's direct intrinsic instead - x86: _tzcnt_u32/_lzcnt_u32/_mm_popcnt_u32 (64-bit
+forms too); SVE2: __clz / __clz(__rbit(x)) / __builtin_popcount; NEON: sz_u32_ctz_neon_/sz_u32_clz_neon_/
+sz_u32_popcount_neon_ from types.h (MSVC/ARM64 has no __builtin_*). WASM/PowerVSX/LoongArch/RVV use the
+wrapper directly - no fragility risk there, so this shouldn't be firing on those files at all.
+${x86_wrapper}${other_wrapper}${neon_wrapper}
+EOF
   exit 1
 fi
 
@@ -183,10 +223,12 @@ raw_assert=$(git diff --cached --no-color -U0 -- 'test/*.c' 'test/*.h' 'test/*.c
   | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
   | grep -E '(^|[^A-Za-z0-9_])assert[[:space:]]*\(' || true)
 if [ -n "$raw_assert" ]; then
-  echo "pre-commit: raw assert() in staged test/ changes (stripped by -DNDEBUG in CI's Release/RelWithDebInfo" >&2
-  echo "test builds). Use verify() / let_verify() / scope_verify() / throws_verify() instead:" >&2
-  echo "$raw_assert" >&2
-  echo "Bypass with --no-verify only if intentional." >&2
+  cat >&2 <<EOF
+pre-commit: raw assert() in staged test/ changes (stripped by -DNDEBUG in CI's Release/RelWithDebInfo
+test builds). Use verify() / let_verify() / scope_verify() / throws_verify() instead:
+$raw_assert
+Bypass with --no-verify only if intentional.
+EOF
   exit 1
 fi
 

@@ -73,7 +73,7 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz
         uint8x16_t headers_u8x16 = vandq_u8(window_u8x16, continuation_mask_u8x16);
         uint8x16_t starts_cmp_u8x16 = vmvnq_u8(vceqq_u8(headers_u8x16, continuation_pattern_u8x16));
         sz_u64_t start_bits = sz_utf8_vreinterpretq_u8_u4_neon_(starts_cmp_u8x16);
-        sz_size_t const start_count = (sz_size_t)sz_u64_popcount(start_bits);
+        sz_size_t const start_count = (sz_size_t)sz_u64_popcount_neon_(start_bits);
 
         if (n >= start_count) {
             n -= start_count, text_u8 += 16, length -= 16;
@@ -355,7 +355,7 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_flat_lookup_neon_( //
  *          `ctz` lowers to `rbit`+`clz`, and the loop trip count is the boundary popcount (sparse for real text). */
 SZ_HELPER_AUTO void sz_utf8_unpack_indices_neon_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
-        *out++ = (sz_u8_t)sz_u64_ctz(mask);
+        *out++ = (sz_u8_t)sz_u64_ctz_neon_(mask);
         mask &= mask - 1; // clear the lowest set bit
     }
 }
@@ -650,8 +650,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *
         if (quarter_mask == 0) continue;
         sz_u32_t const low8 = quarter_mask & 0xFFu;
         sz_u32_t const high8 = (quarter_mask >> 8) & 0xFFu;
-        int const count_low = sz_u64_popcount(low8);
-        int const count = sz_u64_popcount(quarter_mask);
+        int const count_low = sz_u64_popcount_neon_(low8);
+        int const count = sz_u64_popcount_neon_(quarter_mask);
 
         // Row of ascending set-bit positions for each 8-bit half; the high half's positions are +8 (lanes 8..15),
         // valid slots filled low, unused slots = 0x80 (out of `vqtbl1q_u8` range -> read as 0, never stored).
@@ -682,7 +682,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_neon_(sz_u64_t mask, sz_u8_t *
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
-    sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount(boundary);
+    sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount_neon_(boundary);
     sz_size_t previous = *previous_io;
     if (boundary_count == 0 || produced >= capacity) {
         *previous_io = previous;
@@ -1201,7 +1201,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
                              ((step4 & decodable_mask) << 3);
     sz_u64_t const orphan = continuation_bits & decodable_mask & ~covered;
     sz_u64_t const emit_starts = (starts_bits | orphan) & decodable_mask;
-    sz_size_t const emit_count = (sz_size_t)sz_u64_popcount(emit_starts);
+    sz_size_t const emit_count = (sz_size_t)sz_u64_popcount_neon_(emit_starts);
     if (emit_count == 0) { return *runes_unpacked = 0, text; } // Nothing decodable -> window-edge finalize in driver.
     sz_u64_t const ill_formed = emit_starts & ~well_formed;    // Orphans are continuations -> never well-formed.
 

@@ -194,7 +194,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count
     present_pages &= page_count >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << page_count) - 1u);
     __m512i result_u16x32 = _mm512_setzero_si512();
     while (present_pages) {
-        int const page_index = (int)sz_u64_ctz((sz_u64_t)present_pages);
+        int const page_index = (int)_tzcnt_u64((sz_u64_t)present_pages);
         present_pages &= present_pages - 1;
         int const tile_base = page_index * 128;
         int const tile_remaining = count - tile_base;

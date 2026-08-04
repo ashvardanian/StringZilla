@@ -22,13 +22,14 @@ extern "C" {
  */
 #if SZ_USE_SKYLAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt,evex512"))), \
                              apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt"))), \
+                             apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "lzcnt")
 #endif
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
@@ -39,7 +40,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t hay
     while (haystack_length >= 64) {
         haystack_vec.zmm = _mm512_loadu_si512(haystack);
         matches_mask_m64 = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, needle_vec.zmm);
-        if (matches_mask_m64) return haystack + sz_u64_ctz(matches_mask_m64);
+        if (matches_mask_m64) return haystack + (int)_tzcnt_u64(matches_mask_m64);
         haystack += 64, haystack_length -= 64;
     }
 
@@ -48,7 +49,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t hay
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask_m64, haystack);
         // Reuse the same `load_mask_m64` variable to find the bit that doesn't match
         matches_mask_m64 = _mm512_mask_cmpeq_epu8_mask(load_mask_m64, haystack_vec.zmm, needle_vec.zmm);
-        if (matches_mask_m64) return haystack + sz_u64_ctz(matches_mask_m64);
+        if (matches_mask_m64) return haystack + (int)_tzcnt_u64(matches_mask_m64);
     }
 
     return SZ_NULL_CHAR;
@@ -88,7 +89,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack
                     _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                 _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
             while (matches_m64) {
-                int potential_offset = sz_u64_ctz(matches_m64);
+                int potential_offset = (int)_tzcnt_u64(matches_m64);
                 if (sz_equal_skylake(haystack + potential_offset, needle, needle_length))
                     return haystack + potential_offset;
                 matches_m64 &= matches_m64 - 1;
@@ -109,7 +110,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack
                     _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                     _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                 _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
-            if (matches_m64) return haystack + sz_u64_ctz(matches_m64);
+            if (matches_m64) return haystack + (int)_tzcnt_u64(matches_m64);
         }
     }
     // If the needle is smaller than the size of the ZMM register, we can use masked comparisons
@@ -129,7 +130,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack
                     _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                 _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
             while (matches_m64) {
-                int potential_offset = sz_u64_ctz(matches_m64);
+                int potential_offset = (int)_tzcnt_u64(matches_m64);
                 h_full_vec.zmm = _mm512_maskz_loadu_epi8(needle_mask_m64, haystack + potential_offset);
                 if (_mm512_mask_cmpneq_epi8_mask(needle_mask_m64, h_full_vec.zmm, needle_full_vec.zmm) == 0)
                     return haystack + potential_offset;
@@ -151,7 +152,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack
             _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         matches_m64 &= load_mask_m64;
         while (matches_m64) {
-            int potential_offset = sz_u64_ctz(matches_m64);
+            int potential_offset = (int)_tzcnt_u64(matches_m64);
             if (needle_length <= 3 || sz_equal_skylake(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_m64 &= matches_m64 - 1;
@@ -168,7 +169,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t ha
     while (haystack_length >= 64) {
         haystack_vec.zmm = _mm512_loadu_si512(haystack + haystack_length - 64);
         matches_mask_m64 = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, needle_vec.zmm);
-        if (matches_mask_m64) return haystack + haystack_length - 1 - sz_u64_clz(matches_mask_m64);
+        if (matches_mask_m64) return haystack + haystack_length - 1 - (int)_lzcnt_u64(matches_mask_m64);
         haystack_length -= 64;
     }
 
@@ -177,7 +178,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t ha
         haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask_m64, haystack);
         // Reuse the same `load_mask_m64` variable to find the bit that doesn't match
         matches_mask_m64 = _mm512_mask_cmpeq_epu8_mask(load_mask_m64, haystack_vec.zmm, needle_vec.zmm);
-        if (matches_mask_m64) return haystack + 64 - sz_u64_clz(matches_mask_m64) - 1;
+        if (matches_mask_m64) return haystack + 64 - (int)_lzcnt_u64(matches_mask_m64) - 1;
     }
 
     return SZ_NULL_CHAR;
@@ -216,7 +217,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystac
                 _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
             _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches_m64) {
-            int potential_offset = sz_u64_clz(matches_m64);
+            int potential_offset = (int)_lzcnt_u64(matches_m64);
             if (needle_length <= 3 ||
                 sz_equal_skylake(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
@@ -239,7 +240,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystac
             _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         matches_m64 &= load_mask_m64;
         while (matches_m64) {
-            int potential_offset = sz_u64_clz(matches_m64);
+            int potential_offset = (int)_lzcnt_u64(matches_m64);
             if (needle_length <= 3 || sz_equal_skylake(haystack + 64 - potential_offset - 1, needle, needle_length))
                 return haystack + 64 - potential_offset - 1;
             sz_assert_((matches_m64 & (1ull << (63 - potential_offset))) != 0 &&

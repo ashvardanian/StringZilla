@@ -194,7 +194,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
         sz_u64_t const overrun = (two & ~sz_u64_mask_until_serial_(loaded - 1)) |
                                  (three & ~sz_u64_mask_until_serial_(loaded - 2)) |
                                  (four & ~sz_u64_mask_until_serial_(loaded - 3));
-        byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+        byte_span = overrun ? (sz_size_t)sz_u64_ctz_neon_(overrun) : loaded;
         start_lanes &= sz_u64_mask_until_serial_(byte_span);
     }
 
@@ -353,7 +353,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_neon_t sz_grapheme_classify_window_neon_( 
     sz_grapheme_classified_neon_t result;
     for (int quarter = 0; quarter < 4; ++quarter) result.descriptors[quarter] = desc_u8x16[quarter];
     result.start_lanes = start_lanes;
-    result.codepoint_count = (sz_size_t)sz_u64_popcount(start_lanes);
+    result.codepoint_count = (sz_size_t)sz_u64_popcount_neon_(start_lanes);
     result.byte_span = byte_span;
     return result;
 }

@@ -178,7 +178,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_neon(        //
             start_bits &= ~(sz_utf8_vreinterpretq_u8_u4_neon_(newline_cmp_u8x16) & 0xFull);
 
         // One set bit per match (nibble stride 4), so popcount is the true count of trusted set lanes.
-        sz_size_t const window_matches = (sz_size_t)sz_u64_popcount(start_bits);
+        sz_size_t const window_matches = (sz_size_t)sz_u64_popcount_neon_(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
             sz_utf8_iterate_peel_neon_(start_bits, length_per_lane_u8x16, emit_count, position, match_offsets + count,
@@ -283,7 +283,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_neon(     //
             vaddq_u8(vshrq_n_u8(two_byte_cmp_u8x16, 7), vshlq_n_u8(vshrq_n_u8(three_byte_cmp_u8x16, 7), 1)));
 
         // One set bit per match (nibble stride 4), so popcount is the true count of set lanes.
-        sz_size_t const window_matches = (sz_size_t)sz_u64_popcount(start_bits);
+        sz_size_t const window_matches = (sz_size_t)sz_u64_popcount_neon_(start_bits);
         sz_size_t const emit_count = sz_min_of_two(window_matches, matches_capacity - count);
         if (emit_count)
             sz_utf8_iterate_peel_neon_(start_bits, length_per_lane_u8x16, emit_count, position, match_offsets + count,
@@ -543,7 +543,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_neon(      //
             hits = member & valid_starts;
         }
         while (hits && count < matches_capacity) {
-            sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+            sz_size_t const lane = (sz_size_t)sz_u64_ctz_neon_(hits);
             hits &= hits - 1;
             sz_size_t length_at_lane = 1;
             length_at_lane += (decoded.two_byte_starts >> lane) & 1;

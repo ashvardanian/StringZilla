@@ -15,16 +15,17 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                  \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512"))), \
+#pragma clang attribute push(                                                                                              \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt,evex512"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                          \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+#pragma clang attribute push(                                                                                      \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+    "lzcnt", "popcnt")
 #endif
 
 /**
@@ -69,7 +70,7 @@ extern "C" {
  */
 SZ_HELPER_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
     sz_u64_t invalid_mask = ~is_valid | ~load_mask;
-    return invalid_mask ? (sz_size_t)sz_u64_ctz(invalid_mask) : chunk_size;
+    return invalid_mask ? (sz_size_t)_tzcnt_u64(invalid_mask) : chunk_size;
 }
 
 /** @brief OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
@@ -102,7 +103,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
                                (is_three_byte_lead_m64 & ~sz_u64_mask_until_(chunk_size > 2 ? chunk_size - 2 : 0)) |
                                malformed_lead_m64;
     incomplete_m64 &= load_m64;
-    sz_size_t copy_length = incomplete_m64 ? (sz_size_t)sz_u64_ctz(incomplete_m64) : chunk_size;
+    sz_size_t copy_length = incomplete_m64 ? (sz_size_t)_tzcnt_u64(incomplete_m64) : chunk_size;
     if (copy_length == 0) return 0;
 
     __mmask64 prefix_m64 = sz_u64_mask_until_(copy_length);
@@ -195,7 +196,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
     __mmask64 stop_m64 = (irregular_m64 | foreign_e1_second_m64 | malformed_lead_m64) & load_m64;
     sz_size_t fold_length = chunk_size;
     if (stop_m64) {
-        sz_size_t first_flagged_position = (sz_size_t)sz_u64_ctz(stop_m64);
+        sz_size_t first_flagged_position = (sz_size_t)_tzcnt_u64(stop_m64);
         // Find the lead by walking back over continuations (at most 2 steps for E1 thirds)
         while (first_flagged_position && ((is_continuation_m64 >> first_flagged_position) & 1))
             --first_flagged_position;
@@ -207,7 +208,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
     __mmask64 incomplete_m64 = (is_two_byte_lead_m64 & ~sz_u64_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
                                (is_three_byte_lead_m64 & ~sz_u64_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
     incomplete_m64 &= sz_u64_mask_until_(fold_length);
-    if (incomplete_m64) fold_length = (sz_size_t)sz_u64_ctz(incomplete_m64);
+    if (incomplete_m64) fold_length = (sz_size_t)_tzcnt_u64(incomplete_m64);
     if (fold_length == 0) return 0;
     __mmask64 prefix_m64 = sz_u64_mask_until_(fold_length);
 
@@ -518,7 +519,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                     // Check if last 1-2 bytes are an incomplete sequence
                     __mmask64 leads_in_chunk_m64 = is_three_byte_lead_m64 & load_m64;
                     if (leads_in_chunk_m64) {
-                        int last_lead_pos = 63 - sz_u64_clz(leads_in_chunk_m64);
+                        int last_lead_pos = 63 - (int)_lzcnt_u64(leads_in_chunk_m64);
                         if (last_lead_pos + 3 > (int)copy_length) copy_length = last_lead_pos;
                     }
                     if (copy_length > 0) {
@@ -801,7 +802,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
         if (two_byte_length >= 2) {
             __mmask64 prefix_m64 = sz_u64_mask_until_(two_byte_length);
             __mmask64 is_char_start_m64 = (~is_non_ascii_m64 | is_two_byte_lead_m64) & prefix_m64;
-            sz_size_t character_count = (sz_size_t)sz_u64_popcount(is_char_start_m64);
+            sz_size_t character_count = (sz_size_t)_mm_popcnt_u64(is_char_start_m64);
 
             // Compress character start positions, gather first/second bytes
             sz_u512_vec_t char_indices_vec;
@@ -867,7 +868,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
 
             // Handle serial-needed characters by processing them one at a time (assumes valid UTF-8)
             if (needs_serial_m16) {
-                sz_size_t first_special_index = (sz_size_t)sz_u64_ctz((sz_u64_t)needs_serial_m16);
+                sz_size_t first_special_index = (sz_size_t)_tzcnt_u64((sz_u64_t)needs_serial_m16);
                 if (first_special_index == 0) {
                     // First character needs serial - fold it if well-formed, else copy one byte to resync
                     sz_rune_t rune;
@@ -1051,7 +1052,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                     __mmask64 all_leads_m64 = is_three_byte_lead_m64 & sz_u64_mask_until_(valid_length);
                     __mmask64 safe_m64 = valid_length >= 3 ? sz_u64_mask_until_(valid_length - 2) : 0;
                     __mmask64 unsafe_m64 = all_leads_m64 & ~safe_m64;
-                    if (unsafe_m64) valid_length = sz_u64_ctz(unsafe_m64);
+                    if (unsafe_m64) valid_length = (int)_tzcnt_u64(unsafe_m64);
                 }
 
                 if (valid_length >= 2) {
@@ -1156,7 +1157,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                         __mmask64 safe2_m64 = georgian_length >= 2 ? sz_u64_mask_until_(georgian_length - 1) : 0;
                         __mmask64 unsafe2_m64 = leads2_in_prefix_m64 & ~safe2_m64;
                         __mmask64 unsafe_m64 = unsafe3_m64 | unsafe2_m64;
-                        if (unsafe_m64) georgian_length = sz_u64_ctz(unsafe_m64);
+                        if (unsafe_m64) georgian_length = (int)_tzcnt_u64(unsafe_m64);
                     }
 
                     if (georgian_length >= 2) {
@@ -1266,7 +1267,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                         __mmask64 leads_in_prefix_m64 = is_three_byte_lead_m64 & prefix_m64;
                         __mmask64 safe_m64 = latin_ext_length >= 3 ? sz_u64_mask_until_(latin_ext_length - 2) : 0;
                         __mmask64 unsafe_m64 = leads_in_prefix_m64 & ~safe_m64;
-                        if (unsafe_m64) latin_ext_length = sz_u64_ctz(unsafe_m64);
+                        if (unsafe_m64) latin_ext_length = (int)_tzcnt_u64(unsafe_m64);
                     }
 
                     if (latin_ext_length >= 3) {
@@ -1321,7 +1322,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                 __mmask64 all_leads_m64 = is_three_byte_lead_m64 & sz_u64_mask_until_(three_byte_length);
                 __mmask64 safe_leads_m64 = three_byte_length >= 3 ? sz_u64_mask_until_(three_byte_length - 2) : 0;
                 __mmask64 unsafe_leads_m64 = all_leads_m64 & ~safe_leads_m64;
-                if (unsafe_leads_m64) three_byte_length = sz_u64_ctz(unsafe_leads_m64);
+                if (unsafe_leads_m64) three_byte_length = (int)_tzcnt_u64(unsafe_leads_m64);
             }
 
             // Need at least 2 bytes
@@ -1371,7 +1372,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                     __mmask64 needs_serial_e1_m64 = is_greek_ext_m64 | is_special_third_m64;
 
                     if (needs_serial_e1_m64) {
-                        sz_size_t first_special_byte = sz_u64_ctz(needs_serial_e1_m64);
+                        sz_size_t first_special_byte = (int)_tzcnt_u64(needs_serial_e1_m64);
                         if (first_special_byte == 0) {
                             // First char needs serial - fold it if well-formed, else copy one byte to resync
                             sz_rune_t rune;
@@ -1547,7 +1548,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_size
                 __mmask64 all_leads_m64 = is_four_byte_lead_m64 & sz_u64_mask_until_(four_byte_length);
                 __mmask64 safe_leads_m64 = four_byte_length >= 4 ? sz_u64_mask_until_(four_byte_length - 3) : 0;
                 __mmask64 unsafe_leads_m64 = all_leads_m64 & ~safe_leads_m64;
-                if (unsafe_leads_m64) four_byte_length = sz_u64_ctz(unsafe_leads_m64);
+                if (unsafe_leads_m64) four_byte_length = (int)_tzcnt_u64(unsafe_leads_m64);
             }
 
             if (four_byte_length >= 4) {

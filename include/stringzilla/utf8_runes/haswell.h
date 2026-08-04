@@ -373,7 +373,7 @@ SZ_HELPER_AUTO __m256i sz_utf8_rune_flat_lookup_haswell_( //
  *          (AMD pre-Zen3). */
 SZ_HELPER_AUTO void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *out) {
     while (mask) {
-        *out++ = (sz_u8_t)sz_u64_ctz(mask);
+        *out++ = (sz_u8_t)(int)_tzcnt_u64(mask);
         mask = _blsr_u64(mask); // clear the lowest set bit
     }
 }
@@ -387,7 +387,7 @@ SZ_HELPER_AUTO void sz_utf8_unpack_indices_haswell_(sz_u64_t mask, sz_u8_t *out)
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_haswell_( //
     sz_u64_t boundary, sz_size_t base, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
     sz_size_t *previous_io) {
-    sz_size_t const boundary_count = (sz_size_t)sz_u64_popcount(boundary);
+    sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
     sz_u64_t previous = (sz_u64_t)*previous_io;
     if (boundary_count == 0 || produced >= capacity) {
         *previous_io = (sz_size_t)previous;
@@ -736,8 +736,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_
         if (half_mask == 0) continue;
         sz_u32_t const low8 = half_mask & 0xFFu;
         sz_u32_t const high8 = (half_mask >> 8) & 0xFFu;
-        int const count_low = sz_u64_popcount(low8);
-        int const count = sz_u64_popcount(half_mask);
+        int const count_low = (int)_mm_popcnt_u64(low8);
+        int const count = (int)_mm_popcnt_u64(half_mask);
 
         // Ascending set-bit positions for each 8-bit byte; the high byte's positions are +8 (lanes 8..15). Unused slots
         // are 0x80 (high bit set → `vpshufb` reads 0, never stored).
@@ -1022,7 +1022,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_haswell_( //
         _mm256_add_epi8(sequence_end_u8x32, signed_bias_u8x32),
         _mm256_add_epi8(_mm256_set1_epi8((char)chunk), signed_bias_u8x32));
     sz_u32_t const overruns_bits = (sz_u32_t)_mm256_movemask_epi8(overrun_detected_u8x32) & starts_bits;
-    sz_size_t const decodable_end = overruns_bits ? (sz_size_t)sz_u64_ctz(overruns_bits) : chunk;
+    sz_size_t const decodable_end = overruns_bits ? (sz_size_t)_tzcnt_u64(overruns_bits) : chunk;
     sz_u32_t const decodable_mask = sz_u32_mask_until_serial_(decodable_end);
 
     // Bad lead: 0xC0/0xC1 (overlong 2-byte by the LUT) or 0xF5..0xFF (out of range, length-4 by the LUT).
@@ -1099,7 +1099,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_haswell_( //
                              ((step4 & decodable_mask) << 3);
     sz_u32_t const orphan = continuation_bits & decodable_mask & ~covered;
     sz_u32_t const emit_starts = (starts_bits | orphan) & decodable_mask;
-    sz_size_t const emit_count = (sz_size_t)sz_u64_popcount(emit_starts);
+    sz_size_t const emit_count = (sz_size_t)_mm_popcnt_u64(emit_starts);
     if (emit_count == 0) { return *runes_unpacked = 0, text; } // Nothing decodable → window-edge finalize in driver.
     sz_u32_t const ill_formed = emit_starts & ~well_formed;
 

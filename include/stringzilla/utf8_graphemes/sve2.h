@@ -277,7 +277,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2(          //
                 base = length;
                 break;
             } // defensive: cannot happen for valid input
-            int const count = (int)(64 - sz_u64_clz(dense_ones));
+            int const count = (int)(64 - __clzll(dense_ones));
             sz_u64_t const valid = dense_ones;
             sz_u64_t dense_planes[7];
             for (int bit = 0; bit < 7; ++bit) dense_planes[bit] = sz_grapheme_bit_gather_(desc_planes[bit], &route);

@@ -138,7 +138,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, ui
     sz_u64_t remaining = bmp_starts;
     sz_size_t dense_index = 0;
     while (remaining) {
-        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz_neon_(remaining);
         remaining &= remaining - 1;
         dense_high[dense_index] = high_bytes[lane];
         dense_low[dense_index] = low_bytes[lane];
@@ -157,7 +157,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_neon_(sz_u64_t bmp_starts, ui
     remaining = bmp_starts;
     dense_index = 0;
     while (remaining) {
-        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        sz_size_t const lane = (sz_size_t)sz_u64_ctz_neon_(remaining);
         remaining &= remaining - 1;
         scatter[lane] = class_bytes[dense_index++];
     }
@@ -486,9 +486,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(   //
                                        (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                                       valid;
-            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz_neon_(straddle) : loaded;
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
-                sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes_all));
+                sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz_neon_(start_bytes_all));
                 sz_size_t const last_lead_length = sz_utf8_lead_length_(text_u8[position + last_lead]);
                 if (last_lead + last_lead_length > loaded && last_lead < limit) limit = last_lead;
             }

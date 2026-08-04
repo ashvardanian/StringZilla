@@ -34,10 +34,10 @@ extern "C" {
 
 #if SZ_USE_HASWELL
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2", "bmi", "bmi2", "popcnt")
+#pragma GCC target("avx2", "bmi", "bmi2", "popcnt", "lzcnt")
 #endif
 
 #pragma region UAX 29 Word Boundaries forward kernel
@@ -128,7 +128,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
     sz_u64_t remaining = bmp_starts;
     sz_size_t dense_index = 0;
     while (remaining) {
-        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        sz_size_t const lane = (sz_size_t)_tzcnt_u64(remaining);
         remaining = _blsr_u64(remaining);
         dense_high[dense_index] = high_bytes[lane];
         dense_low[dense_index] = low_bytes[lane];
@@ -146,7 +146,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
     remaining = bmp_starts;
     dense_index = 0;
     while (remaining) {
-        sz_size_t const lane = (sz_size_t)sz_u64_ctz(remaining);
+        sz_size_t const lane = (sz_size_t)_tzcnt_u64(remaining);
         remaining = _blsr_u64(remaining);
         sz_u8_t const value = class_bytes[dense_index++];
         if (lane < 32) scatter_lo[lane] = value;
@@ -552,9 +552,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
                                        (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                                       valid;
-            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+            sz_size_t limit = straddle ? (sz_size_t)_tzcnt_u64(straddle) : loaded;
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
-                sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes_all));
+                sz_size_t const last_lead = (sz_size_t)(63 - (int)_lzcnt_u64(start_bytes_all));
                 sz_size_t const last_lead_length = sz_utf8_lead_length_(text_u8[position + last_lead]);
                 if (last_lead + last_lead_length > loaded && last_lead < limit) limit = last_lead;
             }

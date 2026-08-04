@@ -17,16 +17,17 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                         \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512,popcnt"))), \
+#pragma clang attribute push(                                                                                               \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                                 \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,popcnt"))), \
+#pragma clang attribute push(                                                                                       \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+    "lzcnt", \
                    "popcnt")
 #endif
 
@@ -339,9 +340,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
                                        (three & ~sz_u64_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
                                       valid_lanes;
-            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+            sz_size_t limit = straddle ? (sz_size_t)_tzcnt_u64(straddle) : loaded;
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
-                sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes));
+                sz_size_t const last_lead = (sz_size_t)(63 - (int)_lzcnt_u64(start_bytes));
                 if (last_lead < limit) limit = last_lead;
             }
             if (limit > 0) complete_limit = limit;
@@ -389,7 +390,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
         else {
             // Byte offset of dense codepoint `dense_adv`: the (dense_adv)-th set bit of `dense_start_lanes`.
             sz_u64_t const upto = _pdep_u64((1ull << dense_adv), dense_start_lanes);
-            byte_adv = (sz_size_t)sz_u64_ctz(upto);
+            byte_adv = (sz_size_t)_tzcnt_u64(upto);
         }
 
         sentences = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity_u8x64, sentence_starts,

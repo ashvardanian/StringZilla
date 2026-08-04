@@ -405,9 +405,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(    //
                                        (three & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                                       valid;
-            // First straddling lead = lowest set bit of `straddle`. Base rv64gcv has no scalar Zbb `ctz`, but the
-            // exempt `sz_u64_clz` is already on this path, so `63 - clz(lowest_bit)` yields the index without raising
-            // the scalar `straddle` into a mask register for a `vfirst`.
+            // First straddling lead = lowest set bit of `straddle`. Base rv64gcv has no scalar Zbb `ctz`, so
+            // `63 - sz_u64_clz(lowest_bit)` yields the index without raising the scalar `straddle` into a
+            // mask register for a `vfirst`.
             sz_size_t limit = straddle ? (sz_size_t)(63 - sz_u64_clz(straddle & (0ull - straddle))) : loaded;
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
                 sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes_all));

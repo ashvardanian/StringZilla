@@ -101,7 +101,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
         matches_m64 &= sz_u64_mask_until_(step);
 
         for (; matches_m64; matches_m64 &= matches_m64 - 1) {
-            sz_size_t candidate_offset = sz_u64_ctz(matches_m64);
+            sz_size_t candidate_offset = (int)_tzcnt_u64(matches_m64);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             // No window verification needed - probes cover all positions
@@ -144,7 +144,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
         matches_m64 &= valid_m64;
 
         for (; matches_m64; matches_m64 &= matches_m64 - 1) {
-            sz_size_t candidate_offset = sz_u64_ctz(matches_m64);
+            sz_size_t candidate_offset = (int)_tzcnt_u64(matches_m64);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             sz_cptr_t match = sz_utf8_uncased_verify_match_(                                               //
@@ -225,7 +225,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
         matches_m64 &= sz_u64_mask_until_(step);
 
         for (; matches_m64; matches_m64 &= matches_m64 - 1) {
-            sz_size_t candidate_offset = sz_u64_ctz(matches_m64);
+            sz_size_t candidate_offset = (int)_tzcnt_u64(matches_m64);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             // Verify full window - probes don't cover all positions
@@ -281,7 +281,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
         matches_m64 &= valid_m64;
 
         for (; matches_m64; matches_m64 &= matches_m64 - 1) {
-            sz_size_t candidate_offset = sz_u64_ctz(matches_m64);
+            sz_size_t candidate_offset = (int)_tzcnt_u64(matches_m64);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             // Verify full window
@@ -428,7 +428,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
 
         // Candidate Verification
         for (; matches; matches &= matches - 1) {
-            sz_size_t candidate_offset = sz_u64_ctz(matches);
+            sz_size_t candidate_offset = (int)_tzcnt_u64(matches);
             sz_cptr_t haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             haystack_candidate_vec.xmm = _mm_maskz_loadu_epi8(folded_window_m16, haystack_candidate_ptr);

@@ -1571,6 +1571,29 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bs
 SZ_HELPER_AUTO sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
+/*  ARM NEON kernel files call these directly instead of `sz_u32_ctz`/`sz_u32_clz`/`sz_u32_popcount`:
+ *  unlike those, they are explicitly ISA-named and never fall back to a portable loop, so a missing
+ *  case here is a compile error, not a silent downgrade. Real MSVC (not clang-cl) compiles NEON code
+ *  on Windows-on-Arm (`SZ_USE_NEON` is unconditionally 1 there) and has no `__builtin_*`/ACLE support,
+ *  so the MSVC branch is required, not optional; `_CountTrailingZeros[64]` needs VS2022 17.7+, which
+ *  matches this repo's CI floor (`windows-11-arm` runner).
+ */
+#if defined(_MSC_VER) && !defined(__clang__)
+#define sz_u32_ctz_neon_(x) ((int)_CountTrailingZeros(x))
+#define sz_u64_ctz_neon_(x) ((int)_CountTrailingZeros64(x))
+#define sz_u32_clz_neon_(x) ((int)_CountLeadingZeros(x))
+#define sz_u64_clz_neon_(x) ((int)_CountLeadingZeros64(x))
+#define sz_u32_popcount_neon_(x) ((int)_CountOneBits(x))
+#define sz_u64_popcount_neon_(x) ((int)_CountOneBits64(x))
+#else
+#define sz_u32_ctz_neon_(x) ((int)__clz(__rbit(x))) // ACLE, byte-identical to `sz_u32_ctz`'s `rbit`+`clz`
+#define sz_u64_ctz_neon_(x) ((int)__clzll(__rbitll(x)))
+#define sz_u32_clz_neon_(x) ((int)__clz(x))
+#define sz_u64_clz_neon_(x) ((int)__clzll(x))
+#define sz_u32_popcount_neon_(x) (__builtin_popcount(x)) // no ACLE popcount intrinsic exists
+#define sz_u64_popcount_neon_(x) (__builtin_popcountll(x))
+#endif
+
 /** @brief Reverse the 64 bits of @p value (bit `i` moves to bit `63 - i`): swap adjacent bits, then bit-pairs
  *         within nibbles, then nibbles within bytes, then the bytes. Lets an ascending-only byte-compress
  *         (`vpcompressb`) pack lanes in descending order. */

@@ -186,7 +186,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_hasw
         sz_u64_t const overrun = (two & ~sz_u64_mask_until_serial_(loaded - 1)) |
                                  (three & ~sz_u64_mask_until_serial_(loaded - 2)) |
                                  (four & ~sz_u64_mask_until_serial_(loaded - 3));
-        byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+        byte_span = overrun ? (sz_size_t)_tzcnt_u64(overrun) : loaded;
         start_lanes &= sz_u64_mask_until_serial_(byte_span);
     }
 
@@ -379,7 +379,7 @@ SZ_HELPER_AUTO sz_grapheme_classified_haswell_t sz_grapheme_classify_window_hasw
     result.descriptors_lo = desc_lo_u8x32;
     result.descriptors_hi = desc_hi_u8x32;
     result.start_lanes = start_lanes;
-    result.codepoint_count = (sz_size_t)sz_u64_popcount(start_lanes);
+    result.codepoint_count = (sz_size_t)_mm_popcnt_u64(start_lanes);
     result.byte_span = byte_span;
     return result;
 }

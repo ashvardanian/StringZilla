@@ -52,7 +52,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haysta
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise
         // selecting) the vector with a relative offsets array.
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
-        if (matches) return haystack + sz_u64_ctz(matches) / 4;
+        if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
 
         haystack += 16, haystack_length -= 16;
     }
@@ -69,7 +69,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t hayst
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)haystack + haystack_length - 16);
         matches_vec.u8x16 = vceqq_u8(haystack_vec.u8x16, needle_vec.u8x16);
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
-        if (matches) return haystack + haystack_length - 1 - sz_u64_clz(matches) / 4;
+        if (matches) return haystack + haystack_length - 1 - sz_u64_clz_neon_(matches) / 4;
         haystack_length -= 16;
     }
 
@@ -153,7 +153,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_le
             matches_vec.u8x16 = vandq_u8(vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16),
                                          vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
             matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
-            if (matches) return haystack + sz_u64_ctz(matches) / 4;
+            if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
         }
     }
     else if (needle_length == 3) {
@@ -175,7 +175,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_le
                     vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
             matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
-            if (matches) return haystack + sz_u64_ctz(matches) / 4;
+            if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
         }
     }
     else {
@@ -200,7 +200,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_le
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
             matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             while (matches) {
-                int potential_offset = sz_u64_ctz(matches) / 4;
+                int potential_offset = sz_u64_ctz_neon_(matches) / 4;
                 if (sz_find_verify_neon_(haystack + potential_offset, needle, needle_length))
                     return haystack + potential_offset;
                 matches &= matches - 1;
@@ -243,7 +243,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_l
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         while (matches) {
-            int potential_offset = sz_u64_clz(matches) / 4;
+            int potential_offset = sz_u64_clz_neon_(matches) / 4;
             if (sz_find_verify_neon_(haystack + haystack_length - needle_length - potential_offset, needle,
                                      needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
@@ -265,7 +265,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t hay
     for (; haystack_length >= 16; haystack += 16, haystack_length -= 16) {
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)(haystack));
         matches = sz_find_byteset_neon_register_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
-        if (matches) return haystack + sz_u64_ctz(matches) / 4;
+        if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
     }
 
     return sz_find_byteset_serial(haystack, haystack_length, set);
@@ -282,7 +282,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t ha
     for (; haystack_length >= 16; haystack_length -= 16) {
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)(haystack) + haystack_length - 16);
         matches = sz_find_byteset_neon_register_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
-        if (matches) return haystack + haystack_length - 1 - sz_u64_clz(matches) / 4;
+        if (matches) return haystack + haystack_length - 1 - sz_u64_clz_neon_(matches) / 4;
     }
 
     return sz_rfind_byteset_serial(haystack, haystack_length, set);

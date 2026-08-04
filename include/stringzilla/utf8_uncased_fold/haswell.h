@@ -79,14 +79,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
     __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    sz_size_t fold_length = is_foreign_lead_mask ? (sz_size_t)sz_u32_ctz(is_foreign_lead_mask) : 32;
+    sz_size_t fold_length = is_foreign_lead_mask ? (sz_size_t)_tzcnt_u32(is_foreign_lead_mask) : 32;
 
     // Don't split a trailing 2-byte or 3-byte sequence across chunks
     sz_u32_t incomplete_mask = //
         (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
         (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
@@ -218,7 +218,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
     stop_mask |= is_foreign_lead_mask;
     sz_size_t fold_length = 32;
     if (stop_mask) {
-        sz_size_t first_flagged_position = (sz_size_t)sz_u32_ctz(stop_mask);
+        sz_size_t first_flagged_position = (sz_size_t)_tzcnt_u32(stop_mask);
         while (first_flagged_position && ((is_continuation_mask >> first_flagged_position) & 1))
             --first_flagged_position;
         fold_length = first_flagged_position;
@@ -232,7 +232,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
         (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
         (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     // 1. ASCII A-Z
@@ -311,14 +311,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
     sz_u32_t is_extended_second_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_and_si256(is_after_d1_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0xA0, 0x20)));
     sz_u32_t stop_mask = is_foreign_lead_mask | (is_extended_second_mask >> 1);
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split a trailing D0/D1 lead across chunks - this family's only multi-byte leads
     sz_u32_t is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
         sz_haswell_in_byte_range_(source_u8x32, 0xD0, 0x02));
     sz_u32_t incomplete_mask = is_cyrillic_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     // The second byte's high nibble keys the fold offset: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0),
@@ -388,13 +388,13 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
     sz_u32_t is_irregular_second_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_or_si256(ce_irregular_u8x32, cf_irregular_u8x32));
     sz_u32_t stop_mask = is_foreign_lead_mask | (is_irregular_second_mask >> 1);
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split a trailing CE/CF lead across chunks - this family's only multi-byte leads
     sz_u32_t is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xCE, 0x02));
     sz_u32_t incomplete_mask = is_greek_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
@@ -472,12 +472,12 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
     __m256i foreign_e1_lead_u8x32 = _mm256_andnot_si256(is_georgian_second_u8x32, is_e1_u8x32);
 
     sz_u32_t stop_mask = is_foreign_lead_mask | (sz_u32_t)_mm256_movemask_epi8(foreign_e1_lead_u8x32);
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split a trailing E1 three-byte sequence across chunks - this family's only lead
     sz_u32_t incomplete_mask = is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     // The uppercase classification lives at the third byte: E1 (two back) + 82/83 (one back) +
@@ -549,7 +549,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
     sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(
         _mm256_or_si256(_mm256_or_si256(unsafe_e2_u8x32, unsafe_ea_u8x32), is_ef_u8x32));
     stop_mask |= is_foreign_lead_mask;
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split trailing sequences: the caseless family contributes 2-byte leads (D7-DF)
     // and both families contribute 3-byte leads
@@ -557,7 +557,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
         (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
         (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
@@ -608,12 +608,12 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
     sz_u32_t is_armenian_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
         sz_haswell_in_byte_range_(source_u8x32, 0xD4, 0x03));
     sz_u32_t stop_mask = (is_lead_mask & ~is_armenian_lead_mask) | malformed_lead_mask | (expansion_second_mask >> 1);
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split a trailing D4-D6 lead across chunks - this family's only multi-byte leads
     sz_u32_t incomplete_mask = is_armenian_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     // The codepoint's low bit lives in the second byte's low bit, deciding the +1 parity fold
@@ -675,12 +675,12 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
                                                           is_four_byte_lead_u8x32);
     sz_u32_t stop_mask = (is_complex_lead_mask & ~is_four_byte_lead_mask) | is_foreign_lead_mask |
                          (sz_u32_t)_mm256_movemask_epi8(folding_four_byte_u8x32);
-    sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
+    sz_size_t fold_length = stop_mask ? (sz_size_t)_tzcnt_u32(stop_mask) : 32;
 
     // Don't split a trailing 4-byte sequence: a lead in lanes 29-31 lacks its continuations
     sz_u32_t incomplete_mask = is_four_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 3 ? fold_length - 3 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
-    if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
+    if (incomplete_mask) fold_length = (sz_size_t)_tzcnt_u32(incomplete_mask);
     if (fold_length == 0) return 0;
 
     _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));

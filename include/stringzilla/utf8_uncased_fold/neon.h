@@ -156,7 +156,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t 
     sz_u64_t incomplete_nibbles = sz_utf8_fold_neon_nibble_mask_(is_incomplete_u8x16);
 
     // Nibble positions are byte positions ×4; lanes 14-15 of the last register are bytes 62-63
-    sz_size_t copy_length = incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz(incomplete_nibbles) / 4) : 64;
+    sz_size_t copy_length = incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz_neon_(incomplete_nibbles) / 4) : 64;
 
     // Caseless folding is length-preserving, so full-register stores are exact for the consumed
     // prefix; the 0-2 trailing bytes written past `copy_length` sit inside the caller-guaranteed
@@ -328,7 +328,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t sou
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
@@ -347,7 +347,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t sou
     uint8x16_t is_incomplete_u8x16 = vorrq_u8(vandq_u8(is_two_byte_lead_u8x16, last_lane_u8x16),
                                               vandq_u8(is_e1_lead_u8x16, last_two_lanes_u8x16));
     sz_u64_t incomplete_nibbles = sz_utf8_fold_neon_nibble_mask_(is_incomplete_u8x16);
-    return incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz(incomplete_nibbles) / 4) : 64;
+    return incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz_neon_(incomplete_nibbles) / 4) : 64;
 }
 
 /**
@@ -412,7 +412,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t 
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
@@ -500,7 +500,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t sou
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
@@ -598,7 +598,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t 
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
@@ -705,7 +705,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t 
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)
@@ -771,7 +771,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t s
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
             sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
-            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz(stop_nibbles) / 4);
+            first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
         }
         while (first_flagged_position && ((sz_u8_t)source[first_flagged_position] & 0xC0) == 0x80)

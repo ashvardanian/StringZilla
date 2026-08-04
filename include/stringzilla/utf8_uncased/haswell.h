@@ -154,7 +154,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_uncased_search_haswell_ascii_3probe_( //
         matches &= sz_utf8_uncased_haswell_mask_until_(valid_starts);
 
         for (; matches; matches &= matches - 1) {
-            sz_size_t const candidate_offset = (sz_size_t)sz_u32_ctz(matches);
+            sz_size_t const candidate_offset = (sz_size_t)_tzcnt_u32(matches);
             sz_cptr_t const haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             // No window verification needed - probes cover all positions,
@@ -296,7 +296,7 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_haswell_scripted_( //
 
         // Candidate Verification
         for (; matches; matches &= matches - 1) {
-            sz_size_t const candidate_offset = (sz_size_t)sz_u32_ctz(matches);
+            sz_size_t const candidate_offset = (sz_size_t)_tzcnt_u32(matches);
             sz_cptr_t const haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
             // Re-fold the candidate window: zero-extending the 16-byte view into a YMM register

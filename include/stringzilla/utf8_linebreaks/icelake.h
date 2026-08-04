@@ -549,7 +549,7 @@ SZ_HELPER_AUTO sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t win
                                (three & ~sz_u64_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
                                (four & ~sz_u64_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
                               valid;
-    sz_size_t const limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+    sz_size_t const limit = straddle ? (sz_size_t)_tzcnt_u64(straddle) : loaded;
     return limit > 0 ? limit : loaded; // `limit == 0` keeps the whole window for guaranteed progress
 }
 

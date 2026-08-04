@@ -451,7 +451,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
             sz_u64_t const overrun = (decoded.two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
                                      (decoded.three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
                                      (decoded.four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
-            byte_span = overrun ? (sz_size_t)sz_u64_ctz(overrun) : loaded;
+            byte_span = overrun ? (sz_size_t)_tzcnt_u64(overrun) : loaded;
         }
         sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
 
@@ -476,7 +476,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
 
         sz_u64_t hits = member & valid_starts;
         while (hits && count < matches_capacity) {
-            sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+            sz_size_t const lane = (sz_size_t)_tzcnt_u64(hits);
             hits &= hits - 1;
             sz_size_t length_at_lane = 1;
             length_at_lane += (decoded.two_byte_starts >> lane) & 1;

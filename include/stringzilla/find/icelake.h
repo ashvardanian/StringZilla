@@ -25,16 +25,17 @@ extern "C" {
  */
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                  \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512"))), \
+#pragma clang attribute push(                                                                                        \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                          \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+#pragma clang attribute push(                                                                                \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+    "lzcnt")
 #endif
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
@@ -143,7 +144,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t leng
         bitset_even_vec.zmm = _mm512_mask_blend_epi8(take_first_m64, bitset_odd_vec.zmm, bitset_even_vec.zmm);
         __mmask64 matches_m64 = _mm512_mask_test_epi8_mask(load_m64, bitset_even_vec.zmm, bitmask_vec.zmm);
         if (matches_m64) {
-            int offset = sz_u64_ctz(matches_m64);
+            int offset = (int)_tzcnt_u64(matches_m64);
             return text + offset;
         }
         else { text += load_length, length -= load_length; }
@@ -190,7 +191,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t len
         sz_u64_t matches_mask = _cvtmask64_u64(
             _mm512_mask_test_epi8_mask(load_m64, bitset_even_vec.zmm, bitmask_vec.zmm));
         if (matches_mask) {
-            int offset = 63 - sz_u64_clz(matches_mask); // highest set bit -> last in-set byte
+            int offset = 63 - (int)_lzcnt_u64(matches_mask); // highest set bit -> last in-set byte
             return window + offset;
         }
         else { length -= load_length; }

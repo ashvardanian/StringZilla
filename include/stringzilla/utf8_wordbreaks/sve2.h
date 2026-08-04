@@ -954,11 +954,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(   //
                                        (three & ~sz_u64_mask_until_serial_(effective > 2 ? effective - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_serial_(effective > 3 ? effective - 3 : 0))) &
                                       evalid;
-            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : effective;
+            sz_size_t limit = straddle ? (sz_size_t)__clzll(__rbitll(straddle)) : effective;
             if ((text_u8[position + effective] & 0xC0) == 0x80) {
                 sz_u64_t const starts_in_eff = start_bytes_all & evalid;
                 if (starts_in_eff) {
-                    sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(starts_in_eff));
+                    sz_size_t const last_lead = (sz_size_t)(63 - __clzll(starts_in_eff));
                     sz_size_t const last_lead_length = sz_utf8_lead_length_(text_u8[position + last_lead]);
                     if (last_lead + last_lead_length > effective && last_lead < limit) limit = last_lead;
                 }

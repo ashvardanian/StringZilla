@@ -19,11 +19,13 @@ extern "C" {
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
  */
 #if SZ_USE_WESTMERE
+// `bmi,lzcnt` are added only so GCC accepts `_tzcnt_u32`/`_lzcnt_u32`; both compile down to the
+// legacy `bsf`/`bsr` encoding on hardware without those flags, so this doesn't misrepresent the tier.
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("sse4.2,bmi,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("sse4.2")
+#pragma GCC target("sse4.2", "bmi", "lzcnt")
 #endif
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
@@ -34,7 +36,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t ha
     while (haystack_length >= 16) {
         haystack_vec.xmm = _mm_lddqu_si128((__m128i const *)haystack);
         matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
-        if (matches_mask) return haystack + sz_u32_ctz(matches_mask);
+        if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
         haystack += 16, haystack_length -= 16;
     }
 
@@ -49,7 +51,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t h
     while (haystack_length >= 16) {
         haystack_vec.xmm = _mm_lddqu_si128((__m128i const *)(haystack + haystack_length - 16));
         matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
-        if (matches_mask) return haystack + haystack_length - 1 - (sz_u32_clz(matches_mask) - 16);
+        if (matches_mask) return haystack + haystack_length - 1 - ((int)_lzcnt_u32(matches_mask) - 16);
         haystack_length -= 16;
     }
 
@@ -85,7 +87,7 @@ SZ_API_COMPTIME sz_cptr_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystac
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_mid_vec.xmm, n_mid_vec.xmm)) &
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_last_vec.xmm, n_last_vec.xmm));
         while (matches_vec.u32) {
-            int potential_offset = sz_u32_ctz(matches_vec.u32);
+            int potential_offset = (int)_tzcnt_u32(matches_vec.u32);
             if (sz_equal_westmere(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_vec.u32 &= matches_vec.u32 - 1;
@@ -125,7 +127,7 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haysta
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_mid_vec.xmm, n_mid_vec.xmm)) &
             _mm_movemask_epi8(_mm_cmpeq_epi8(h_last_vec.xmm, n_last_vec.xmm));
         while (matches_vec.u32) {
-            int potential_offset = sz_u32_clz(matches_vec.u32) - 16;
+            int potential_offset = (int)_lzcnt_u32(matches_vec.u32) - 16;
             if (sz_equal_westmere(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             matches_vec.u32 &= ~(1u << (15 - potential_offset));

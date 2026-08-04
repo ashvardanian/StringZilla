@@ -74,16 +74,17 @@ extern "C" {
 
 #if SZ_USE_ICELAKE
 #if defined(__clang__) && SZ_CLANG_HAS_EVEX512_
-#pragma clang attribute push(                                                                                         \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512,popcnt"))), \
+#pragma clang attribute push(                                                                                               \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512,popcnt"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                                 \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,popcnt"))), \
+#pragma clang attribute push(                                                                                       \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+    "lzcnt", \
                    "popcnt")
 #endif
 
@@ -564,14 +565,14 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
                                        (three & ~sz_u64_mask_until_(loaded > 2 ? loaded - 2 : 0)) |
                                        (four & ~sz_u64_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
                                       valid_lanes;
-            sz_size_t limit = straddle ? (sz_size_t)sz_u64_ctz(straddle) : loaded;
+            sz_size_t limit = straddle ? (sz_size_t)_tzcnt_u64(straddle) : loaded;
             // A continuation byte just past the window edge extends the LAST codepoint's blind span into the next
             // window only when that codepoint actually claims it (its declared span reaches the edge). The straddle
             // check already excludes any lead whose declared span exceeds `loaded`, so here we cap to the last start
             // only if the edge byte is a continuation AND the last codepoint ends exactly at `loaded` (a multi-byte
             // codepoint flush against the edge whose blind decode may absorb the next byte).
             if ((text_u8[position + loaded] & 0xC0) == 0x80) {
-                sz_size_t const last_lead = (sz_size_t)(63 - sz_u64_clz(start_bytes_all));
+                sz_size_t const last_lead = (sz_size_t)(63 - (int)_lzcnt_u64(start_bytes_all));
                 sz_size_t const last_lead_length = sz_utf8_lead_length_(text_u8[position + last_lead]);
                 if (last_lead + last_lead_length > loaded && last_lead < limit) limit = last_lead;
             }
