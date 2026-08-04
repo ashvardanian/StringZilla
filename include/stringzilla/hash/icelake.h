@@ -566,23 +566,15 @@ SZ_HELPER_AUTO void sz_sha256_process_block_icelake_(sz_u32_t hash[sz_at_least_(
                                                      sz_u8_t const block[sz_at_least_(SZ_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
 
-    // Load entire 64-byte block with single 512-bit load and byte-swap
-    sz_u512_vec_t block_vec;
-    block_vec.zmm = _mm512_loadu_si512(block);
-
-    // Byte-swap using 512-bit shuffle (reverse byte order within each 32-bit word)
-    __m512i const bswap_mask_u8x64 = _mm512_set_epi8(                   //
-        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
-        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
-        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, //
-        12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
-    block_vec.zmm = _mm512_shuffle_epi8(block_vec.zmm, bswap_mask_u8x64);
-
-    // Extract 128-bit message words (SHA-NI operates on 128-bit registers)
-    __m128i msg0_u32x4 = block_vec.xmms[0];
-    __m128i msg1_u32x4 = block_vec.xmms[1];
-    __m128i msg2_u32x4 = block_vec.xmms[2];
-    __m128i msg3_u32x4 = block_vec.xmms[3];
+    // Load and byte-swap 16 bytes at a time, never touching a ZMM register. SHA-NI has no VEX or EVEX
+    // encoding, so its instructions are legacy-SSE; a single 512-bit load here would leave the upper
+    // register state dirty and make every one of the 56 SHA-NI instructions below pay an AVX-SSE
+    // transition. VEX-128 zeroes the upper bits instead, so the state stays clean throughout.
+    __m128i const bswap_mask_u8x16 = _mm_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
+    __m128i msg0_u32x4 = _mm_shuffle_epi8(_mm_lddqu_si128((__m128i const *)&block[0]), bswap_mask_u8x16);
+    __m128i msg1_u32x4 = _mm_shuffle_epi8(_mm_lddqu_si128((__m128i const *)&block[16]), bswap_mask_u8x16);
+    __m128i msg2_u32x4 = _mm_shuffle_epi8(_mm_lddqu_si128((__m128i const *)&block[32]), bswap_mask_u8x16);
+    __m128i msg3_u32x4 = _mm_shuffle_epi8(_mm_lddqu_si128((__m128i const *)&block[48]), bswap_mask_u8x16);
 
     // Pre-load round constants into 512-bit registers for efficient access
     sz_u128_vec_t k0_3_vec, k4_7_vec, k8_11_vec, k12_15_vec, k16_19_vec, k20_23_vec, k24_27_vec, k28_31_vec;
