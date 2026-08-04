@@ -31,6 +31,14 @@ python_files = ["*.py"]
 testpaths = ["test"]
 xfail_strict = true
 
+# Third-party oracles the suite differentials against when they import and skips over when they do not.
+# Deliberately kept out of `[tool.cibuildwheel] test-requires`, which installs on QEMU-emulated
+# aarch64, ppc64le and s390x, where a missing wheel means compiling the oracle's own C under emulation.
+# `pycryptodome` ships its own C implementation linking only libc, so it is an independent witness to
+# the OpenSSL the C++ suite already compares against.
+[dependency-groups]
+differential = ["pycryptodome"]
+
 [tool.black]
 line-length = 120
 

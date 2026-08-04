@@ -36,6 +36,7 @@ static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_dispatch_compare_update_(caps);
     sz_dispatch_memory_update_(caps);
     sz_dispatch_hash_update_(caps);
+    sz_dispatch_cipher_update_(caps);
     sz_dispatch_find_update_(caps);
     sz_dispatch_sort_update_(caps);
     sz_dispatch_intersect_update_(caps);

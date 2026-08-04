@@ -5,7 +5,7 @@
  *  @date January 16, 2024
  *
  *  The compiled StringZilla library is split into one translation unit per domain
- *  (`compare.c`, `memory.c`, `hash.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`,
+ *  (`compare.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `sort.c`, `intersect.c`, `utf8_runes.c`,
  *  `utf8_tokens.c`, `utf8_wordbreaks.c`, `utf8_graphemes.c`, `utf8_sentences.c`, `utf8_linebreaks.c`,
  *  `utf8_uncased_fold.c`, `utf8_uncased.c`), so that touching one domain only recompiles
  *  that domain. Each TU includes only its own domain header, fills its slice of the shared
@@ -52,6 +52,20 @@ typedef struct sz_implementations_t {
     sz_sha256_state_update_t sha256_state_update;
     sz_sha256_state_digest_t sha256_state_digest;
 
+    sz_aes256_key_init_t aes256_key_init;
+    sz_aes256_gcm_key_init_t aes256_gcm_key_init;
+    sz_aes256_ctr_xor_t aes256_ctr_xor;
+    sz_aes256_gcm_encrypt_t aes256_gcm_encrypt;
+    sz_aes256_gcm_decrypt_t aes256_gcm_decrypt;
+    sz_aes256_gcm_encryptor_init_t aes256_gcm_encryptor_init;
+    sz_aes256_gcm_encryptor_associate_t aes256_gcm_encryptor_associate;
+    sz_aes256_gcm_encryptor_update_t aes256_gcm_encryptor_update;
+    sz_aes256_gcm_encryptor_digest_t aes256_gcm_encryptor_digest;
+    sz_aes256_gcm_decryptor_init_t aes256_gcm_decryptor_init;
+    sz_aes256_gcm_decryptor_associate_t aes256_gcm_decryptor_associate;
+    sz_aes256_gcm_decryptor_update_unverified_t aes256_gcm_decryptor_update_unverified;
+    sz_aes256_gcm_decryptor_verify_t aes256_gcm_decryptor_verify;
+
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
     sz_find_t find;
@@ -95,6 +109,7 @@ extern SZ_DISPATCH_INTERNAL sz_implementations_t sz_dispatch_table;
 SZ_DISPATCH_INTERNAL void sz_dispatch_compare_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_memory_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_hash_update_(sz_capability_t caps);
+SZ_DISPATCH_INTERNAL void sz_dispatch_cipher_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_find_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_sort_update_(sz_capability_t caps);
 SZ_DISPATCH_INTERNAL void sz_dispatch_intersect_update_(sz_capability_t caps);

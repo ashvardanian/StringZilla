@@ -414,6 +414,7 @@ set(STRINGZILLA_SHIM_SOURCES
     c/stringzilla/compare.c
     c/stringzilla/memory.c
     c/stringzilla/hash.c
+    c/stringzilla/cipher.c
     c/stringzilla/find.c
     c/stringzilla/sort.c
     c/stringzilla/intersect.c
@@ -731,6 +732,7 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_utf8_norm_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/utf8_norm.cpp)
     define_launcher(stringzilla_bench_container_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/container.cpp)
     define_launcher(stringzilla_bench_memory_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/memory.cpp)
+    define_launcher(stringzilla_bench_cipher_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/cipher.cpp)
 
     # Parallel benchmarks link the precompiled static libraries when those are built.
     define_launcher(stringzillas_bench_similarities_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cpp)
@@ -764,6 +766,7 @@ if (STRINGZILLA_BUILD_TEST)
     set(STRINGZILLA_TEST_SOURCES
         test/stringzilla.cpp
         test/hash.cpp
+        test/cipher.cpp
         test/utf8_runes.cpp
         test/utf8_tokens.cpp
         test/utf8_wordbreaks.cpp

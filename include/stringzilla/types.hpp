@@ -147,6 +147,9 @@ namespace stringzilla {
  *         boundary - the read-side companion to `SZ_NOIPA`. Mirrors Google Benchmark's `DoNotOptimize`; use
  *         it on a status/result just before returning it from a `SZ_NOIPA` public entry point so the value
  *         survives a same-TU caller's interprocedural rewrite.
+ *
+ *  @sa sz_keep_alive_ in `types.h`, the C-callable sibling that pins stores to a buffer rather than a value.
+ *      Reach for that one from the C headers, which cannot instantiate a template.
  */
 template <typename value_type_>
 SZ_INLINE void sz_do_not_optimize(value_type_ &value) noexcept {

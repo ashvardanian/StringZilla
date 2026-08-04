@@ -135,6 +135,10 @@ int main(int argc, char const **argv) {
     failures += run_test("test_hash_all", test_hash_all);
     failures += run_test("test_hash_multiseed_all", test_hash_multiseed_all);
 
+    failures += run_test("test_cipher_unit", test_cipher_unit);
+    failures += run_test("test_cipher_safety", test_cipher_safety);
+    failures += run_test("test_cipher_all", test_cipher_all);
+
     failures += run_test("test_sort_unit", test_sort_unit);
     failures += run_test("test_sort_all", test_sort_all);
     failures += run_test("test_intersect_unit", test_intersect_unit);

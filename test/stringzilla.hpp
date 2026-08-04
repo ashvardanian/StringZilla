@@ -616,6 +616,14 @@ void test_hash_multiseed_all();
 
 #pragma endregion // Hashing
 
+#pragma region Ciphers
+
+void test_cipher_unit();
+void test_cipher_safety();
+void test_cipher_all();
+
+#pragma endregion // Ciphers
+
 #pragma region UTF-8
 
 void test_utf8_runes_unit();

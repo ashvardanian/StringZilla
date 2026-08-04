@@ -19,6 +19,7 @@
  *  - `compare.h` - byte-level comparison functions.
  *  - `memory.h` - copying, moving, and filling raw memory.
  *  - `hash.h` - hash functions and checksum algorithms.
+ *  - `cipher.h` - AES-256 encryption in counter and Galois/counter modes.
  *  - `find.h` - searching for substrings and byte sets.
  *  - `sort.h` - single-threaded sorting algorithms.
  *  - `intersect.h` - intersections of unordered string sets.
@@ -83,6 +84,7 @@
 #include "stringzilla/compare.h" // `sz_equal`, `sz_order`
 #include "stringzilla/memory.h"  // `sz_copy`, `sz_move`, `sz_fill`
 #include "stringzilla/hash.h"    // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
+#include "stringzilla/cipher.h"  // `sz_aes256_key_init`, `sz_aes256_ctr_xor`, `sz_aes256_gcm_encrypt`
 #include "stringzilla/find.h"    // `sz_find`, `sz_find_byteset`, `sz_rfind`
 
 #include "stringzilla/sort.h"      // `sz_sequence_argsort`, `sz_pgrams_sort`

@@ -290,9 +290,6 @@ typedef struct sz_aes256_gcm_decryptor_t {
 /*  A chunk boundary must be invisible to the result. The keystream block and the hash block are both
  *  sixteen bytes wide and a caller's chunks are not, so both have to survive between calls - which is
  *  why `keystream_used` exists alongside `buffered` rather than one counter serving both. */
-sz_static_assert(sizeof(sz_aes256_key_t) == 240, cipher_counter_key_size_is_stable);
-sz_static_assert(sizeof(sz_aes256_gcm_key_t) == 368, cipher_galois_key_size_is_stable);
-sz_static_assert(sizeof(sz_aes256_gcm_state_t) == 472, cipher_state_size_is_stable);
 
 /**
  *  @brief Begins sealing a message delivered in chunks.

@@ -578,6 +578,37 @@ Where the AES hash leans on the AES round instructions, SHA-256 leans on the ded
 The API is a three-call streaming state — `sz_sha256_state_init`, `sz_sha256_state_update`, `sz_sha256_state_digest` — so arbitrarily long inputs can be absorbed in chunks without buffering the whole message.
 Each backend is also exposed under its own suffix, like `sz_sha256_state_update_neonsha`, for the same manual-dispatch reasons as the rest of the library.
 
+### AES-256 Encryption
+
+Most cipher libraries are built for a socket: a stream arrives in order, gets authenticated, and is consumed once.
+Columnar and block-storage formats are not sockets.
+They seek — a reader wants row group four hundred out of a million-row file and has no interest in the preceding gigabyte, so a cipher that can only start from byte zero forces the whole file through the AES units to answer a question about the middle of it.
+
+StringZilla implements AES-256 in two modes, following [FIPS 197][faq-fips197] for the cipher and [NIST SP 800-38D][faq-gcm] for authentication, and treats seeking as the first-class case.
+Counter mode is __seekable__: `sz_aes256_ctr_xor` takes an absolute `byte_offset`, so decryption starts wherever the reader is, at the cost of authentication.
+Galois/counter mode adds a tag over the ciphertext and any associated data, and gives up seeking to get it.
+Which trade a format wants is the format's decision, so both are exposed rather than one being wrapped in the other.
+
+The two share a key schedule but not a key struct.
+`sz_aes256_key_t` is the bare round-key schedule that counter mode needs, while `sz_aes256_gcm_key_t` adds the hash subkey powers `H^1` through `H^8`, so bulk encryption never carries a hundred and twenty-eight bytes it will not read.
+Both one-shot and streaming forms exist, and the streaming state carries __two__ sixteen-byte rhythms across chunk boundaries — one for the keystream block and one for the hash block — so a five-byte chunk followed by an eleven-byte chunk produces the same bytes and the same tag as one sixteen-byte chunk.
+
+Streaming splits by __type__ rather than by a flag: `sz_aes256_gcm_encryptor_t` seals and `sz_aes256_gcm_decryptor_t` opens.
+The Galois hash absorbs ciphertext in both directions, so a shared state that could be pointed the wrong way would make that a runtime question; separate types make it a compile error instead.
+
+Authenticated decryption returns `sz_authentication_failed_k` on a forged tag and zero-fills its output, so a caller who ignores the status finds nothing usable rather than forged plaintext.
+The streaming decrypt is called `sz_aes256_gcm_decryptor_update_unverified` because it structurally emits bytes before anything is authenticated, and the name is the warning.
+
+Backends cover AES-NI and PCLMUL, VAES and VPCLMULQDQ, Arm crypto extensions and SVE2-AES, RISC-V `Zvkned` with `Zvkg`, Power `vcipher` with `vpmsumd`, and a WebAssembly path that has no cipher instructions at all and emulates the round function through a constant-time tower-field substitution — where the 256-byte lookup table a serial implementation reaches for is itself the side channel.
+
+Against OpenSSL the authenticated path is a fair fight, traded back and forth by message size.
+Counter mode is not close, and that is an artifact of coverage rather than of arithmetic: OpenSSL ships hand-written AVX-512 assembly for Galois/counter mode and the cipher-block chaining variants, but not for counter mode, so the comparison is a vectorized kernel against a sixteen-byte one.
+The honest summary is that we win where the competition has not bothered to vectorize, and draw where it has.
+Per-backend numbers are in [`include/stringzilla/cipher/README.md`](include/stringzilla/cipher/README.md).
+
+[faq-fips197]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
+[faq-gcm]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
+
 ### Random Generation
 
 StringZilla implements a fast [Pseudorandom Number Generator][faq-prng] inspired by the "AES-CTR-128" algorithm, reusing the same AES primitives as the hash function.

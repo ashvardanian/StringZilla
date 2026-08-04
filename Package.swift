@@ -28,6 +28,7 @@ let package = Package(
                 "c/stringzilla/compare.c",
                 "c/stringzilla/memory.c",
                 "c/stringzilla/hash.c",
+                "c/stringzilla/cipher.c",
                 "c/stringzilla/find.c",
                 "c/stringzilla/sort.c",
                 "c/stringzilla/intersect.c",

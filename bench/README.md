@@ -10,6 +10,7 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 - `token.cpp` — token-level hashing, checksums, equality, and ordering.
 - `sequence.cpp` — sorting, partitioning, and set intersection of string arrays.
 - `memory.cpp` — copies, moves, fills, and lookup-table transforms.
+- `cipher.cpp` — AES-256 counter mode and Galois/counter mode throughput.
 - `container.cpp` — STL associative containers with string keys.
 - `similarities.cpp` — Levenshtein, Needleman-Wunsch, and Smith-Waterman scoring.
 - `fingerprints.cpp` — MinHash rolling fingerprints and multi-pattern search.
