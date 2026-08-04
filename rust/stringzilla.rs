@@ -1242,6 +1242,25 @@ impl Aes256GcmState {
     }
 }
 
+impl Drop for Aes256GcmEncryptor {
+    /// Overwrites the payload so a streamed message leaves nothing behind.
+    ///
+    /// The embedded key scrubs itself through [`Aes256GcmKey`]'s drop; the rest does not, and 77 bytes
+    /// of tag mask, live keystream and pending hash block survived before this existed.
+    fn drop(&mut self) {
+        unsafe { core::ptr::write_volatile(&mut self.state as *mut Aes256GcmState, Aes256GcmState::zeroed()) };
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for Aes256GcmDecryptor {
+    /// Overwrites the payload for the same reason [`Aes256GcmEncryptor`] does.
+    fn drop(&mut self) {
+        unsafe { core::ptr::write_volatile(&mut self.state as *mut Aes256GcmState, Aes256GcmState::zeroed()) };
+        core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl Aes256GcmEncryptor {
     /// Begins a chunked encryption under `key` and `nonce`, copying `key` in so this cannot outlive it.
     pub fn new(key: &Aes256GcmKey, nonce: &[u8; AES256_NONCE_LENGTH]) -> Self {
@@ -6141,6 +6160,36 @@ mod tests {
         decryptor.decrypt_unverified_into(&whole, &mut recovered);
         assert_eq!(decryptor.verify(&forged_tag), Err(sz::AuthenticationError::TagMismatch));
         assert_eq!(recovered, plaintext);
+    }
+
+    /// A dropped encryptor must leave none of its payload behind, which a passing build cannot show.
+    ///
+    /// The encryptor lives in storage this test owns so the bytes can be read back. Only the named
+    /// fields are checked; the six trailing padding bytes are never written by the C core.
+    #[test]
+    fn aes256_gcm_streaming_scrubs_on_drop() {
+        use core::mem::{size_of, MaybeUninit};
+
+        let secret = [0xA5u8; sz::AES256_KEY_LENGTH];
+        let nonce = [0x5Au8; sz::AES256_NONCE_LENGTH];
+        let key = sz::Aes256GcmKey::new(&secret);
+
+        let mut slot = MaybeUninit::<sz::Aes256GcmEncryptor>::uninit();
+        unsafe { slot.as_mut_ptr().write(sz::Aes256GcmEncryptor::new(&key, &nonce)) };
+
+        // Drive it so the keystream and the pending block hold live material rather than zeros.
+        let mut text = *b"material that must not survive the drop";
+        unsafe { (*slot.as_mut_ptr()).encrypt_in_place(&mut text) };
+        unsafe { core::ptr::drop_in_place(slot.as_mut_ptr()) };
+
+        let payload =
+            unsafe { core::slice::from_raw_parts(slot.as_ptr() as *const u8, size_of::<sz::Aes256GcmEncryptor>()) };
+        let named_fields = &payload[..payload.len() - 6];
+        let surviving = named_fields.iter().filter(|byte| **byte != 0).count();
+        assert_eq!(
+            surviving, 0,
+            "{surviving} bytes of a dropped encryptor's payload survived"
+        );
     }
 
     #[test]
