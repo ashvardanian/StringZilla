@@ -32,9 +32,7 @@ extern "C" {
  *  @param substituted_u8x16 The substituted word, already broadcast across every lane.
  *  @return The next round key.
  *
- *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it. The three
- *  cascading byte shifts replay that dependency inside a single register, so a whole round key falls out
- *  of one exclusive-or chain rather than four.
+ *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_key_fold_westmere_(__m128i previous_u8x16, __m128i substituted_u8x16) {
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
@@ -146,8 +144,8 @@ SZ_HELPER_INLINE void sz_aes256_blocks_round_westmere_(sz_u512_vec_t *blocks_vec
  *  @param blocks_vec The four plaintext blocks.
  *  @return The four ciphertext blocks.
  *
- *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
- *  fourteen dependent rounds leaves most of that throughput idle. Four independent chains fill it.
+ *  One round instruction has several cycles of latency and issues every cycle, so a single chain of fourteen
+ *  dependent rounds leaves most of that throughput idle.
  */
 SZ_HELPER_INLINE sz_u512_vec_t sz_aes256_blocks_encrypt_westmere_(sz_aes256_key_t const *key,
                                                                   sz_u512_vec_t blocks_vec) {
@@ -221,6 +219,8 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_westmere(sz_aes256_key_t const *key, sz_u
         __m128i const counter_u8x16 = sz_aes256_counter_block_westmere_(counter_base_u8x16, block_index);
         sz_u128_vec_t keystream_vec;
         keystream_vec.xmm = sz_aes256_block_encrypt_westmere_(key, counter_u8x16);
+        // Stays a byte loop: SSE has no masked store, and writing the register would touch bytes the
+        // caller did not hand us. Ice Lake and SVE2 do this run with predication.
         for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
         ++block_index;
@@ -273,9 +273,8 @@ SZ_HELPER_INLINE sz_u8_t const *sz_ghash_byte_order_westmere_(void) {
  *  @param block_u8x16 The block in either order.
  *  @return The same block in the other order.
  *
- *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient, which is
- *  the opposite of how a carry-less multiply reads its operands. Reversing the bytes puts the polynomial
- *  the right way round, and the multiplier's leftward shift makes up the remaining single-bit offset.
+ *  The tag is defined over blocks whose leading bit is the field element's lowest coefficient, which is the
+ *  opposite of how a carry-less multiply reads its operands.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_reflect_westmere_(__m128i block_u8x16) {
     return _mm_shuffle_epi8(block_u8x16, _mm_load_si128((__m128i const *)sz_ghash_byte_order_westmere_()));
@@ -290,13 +289,19 @@ SZ_HELPER_INLINE __m128i sz_ghash_load_westmere_(sz_u8_t const *block) {
     return sz_ghash_reflect_westmere_(_mm_lddqu_si128((__m128i const *)block));
 }
 
+/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_westmere_(sz_u8_t const *first, sz_u8_t const *second) {
+    __m128i const first_u8x16 = _mm_lddqu_si128((__m128i const *)first);
+    __m128i const second_u8x16 = _mm_lddqu_si128((__m128i const *)second);
+    int const matching = _mm_movemask_epi8(_mm_cmpeq_epi8(first_u8x16, second_u8x16));
+    return matching == 0xFFFF ? sz_true_k : sz_false_k;
+}
+
 /**
  *  @brief Loads a pending block with everything past @p buffered forced to zero.
- *  @param block A sixteen-byte field, so the full-width load is always safe.
- *  @param buffered How many bytes are live, below sixteen.
  *
- *  A lane-identity compare rather than a byte loop, which GCC lowered to a LibC fill call and clang to
- *  branchy scalar stores, both then stalling on store forwarding.
+ *  A lane-identity compare rather than a byte loop, which GCC lowered to a LibC fill call and clang to branchy
+ *  scalar stores, both then stalling on store forwarding.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_load_padded_westmere_(sz_u8_t const *block, sz_size_t buffered) {
     __m128i const lane_ids_u8x16 = _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
@@ -322,8 +327,8 @@ SZ_HELPER_INLINE void sz_ghash_store_westmere_(__m128i value_u8x16, sz_u8_t *blo
  *  @param middle_u8x16 Accumulates both cross products.
  *  @param high_u8x16 Accumulates the product of the two high halves.
  *
- *  Splitting the schoolbook product from its reduction is what lets several blocks share one reduction:
- *  the field is linear, so the partial products of a whole group may be summed before folding once.
+ *  Splitting the schoolbook product from its reduction is what lets several blocks share one reduction: the
+ *  field is linear, so the partial products of a whole group may be summed before folding once.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, __m128i multiplier_u8x16,
                                                     __m128i *low_u8x16, __m128i *middle_u8x16, __m128i *high_u8x16) {
@@ -340,10 +345,7 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_westmere_(__m128i multiplicand_u8x16, 
  *  @param product_high_u8x16 The accumulated high halves.
  *  @return The reduced product, reflected.
  *
- *  The cross products straddle the halves, so they are split and merged first. The reflected field puts
- *  the whole 256-bit value one bit below where the reduction expects it, hence the leftward shift, and
- *  what remains is the standard fold modulo `x^128 + x^7 + x^2 + x + 1`, done in two passes because the
- *  three low taps are close enough together to share a shift chain.
+ *  The cross products straddle the halves, so they are split and merged first.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_reduce_westmere_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
                                                    __m128i product_high_u8x16) {
@@ -434,8 +436,8 @@ SZ_HELPER_INLINE sz_u512_vec_t sz_ghash_descending_powers_westmere_(sz_u8_t cons
  *  @param powers_vec The reflected powers `H^4` through `H^1`.
  *  @return The updated running hash, reflected.
  *
- *  Four absorbed blocks expand to `(Y ^ X1) H^4 ^ X2 H^3 ^ X3 H^2 ^ X4 H`, which needs four multiplies
- *  either way but only one reduction instead of four.
+ *  Four absorbed blocks expand to `(Y ^ X1) H^4 ^ X2 H^3 ^ X3 H^2 ^ X4 H`, which needs four multiplies either
+ *  way but only one reduction instead of four.
  */
 SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x16, sz_u512_vec_t blocks_vec,
                                                         sz_u512_vec_t powers_vec) {
@@ -460,9 +462,7 @@ SZ_HELPER_INLINE __m128i sz_ghash_absorb_four_westmere_(__m128i accumulator_u8x1
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
  *  The size is known at compile time, so both bounds are constants and the fill unrolls into twenty-nine
- *  whole-register stores and an eight-byte tail. Writes are ordinary stores followed by one barrier:
- *  routing them through a `volatile` view instead would forbid vectorization and cost 472 single-byte
- *  stores on every one-shot call.
+ *  whole-register stores and an eight-byte tail.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_westmere_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -551,22 +551,22 @@ SZ_HELPER_INLINE void sz_aes256_gcm_associate_westmere_(sz_aes256_gcm_state_t *s
  *  @param direction Which buffer the hash absorbs.
  *  @return The updated running hash, reflected.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte
- *  spends one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
+ *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
  */
 SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
                                                        sz_u8_t *output, sz_size_t count, __m128i accumulator_u8x16,
                                                        __m128i subkey_u8x16, sz_aes256_gcm_direction_t direction) {
     sz_size_t byte_index;
 
-    // The hash always eats ciphertext, which is the output when encrypting and the input when
-    // decrypting, and the byte is captured before the store because a caller may pass one pointer.
+    // Scalar: SSE has no masked load or store, so a partial run cannot move without a
+    // round trip through memory. Ice Lake, SVE2, RVV and Power do it a run at a time.
     for (byte_index = 0; byte_index != count; ++byte_index) {
         sz_u8_t const plaintext_byte = input[byte_index];
         sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-        sz_u8_t const ciphertext = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
+        sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
         output[byte_index] = transformed;
-        state->partial[state->buffered] = ciphertext;
+        state->partial[state->buffered] = ciphertext_byte;
         ++state->buffered;
         ++state->keystream_used;
         if (state->buffered == SZ_AES_BLOCK_LENGTH) {
@@ -586,9 +586,9 @@ SZ_HELPER_INLINE __m128i sz_aes256_gcm_spend_westmere_(sz_aes256_gcm_state_t *st
  *  @param output Receives the transformed bytes.
  *  @param direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and
- *  neither may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then
- *  whole blocks four at a time, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
+ *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
+ *  four at a time, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_westmere_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -736,7 +736,8 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_westmere(sz_aes256_gc
                                                                     sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_westmere_(&decryptor->state, expected_vec.u8s);
-    return sz_aes256_tag_equal_serial_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
+    return sz_aes256_tag_equal_westmere_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k
+                                                                             : sz_authentication_failed_k;
 }
 
 #pragma endregion // Streaming Interface

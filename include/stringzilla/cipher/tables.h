@@ -5,13 +5,8 @@
  *  @sa include/stringzilla/cipher.h
  *
  *  The substitution box of FIPS 197 is needed in two places that are otherwise unrelated: the cipher's
- *  software round function, and the software emulation of `AESENC` that `sz_hash` falls back to where no
- *  round instruction exists. Keeping one definition here follows the same rule as the `tables.h` file in
- *  each UTF-8 family, and means a correction can only ever be made once.
- *
- *  Names here deliberately carry the plain `sz_aes_` prefix rather than the `sz_aes256_` one the rest of
- *  the cipher uses. The substitution box does not depend on the key size, and the hash consumes it, so
- *  claiming otherwise in the name would be wrong.
+ *  software round function, and the software emulation of `AESENC` that `sz_hash` falls back to where no round
+ *  instruction exists.
  */
 #ifndef STRINGZILLA_CIPHER_TABLES_H_
 #define STRINGZILLA_CIPHER_TABLES_H_

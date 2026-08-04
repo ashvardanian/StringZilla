@@ -4,15 +4,9 @@
  *  @author Ash Vardanian
  *  @sa include/stringzilla/cipher.h
  *
- *  The round instructions treat every 128-bit segment of a scalable vector as an independent block, so
- *  one `AESE` covers as many blocks as the vector happens to hold and counter mode only has to spread
- *  consecutive block indices across the segments. That width is a runtime property, which is why no
- *  kernel here is written against a fixed lane count: each one reads `svcntb` and derives its step from
- *  it, and the single compile-time constant is the sixteen-byte block. Round keys reach every segment
- *  through a quadword broadcast load, one instruction whatever the width.
- *
- *  The fourteen rounds are the one thing here fixed at compile time, so they are written out rather than
- *  looped, for the reason `cipher/icelake.h` spells out.
+ *  The round instructions treat every 128-bit segment of a scalable vector as an independent block, so one
+ *  `AESE` covers as many blocks as the vector happens to hold and counter mode only has to spread consecutive
+ *  block indices across the segments.
  */
 #ifndef STRINGZILLA_CIPHER_SVE2AES_H_
 #define STRINGZILLA_CIPHER_SVE2AES_H_
@@ -40,9 +34,7 @@ extern "C" {
  *  @return The substituted word.
  *
  *  `AESE` applies `AddRoundKey`, `SubBytes` and `ShiftRows` in that order, so a zero round key leaves a
- *  substitution followed by a row shift. Broadcasting the word into all four columns makes that row shift
- *  a permutation among identical columns, which leaves every column holding the substituted word, and
- *  every segment of the vector holding the same answer whatever the width.
+ *  substitution followed by a row shift.
  */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_sve2aes_(sz_u32_t word) {
     sz_u128_vec_t substituted_vec;
@@ -78,8 +70,7 @@ SZ_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t co
  *  @return One ciphertext block per segment.
  *
  *  Arm folds `AddRoundKey` into the front of `AESE` rather than the end of the round, so the schedule is
- *  consumed one round early and the fifteenth round key is exclusive-ored on afterwards. Thirteen rounds
- *  carry a column mix, the fourteenth does not.
+ *  consumed one round early and the fifteenth round key is exclusive-ored on afterwards.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t const *key, svuint8_t blocks_u8x) {
     svbool_t const all_b8x = svptrue_b8();
@@ -168,8 +159,7 @@ SZ_HELPER_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
  *  @return The advanced counter blocks.
  *
  *  The index is stored big-endian while the addition is not, so the words are byte reversed, added and
- *  reversed back. Lanes holding nonce bytes receive a zero increment, which makes the pair of reversals
- *  an identity there, and the trailing lane wraps modulo `2^32` without carrying into the nonce.
+ *  reversed back.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_counter_advance_sve2aes_(svuint8_t counter_u8x, svuint32_t increment_u32x) {
     svbool_t const all_b32x = svptrue_b32();
@@ -198,10 +188,15 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key, sz_u8
     //  A start that is not block aligned generates its first block whole and discards the leading bytes,
     //  after which the buffer position and the stream's block boundaries line up again.
     if (within_block != 0) {
-        sz_u128_vec_t keystream_vec;
-        svst1_u8(svptrue_pat_b8(SV_VL16), &keystream_vec.u8s[0], sz_aes256_blocks_encrypt_sve2aes_(key, counter_u8x));
-        for (; within_block != SZ_AES_BLOCK_LENGTH && produced != length; ++within_block, ++produced)
-            output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
+        // A partial first block, entered mid-stream by a seeking caller. A predicated load plus an
+        // `svtbl` shift of the keystream to the resume offset covers it.
+        sz_size_t const head_bytes = sz_min_of_two(length, SZ_AES_BLOCK_LENGTH - within_block);
+        svbool_t const head_b8x = svwhilelt_b8_u64(0, head_bytes);
+        svuint8_t const keystream_u8x = sz_aes256_blocks_encrypt_sve2aes_(key, counter_u8x);
+        svuint8_t const shifted_u8x = svtbl_u8(keystream_u8x,
+                                               svadd_n_u8_x(head_b8x, svindex_u8(0, 1), (sz_u8_t)within_block));
+        svst1_u8(head_b8x, output_bytes, sveor_u8_x(head_b8x, svld1_u8(head_b8x, input_bytes), shifted_u8x));
+        produced += head_bytes, within_block += head_bytes;
         counter_u8x = sz_aes256_counter_advance_sve2aes_(counter_u8x, sz_aes256_counter_step_sve2aes_(1));
     }
 
@@ -225,9 +220,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key, sz_u8
  *  @return The same block in the other order.
  *
  *  The tag reads a field element's lowest coefficient from the leading bit of the leading byte, while a
- *  carry-less multiply reads it from the lowest bit of the lowest byte. The bytes already ascend in both,
- *  so the whole difference is a bit reversal inside each byte, which is its own inverse and leaves the
- *  product needing no further shift.
+ *  carry-less multiply reads it from the lowest bit of the lowest byte.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_reflect_sve2aes_(svuint8_t block_u8x) {
     return svrbit_u8_x(svptrue_b8(), block_u8x);
@@ -240,14 +233,19 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
 
 /**
  *  @brief Loads a pending block with everything past @p buffered forced to zero.
- *  @param block A sixteen-byte field, so the full-width load is always safe.
- *  @param buffered How many bytes are live, below sixteen.
  *
- *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging
- *  buffer, and nothing written back into the caller's state.
+ *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging buffer,
+ *  and nothing written back into the caller's state.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_load_padded_sve2aes_(sz_u8_t const *block, sz_size_t buffered) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svwhilelt_b8_u64(0, buffered), block));
+}
+
+/** @brief Compares two tags in constant time; `sz_true_k` when all sixteen bytes match. */
+SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_sve2aes_(sz_u8_t const *first, sz_u8_t const *second) {
+    svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
+    svbool_t const differing_b8x = svcmpne_u8(first_b8x, svld1_u8(first_b8x, first), svld1_u8(first_b8x, second));
+    return svptest_any(first_b8x, differing_b8x) ? sz_false_k : sz_true_k;
 }
 
 /** @brief Stores the leading segment of a reflected value back in the tag's bit order. */
@@ -273,9 +271,8 @@ SZ_HELPER_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
  *  @param lane_count The number of 64-bit lanes the vector holds.
  *  @return A vector whose leading segment holds the sum of them all.
  *
- *  A table lookup rather than an extract, because the distance halves each round and the vector length is
- *  not a compile-time constant. Indices that run off the end return zero, which is the identity here, so
- *  the last round needs no separate guard.
+ *  A table lookup rather than an extract, because the distance halves each round and the vector length is not
+ *  a compile-time constant.
  */
 SZ_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64x, sz_size_t lane_count) {
     svbool_t const all_b64x = svptrue_b64();
@@ -295,10 +292,9 @@ SZ_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64
  *  @param middle_u64x Accumulates both cross products.
  *  @param high_u64x Accumulates the product of the two high halves.
  *
- *  The bottom and top forms of the paired multiply reach the two halves of a segment, and Karatsuba's
- *  identity recovers the cross terms from a third product of the two folded operands, so three multiplies
- *  cover a schoolbook four. Keeping the triple unreduced is what lets a whole group share one reduction:
- *  the field is linear, so partial products may be summed before folding once.
+ *  The bottom and top forms of the paired multiply reach the two halves of a segment, and Karatsuba's identity
+ *  recovers the cross terms from a third product of the two folded operands, so three multiplies cover a
+ *  schoolbook four.
  */
 SZ_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint64_t second_u64x, svuint64_t *low_u64x,
                                                    svuint64_t *middle_u64x, svuint64_t *high_u64x) {
@@ -325,10 +321,6 @@ SZ_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint
  *  @return The reduced product in the leading segment, with the rest left undefined.
  *
  *  The cross products straddle the halves, so they are split and merged into the two 128-bit words first.
- *  What remains is `x^128` congruent to `x^7 + x^2 + x + 1`, applied one word at a time: multiplying the
- *  top word by that constant leaves seven bits that still sit above the modulus, which are carried into
- *  the third word before the second multiply retires both. Two multiplies rather than a shift chain,
- *  because the same paired instruction the schoolbook product uses reaches each word directly.
  */
 SZ_HELPER_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64x, svuint64_t middle_u64x, svuint64_t high_u64x,
                                                      sz_size_t lane_count) {
@@ -407,8 +399,7 @@ SZ_HELPER_INLINE sz_size_t sz_ghash_group_blocks_sve2aes_(void) {
  *  @return The reflected powers `H^n` down to `H^1`, one per segment, zero beyond the group.
  *
  *  The powers ascend in memory and a group wants them descending, so the segments are mirrored by a table
- *  lookup. Ordinals past the group underflow into indices no table can hold, and those lanes read back as
- *  zero, which is exactly the operand a segment carrying no block should meet.
+ *  lookup.
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *powers, sz_size_t group_blocks) {
     svbool_t const all_b64x = svptrue_b64();
@@ -430,9 +421,7 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *po
  *  @param lane_count The number of 64-bit lanes the vector holds.
  *  @return The updated running hash in the leading segment, zero elsewhere.
  *
- *  A group of `n` absorbed blocks expands to `(Y ^ X1) H^n ^ X2 H^(n-1) ^ ... ^ Xn H`, which needs `n`
- *  multiplies either way but only one reduction instead of `n`, and every segment performs its multiply
- *  under the same instruction.
+ *  A group of `n` absorbed blocks expands to `(Y ^ X1) H^n ^ X2 H^(n-1) ^ ...
  */
 SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_u8x, svuint8_t blocks_u8x,
                                                           svuint8_t powers_u8x, sz_size_t lane_count) {
@@ -452,10 +441,8 @@ SZ_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  The size is known at compile time but the vector length is not, so the fill runs one predicated store
- *  per vector and the trailing predicate covers a size that is a multiple of no vector width. Writes are
- *  ordinary stores followed by one barrier: routing them through a `volatile` view instead would forbid
- *  vectorization and cost 472 single-byte stores on every one-shot call.
+ *  The size is known at compile time but the vector length is not, so the fill runs one predicated store per
+ *  vector and the trailing predicate covers a size that is a multiple of no vector width.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -554,24 +541,42 @@ SZ_HELPER_AUTO void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *stat
  *  @param direction Which buffer the hash absorbs.
  *  @return The updated running hash, reflected.
  *
- *  Through the message the keystream offset and the hash offset are the same number, because every byte
- *  spends one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
+ *  Through the message the keystream offset and the hash offset are the same number, because every byte spends
+ *  one of each, so a chunk that ends mid block leaves both mid block and this resumes both.
  */
 SZ_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
                                                         sz_u8_t *output, sz_size_t count, svuint8_t accumulator_u8x,
                                                         svuint8_t subkey_u8x, sz_aes256_gcm_direction_t direction) {
-    sz_size_t byte_index;
+    svbool_t const block_b8x = svptrue_pat_b8(SV_VL16);
+    svuint8_t const lane_ids_u8x = svindex_u8(0, 1);
+    sz_size_t consumed = 0;
 
     //  The hash always eats ciphertext, which is the output when encrypting and the input when
-    //  decrypting, and the byte is captured before the store because a caller may pass one pointer.
-    for (byte_index = 0; byte_index != count; ++byte_index) {
-        sz_u8_t const plaintext_byte = input[byte_index];
-        sz_u8_t const transformed = (sz_u8_t)(plaintext_byte ^ state->keystream[state->keystream_used]);
-        sz_u8_t const ciphertext_byte = direction == sz_aes256_gcm_decrypting_k ? plaintext_byte : transformed;
-        output[byte_index] = transformed;
-        state->partial[state->buffered] = ciphertext_byte;
-        ++state->buffered;
-        ++state->keystream_used;
+    //  decrypting, and it is captured before the store because a caller may pass one pointer.
+    while (consumed != count) {
+        //  Both offsets advance together, so one run covers the keystream and the pending block alike.
+        //  Predication carries the whole run, so nothing here goes through memory a byte at a time.
+        sz_size_t const block_left = SZ_AES_BLOCK_LENGTH - state->buffered;
+        sz_size_t const remaining = count - consumed;
+        sz_size_t const run = remaining < block_left ? remaining : block_left;
+        svbool_t const run_b8x = svwhilelt_b8_u64(0, run);
+
+        svuint8_t const offset_u8x = svdup_n_u8((sz_u8_t)state->buffered);
+        svuint8_t const spent_keystream_u8x = svtbl_u8(svld1_u8(block_b8x, state->keystream),
+                                                       svadd_u8_x(block_b8x, lane_ids_u8x, offset_u8x));
+        svuint8_t const plaintext_u8x = svld1_u8(run_b8x, input + consumed);
+        svuint8_t const transformed_u8x = sveor_u8_x(run_b8x, plaintext_u8x, spent_keystream_u8x);
+        svst1_u8(run_b8x, output + consumed, transformed_u8x);
+
+        svuint8_t const ciphertext_u8x = direction == sz_aes256_gcm_decrypting_k ? plaintext_u8x : transformed_u8x;
+        svuint8_t const staged_u8x = svtbl_u8(ciphertext_u8x, svsub_u8_x(block_b8x, lane_ids_u8x, offset_u8x));
+        svbool_t const keep_b8x = svbic_b_z(block_b8x, svwhilelt_b8_u64(0, state->buffered + run),
+                                            svwhilelt_b8_u64(0, state->buffered));
+        svst1_u8(block_b8x, state->partial, svsel_u8(keep_b8x, staged_u8x, svld1_u8(block_b8x, state->partial)));
+
+        state->buffered = (sz_u8_t)(state->buffered + run);
+        state->keystream_used = (sz_u8_t)(state->keystream_used + run);
+        consumed += run;
         if (state->buffered == SZ_AES_BLOCK_LENGTH) {
             accumulator_u8x = sz_ghash_absorb_sve2aes_(accumulator_u8x, sz_ghash_load_sve2aes_(state->partial),
                                                        subkey_u8x);
@@ -589,11 +594,9 @@ SZ_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *s
  *  @param output Receives the transformed bytes.
  *  @param direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and
- *  neither may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then
- *  whole blocks a group at a time, then a trailing block that the next chunk will resume. The group pass
- *  leaves the block it finished on in the state's keystream, so a chunk that ends on a boundary is
- *  indistinguishable from one the byte-at-a-time path produced.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
+ *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole blocks
+ *  a group at a time, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                        sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
@@ -752,8 +755,8 @@ SZ_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes(sz_aes256_gcm
                                                                    sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_sve2aes_(&decryptor->state, &expected_vec.u8s[0]);
-    return sz_aes256_tag_equal_serial_(&expected_vec.u8s[0], tag) == sz_true_k ? sz_success_k
-                                                                               : sz_authentication_failed_k;
+    return sz_aes256_tag_equal_sve2aes_(&expected_vec.u8s[0], tag) == sz_true_k ? sz_success_k
+                                                                                : sz_authentication_failed_k;
 }
 
 #pragma endregion // Streaming Interface

@@ -40,6 +40,13 @@
  *  lacking it - WebAssembly, base RISC-V vector, LoongArch - fall back to a constant-time shift-and-add
  *  reduction rather than a subkey-indexed table, which would leak the key through the cache.
  *
+ *  @b Constant @b time is a property of the backend, not of this API. Every tier with cipher
+ *  instructions is constant time, and so are the WebAssembly tiers, which substitute through swizzles
+ *  over a fixed address stream. The `serial` tier is @b not: its round indexes a 256-byte table, so its
+ *  timing depends on the key through the cache. It runs only where no cipher instruction exists, the
+ *  alternative being bit-slicing at an order of magnitude. The Galois hash is constant time everywhere,
+ *  including `serial`, since a table indexed by its subkey would leak the key outright.
+ *
  *  @see Recommendation for Block Cipher Modes of Operation: Galois/Counter Mode, NIST SP 800-38D.
  *  @see Recommendation for Block Cipher Modes of Operation: Methods and Techniques, NIST SP 800-38A.
  *  @see The Galois/Counter Mode of Operation by David McGrew and John Viega.

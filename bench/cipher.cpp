@@ -22,8 +22,6 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
-namespace {
-
 /** @brief The message sizes every kernel is measured at, from a short record to a page. */
 static constexpr std::size_t cipher_message_sizes_[] = {256, 1024, 4096, 16384};
 
@@ -104,11 +102,9 @@ struct gcm_from_sz {
 };
 
 /** @brief Fills a pool with a deterministic pattern, since cipher cost never depends on the bytes. */
-void fill_cipher_pool_(std::vector<char> &pool) noexcept {
+static void fill_cipher_pool_(std::vector<char> &pool) noexcept {
     for (std::size_t index = 0; index != pool.size(); ++index) pool[index] = static_cast<char>(index * 31 + 7);
 }
-
-} // namespace
 
 #pragma region Counter Mode
 
@@ -191,6 +187,110 @@ void bench_cipher_gcm(environment_t const &env) {
 
 #pragma endregion // Galois Counter Mode
 
+#pragma region Streaming
+
+/** @brief The chunk sizes the streaming path is measured at, straddling the sixteen-byte block. */
+static constexpr std::size_t cipher_chunk_sizes_[] = {1, 7, 16, 40};
+
+/**
+ *  @brief Seals one message in fixed-size chunks, which is where the partial-block path dominates.
+ *
+ *  A chunk below the block width leaves bytes staged in the state between calls, so the cost per byte
+ *  is the staging rather than the cipher. Sweeping across sixteen shows where the two cross over.
+ */
+template <sz_aes256_gcm_key_init_t init_, sz_aes256_gcm_encryptor_init_t begin_,
+          sz_aes256_gcm_encryptor_update_t update_, sz_aes256_gcm_encryptor_digest_t digest_>
+struct gcm_stream_from_sz {
+
+    std::size_t message_bytes;
+    std::size_t chunk_bytes;
+    std::vector<char> &pool;
+    std::vector<char> &target;
+    sz_aes256_gcm_key_t key;
+    sz_u8_t nonce[SZ_AES256_NONCE_LENGTH];
+
+    gcm_stream_from_sz(std::size_t configured, std::size_t chunk, std::vector<char> &input, std::vector<char> &output)
+        : message_bytes(configured), chunk_bytes(chunk), pool(input), target(output) {
+        sz_u8_t secret[SZ_AES256_KEY_LENGTH];
+        for (std::size_t index = 0; index != SZ_AES256_KEY_LENGTH; ++index)
+            secret[index] = static_cast<sz_u8_t>(index * 3 + 5);
+        for (std::size_t index = 0; index != SZ_AES256_NONCE_LENGTH; ++index)
+            nonce[index] = static_cast<sz_u8_t>(index + 9);
+        init_(&key, secret);
+    }
+
+    inline call_result_t operator()(std::size_t call_index) const noexcept {
+        std::size_t const messages = cipher_pool_bytes_ / message_bytes;
+        std::size_t const offset = (call_index % messages) * message_bytes;
+        sz_u8_t tag[SZ_AES256_TAG_LENGTH];
+        sz_aes256_gcm_encryptor_t encryptor;
+        begin_(&encryptor, &key, nonce);
+        for (std::size_t consumed = 0; consumed < message_bytes; consumed += chunk_bytes) {
+            std::size_t const taken = chunk_bytes < message_bytes - consumed ? chunk_bytes : message_bytes - consumed;
+            update_(&encryptor, pool.data() + offset + consumed, taken, target.data() + offset + consumed);
+        }
+        digest_(&encryptor, tag);
+        sz_u64_t check = 0;
+        std::memcpy(&check, tag, sizeof(check));
+        do_not_optimize(check);
+        call_result_t result;
+        result.bytes_passed = message_bytes;
+        result.check_value = static_cast<check_value_t>(check);
+        result.operations = 1;
+        result.inputs_processed = 1;
+        return result;
+    }
+};
+
+void bench_cipher_stream(environment_t const &env) {
+
+    std::size_t const message_bytes = 4096;
+    for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
+        std::vector<char> pool(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
+        std::vector<char> target(cipher_pool_bytes_ + SZ_AES_BLOCK_LENGTH);
+        fill_cipher_pool_(pool);
+
+        std::string const suffix = ":chunk" + std::to_string(chunk_bytes);
+        auto validator =
+            gcm_stream_from_sz<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,
+                               sz_aes256_gcm_encryptor_update_serial, sz_aes256_gcm_encryptor_digest_serial> {
+                message_bytes, chunk_bytes, pool, target};
+        bench_result_t base = bench_unary(env, "sz_aes256_gcm_stream_serial" + suffix, validator).log();
+
+#if SZ_USE_WESTMERE
+        bench_unary(
+            env, "sz_aes256_gcm_stream_westmere" + suffix, validator,
+            gcm_stream_from_sz<sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encryptor_init_westmere,
+                               sz_aes256_gcm_encryptor_update_westmere, sz_aes256_gcm_encryptor_digest_westmere> {
+                message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_ICELAKE
+        bench_unary(env, "sz_aes256_gcm_stream_icelake" + suffix, validator,
+                    gcm_stream_from_sz<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encryptor_init_icelake,
+                                       sz_aes256_gcm_encryptor_update_icelake, sz_aes256_gcm_encryptor_digest_icelake> {
+                        message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_NEONAES
+        bench_unary(env, "sz_aes256_gcm_stream_neonaes" + suffix, validator,
+                    gcm_stream_from_sz<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encryptor_init_neonaes,
+                                       sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes> {
+                        message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+#if SZ_USE_SVE2AES
+        bench_unary(env, "sz_aes256_gcm_stream_sve2aes" + suffix, validator,
+                    gcm_stream_from_sz<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encryptor_init_sve2aes,
+                                       sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes> {
+                        message_bytes, chunk_bytes, pool, target})
+            .log(base);
+#endif
+    }
+}
+
+#pragma endregion // Streaming
+
 int main(int argc, char const **argv) {
     install_test_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
     std::printf("Welcome to StringZilla AES-256 Cipher Benchmarks!\n");
@@ -206,6 +306,7 @@ int main(int argc, char const **argv) {
 
     bench_cipher_ctr(env);
     bench_cipher_gcm(env);
+    bench_cipher_stream(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

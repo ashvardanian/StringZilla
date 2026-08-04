@@ -42,13 +42,7 @@ extern "C" {
  *  @brief Which buffer the Galois hash absorbs, for the one transform both directions share.
  *  @see sz_aes256_gcm_encryptor_t, sz_aes256_gcm_decryptor_t.
  *
- *  Internal vocabulary, which is why it lives here rather than in the hub: it appears in no public
- *  signature. The public tier spells the direction as a type, so a caller cannot point a state the wrong
- *  way. The backends share one transform body, because only the choice of which register feeds the hash
- *  differs - a single line out of dozens - and duplicating the rest would trade a branch for a
- *  maintenance hazard. That tier therefore spells the direction as this parameter. Every call site
- *  passes a constant into an always-inlined helper, so the selection folds away and no branch survives
- *  into the hot loop. Every backend includes this header, so every backend sees it.
+ *  Internal vocabulary, which is why it lives here rather than in the hub: it appears in no public signature.
  */
 typedef enum sz_aes256_gcm_direction_t {
     sz_aes256_gcm_encrypting_k = 0, ///< The hash absorbs the transformed bytes, which are the output
@@ -61,8 +55,7 @@ typedef enum sz_aes256_gcm_direction_t {
  *  @brief Packs four schedule bytes into one word, byte zero in the least significant position.
  *  @return The packed word.
  *
- *  FIPS 197 writes a key-schedule word as the byte quadruple `(a0, a1, a2, a3)`. Keeping `a0` low means
- *  the rotation the schedule needs is an ordinary shift rather than an endian-dependent permutation.
+ *  FIPS 197 writes a key-schedule word as the byte quadruple `(a0, a1, a2, a3)`.
  */
 SZ_HELPER_INLINE sz_u32_t sz_aes256_word_pack_serial_(sz_u8_t const *bytes) {
     return (sz_u32_t)bytes[0] | ((sz_u32_t)bytes[1] << 8) | ((sz_u32_t)bytes[2] << 16) | ((sz_u32_t)bytes[3] << 24);
@@ -209,10 +202,7 @@ SZ_API_COMPTIME void sz_aes256_ctr_xor_serial(sz_aes256_key_t const *key, sz_u8_
  *  @param accumulator The running hash, replaced by the product.
  *  @param subkey One of the precomputed powers of the hash subkey.
  *
- *  Deliberately branch free and table free. The obvious four-bit windowed implementation indexes a table
- *  derived from the subkey, which is derived from the key, so its cache footprint would leak the key on
- *  exactly the platforms that reach this code. Selecting each partial product through an all-ones or
- *  all-zeros mask costs 128 iterations and reveals nothing.
+ *  Deliberately branch free and table free.
  */
 SZ_HELPER_AUTO void sz_ghash_multiply_serial_(sz_u8_t *accumulator, sz_u8_t const *subkey) {
     sz_u8_t product[16], operand[16];
@@ -267,9 +257,8 @@ SZ_API_COMPTIME void sz_aes256_gcm_key_init_serial(sz_aes256_gcm_key_t *key, sz_
  *  @brief Compares two authentication tags in time that does not depend on their contents.
  *  @return `sz_true_k` when all sixteen bytes match.
  *
- *  Accumulates every difference instead of returning at the first one, so an attacker cannot recover a
- *  forged tag byte by byte from how long the comparison ran. `sz_equal` short-circuits by design and is
- *  the wrong tool here. The width is fixed because a tag is always one block.
+ *  Accumulates every difference instead of returning at the first one, so an attacker cannot recover a forged
+ *  tag byte by byte from how long the comparison ran.
  */
 SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_u8_t const *second) {
     sz_u8_t difference = 0;
@@ -285,11 +274,7 @@ SZ_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_serial_(sz_u8_t const *first, sz_
  *  @param associated_length Bytes of associated data absorbed.
  *  @param text_length Bytes of message absorbed.
  *
- *  Every backend closes its hash with this block, so it lives here rather than eight times over. Both
- *  words go in through the union's `u64s[]` as two byte-reverses and two stores. Written byte by byte
- *  the shift-and-truncate pattern is only recognised as a byteswap by GCC on x86: clang emitted about
- *  thirty-five instructions for it, GCC on aarch64 about thirty, and the union then took a
- *  store-forwarding stall when the vector load read back what the scalar stores had just written.
+ *  Every backend closes its hash with this block, so it lives here rather than eight times over.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, sz_u64_t associated_length,
                                                     sz_u64_t text_length) {
@@ -306,13 +291,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_lengths_serial_(sz_u128_vec_t *lengths_vec, 
 /**
  *  @brief Overwrites a finished state so the key schedule it embeds does not outlive the call.
  *
- *  Ordinary stores followed by one barrier, rather than writes through a `volatile` view: `volatile`
- *  forbids vectorization, so that form would cost 472 single-byte stores on every one-shot call. The
- *  bound is a compile-time constant, so a compiler is free to widen this however it likes - on x86 it
- *  becomes a single `rep stos`. The barrier is what stops it being dropped as a dead store.
- *
- *  @note The vector backends replace this with stores of their own native width. This is the tier with
- *        no vector registers by definition, so a byte loop already is the native width here.
+ *  Ordinary stores followed by one barrier, rather than writes through a `volatile` view: `volatile` forbids
+ *  vectorization, so that form would cost 472 single-byte stores on every one-shot call.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_state_scrub_serial_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
@@ -395,13 +375,8 @@ SZ_HELPER_INLINE void sz_aes256_gcm_hash_byte_serial_(sz_aes256_gcm_state_t *sta
  *  @param length Bytes in the chunk.
  *  @param output Receives the transformed bytes.
  *
- *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may restart at
- *  a chunk boundary. The keystream block is carried in the state and consumed byte by byte, so a
- *  five-byte chunk followed by an eleven-byte one spends exactly one block rather than two. The hash
- *  block is carried the same way, so only the final block of the whole message is ever zero padded.
- *
- *  The hash always eats ciphertext, which is the output when encrypting and the input when decrypting.
- *  The ciphertext byte is captured before the store because a caller may pass one pointer for both.
+ *  Two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes, and neither may restart at a
+ *  chunk boundary.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_serial_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
                                                       sz_ptr_t output, sz_aes256_gcm_direction_t direction) {

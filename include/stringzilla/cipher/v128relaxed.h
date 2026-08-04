@@ -22,21 +22,12 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-/*  Relaxed SIMD adds exactly one thing this workload can use: a swizzle that does not have to answer
- *  zero for an out-of-range index. Baseline `i8x16.swizzle` must, and on hosts whose native permute
- *  zeroes only for a different range an engine has to bracket every swizzle with a saturating clamp.
- *  The substitution box runs nineteen swizzles per block, thirteen of which carry indices this file
- *  can prove lie in zero through fifteen: two into the tower-field basis, six logarithm lookups,
- *  three four-bit tables, and two into the fused output table. Those thirteen become relaxed here.
- *
- *  The other six are the antilogarithm lookups, which are fed sums running past twenty-eight and a
- *  deliberately negative index, and whose whole correctness argument is that an out-of-range index
- *  answers zero. Those stay baseline. Relaxing them would make the substitution engine dependent,
- *  and the kernels below have to be bit-identical to the serial reference on every runtime.
- *
- *  Everything with no relaxed opportunity calls the `_v128` kernel rather than restating it: the
- *  Galois hash uses no swizzle at all, the row shift and column mixing are immediate shuffles, and
- *  the associated-data and digest paths never reach the block cipher.
+/*  Relaxed SIMD adds one usable thing: a swizzle that need not answer zero for an out-of-range index,
+ *  which spares the engine a saturating clamp. Thirteen of the substitution box's nineteen swizzles
+ *  carry indices provably in zero through fifteen and become relaxed here. The six antilogarithm
+ *  lookups stay baseline - they are fed sums past twenty-eight and a deliberately negative index, and
+ *  rely on an out-of-range index answering zero, so relaxing them would make the result engine
+ *  dependent. Everything with no relaxed opportunity calls the `_v128` kernel rather than restating it.
  */
 
 #pragma region Substitution Box
@@ -48,8 +39,8 @@ extern "C" {
  *  @param bytes_u8x16 The sixteen inputs.
  *  @return `low_table_u8x16[byte & 0xF] ^ high_table_u8x16[byte >> 4]` in every lane.
  *
- *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the
- *  relaxed form's implementation-defined case is unreachable.
+ *  Both index vectors are nibbles by construction, so neither swizzle can go out of range and the relaxed
+ *  form's implementation-defined case is unreachable.
  */
 SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16, v128_t high_table_u8x16,
                                                           v128_t bytes_u8x16) {
@@ -65,9 +56,7 @@ SZ_HELPER_INLINE v128_t sz_aes256_nibble_map_v128relaxed_(v128_t low_table_u8x16
  *  @param second_u8x16 The other operand per lane, each below sixteen.
  *  @return The product per lane.
  *
- *  The two logarithm lookups take nibbles and may be relaxed. The two antilogarithm lookups may not:
- *  they are handed a sum that runs to twenty-eight and that same sum less sixteen, and they rely on
- *  a baseline swizzle answering zero outside its table, which is also how a zero operand is handled.
+ *  The two logarithm lookups take nibbles and may be relaxed.
  */
 SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16, v128_t second_u8x16) {
     v128_t const logarithm_table_u8x16 = wasm_v128_load(sz_aes256_nibble_logarithm_v128_());
@@ -85,9 +74,8 @@ SZ_HELPER_AUTO v128_t sz_aes256_nibble_multiply_v128relaxed_(v128_t first_u8x16,
  *  @param bytes_u8x16 The sixteen inputs.
  *  @return The substituted bytes.
  *
- *  The same tower-field construction the `_v128` kernel uses, with every provably in-range swizzle
- *  taken in its relaxed form. The norm, its inverse and both halves of the inverse are `GF(2^4)`
- *  elements, so each of them is a legal index by construction.
+ *  The same tower-field construction the `_v128` kernel uses, with every provably in-range swizzle taken in
+ *  its relaxed form.
  */
 SZ_HELPER_AUTO v128_t sz_aes256_substitute_v128relaxed_(v128_t bytes_u8x16) {
     v128_t const mapped_u8x16 = sz_aes256_nibble_map_v128relaxed_(wasm_v128_load(sz_aes256_tower_forward_low_v128_()),
@@ -305,9 +293,9 @@ SZ_HELPER_INLINE void sz_aes256_gcm_begin_v128relaxed_(sz_aes256_gcm_state_t *st
  *  @param output Receives the transformed bytes.
  *  @param direction Which buffer the hash absorbs.
  *
- *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes
- *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
- *  block, then whole blocks, then a trailing block that the next chunk will resume.
+ *  Three passes, because two sixteen-byte rhythms run underneath a caller's arbitrary chunk sizes and neither
+ *  may restart at a chunk boundary: whatever the previous chunk left of its keystream block, then whole
+ *  blocks, then a trailing block that the next chunk will resume.
  */
 SZ_HELPER_INLINE void sz_aes256_gcm_transform_v128relaxed_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
                                                            sz_size_t length, sz_ptr_t output,
