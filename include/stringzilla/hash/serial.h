@@ -818,11 +818,13 @@ SZ_HELPER_AUTO void sz_sha256_process_block_serial_(sz_u32_t hash[sz_at_least_(8
 }
 
 SZ_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
-    // Vectorize the load/store of 8x u32s as 4x u64s
+    // Copy at the width the state is declared with. Widening the store to `sz_u64_t` lets a strict-aliasing
+    // compiler assume these writes are not the ones `update` and `digest` read back through `sz_u32_t`, and
+    // GCC says so outright: "dereferencing type-punned pointer will break strict-aliasing rules". Both
+    // compilers still fold the eight assignments into two 16-byte stores.
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
-    sz_u64_t const *source = (sz_u64_t const *)initial_hash;
-    sz_u64_t *target = (sz_u64_t *)state_ptr->hash;
-    target[0] = source[0], target[1] = source[1], target[2] = source[2], target[3] = source[3];
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        state_ptr->hash[word_index] = initial_hash[word_index];
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
@@ -887,38 +889,25 @@ SZ_API_COMPTIME void sz_sha256_state_digest_serial(sz_sha256_state_t const *stat
 
     // If there's not enough room for the 64-bit length, pad this block and process it
     if (state.block_length > 56) {
+        // `sz_u64_store` already owns the misaligned-store decision and routes through a union, so the
+        // word-sized path stays without punning a `sz_u64_t` onto the `sz_u8_t` block.
         sz_size_t remaining = 64 - state.block_length;
-#if SZ_USE_MISALIGNED_LOADS
-        // Use word-sized writes for better performance when misaligned stores are supported
         sz_size_t word_bytes = (remaining / 8) * 8;
         for (sz_size_t byte_index = 0; byte_index < word_bytes; byte_index += 8)
-            *(sz_u64_t *)&state.block[state.block_length + byte_index] = 0;
+            sz_u64_store((sz_ptr_t)&state.block[state.block_length + byte_index], 0);
         for (sz_size_t byte_index = word_bytes; byte_index < remaining; ++byte_index)
             state.block[state.block_length + byte_index] = 0;
-#else
-        // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-        for (sz_size_t byte_index = 0; byte_index < remaining; ++byte_index)
-            state.block[state.block_length + byte_index] = 0;
-#endif
         sz_sha256_process_block_serial_(state.hash, state.block);
         state.block_length = 0;
     }
 
     // Pad with zeros until we have 56 bytes
     sz_size_t remaining = 56 - state.block_length;
-
-#if SZ_USE_MISALIGNED_LOADS
-    // Use word-sized writes for better performance when misaligned stores are supported
     sz_size_t word_bytes = (remaining / 8) * 8;
     for (sz_size_t byte_index = 0; byte_index < word_bytes; byte_index += 8)
-        *(sz_u64_t *)&state.block[state.block_length + byte_index] = 0;
+        sz_u64_store((sz_ptr_t)&state.block[state.block_length + byte_index], 0);
     for (sz_size_t byte_index = word_bytes; byte_index < remaining; ++byte_index)
         state.block[state.block_length + byte_index] = 0;
-#else
-    // Use byte-by-byte writes to avoid alignment issues on platforms like ARMv7
-    for (sz_size_t byte_index = 0; byte_index < remaining; ++byte_index)
-        state.block[state.block_length + byte_index] = 0;
-#endif
 
     state.block_length = 56;
 
