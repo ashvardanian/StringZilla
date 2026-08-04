@@ -31,16 +31,16 @@ SZ_HELPER_INLINE sz_size_t sz_utf8_iterate_tile_bytes_rvv_(void) {
 }
 
 /** @brief Peel a window's first `emit_count` matches: compress lane offsets + lengths, widen-store absolute pairs. */
-SZ_HELPER_AUTO void sz_utf8_iterate_peel_tile_rvv_(                       //
-    vuint8m4_t length_u8m4, vbool2_t start_mask, sz_size_t tile_position, //
+SZ_HELPER_AUTO void sz_utf8_iterate_peel_tile_rvv_(                          //
+    vuint8m4_t length_u8m4, vbool2_t start_mask_b2, sz_size_t tile_position, //
     sz_size_t vector_length, sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
     if (!emit_count) return;
 
     // `u16m8` and `u8m4` share the SEW/LMUL ratio (-> `vbool2`), so one mask drives both compactions.
     vuint16m8_t lane_iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
-    vuint16m8_t compact_indices_u16m8 = __riscv_vcompress_vm_u16m8(lane_iota_u16m8, start_mask, vector_length);
-    vuint8m4_t compact_lengths_u8m4 = __riscv_vcompress_vm_u8m4(length_u8m4, start_mask, vector_length);
+    vuint16m8_t compact_indices_u16m8 = __riscv_vcompress_vm_u16m8(lane_iota_u16m8, start_mask_b2, vector_length);
+    vuint8m4_t compact_lengths_u8m4 = __riscv_vcompress_vm_u8m4(length_u8m4, start_mask_b2, vector_length);
 
     // Widen only the low `emit_count` compacted indices to 64-bit, add the absolute tile base, store both arrays.
     sz_size_t store_offset = 0;
@@ -71,80 +71,81 @@ SZ_HELPER_AUTO vuint8m4_t sz_utf8_classify_newlines_rvv_(sz_u8_t const *text_u8,
                                                          vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
     vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
     // '\n' '\v' '\f' (0x0A-0x0C) and a lone '\r' (0x0D): length 1.
-    vbool2_t is_lf_vt_ff = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x0A, vector_length), 3,
-                                                     vector_length);
-    vbool2_t is_cr = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0D, vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, __riscv_vmor_mm_b2(is_lf_vt_ff, is_cr, vector_length),
+    vbool2_t is_lf_vt_ff_b2 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x0A, vector_length), 3,
+                                                        vector_length);
+    vbool2_t is_cr_b2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0D, vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, __riscv_vmor_mm_b2(is_lf_vt_ff_b2, is_cr_b2, vector_length),
                                           vector_length);
     // '\r\n': length 2 (overrides the lone-'\r').
-    vbool2_t is_cr_lf = __riscv_vmand_mm_b2(is_cr, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x0A, vector_length),
-                                            vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_cr_lf, vector_length);
+    vbool2_t is_cr_lf_b2 = __riscv_vmand_mm_b2(is_cr_b2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x0A, vector_length),
+                                               vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_cr_lf_b2, vector_length);
     // U+0085 NEL (C2 85): length 2.
-    vbool2_t is_nel = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length),
-                                          __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length), vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_nel, vector_length);
+    vbool2_t is_nel_b2 = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length),
+                                             __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length), vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, is_nel_b2, vector_length);
     // U+2028 / U+2029 (E2 80 A8 / E2 80 A9): length 3.
-    vbool2_t is_e2_80 = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length),
-                                            __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length), vector_length);
-    vbool2_t is_a8_a9 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
-                                           __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length),
-                                           vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, __riscv_vmand_mm_b2(is_e2_80, is_a8_a9, vector_length),
+    vbool2_t is_e2_80_b2 = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length),
+                                               __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length), vector_length);
+    vbool2_t is_a8_a9_b2 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
+                                              __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length),
+                                              vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, __riscv_vmand_mm_b2(is_e2_80_b2, is_a8_a9_b2, vector_length),
                                           vector_length);
     // An LF that is the 2nd byte of a CRLF is owned by the CR's match: the previous byte (carried via
     // `vslide1up`) being '\r' identifies it, also covering a CRLF that straddled the previous tile edge.
     sz_u8_t carry_prev = (position != 0) ? text_u8[position - 1] : 0;
     vuint8m4_t prev_u8m4 = __riscv_vslide1up_vx_u8m4(bytes_u8m4, carry_prev, vector_length);
-    vbool2_t is_lf_of_crlf = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0A, vector_length),
-                                                 __riscv_vmseq_vx_u8m4_b2(prev_u8m4, 0x0D, vector_length),
-                                                 vector_length);
-    return __riscv_vmerge_vxm_u8m4(length_u8m4, 0, is_lf_of_crlf, vector_length);
+    vbool2_t is_lf_of_crlf_b2 = __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x0A, vector_length),
+                                                    __riscv_vmseq_vx_u8m4_b2(prev_u8m4, 0x0D, vector_length),
+                                                    vector_length);
+    return __riscv_vmerge_vxm_u8m4(length_u8m4, 0, is_lf_of_crlf_b2, vector_length);
 }
 
 SZ_HELPER_AUTO vuint8m4_t sz_utf8_classify_whitespaces_rvv_(vuint8m4_t bytes_u8m4, vuint8m4_t next_u8m4,
                                                             vuint8m4_t after_next_u8m4, sz_size_t vector_length) {
     vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
     // ASCII whitespace: '\t'-'\r' (0x09-0x0D) and ' ' (0x20): length 1.
-    vbool2_t is_ascii_ws = __riscv_vmor_mm_b2(
+    vbool2_t is_ascii_ws_b2 = __riscv_vmor_mm_b2(
         __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(bytes_u8m4, 0x09, vector_length), 5, vector_length),
         __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0x20, vector_length), vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, is_ascii_ws, vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 1, is_ascii_ws_b2, vector_length);
     // U+0085 NEL (C2 85) and U+00A0 NBSP (C2 A0): length 2.
-    vbool2_t is_c2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length);
-    vbool2_t next_85_a0 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length),
-                                             __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0xA0, vector_length), vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, __riscv_vmand_mm_b2(is_c2, next_85_a0, vector_length),
+    vbool2_t is_c2_b2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xC2, vector_length);
+    vbool2_t next_85_a0_b2 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x85, vector_length),
+                                                __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0xA0, vector_length),
+                                                vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, __riscv_vmand_mm_b2(is_c2_b2, next_85_a0_b2, vector_length),
                                           vector_length);
     // U+1680 Ogham space mark (E1 9A 80): length 3.
-    vbool2_t is_ogham = __riscv_vmand_mm_b2(
+    vbool2_t is_ogham_b2 = __riscv_vmand_mm_b2(
         __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE1, vector_length),
                             __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x9A, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x80, vector_length), vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_ogham, vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_ogham_b2, vector_length);
     // U+2000-U+200A, U+2028, U+2029, U+202F (E2 80 {80-8A, A8, A9, AF}) and U+205F (E2 81 9F): length 3.
-    vbool2_t is_e2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length);
-    vbool2_t is_e2_80 = __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length),
-                                            vector_length);
-    vbool2_t third_2000_200a = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(after_next_u8m4, 0x80, vector_length),
-                                                         0x0B, vector_length);
-    vbool2_t third_a8_a9_af = __riscv_vmor_mm_b2(
+    vbool2_t is_e2_b2 = __riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE2, vector_length);
+    vbool2_t is_e2_80_b2 = __riscv_vmand_mm_b2(is_e2_b2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length),
+                                               vector_length);
+    vbool2_t third_2000_200a_b2 = __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(after_next_u8m4, 0x80, vector_length),
+                                                            0x0B, vector_length);
+    vbool2_t third_a8_a9_af_b2 = __riscv_vmor_mm_b2(
         __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA8, vector_length),
                            __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xA9, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0xAF, vector_length), vector_length);
-    vbool2_t is_e2_80_ws = __riscv_vmand_mm_b2(
-        is_e2_80, __riscv_vmor_mm_b2(third_2000_200a, third_a8_a9_af, vector_length), vector_length);
-    vbool2_t is_e2_81_9f = __riscv_vmand_mm_b2(
-        __riscv_vmand_mm_b2(is_e2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x81, vector_length), vector_length),
+    vbool2_t is_e2_80_ws_b2 = __riscv_vmand_mm_b2(
+        is_e2_80_b2, __riscv_vmor_mm_b2(third_2000_200a_b2, third_a8_a9_af_b2, vector_length), vector_length);
+    vbool2_t is_e2_81_9f_b2 = __riscv_vmand_mm_b2(
+        __riscv_vmand_mm_b2(is_e2_b2, __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x81, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x9F, vector_length), vector_length);
-    length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, __riscv_vmor_mm_b2(is_e2_80_ws, is_e2_81_9f, vector_length),
-                                          vector_length);
+    length_u8m4 = __riscv_vmerge_vxm_u8m4(
+        length_u8m4, 3, __riscv_vmor_mm_b2(is_e2_80_ws_b2, is_e2_81_9f_b2, vector_length), vector_length);
     // U+3000 ideographic space (E3 80 80): length 3.
-    vbool2_t is_e3 = __riscv_vmand_mm_b2(
+    vbool2_t is_e3_b2 = __riscv_vmand_mm_b2(
         __riscv_vmand_mm_b2(__riscv_vmseq_vx_u8m4_b2(bytes_u8m4, 0xE3, vector_length),
                             __riscv_vmseq_vx_u8m4_b2(next_u8m4, 0x80, vector_length), vector_length),
         __riscv_vmseq_vx_u8m4_b2(after_next_u8m4, 0x80, vector_length), vector_length);
-    return __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_e3, vector_length);
+    return __riscv_vmerge_vxm_u8m4(length_u8m4, 3, is_e3_b2, vector_length);
 }
 
 /*  Shared window/carry/trusted-lane/peel scaffolding for both delimiter sets. `classify_newlines` selects the
@@ -176,14 +177,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_iterate_multistep_rvv_( //
         // (masked) tile (`vl < tile`) trust every valid lane (carried tails are real bytes or the at-EOF 0).
         sz_size_t trusted_lanes = (vector_length >= tile) ? vector_length - 2 : vector_length;
         vuint16m8_t lane_iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
-        vbool2_t trusted_mask = __riscv_vmsltu_vx_u16m8_b2(lane_iota_u16m8, (sz_u16_t)trusted_lanes, vector_length);
-        vbool2_t start_mask = __riscv_vmand_mm_b2(__riscv_vmsne_vx_u8m4_b2(length_u8m4, 0, vector_length), trusted_mask,
-                                                  vector_length);
+        vbool2_t trusted_mask_b2 = __riscv_vmsltu_vx_u16m8_b2(lane_iota_u16m8, (sz_u16_t)trusted_lanes, vector_length);
+        vbool2_t start_mask_b2 = __riscv_vmand_mm_b2(__riscv_vmsne_vx_u8m4_b2(length_u8m4, 0, vector_length),
+                                                     trusted_mask_b2, vector_length);
 
         // Capacity cut: emit only as many of this tile's matches as the output can still hold.
-        sz_size_t window_matches = (sz_size_t)__riscv_vcpop_m_b2(start_mask, vector_length);
+        sz_size_t window_matches = (sz_size_t)__riscv_vcpop_m_b2(start_mask_b2, vector_length);
         sz_size_t emit_count = sz_min_of_two(window_matches, matches_capacity - count);
-        sz_utf8_iterate_peel_tile_rvv_(length_u8m4, start_mask, position, vector_length, emit_count,
+        sz_utf8_iterate_peel_tile_rvv_(length_u8m4, start_mask_b2, position, vector_length, emit_count,
                                        match_offsets + count, match_lengths + count);
         count += emit_count;
         if (count == matches_capacity) { // output buffer full: resume past the last emitted match

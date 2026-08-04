@@ -6,6 +6,21 @@
 
 set -u
 
+# Rules below split into two kinds. A few deliberately police prose - the decorative-separator and
+# `#pragma region` checks - and read added lines as they stand. The rest police code, and a comment that
+# merely names the construct it bans is not a violation: "GCC lowered this to a memset call" explains a
+# kernel, it does not call LibC. Those pipe through `code_only`, which blanks `//` tails, single-line
+# `/* ... */` spans, and any line whose first non-blank character continues a block comment. The intent
+# is to keep the guards honest about what they are reading, not to weaken them: nothing that survives on
+# a code line is let through.
+code_only() {
+    # Input lines arrive from `grep -n`, so an optional `NNN:` prefix precedes the diff's `+`.
+    sed -E \
+        -e 's,//.*$,,' \
+        -e 's,/\*([^*]|\*+[^*/])*\*+/,,g' \
+        -e 's,^([0-9]*:?\+[[:space:]]*)(\*|/\*).*$,\1,'
+}
+
 # Decorative comment separators - runs of three or more `-` or `=` used purely as visual dividers inside
 # C/C++ comments. Proper sentences communicate structure better than attention-grabbing rules.
 mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM \
@@ -32,7 +47,7 @@ fi
 # The `&*iterator` antipattern (iterator -> reference -> pointer laundering). Use the container's
 # `.data()`, `std::to_address(it)`, or a raw pointer directly instead.
 laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
-  | grep -nE '^\+' | grep -E '&\*' || true)
+  | grep -nE '^\+' | code_only | grep -E '&\*' || true)
 if [ -n "$laundering" ]; then
   echo "pre-commit: '&*' antipattern in staged changes (use .data() / std::to_address / a raw pointer):" >&2
   echo "$laundering" >&2
@@ -46,7 +61,8 @@ fi
 # Cast to the pointer type you mean, once. If an intrinsic genuinely wants a non-const pointer, a single
 # `(T *)` is honest; the chain through `sz_size_t` / `uintptr_t` / `size_t` is not.
 pointer_laundering=$(git diff --cached --no-color -U0 -- '*.c' '*.h' '*.cc' '*.hpp' '*.cuh' '*.cu' \
-  | grep -nE '^\+' | grep -E '\([[:space:]]*(sz_size_t|sz_u64_t|uintptr_t|size_t|unsigned long|long)[[:space:]]*\)[[:space:]]*[A-Za-z_]' \
+  | grep -nE '^\+' | code_only \
+  | grep -E '\([[:space:]]*(sz_size_t|sz_u64_t|uintptr_t|size_t|unsigned long|long)[[:space:]]*\)[[:space:]]*[A-Za-z_]' \
   | grep -E '\)[[:space:]]*\([[:space:]]*(void|[A-Za-z_][A-Za-z_0-9]*)[[:space:]]*\*' || true)
 if [ -n "$pointer_laundering" ]; then
   echo "pre-commit: pointer cast through an integer type (cast to the pointer type you mean, once):" >&2
@@ -72,7 +88,7 @@ fi
 # and assert live in `types.h` (the sanctioned LibC touch-points) and are excluded; the `alloc->`/`allocator->`
 # callbacks are not LibC.
 libc=$(git diff --cached --no-color -U0 -- 'include/stringzilla' ':(exclude)include/stringzilla/types.h' \
-  | grep -nE '^\+' \
+  | grep -nE '^\+' | code_only \
   | grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' \
   | grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
 if [ -n "$libc" ]; then
@@ -148,7 +164,7 @@ serial_bitops=$(git diff --cached --no-color -U0 \
      'include/stringzilla/*/sve.h' 'include/stringzilla/*/sve2.h' 'include/stringzilla/*/rvv.h' \
      'include/stringzilla/*/rvvcrypto.h' 'include/stringzilla/*/v128.h' 'include/stringzilla/*/lasx.h' \
      'include/stringzilla/*/powervsx.h' 'include/stringzillas/*/*.hpp' ':(exclude)include/stringzillas/*/serial.hpp' \
-  | grep -nE '^\+' | grep -vE '^\+\+\+' \
+  | grep -nE '^\+' | grep -vE '^\+\+\+' | code_only \
   | grep -E 'sz_u(32|64)_(popcount|ctz)|__builtin_(popcount|ctz|clz|ffs|parity)' || true)
 if [ -n "$serial_bitops" ]; then
   echo "pre-commit: serial bit-op helper or raw __builtin_* in a staged ISA kernel file." >&2
@@ -164,7 +180,7 @@ fi
 # The test suite's oracle must never be a no-op: use verify() / let_verify() / scope_verify() /
 # throws_verify() from test/stringzilla.hpp instead, which are never gated by NDEBUG or SZ_DEBUG.
 raw_assert=$(git diff --cached --no-color -U0 -- 'test/*.c' 'test/*.h' 'test/*.cpp' 'test/*.hpp' 'test/*.cuh' 'test/*.cu' \
-  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' | code_only \
   | grep -E '(^|[^A-Za-z0-9_])assert[[:space:]]*\(' || true)
 if [ -n "$raw_assert" ]; then
   echo "pre-commit: raw assert() in staged test/ changes (stripped by -DNDEBUG in CI's Release/RelWithDebInfo" >&2
@@ -174,15 +190,21 @@ if [ -n "$raw_assert" ]; then
   exit 1
 fi
 
-# SIMD register naming in cipher/*.h: every raw fixed-width register (x86 __m128i/__m256i/__m512i, NEON
-# uint8x16_t, WASM v128_t, Power __vector unsigned char/int) carries a `_<dtype>x<lanes>` suffix
-# (`_u8x16`/`_u8x32`/`_u8x64`); SVE scalable registers (svuint8_t etc) carry `_<dtype>x`; RVV registers
-# (vuint32m1_t etc) carry `_<dtype>m<lmul>`; x86 k-masks (__mmask8/16/32/64) carry `_m<n>`; SVE/RVV
-# predicates (svbool_t/vbool<n>_t) carry `_b<n>x`/`_b<n>`. One exception: locals typed sz_u128_vec_t /
-# sz_u256_vec_t / sz_u512_vec_t (the union wrapper types) always keep a bare `_vec` suffix instead - they
-# are not raw registers, and this check never looks at that type name in the first place. Scoped to
-# cipher/*.h, added lines only, so legacy violations migrate on their own schedule; grandfather one line
-# with a trailing `// sz-nolint: naming`.
+# SIMD register naming across every ISA backend (cipher/hash/find/compare/intersect/memory/sort/utf8_*)
+# plus types.h, where the union wrapper types themselves live: every raw fixed-width register (x86
+# __m128i/__m256i/__m512i, NEON uint8x16_t etc, WASM v128_t, Power __vector unsigned char/int/long long,
+# LoongArch LASX/LSX __m256i/__m128i) carries a `_<dtype>x<lanes>` suffix (`_u8x16`/`_u32x8`/`_u64x2`/...);
+# SVE scalable registers (svuint8_t etc) carry `_<dtype>x`; RVV registers (vuint8m1_t..m8, any element
+# width) carry `_<dtype>m<lmul>`; x86 k-masks (__mmask8/16/32/64) carry `_m<n>`; SVE/RVV predicates
+# (svbool_t/vbool<n>_t) carry `_b<n>x`/`_b<n>`. The other direction: locals or parameters typed (or
+# pointer-to) sz_u16_vec_t / sz_u32_vec_t / sz_u64_vec_t / sz_u128_vec_t / sz_u256_vec_t / sz_u512_vec_t
+# (the union wrapper types) always end in a bare `_vec` suffix instead (or are simply named `vec` outright
+# in small single-variable helpers) - never a dtype x lanes suffix, since they are not raw registers. Struct fields of either kind are exempt (this check can not tell a
+# struct field from a local from token scanning alone - name a struct member as freely as the type it
+# packs demands and grandfather the line with `// sz-nolint: naming` if this fires on one anyway). Scoped
+# to include/stringzilla/*/*.h and include/stringzilla/types.h (every family's serial.h/tables.h excluded
+# - portable/table-only, but types.h itself is IN scope since the union types are declared there),
+# added lines only, so legacy violations migrate on their own schedule.
 cipher_naming_awk='
 BEGIN {
     na = split(added, ar, "\n")
@@ -197,26 +219,33 @@ BEGIN {
     gsub(/\/\/.*/, "", line)
     gsub(/__vector unsigned char/, "__vector_uchar", line)
     gsub(/__vector unsigned int/, "__vector_uint", line)
+    gsub(/__vector unsigned long long/, "__vector_ulonglong", line)
     n = split(line, tok, /[[:space:]]+/)
     for (i = 1; i <= n; i++) {
         t = tok[i]
-        is_raw = (t ~ /^(__m128i|__m256i|__m512i|__mmask(8|16|32|64)|uint8x16_t|v128_t|svuint(8|32|64)_t|svbool_t|vuint32m[14]_t|vbool[0-9]+_t|__vector_uchar|__vector_uint)$/)
-        if (!is_raw) continue
+        is_raw = (t ~ /^(__m128i|__m256i|__m512i|__mmask(8|16|32|64)|uint8x16_t|v128_t|sv(uint|int|float)(8|16|32|64)_t|svbool_t|v(uint|int|float)(8|16|32|64)m[1248]_t|vbool[0-9]+_t|__vector_uchar|__vector_uint|__vector_ulonglong)$/)
+        is_wrapper = (t ~ /^sz_u(16|32|64|128|256|512)_vec_t$/)
+        if (!is_raw && !is_wrapper) continue
         name = tok[i + 1]
         if (name ~ /^const,?$/) name = tok[i + 2]
         if (name == "") continue
         if (name ~ /\(/) continue
-        sub(/[=;,)*].*/, "", name)
+        gsub(/^\*+/, "", name)
+        sub(/[=;,)*[].*/, "", name)
         if (name == "" || name ~ /[^A-Za-z0-9_]/) continue
-        suffix_ok = (name ~ /_[a-z]{1,2}[0-9]{1,2}(x[0-9]*|m[0-9])$/) || (name ~ /_m[0-9]+$/) || (name ~ /_b[0-9]+x?$/)
+        if (is_raw) {
+            suffix_ok = (name ~ /_[a-z]{1,2}[0-9]{1,2}(x[0-9]*|m[0-9])s?$/) || (name ~ /_m[0-9]+$/) || (name ~ /_b[0-9]+x?$/)
+        } else {
+            suffix_ok = (name ~ /_vec$/) || (name == "vec")
+        }
         if (!suffix_ok) print fname":"lineno": "t" -> "name
     }
 }
 '
 while IFS= read -r file; do
     case "$file" in
-    */cipher/serial.h | */cipher/tables.h) continue ;;
-    */cipher/*.h) ;;
+    */serial.h | */tables.h) continue ;;
+    include/stringzilla/*/*.h | include/stringzilla/types.h) ;;
     *) continue ;;
     esac
     added_nums=$(git diff --cached --unified=0 -- "$file" \
@@ -231,6 +260,6 @@ while IFS= read -r file; do
         echo "Bypass with --no-verify only if intentional, or grandfather with '// sz-nolint: naming'." >&2
         exit 1
     fi
-done < <(git diff --cached --name-only --diff-filter=ACM -- 'include/stringzilla/cipher/*.h')
+done < <(git diff --cached --name-only --diff-filter=ACM -- 'include/stringzilla/*/*.h')
 
 exit 0

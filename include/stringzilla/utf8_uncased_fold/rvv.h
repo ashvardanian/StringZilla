@@ -54,10 +54,10 @@ static sz_u8_t const *const sz_utf8_fold_latin_c6_deltas_rvv_ = sz_utf8_fold_lat
 /*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of `sz_ascii_fold_`.
  *  Only `[0x41, 0x5A]` shifts by `+0x20`; every other lane passes through unchanged. */
 SZ_HELPER_INLINE vuint8m8_t sz_utf8_fold_ascii_rvv_(vuint8m8_t source_u8m8, sz_size_t vector_length) {
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
-                                                  vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
     vuint8m8_t lowered_u8m8 = __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length);
-    return __riscv_vmerge_vvm_u8m8(source_u8m8, lowered_u8m8, is_upper, vector_length);
+    return __riscv_vmerge_vvm_u8m8(source_u8m8, lowered_u8m8, is_upper_b1, vector_length);
 }
 
 /*  Largest strip length that does not split a trailing multi-byte sequence across strips. On the final strip
@@ -89,80 +89,83 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_trim_incomplete_(sz_u8_t const *source_ptr
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                        sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t after_c2 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC2, vector_length);
-    vbool1_t after_c3 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC3, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t after_c2_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC2, vector_length);
+    vbool1_t after_c3_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC3, vector_length);
     // After a C4/C5/C6 lead: the previous byte is in [0xC4, 0xC6]; the family base is `(prev - 0xC4) * 64`.
-    vbool1_t after_c456 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 2,
-                                                    vector_length);
+    vbool1_t after_c456_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 2,
+                                                       vector_length);
 
     // Latin Extended-A/B continuation deltas: one indexed load over the combined C4/C5/C6 table, keyed by
     // `family_base + low6`, applied only on continuation bytes that follow a C4/C5/C6 lead.
-    vbool1_t delta_lanes = __riscv_vmand_mm_b1(after_c456, is_continuation, vector_length);
-    vuint8m8_t low6 = __riscv_vand_vx_u8m8(source, 0x3F, vector_length);
-    vuint8m8_t family_base = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 64,
-                                                  vector_length);
-    vuint8m8_t lut_index = __riscv_vadd_vv_u8m8(family_base, low6, vector_length);
-    vuint8m8_t delta = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta = __riscv_vluxei8_v_u8m8_mu(delta_lanes, delta, sz_utf8_fold_latin_c456_deltas_rvv_, lut_index,
-                                      vector_length);
-    vbool1_t is_irregular = __riscv_vmsne_vx_u8m8_b1(__riscv_vand_vx_u8m8(delta, 0x80, vector_length), 0,
-                                                     vector_length);
+    vbool1_t delta_lanes_b1 = __riscv_vmand_mm_b1(after_c456_b1, is_continuation_b1, vector_length);
+    vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
+    vuint8m8_t family_base_u8m8 = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 64,
+                                                       vector_length);
+    vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
+    vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
+                                           lut_index_u8m8, vector_length);
+    vbool1_t is_irregular_b1 = __riscv_vmsne_vx_u8m8_b1(__riscv_vand_vx_u8m8(delta_u8m8, 0x80, vector_length), 0,
+                                                        vector_length);
 
     // Build the folded strip: ASCII A-Z, Latin-1 upper +0x20, ß/µ replacements, then the Extended delta.
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
     // Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20.
-    vbool1_t latin1_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x1F,
-                                                      vector_length);
-    vbool1_t is_latin1_upper = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3, latin1_range, vector_length),
-                                                    __riscv_vmseq_vx_u8m8_b1(source, 0x97, vector_length),
-                                                    vector_length);
-    folded = __riscv_vmerge_vvm_u8m8(folded, __riscv_vadd_vx_u8m8(folded, 0x20, vector_length), is_latin1_upper,
-                                     vector_length);
+    vbool1_t latin1_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x1F,
+                                                         vector_length);
+    vbool1_t is_latin1_upper_b1 = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3_b1, latin1_range_b1, vector_length),
+                                                       __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x97, vector_length),
+                                                       vector_length);
+    folded_u8m8 = __riscv_vmerge_vvm_u8m8(folded_u8m8, __riscv_vadd_vx_u8m8(folded_u8m8, 0x20, vector_length),
+                                          is_latin1_upper_b1, vector_length);
     // ß (C3 9F) -> "ss": both bytes become 's'.
-    vbool1_t eszett_lead = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source, 0xC3, vector_length),
-                                               __riscv_vmseq_vx_u8m8_b1(next, 0x9F, vector_length), vector_length);
-    vbool1_t eszett_second = __riscv_vmand_mm_b1(after_c3, __riscv_vmseq_vx_u8m8_b1(source, 0x9F, vector_length),
-                                                 vector_length);
-    folded = __riscv_vmerge_vxm_u8m8(folded, 's', __riscv_vmor_mm_b1(eszett_lead, eszett_second, vector_length),
-                                     vector_length);
+    vbool1_t eszett_lead_b1 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xC3, vector_length),
+                                                  __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9F, vector_length),
+                                                  vector_length);
+    vbool1_t eszett_second_b1 = __riscv_vmand_mm_b1(
+        after_c3_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x9F, vector_length), vector_length);
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(
+        folded_u8m8, 's', __riscv_vmor_mm_b1(eszett_lead_b1, eszett_second_b1, vector_length), vector_length);
     // µ (C2 B5) -> μ (CE BC): lead byte becomes 0xCE, continuation 0xBC.
-    folded = __riscv_vmerge_vxm_u8m8(
-        folded, 0xCE,
-        __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source, 0xC2, vector_length),
-                            __riscv_vmseq_vx_u8m8_b1(next, 0xB5, vector_length), vector_length),
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(
+        folded_u8m8, 0xCE,
+        __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xC2, vector_length),
+                            __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xB5, vector_length), vector_length),
         vector_length);
-    folded = __riscv_vmerge_vxm_u8m8(
-        folded, 0xBC,
-        __riscv_vmand_mm_b1(after_c2, __riscv_vmseq_vx_u8m8_b1(source, 0xB5, vector_length), vector_length),
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(
+        folded_u8m8, 0xBC,
+        __riscv_vmand_mm_b1(after_c2_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xB5, vector_length), vector_length),
         vector_length);
     // Latin Extended +1 parity delta (0x80 irregulars corrupt their lane but are trimmed off below).
-    folded = __riscv_vadd_vv_u8m8(folded, delta, vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, delta_u8m8, vector_length);
 
     // Stops: any lead outside the C2-C6 family, a malformed family lead, or an irregular continuation.
-    vbool1_t is_non_ascii = __riscv_vmsgtu_vx_u8m8_b1(source, 0x7F, vector_length);
-    vbool1_t is_lead = __riscv_vmandn_mm_b1(is_non_ascii, is_continuation, vector_length);
-    vbool1_t is_family_lead = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0xC2, vector_length), 4,
-                                                        vector_length);
-    vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
+    vbool1_t is_non_ascii_b1 = __riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vector_length);
+    vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(is_non_ascii_b1, is_continuation_b1, vector_length);
+    vbool1_t is_family_lead_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0xC2, vector_length), 4,
+                                                           vector_length);
+    vbool1_t is_foreign_lead_b1 = __riscv_vmandn_mm_b1(is_lead_b1, is_family_lead_b1, vector_length);
     // Well-formed C2-C6 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. C2-C6 are
     // all 2-byte leads with no overlong/surrogate special case, so the continuation test is the whole gate; a
     // malformed family lead is treated as foreign so the strip stops before it and serial copies one byte.
-    vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
-                                                             vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(is_family_lead, next_is_continuation, vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-                                       is_irregular, vector_length);
+    vbool1_t next_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_u8m8, 0xC0, vector_length),
+                                                                0x80, vector_length);
+    vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(is_family_lead_b1, next_is_continuation_b1, vector_length);
+    vbool1_t stop_b1 = __riscv_vmor_mm_b1(
+        __riscv_vmor_mm_b1(is_foreign_lead_b1, malformed_family_lead_b1, vector_length), is_irregular_b1,
+        vector_length);
 
-    long first_stop = __riscv_vfirst_m_b1(stop, vector_length);
+    long first_stop = __riscv_vfirst_m_b1(stop_b1, vector_length);
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -175,7 +178,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source_ptr
         if (vector_length < remaining && source_ptr[vector_length - 1] >= 0xC0) --consumed;
         *needs_serial = 0;
     }
-    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded, consumed);
+    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, consumed);
     return consumed;
 }
 
@@ -191,50 +194,51 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_
                                                           sz_u8_t *destination_ptr, int *needs_serial) {
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t is_d0 = __riscv_vmseq_vx_u8m8_b1(source, 0xD0, vector_length);
-    vbool1_t is_d1 = __riscv_vmseq_vx_u8m8_b1(source, 0xD1, vector_length);
-    vbool1_t after_d0 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD0, vector_length);
-    vbool1_t is_lead = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source, 0x7F, vector_length), is_continuation,
-                                            vector_length);
-    vbool1_t is_family_lead = __riscv_vmor_mm_b1(is_d0, is_d1, vector_length);
-    vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t is_d0_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD0, vector_length);
+    vbool1_t is_d1_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD1, vector_length);
+    vbool1_t after_d0_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD0, vector_length);
+    vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vector_length),
+                                               is_continuation_b1, vector_length);
+    vbool1_t is_family_lead_b1 = __riscv_vmor_mm_b1(is_d0_b1, is_d1_b1, vector_length);
+    vbool1_t is_foreign_lead_b1 = __riscv_vmandn_mm_b1(is_lead_b1, is_family_lead_b1, vector_length);
     // Well-formed D0/D1 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. D0/D1 are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
-    vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
-                                                             vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(is_family_lead, next_is_continuation, vector_length);
+    vbool1_t next_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_u8m8, 0xC0, vector_length),
+                                                                0x80, vector_length);
+    vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(is_family_lead_b1, next_is_continuation_b1, vector_length);
     // Cyrillic Extended-A (D1 A0+) folds by parity across blocks — leave it to serial.
-    vbool1_t is_extended = __riscv_vmand_mm_b1(is_d1, __riscv_vmsgeu_vx_u8m8_b1(next, 0xA0, vector_length),
-                                               vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-                                       is_extended, vector_length);
+    vbool1_t is_extended_b1 = __riscv_vmand_mm_b1(is_d1_b1, __riscv_vmsgeu_vx_u8m8_b1(next_u8m8, 0xA0, vector_length),
+                                                  vector_length);
+    vbool1_t stop_b1 = __riscv_vmor_mm_b1(
+        __riscv_vmor_mm_b1(is_foreign_lead_b1, malformed_family_lead_b1, vector_length), is_extended_b1, vector_length);
 
     // Second-byte offset by high nibble, applied only after a D0 lead.
-    vuint8m8_t offset = __riscv_vmv_v_x_u8m8(0, vector_length);
-    offset = __riscv_vluxei8_v_u8m8_mu(after_d0, offset, second_byte_offsets,
-                                       __riscv_vsrl_vx_u8m8(source, 4, vector_length), vector_length);
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
-    folded = __riscv_vadd_vv_u8m8(folded, offset, vector_length);
+    vuint8m8_t offset_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    offset_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_d0_b1, offset_u8m8, second_byte_offsets,
+                                            __riscv_vsrl_vx_u8m8(source_u8m8, 4, vector_length), vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, offset_u8m8, vector_length);
     // Lead rewrite D0 -> D1 (+1) where the next byte is 80-8F or A0-AF.
-    vbool1_t next_80_8f = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0x80, vector_length), 0x10,
-                                                    vector_length);
-    vbool1_t next_a0_af = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0xA0, vector_length), 0x10,
-                                                    vector_length);
-    vbool1_t needs_d1 = __riscv_vmand_mm_b1(is_d0, __riscv_vmor_mm_b1(next_80_8f, next_a0_af, vector_length),
-                                            vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(needs_d1, folded, folded, 1, vector_length);
+    vbool1_t next_80_8f_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0x80, vector_length), 0x10,
+                                                       vector_length);
+    vbool1_t next_a0_af_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0xA0, vector_length), 0x10,
+                                                       vector_length);
+    vbool1_t needs_d1_b1 = __riscv_vmand_mm_b1(
+        is_d0_b1, __riscv_vmor_mm_b1(next_80_8f_b1, next_a0_af_b1, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(needs_d1_b1, folded_u8m8, folded_u8m8, 1, vector_length);
 
-    long first_stop = __riscv_vfirst_m_b1(stop, vector_length);
+    long first_stop = __riscv_vfirst_m_b1(stop_b1, vector_length);
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -245,7 +249,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_
         consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
-    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded, consumed);
+    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, consumed);
     return consumed;
 }
 
@@ -256,66 +260,69 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_rvv_(sz_u8_t const *source_
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                        sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t is_ce = __riscv_vmseq_vx_u8m8_b1(source, 0xCE, vector_length);
-    vbool1_t is_cf = __riscv_vmseq_vx_u8m8_b1(source, 0xCF, vector_length);
-    vbool1_t after_ce = __riscv_vmseq_vx_u8m8_b1(previous, 0xCE, vector_length);
-    vbool1_t after_cf = __riscv_vmseq_vx_u8m8_b1(previous, 0xCF, vector_length);
-    vbool1_t is_lead = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source, 0x7F, vector_length), is_continuation,
-                                            vector_length);
-    vbool1_t is_family_lead = __riscv_vmor_mm_b1(is_ce, is_cf, vector_length);
-    vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family_lead, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t is_ce_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xCE, vector_length);
+    vbool1_t is_cf_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xCF, vector_length);
+    vbool1_t after_ce_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xCE, vector_length);
+    vbool1_t after_cf_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xCF, vector_length);
+    vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vector_length),
+                                               is_continuation_b1, vector_length);
+    vbool1_t is_family_lead_b1 = __riscv_vmor_mm_b1(is_ce_b1, is_cf_b1, vector_length);
+    vbool1_t is_foreign_lead_b1 = __riscv_vmandn_mm_b1(is_lead_b1, is_family_lead_b1, vector_length);
     // Well-formed CE/CF lead (mirrors `sz_rune_decode`): the next byte must be a continuation. CE/CF are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
-    vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
-                                                             vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(is_family_lead, next_is_continuation, vector_length);
+    vbool1_t next_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_u8m8, 0xC0, vector_length),
+                                                                0x80, vector_length);
+    vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(is_family_lead_b1, next_is_continuation_b1, vector_length);
     // CE excluded: next < 0x91 (accented uppercase) or next == 0xB0 ('ΰ' expands). CF excluded: next >= 0x8F.
-    vbool1_t ce_excluded = __riscv_vmand_mm_b1(
-        is_ce,
-        __riscv_vmor_mm_b1(__riscv_vmsltu_vx_u8m8_b1(next, 0x91, vector_length),
-                           __riscv_vmseq_vx_u8m8_b1(next, 0xB0, vector_length), vector_length),
+    vbool1_t ce_excluded_b1 = __riscv_vmand_mm_b1(
+        is_ce_b1,
+        __riscv_vmor_mm_b1(__riscv_vmsltu_vx_u8m8_b1(next_u8m8, 0x91, vector_length),
+                           __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0xB0, vector_length), vector_length),
         vector_length);
-    vbool1_t cf_excluded = __riscv_vmand_mm_b1(is_cf, __riscv_vmsgeu_vx_u8m8_b1(next, 0x8F, vector_length),
-                                               vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-                                       __riscv_vmor_mm_b1(ce_excluded, cf_excluded, vector_length), vector_length);
+    vbool1_t cf_excluded_b1 = __riscv_vmand_mm_b1(is_cf_b1, __riscv_vmsgeu_vx_u8m8_b1(next_u8m8, 0x8F, vector_length),
+                                                  vector_length);
+    vbool1_t stop_b1 = __riscv_vmor_mm_b1(
+        __riscv_vmor_mm_b1(is_foreign_lead_b1, malformed_family_lead_b1, vector_length),
+        __riscv_vmor_mm_b1(ce_excluded_b1, cf_excluded_b1, vector_length), vector_length);
 
     // Promoting ranges (second byte A0-A1 or A3-AB), used both for the second-byte -0x20 and the lead +1.
-    vbool1_t in_promote_a0 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0xA0, vector_length), 0x02,
-                                                       vector_length);
-    vbool1_t in_promote_a3 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0xA3, vector_length), 0x09,
-                                                       vector_length);
-    vbool1_t next_promote_a0 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0xA0, vector_length), 0x02,
-                                                         vector_length);
-    vbool1_t next_promote_a3 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0xA3, vector_length), 0x09,
-                                                         vector_length);
+    vbool1_t in_promote_a0_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0xA0, vector_length), 0x02,
+                                                          vector_length);
+    vbool1_t in_promote_a3_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0xA3, vector_length), 0x09,
+                                                          vector_length);
+    vbool1_t next_promote_a0_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0xA0, vector_length), 0x02,
+                                                            vector_length);
+    vbool1_t next_promote_a3_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0xA3, vector_length), 0x09,
+                                                            vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
-    vbool1_t basic_upper = __riscv_vmand_mm_b1(
-        after_ce, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x91, vector_length), 0x0F, vector_length),
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
+    vbool1_t basic_upper_b1 = __riscv_vmand_mm_b1(
+        after_ce_b1,
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x91, vector_length), 0x0F, vector_length),
         vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(basic_upper, folded, folded, 0x20, vector_length);
-    vbool1_t promoting_upper = __riscv_vmand_mm_b1(
-        after_ce, __riscv_vmor_mm_b1(in_promote_a0, in_promote_a3, vector_length), vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(promoting_upper, folded, folded, 0xE0, vector_length); // -0x20
-    vbool1_t final_sigma = __riscv_vmand_mm_b1(after_cf, __riscv_vmseq_vx_u8m8_b1(source, 0x82, vector_length),
-                                               vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(final_sigma, folded, folded, 0x01, vector_length);
-    vbool1_t promotes_lead = __riscv_vmand_mm_b1(
-        is_ce, __riscv_vmor_mm_b1(next_promote_a0, next_promote_a3, vector_length), vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(promotes_lead, folded, folded, 0x01, vector_length); // CE -> CF
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(basic_upper_b1, folded_u8m8, folded_u8m8, 0x20, vector_length);
+    vbool1_t promoting_upper_b1 = __riscv_vmand_mm_b1(
+        after_ce_b1, __riscv_vmor_mm_b1(in_promote_a0_b1, in_promote_a3_b1, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(promoting_upper_b1, folded_u8m8, folded_u8m8, 0xE0, vector_length); // -0x20
+    vbool1_t final_sigma_b1 = __riscv_vmand_mm_b1(
+        after_cf_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x82, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(final_sigma_b1, folded_u8m8, folded_u8m8, 0x01, vector_length);
+    vbool1_t promotes_lead_b1 = __riscv_vmand_mm_b1(
+        is_ce_b1, __riscv_vmor_mm_b1(next_promote_a0_b1, next_promote_a3_b1, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(promotes_lead_b1, folded_u8m8, folded_u8m8, 0x01, vector_length); // CE -> CF
 
-    long first_stop = __riscv_vfirst_m_b1(stop, vector_length);
+    long first_stop = __riscv_vfirst_m_b1(stop_b1, vector_length);
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -326,7 +333,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr
         consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
-    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded, consumed);
+    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, consumed);
     return consumed;
 }
 
@@ -337,59 +344,65 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_rvv_(sz_u8_t const *source_ptr
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                           sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t next_carry = (vector_length < remaining) ? source_ptr[vector_length] : 0;
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t is_d4 = __riscv_vmseq_vx_u8m8_b1(source, 0xD4, vector_length);
-    vbool1_t is_d5 = __riscv_vmseq_vx_u8m8_b1(source, 0xD5, vector_length);
-    vbool1_t is_d6 = __riscv_vmseq_vx_u8m8_b1(source, 0xD6, vector_length);
-    vbool1_t after_d4 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD4, vector_length);
-    vbool1_t after_d5 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD5, vector_length);
-    vbool1_t is_lead = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source, 0x7F, vector_length), is_continuation,
-                                            vector_length);
-    vbool1_t is_family = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_d4, is_d5, vector_length), is_d6, vector_length);
-    vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_family, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t is_d4_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD4, vector_length);
+    vbool1_t is_d5_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD5, vector_length);
+    vbool1_t is_d6_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD6, vector_length);
+    vbool1_t after_d4_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD4, vector_length);
+    vbool1_t after_d5_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD5, vector_length);
+    vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vector_length),
+                                               is_continuation_b1, vector_length);
+    vbool1_t is_family_b1 = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_d4_b1, is_d5_b1, vector_length), is_d6_b1,
+                                               vector_length);
+    vbool1_t is_foreign_lead_b1 = __riscv_vmandn_mm_b1(is_lead_b1, is_family_b1, vector_length);
     // Well-formed D4/D5/D6 lead (mirrors `sz_rune_decode`): the next byte must be a continuation. D4-D6 are
     // 2-byte leads with no overlong/surrogate special case, so a malformed family lead is foreign and the strip
     // stops before it for serial to copy one byte.
-    vbool1_t next_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next, 0xC0, vector_length), 0x80,
-                                                             vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(is_family, next_is_continuation, vector_length);
-    vbool1_t d4_stop = __riscv_vmand_mm_b1(is_d4, __riscv_vmsltu_vx_u8m8_b1(next, 0xB1, vector_length), vector_length);
-    vbool1_t ligature_stop = __riscv_vmand_mm_b1(is_d6, __riscv_vmseq_vx_u8m8_b1(next, 0x87, vector_length),
-                                                 vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, malformed_family_lead, vector_length),
-                                       __riscv_vmor_mm_b1(d4_stop, ligature_stop, vector_length), vector_length);
+    vbool1_t next_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_u8m8, 0xC0, vector_length),
+                                                                0x80, vector_length);
+    vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(is_family_b1, next_is_continuation_b1, vector_length);
+    vbool1_t d4_stop_b1 = __riscv_vmand_mm_b1(is_d4_b1, __riscv_vmsltu_vx_u8m8_b1(next_u8m8, 0xB1, vector_length),
+                                              vector_length);
+    vbool1_t ligature_stop_b1 = __riscv_vmand_mm_b1(is_d6_b1, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x87, vector_length),
+                                                    vector_length);
+    vbool1_t stop_b1 = __riscv_vmor_mm_b1(
+        __riscv_vmor_mm_b1(is_foreign_lead_b1, malformed_family_lead_b1, vector_length),
+        __riscv_vmor_mm_b1(d4_stop_b1, ligature_stop_b1, vector_length), vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
     // Second-byte offsets (disjoint lanes).
-    vbool1_t d4_second = __riscv_vmand_mm_b1(after_d4, __riscv_vmsgeu_vx_u8m8_b1(source, 0xB1, vector_length),
-                                             vector_length);
-    vbool1_t d5_plus30 = __riscv_vmand_mm_b1(
-        after_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x10, vector_length),
+    vbool1_t d4_second_b1 = __riscv_vmand_mm_b1(
+        after_d4_b1, __riscv_vmsgeu_vx_u8m8_b1(source_u8m8, 0xB1, vector_length), vector_length);
+    vbool1_t d5_plus30_b1 = __riscv_vmand_mm_b1(
+        after_d5_b1,
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x10, vector_length),
         vector_length);
-    vbool1_t d5_minus10 = __riscv_vmand_mm_b1(
-        after_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x90, vector_length), 0x07, vector_length),
+    vbool1_t d5_minus10_b1 = __riscv_vmand_mm_b1(
+        after_d5_b1,
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x90, vector_length), 0x07, vector_length),
         vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(d4_second, d5_minus10, vector_length), folded, folded, 0xF0,
-                                     vector_length); // -0x10
-    folded = __riscv_vadd_vx_u8m8_mu(d5_plus30, folded, folded, 0x30, vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(d4_second_b1, d5_minus10_b1, vector_length), folded_u8m8,
+                                          folded_u8m8, 0xF0, vector_length); // -0x10
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(d5_plus30_b1, folded_u8m8, folded_u8m8, 0x30, vector_length);
     // Lead +1 rewrites D4->D5 and D5->D6.
-    vbool1_t promotes_d4 = __riscv_vmand_mm_b1(is_d4, __riscv_vmsgeu_vx_u8m8_b1(next, 0xB1, vector_length),
-                                               vector_length);
-    vbool1_t promotes_d5 = __riscv_vmand_mm_b1(
-        is_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0x90, vector_length), 0x07, vector_length),
+    vbool1_t promotes_d4_b1 = __riscv_vmand_mm_b1(is_d4_b1, __riscv_vmsgeu_vx_u8m8_b1(next_u8m8, 0xB1, vector_length),
+                                                  vector_length);
+    vbool1_t promotes_d5_b1 = __riscv_vmand_mm_b1(
+        is_d5_b1, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0x90, vector_length), 0x07, vector_length),
         vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(promotes_d4, promotes_d5, vector_length), folded, folded, 0x01,
-                                     vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(promotes_d4_b1, promotes_d5_b1, vector_length),
+                                          folded_u8m8, folded_u8m8, 0x01, vector_length);
 
-    long first_stop = __riscv_vfirst_m_b1(stop, vector_length);
+    long first_stop = __riscv_vfirst_m_b1(stop_b1, vector_length);
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -400,7 +413,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_
         consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
-    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded, consumed);
+    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, consumed);
     return consumed;
 }
 
@@ -412,71 +425,75 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_rvv_(sz_u8_t const *source_
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                           sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining);
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
     sz_u8_t carry1 = (vector_length < remaining) ? source_ptr[vector_length] : 0;
     sz_u8_t carry2 = (vector_length + 1 < remaining) ? source_ptr[vector_length + 1] : 0;
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, carry1, vector_length);
-    vuint8m8_t next_next = __riscv_vslide1down_vx_u8m8(next, carry2, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, carry1, vector_length);
+    vuint8m8_t next_next_u8m8 = __riscv_vslide1down_vx_u8m8(next_u8m8, carry2, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t is_e1 = __riscv_vmseq_vx_u8m8_b1(source, 0xE1, vector_length);
-    vbool1_t is_lead = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source, 0x7F, vector_length), is_continuation,
-                                            vector_length);
-    vbool1_t is_foreign_lead = __riscv_vmandn_mm_b1(is_lead, is_e1, vector_length);
-    vbool1_t is_82_lead = __riscv_vmand_mm_b1(is_e1, __riscv_vmseq_vx_u8m8_b1(next, 0x82, vector_length),
-                                              vector_length);
-    vbool1_t is_83_lead = __riscv_vmand_mm_b1(is_e1, __riscv_vmseq_vx_u8m8_b1(next, 0x83, vector_length),
-                                              vector_length);
-    vbool1_t is_foreign_e1 = __riscv_vmandn_mm_b1(is_e1, __riscv_vmor_mm_b1(is_82_lead, is_83_lead, vector_length),
-                                                  vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t is_e1_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xE1, vector_length);
+    vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(__riscv_vmsgtu_vx_u8m8_b1(source_u8m8, 0x7F, vector_length),
+                                               is_continuation_b1, vector_length);
+    vbool1_t is_foreign_lead_b1 = __riscv_vmandn_mm_b1(is_lead_b1, is_e1_b1, vector_length);
+    vbool1_t is_82_lead_b1 = __riscv_vmand_mm_b1(is_e1_b1, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x82, vector_length),
+                                                 vector_length);
+    vbool1_t is_83_lead_b1 = __riscv_vmand_mm_b1(is_e1_b1, __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x83, vector_length),
+                                                 vector_length);
+    vbool1_t is_foreign_e1_b1 = __riscv_vmandn_mm_b1(
+        is_e1_b1, __riscv_vmor_mm_b1(is_82_lead_b1, is_83_lead_b1, vector_length), vector_length);
     // Well-formed E1 82/83 lead (mirrors `sz_rune_decode`): the second byte (82/83) is already a
     // continuation, so the gate is that the THIRD byte is a continuation too. E1 has no overlong/surrogate
     // special case. A malformed E1 family lead is treated as foreign so the strip stops before it and serial
     // copies one byte.
-    vbool1_t third_is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(next_next, 0xC0, vector_length),
-                                                              0x80, vector_length);
-    vbool1_t malformed_family_lead = __riscv_vmandn_mm_b1(__riscv_vmor_mm_b1(is_82_lead, is_83_lead, vector_length),
-                                                          third_is_continuation, vector_length);
-    vbool1_t stop = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead, is_foreign_e1, vector_length),
-                                       malformed_family_lead, vector_length);
+    vbool1_t third_is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(
+        __riscv_vand_vx_u8m8(next_next_u8m8, 0xC0, vector_length), 0x80, vector_length);
+    vbool1_t malformed_family_lead_b1 = __riscv_vmandn_mm_b1(
+        __riscv_vmor_mm_b1(is_82_lead_b1, is_83_lead_b1, vector_length), third_is_continuation_b1, vector_length);
+    vbool1_t stop_b1 = __riscv_vmor_mm_b1(__riscv_vmor_mm_b1(is_foreign_lead_b1, is_foreign_e1_b1, vector_length),
+                                          malformed_family_lead_b1, vector_length);
 
     // Uppercase keyed by the third byte: E1 82 third >= A0; E1 83 third in 80-85, or 87, or 8D.
-    vbool1_t is_82_upper_lead = __riscv_vmand_mm_b1(
-        is_82_lead, __riscv_vmsgeu_vx_u8m8_b1(next_next, 0xA0, vector_length), vector_length);
-    vbool1_t third_83_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_next, 0x80, vector_length), 0x06,
-                                                        vector_length);
-    vbool1_t third_83_extra = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_next, 0x87, vector_length),
-                                                 __riscv_vmseq_vx_u8m8_b1(next_next, 0x8D, vector_length),
-                                                 vector_length);
-    vbool1_t is_83_upper_lead = __riscv_vmand_mm_b1(
-        is_83_lead, __riscv_vmor_mm_b1(third_83_range, third_83_extra, vector_length), vector_length);
+    vbool1_t is_82_upper_lead_b1 = __riscv_vmand_mm_b1(
+        is_82_lead_b1, __riscv_vmsgeu_vx_u8m8_b1(next_next_u8m8, 0xA0, vector_length), vector_length);
+    vbool1_t third_83_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_next_u8m8, 0x80, vector_length),
+                                                           0x06, vector_length);
+    vbool1_t third_83_extra_b1 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(next_next_u8m8, 0x87, vector_length),
+                                                    __riscv_vmseq_vx_u8m8_b1(next_next_u8m8, 0x8D, vector_length),
+                                                    vector_length);
+    vbool1_t is_83_upper_lead_b1 = __riscv_vmand_mm_b1(
+        is_83_lead_b1, __riscv_vmor_mm_b1(third_83_range_b1, third_83_extra_b1, vector_length), vector_length);
 
     // Carry the per-block uppercase flag forward as a 0/1 byte: lane +1 (second) and lane +2 (third).
-    vuint8m8_t flag82_lead = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, is_82_upper_lead,
+    vuint8m8_t flag82_lead_u8m8 = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
+                                                          is_82_upper_lead_b1, vector_length);
+    vuint8m8_t flag83_lead_u8m8 = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
+                                                          is_83_upper_lead_b1, vector_length);
+    vuint8m8_t flag82_second_u8m8 = __riscv_vslide1up_vx_u8m8(flag82_lead_u8m8, 0, vector_length);
+    vuint8m8_t flag83_second_u8m8 = __riscv_vslide1up_vx_u8m8(flag83_lead_u8m8, 0, vector_length);
+    vuint8m8_t flag82_third_u8m8 = __riscv_vslide1up_vx_u8m8(flag82_second_u8m8, 0, vector_length);
+    vuint8m8_t flag83_third_u8m8 = __riscv_vslide1up_vx_u8m8(flag83_second_u8m8, 0, vector_length);
+
+    vbool1_t is_upper_lead_b1 = __riscv_vmor_mm_b1(is_82_upper_lead_b1, is_83_upper_lead_b1, vector_length);
+    vbool1_t is_upper_second_b1 = __riscv_vmsne_vx_u8m8_b1(
+        __riscv_vor_vv_u8m8(flag82_second_u8m8, flag83_second_u8m8, vector_length), 0, vector_length);
+    vbool1_t is_82_upper_third_b1 = __riscv_vmsne_vx_u8m8_b1(flag82_third_u8m8, 0, vector_length);
+    vbool1_t is_83_upper_third_b1 = __riscv_vmsne_vx_u8m8_b1(flag83_third_u8m8, 0, vector_length);
+
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
                                                      vector_length);
-    vuint8m8_t flag83_lead = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, is_83_upper_lead,
-                                                     vector_length);
-    vuint8m8_t flag82_second = __riscv_vslide1up_vx_u8m8(flag82_lead, 0, vector_length);
-    vuint8m8_t flag83_second = __riscv_vslide1up_vx_u8m8(flag83_lead, 0, vector_length);
-    vuint8m8_t flag82_third = __riscv_vslide1up_vx_u8m8(flag82_second, 0, vector_length);
-    vuint8m8_t flag83_third = __riscv_vslide1up_vx_u8m8(flag83_second, 0, vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(folded_u8m8, 0xE2, is_upper_lead_b1, vector_length); // lead E1 -> E2
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(folded_u8m8, 0xB4, is_upper_second_b1,
+                                          vector_length); // second 82/83 -> B4
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(is_82_upper_third_b1, folded_u8m8, folded_u8m8, 0xE0,
+                                          vector_length); // third -0x20
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(is_83_upper_third_b1, folded_u8m8, folded_u8m8, 0x20,
+                                          vector_length); // third +0x20
 
-    vbool1_t is_upper_lead = __riscv_vmor_mm_b1(is_82_upper_lead, is_83_upper_lead, vector_length);
-    vbool1_t is_upper_second = __riscv_vmsne_vx_u8m8_b1(
-        __riscv_vor_vv_u8m8(flag82_second, flag83_second, vector_length), 0, vector_length);
-    vbool1_t is_82_upper_third = __riscv_vmsne_vx_u8m8_b1(flag82_third, 0, vector_length);
-    vbool1_t is_83_upper_third = __riscv_vmsne_vx_u8m8_b1(flag83_third, 0, vector_length);
-
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
-    folded = __riscv_vmerge_vxm_u8m8(folded, 0xE2, is_upper_lead, vector_length);             // lead E1 -> E2
-    folded = __riscv_vmerge_vxm_u8m8(folded, 0xB4, is_upper_second, vector_length);           // second 82/83 -> B4
-    folded = __riscv_vadd_vx_u8m8_mu(is_82_upper_third, folded, folded, 0xE0, vector_length); // third -0x20
-    folded = __riscv_vadd_vx_u8m8_mu(is_83_upper_third, folded, folded, 0x20, vector_length); // third +0x20
-
-    long first_stop = __riscv_vfirst_m_b1(stop, vector_length);
+    long first_stop = __riscv_vfirst_m_b1(stop_b1, vector_length);
     sz_size_t consumed;
     if (first_stop >= 0) {
         consumed = (sz_size_t)first_stop;
@@ -487,7 +504,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_georgian_strip_rvv_(sz_u8_t const *source_
         consumed = sz_utf8_fold_trim_incomplete_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
-    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded, consumed);
+    if (consumed) __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, consumed);
     return consumed;
 }
 

@@ -46,34 +46,35 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
     sz_u8_t previous_canonical_combining_class = 0;
 
-    v128_t const lut0 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 0);
-    v128_t const lut1 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 16);
-    v128_t const lut2 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 32);
-    v128_t const lut3 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 48);
-    v128_t const high_bit = wasm_u8x16_splat(0x80);
-    v128_t const continuation_span = wasm_u8x16_splat(0x40);
-    v128_t const low6_mask = wasm_u8x16_splat(0x3F);
-    v128_t const flag_vector = wasm_u8x16_splat(form_flag);
-    v128_t const zero = wasm_u8x16_splat(0);
+    v128_t const lut0_u8x16 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 0);
+    v128_t const lut1_u8x16 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 16);
+    v128_t const lut2_u8x16 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 32);
+    v128_t const lut3_u8x16 = wasm_v128_load(sz_utf8_norm_lead_lut_ + 48);
+    v128_t const high_bit_u8x16 = wasm_u8x16_splat(0x80);
+    v128_t const continuation_span_u8x16 = wasm_u8x16_splat(0x40);
+    v128_t const low6_mask_u8x16 = wasm_u8x16_splat(0x3F);
+    v128_t const flag_vector_u8x16 = wasm_u8x16_splat(form_flag);
+    v128_t const zero_u8x16 = wasm_u8x16_splat(0);
 
     while (position + 16 <= end) {
-        v128_t bytes = wasm_v128_load(position);
+        v128_t bytes_u8x16 = wasm_v128_load(position);
 
         // 16-byte all-ASCII gate: an inert window of single-byte runes skips with zero LUT work.
-        v128_t non_ascii = wasm_u8x16_ge(bytes, high_bit);
-        if (!wasm_v128_any_true(non_ascii)) {
+        v128_t non_ascii_u8x16 = wasm_u8x16_ge(bytes_u8x16, high_bit_u8x16);
+        if (!wasm_v128_any_true(non_ascii_u8x16)) {
             position += 16, previous_canonical_combining_class = 0;
             continue;
         }
 
         // Lead bytes only (non-ASCII and not a 10xxxxxx continuation), classified via the 64-entry LUT.
-        v128_t continuation = wasm_u8x16_lt(wasm_i8x16_sub(bytes, high_bit), continuation_span);
-        v128_t is_lead = wasm_v128_andnot(non_ascii, continuation);
-        v128_t index = wasm_v128_and(bytes, low6_mask);
-        v128_t families = sz_utf8_gather64_v128_(lut0, lut1, lut2, lut3, index);
-        v128_t flagged = wasm_v128_and(is_lead, wasm_i8x16_ne(wasm_v128_and(families, flag_vector), zero));
+        v128_t continuation_u8x16 = wasm_u8x16_lt(wasm_i8x16_sub(bytes_u8x16, high_bit_u8x16), continuation_span_u8x16);
+        v128_t is_lead_u8x16 = wasm_v128_andnot(non_ascii_u8x16, continuation_u8x16);
+        v128_t index_u8x16 = wasm_v128_and(bytes_u8x16, low6_mask_u8x16);
+        v128_t families_u8x16 = sz_utf8_gather64_v128_(lut0_u8x16, lut1_u8x16, lut2_u8x16, lut3_u8x16, index_u8x16);
+        v128_t flagged_u8x16 = wasm_v128_and(
+            is_lead_u8x16, wasm_i8x16_ne(wasm_v128_and(families_u8x16, flag_vector_u8x16), zero_u8x16));
 
-        if (!wasm_v128_any_true(flagged)) { // no flagged lead: inert for the form
+        if (!wasm_v128_any_true(flagged_u8x16)) { // no flagged lead: inert for the form
             // After the skip, realign to a codepoint boundary - a 16-byte step can land mid-sequence, and
             // the straddling codepoint's lead was already classified inert in the window we are leaving.
             position += 16, previous_canonical_combining_class = 0;

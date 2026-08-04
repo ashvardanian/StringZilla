@@ -108,14 +108,14 @@ typedef struct sz_utf8_rune_window_haswell_t {
 } sz_utf8_rune_window_haswell_t;
 
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the AVX2 twin of `srl8_`. */
-SZ_HELPER_INLINE __m256i sz_utf8_srl8_haswell_(__m256i value, int shift, sz_u8_t keep) {
-    return _mm256_and_si256(_mm256_srli_epi16(value, shift), _mm256_set1_epi8((char)keep));
+SZ_HELPER_INLINE __m256i sz_utf8_srl8_haswell_(__m256i value_u8x32, int shift, sz_u8_t keep) {
+    return _mm256_and_si256(_mm256_srli_epi16(value_u8x32, shift), _mm256_set1_epi8((char)keep));
 }
 
 /** @brief  Combine two per-half `vpmovmskb` results into one 64-bit lane mask. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half, __m256i high_half) {
-    sz_u64_t const low_bits = (sz_u32_t)_mm256_movemask_epi8(low_half);
-    sz_u64_t const high_bits = (sz_u32_t)_mm256_movemask_epi8(high_half);
+SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32) {
+    sz_u64_t const low_bits = (sz_u32_t)_mm256_movemask_epi8(low_half_u8x32);
+    sz_u64_t const high_bits = (sz_u32_t)_mm256_movemask_epi8(high_half_u8x32);
     return low_bits | (high_bits << 32);
 }
 
@@ -123,18 +123,18 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_haswell_(__m256i low_half, __m256
  *          `_mm512_maskz_loadu_epi8`). A small stack staging union covers the partial tail so we never read past
  *          `text + loaded`. */
 SZ_HELPER_AUTO void sz_utf8_load_window_haswell_( //
-    sz_u8_t const *text, sz_size_t loaded, __m256i *out_low, __m256i *out_high) {
+    sz_u8_t const *text, sz_size_t loaded, __m256i *out_low_u8x32, __m256i *out_high_u8x32) {
     if (loaded >= 64) {
-        *out_low = _mm256_loadu_si256((__m256i const *)(text + 0));
-        *out_high = _mm256_loadu_si256((__m256i const *)(text + 32));
+        *out_low_u8x32 = _mm256_loadu_si256((__m256i const *)(text + 0));
+        *out_high_u8x32 = _mm256_loadu_si256((__m256i const *)(text + 32));
         return;
     }
-    sz_u512_vec_t staging;
-    staging.ymms[0] = _mm256_setzero_si256();
-    staging.ymms[1] = _mm256_setzero_si256();
-    for (sz_size_t i = 0; i < loaded; ++i) staging.u8s[i] = text[i];
-    *out_low = staging.ymms[0];
-    *out_high = staging.ymms[1];
+    sz_u512_vec_t staging_vec;
+    staging_vec.ymms[0] = _mm256_setzero_si256();
+    staging_vec.ymms[1] = _mm256_setzero_si256();
+    for (sz_size_t i = 0; i < loaded; ++i) staging_vec.u8s[i] = text[i];
+    *out_low_u8x32 = staging_vec.ymms[0];
+    *out_high_u8x32 = staging_vec.ymms[1];
 }
 
 /** @brief  Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]` over all 64 lanes, with the lanes
@@ -273,21 +273,21 @@ SZ_HELPER_AUTO sz_utf8_rune_window_haswell_t sz_utf8_rune_decode_window_haswell_
 }
 
 /** @brief  One nibble-cascade stage with a sub-256 selector: `result[lane] = table[selector[lane]*16 + within[lane]]`.
- *          Each of @p tile_count 16-byte rows is one selector value; @p within is the addressing nibble (caller-masked
- *          to `[0,16)`). The AVX2 stand-in for VBMI `vpermi2b`: there is no 32-byte byte permute, so each resident row
- *          is broadcast and shuffled by @p within, then blended in for the lanes whose @p selector picks that row.
- *          In-register — only `vbroadcasti128`/`vpshufb`/`vpcmpeqb`/`vpblendvb`.
+ *          Each of @p tile_count 16-byte rows is one selector value; @p within_u8x32 is the addressing nibble
+ *          (caller-masked to `[0,16)`). The AVX2 stand-in for VBMI `vpermi2b`: there is no 32-byte byte permute, so
+ *          each resident row is broadcast and shuffled by @p within_u8x32, then blended in for the lanes whose
+ *          @p selector_u8x32 picks that row. In-register — only `vbroadcasti128`/`vpshufb`/`vpcmpeqb`/`vpblendvb`.
  *
  *  ! Cost scales with @p tile_count, not with the window: every resident row is shuffled and blended on the shuffle
  *  ! port. The BMP classifiers use @ref sz_utf8_rune_flat_lookup_haswell_ instead for that reason. */
 SZ_HELPER_AUTO __m256i sz_utf8_rune_cascade_stage_haswell_( //
-    sz_u8_t const *table, int tile_count, __m256i selector, __m256i within) {
+    sz_u8_t const *table, int tile_count, __m256i selector_u8x32, __m256i within_u8x32) {
     __m256i result_u8x32 = _mm256_setzero_si256();
     for (int tile = 0; tile < tile_count; ++tile) {
         __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(
             _mm_loadu_si128((__m128i const *)(table + tile * 16)));
-        __m256i const lut_row_picked_u8x32 = _mm256_shuffle_epi8(lut_row_broadcast_u8x32, within);
-        __m256i const selector_match_u8x32 = _mm256_cmpeq_epi8(selector, _mm256_set1_epi8((char)tile));
+        __m256i const lut_row_picked_u8x32 = _mm256_shuffle_epi8(lut_row_broadcast_u8x32, within_u8x32);
+        __m256i const selector_match_u8x32 = _mm256_cmpeq_epi8(selector_u8x32, _mm256_set1_epi8((char)tile));
         result_u8x32 = _mm256_blendv_epi8(result_u8x32, lut_row_picked_u8x32, selector_match_u8x32);
     }
     return result_u8x32;
@@ -296,9 +296,10 @@ SZ_HELPER_AUTO __m256i sz_utf8_rune_cascade_stage_haswell_( //
 /** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = group_base[index[lane]]`.
  *          Two-stage `vpshufb` over 16 resident rows — the low nibble shuffles within a row, the high nibble selects
  *          the row. The AVX2 twin of the substrate `lut256` leaf. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base, __m256i index) {
-    __m256i const index_within_low_u8x32 = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
-    __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index, 4), _mm256_set1_epi8(0x0F));
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
+    __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
+    __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
+                                                               _mm256_set1_epi8(0x0F));
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 16, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
@@ -306,19 +307,20 @@ SZ_HELPER_INLINE __m256i sz_utf8_rune_lut256_haswell_(sz_u8_t const *group_base,
  *          The bounded twin of @ref sz_utf8_rune_lut256_haswell_ for callers whose table is only four rows wide -
  *          e.g. a 128-entry property table read as two 64-byte halves - so the loads never run past the array, and
  *          only a quarter of the shuffle/blend work is issued. @p group_base must point to at least 64 valid bytes. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index) {
-    __m256i const index_within_low_u8x32 = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
-    __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index, 4), _mm256_set1_epi8(0x03));
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut64_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
+    __m256i const index_within_low_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
+    __m256i const index_selector_high_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4),
+                                                               _mm256_set1_epi8(0x03));
     return sz_utf8_rune_cascade_stage_haswell_(group_base, 4, index_selector_high_u8x32, index_within_low_u8x32);
 }
 
 /** @brief  16-entry byte LUT addressed by a per-lane index in `[0,16)`: one broadcast row and one `vpshufb`, with
  *          no cascade at all, since a single row covers the whole index range. The bounded twin of
  *          @ref sz_utf8_rune_lut256_haswell_ for nibble-wide tables. @p group_base must point to at least 16 valid
- *          bytes, and @p index must have bit 7 clear on every lane or `vpshufb` zeroes that lane. */
-SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index) {
+ *          bytes, and @p index_u8x32 must have bit 7 clear on every lane or `vpshufb` zeroes that lane. */
+SZ_HELPER_INLINE __m256i sz_utf8_rune_lut16_haswell_(sz_u8_t const *group_base, __m256i index_u8x32) {
     __m256i const lut_row_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)group_base));
-    return _mm256_shuffle_epi8(lut_row_broadcast_u8x32, index);
+    return _mm256_shuffle_epi8(lut_row_broadcast_u8x32, index_u8x32);
 }
 
 /** @brief  Narrow four `u32x8` vectors, each carrying one class byte in the low byte of every dword, into a single
@@ -439,20 +441,21 @@ SZ_HELPER_INLINE sz_u32_t sz_u32_mask_until_serial_(sz_size_t count) {
 }
 
 /**
- *  @brief  Gather one byte per 32-bit lane from a 32-byte window addressed by the 8 per-dword byte @p offsets (each in
- *          `[0, 32)`), entirely in-register (NO `vpgatherdd`). The window's two 16-byte halves are each broadcast into
- *          both 128-bit lanes (@p window_dup_lo / @p window_dup_hi); a `vpshufb` per half routes `window[offset & 15]`
- *          into the low byte of every dword, and the high offset bit blends the two halves. Lanes pointing past lane 31
- *          read the wrapped low half, but the caller only consults lanes whose offset is a real emitted start.
+ *  @brief  Gather one byte per 32-bit lane from a 32-byte window addressed by the 8 per-dword byte @p offsets_u32x8
+ *          (each in `[0, 32)`), entirely in-register (NO `vpgatherdd`). The window's two 16-byte halves are each
+ *          broadcast into both 128-bit lanes (@p window_dup_lo_u8x32 / @p window_dup_hi_u8x32); a `vpshufb` per half
+ *          routes `window[offset & 15]` into the low byte of every dword, and the high offset bit blends the two
+ *          halves. Lanes pointing past lane 31 read the wrapped low half, but the caller only consults lanes whose
+ *          offset is a real emitted start.
  */
 SZ_HELPER_INLINE __m256i sz_utf8_rune_gather8_window_haswell_( //
-    __m256i window_dup_lo, __m256i window_dup_hi, __m256i offsets) {
-    __m256i const offset_within_u32x8 = _mm256_and_si256(offsets, _mm256_set1_epi32(0x0F));
+    __m256i window_dup_lo_u8x32, __m256i window_dup_hi_u8x32, __m256i offsets_u32x8) {
+    __m256i const offset_within_u32x8 = _mm256_and_si256(offsets_u32x8, _mm256_set1_epi32(0x0F));
     __m256i const shuffle_control_u8x32 = _mm256_or_si256(offset_within_u32x8, _mm256_set1_epi32((int)0x80808000u));
-    __m256i const window_low_picked_u8x32 = _mm256_shuffle_epi8(window_dup_lo, shuffle_control_u8x32);
-    __m256i const window_high_picked_u8x32 = _mm256_shuffle_epi8(window_dup_hi, shuffle_control_u8x32);
-    __m256i const offset_high_bit_select_u32x8 = _mm256_cmpeq_epi32(_mm256_and_si256(offsets, _mm256_set1_epi32(0x10)),
-                                                                    _mm256_set1_epi32(0x10));
+    __m256i const window_low_picked_u8x32 = _mm256_shuffle_epi8(window_dup_lo_u8x32, shuffle_control_u8x32);
+    __m256i const window_high_picked_u8x32 = _mm256_shuffle_epi8(window_dup_hi_u8x32, shuffle_control_u8x32);
+    __m256i const offset_high_bit_select_u32x8 = _mm256_cmpeq_epi32(
+        _mm256_and_si256(offsets_u32x8, _mm256_set1_epi32(0x10)), _mm256_set1_epi32(0x10));
     return _mm256_blendv_epi8(window_low_picked_u8x32, window_high_picked_u8x32, offset_high_bit_select_u32x8);
 }
 
@@ -754,9 +757,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_
 
         // Promote the half-relative offsets to global byte-offsets and append the `count` dense lanes.
         __m128i const global_offsets_u8x16 = _mm_add_epi8(stitched_offsets_u8x16, _mm_set1_epi8((char)(half * 16)));
-        sz_u128_vec_t lanes;
-        _mm_storeu_si128((__m128i *)lanes.u8s, global_offsets_u8x16);
-        for (int lane = 0; lane < count; ++lane) out[produced + (sz_size_t)lane] = lanes.u8s[lane];
+        sz_u128_vec_t lanes_vec;
+        _mm_storeu_si128((__m128i *)lanes_vec.u8s, global_offsets_u8x16);
+        for (int lane = 0; lane < count; ++lane) out[produced + (sz_size_t)lane] = lanes_vec.u8s[lane];
         produced += (sz_size_t)count;
     }
     return produced;
@@ -769,28 +772,28 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_leftpack_offsets_haswell_(sz_u32_t mask, sz_u8_
  *          and each block of up to 8 starts loads its offsets to dwords, gathers the lead and trailing bytes from the
  *          in-register window, width-blends 1/2/3/4-byte lanes branchlessly, and — only when @p has_ill — overwrites
  *          ill-formed lanes with U+FFFD (their per-emitted-lane flag gathered with the SAME packed offsets out of
- *          @p ill_formed_lanes).
+ *          @p ill_formed_lanes_u8x32).
  *  @return Number of runes emitted; sets @p last_off_out to the last emitted start's window byte-offset (the caller
  *          turns it into the resume cursor by adding that lane's maximal-subpart length).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_haswell_(               //
-    __m256i window, __m256i ill_formed_lanes, sz_u32_t emit_starts, //
-    int has_three, int has_four, int has_ill,                       //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_haswell_(                           //
+    __m256i window_u8x32, __m256i ill_formed_lanes_u8x32, sz_u32_t emit_starts, //
+    int has_three, int has_four, int has_ill,                                   //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_u8_t *last_off_out) {
 
     // Left-pack the emitted-start byte-offsets (ascending) into a dense array. On Intel Haswell single-uop
     // `tzcnt`/`blsr` (@ref sz_utf8_unpack_indices_haswell_) beat the `vpshufb` stitch LUT; the LUT only wins where
     // `blsr` is microcoded.
-    sz_u512_vec_t offsets;
-    sz_utf8_unpack_indices_haswell_(emit_starts, offsets.u8s);
+    sz_u512_vec_t offsets_vec;
+    sz_utf8_unpack_indices_haswell_(emit_starts, offsets_vec.u8s);
 
-    __m256i const window_low_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm256_castsi256_si128(window));
-    __m256i const window_high_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(window, 1));
+    __m256i const window_low_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm256_castsi256_si128(window_u8x32));
+    __m256i const window_high_broadcast_u8x32 = _mm256_broadcastsi128_si256(_mm256_extracti128_si256(window_u8x32, 1));
 
     sz_size_t const want = emit_count < capacity ? emit_count : capacity;
     sz_size_t produced = 0;
     for (sz_size_t block_start = 0; block_start < want; block_start += 8) {
-        __m128i const offsets_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(offsets.u8s + block_start));
+        __m128i const offsets_bytes_u8x16 = _mm_loadl_epi64((__m128i const *)(offsets_vec.u8s + block_start));
         __m256i const offsets_u32x8 = _mm256_cvtepu8_epi32(offsets_bytes_u8x16);
         __m256i const lead_byte_u32x8 = sz_utf8_rune_gather8_window_haswell_(
             window_low_broadcast_u8x32, window_high_broadcast_u8x32, offsets_u32x8);
@@ -841,9 +844,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_haswell_(               //
         // Ill-formed lanes collapse to U+FFFD; well-formed-only windows (the overwhelming common case) skip the gather.
         if (has_ill) {
             __m256i const ill_formed_low_broadcast_u8x32 = _mm256_broadcastsi128_si256(
-                _mm256_castsi256_si128(ill_formed_lanes));
+                _mm256_castsi256_si128(ill_formed_lanes_u8x32));
             __m256i const ill_formed_high_broadcast_u8x32 = _mm256_broadcastsi128_si256(
-                _mm256_extracti128_si256(ill_formed_lanes, 1));
+                _mm256_extracti128_si256(ill_formed_lanes_u8x32, 1));
             __m256i const ill_formed_flags_u32x8 = sz_utf8_rune_gather8_window_haswell_(
                 ill_formed_low_broadcast_u8x32, ill_formed_high_broadcast_u8x32, offsets_u32x8);
             __m256i const ill_formed_detected_u32x8 = _mm256_cmpgt_epi32(ill_formed_flags_u32x8,
@@ -863,7 +866,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_haswell_(               //
         produced += lanes;
     }
 
-    *last_off_out = offsets.u8s[produced - 1];
+    *last_off_out = offsets_vec.u8s[produced - 1];
     return produced;
 }
 
@@ -887,10 +890,10 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_haswell_( //
     __m256i window_u8x32; // The 32-byte window; lanes [chunk, 32) read as zero (the AVX2 masked-tail stand-in).
     if (chunk >= 32) { window_u8x32 = _mm256_loadu_si256((__m256i const *)text); }
     else {
-        sz_u256_vec_t staging;
-        staging.ymm = _mm256_setzero_si256();
-        for (sz_size_t i = 0; i < chunk; ++i) staging.u8s[i] = (sz_u8_t)text[i];
-        window_u8x32 = staging.ymm;
+        sz_u256_vec_t staging_vec;
+        staging_vec.ymm = _mm256_setzero_si256();
+        for (sz_size_t i = 0; i < chunk; ++i) staging_vec.u8s[i] = (sz_u8_t)text[i];
+        window_u8x32 = staging_vec.ymm;
     }
 
     // ASCII fast lane: a whole window of 1-byte runes widens directly with `vpmovzxbd`, no classification needed.

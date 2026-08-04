@@ -33,31 +33,31 @@ SZ_HELPER_AUTO void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_ali
                                                                sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
-    __m128i seed_vec = _mm_set1_epi64x(seed);
-    state->key.xmm = seed_vec;
+    __m128i seed_u8x16 = _mm_set1_epi64x(seed);
+    state->key.xmm = seed_u8x16;
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
-    __m128i const pi0 = _mm_load_si128((__m128i const *)(pi));
-    __m128i const pi1 = _mm_load_si128((__m128i const *)(pi + 8));
-    __m128i aes_state_key = _mm_xor_si128(seed_vec, pi0);
-    __m128i sum_state_key = _mm_xor_si128(seed_vec, pi1);
+    __m128i const pi0_u8x16 = _mm_load_si128((__m128i const *)(pi));
+    __m128i const pi1_u8x16 = _mm_load_si128((__m128i const *)(pi + 8));
+    __m128i aes_state_key_u8x16 = _mm_xor_si128(seed_u8x16, pi0_u8x16);
+    __m128i sum_state_key_u8x16 = _mm_xor_si128(seed_u8x16, pi1_u8x16);
 
     // The first 128 bits of the "sum" and "AES" blocks are the same for the "minimal" and full state
-    state->aes.xmm = aes_state_key;
-    state->sum.xmm = sum_state_key;
+    state->aes.xmm = aes_state_key_u8x16;
+    state->sum.xmm = sum_state_key_u8x16;
 }
 
 /**
  *  @brief Absorbs one 128-bit block into the minimal hash state using AES-NI and SSSE3 intrinsics.
  *  @param state_ptr Pointer to the aligned minimal hash state.
- *  @param block 128-bit data block to absorb.
- *  @param order Shuffle permutation for the additive accumulator lane (loaded from `sz_hash_u8x16x4_shuffle_`).
+ *  @param block_u8x16 128-bit data block to absorb.
+ *  @param order_u8x16 Shuffle permutation for the additive accumulator lane (loaded from `sz_hash_u8x16x4_shuffle_`).
  */
 SZ_HELPER_AUTO void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_aligned_for_short_t *state_ptr,
-                                                                 __m128i block, __m128i order) {
-    state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block);
-    state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order), block);
+                                                                 __m128i block_u8x16, __m128i order_u8x16) {
+    state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block_u8x16);
+    state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order_u8x16), block_u8x16);
 }
 
 /**
@@ -69,33 +69,34 @@ SZ_HELPER_AUTO void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_a
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(sz_hash_state_aligned_for_short_t const *state,
                                                                        sz_size_t length) {
     // Mix the length into the key
-    __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
+    __m128i key_with_length_u64x2 = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed = _mm_aesenc_si128(state->sum.xmm, state->aes.xmm);
+    __m128i mixed_u8x16 = _mm_aesenc_si128(state->sum.xmm, state->aes.xmm);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    __m128i mixed_in_register = _mm_aesenc_si128(_mm_aesenc_si128(mixed, key_with_length), mixed);
+    __m128i mixed_in_register_u8x16 = _mm_aesenc_si128(_mm_aesenc_si128(mixed_u8x16, key_with_length_u64x2),
+                                                       mixed_u8x16);
     // Extract the low 64 bits
-    return _mm_cvtsi128_si64(mixed_in_register);
+    return _mm_cvtsi128_si64(mixed_in_register_u8x16);
 }
 
 SZ_API_COMPTIME void sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
-    __m128i seed_vec = _mm_set1_epi64x(seed);
+    __m128i seed_u8x16 = _mm_set1_epi64x(seed);
 
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
     // ! we must use `_mm_storeu_si128` stores to update the state. Moreover, accessing `state.xmms[i]`
     // ! fools the compiler into preferring aligned operations over out misaligned ones.
-    _mm_storeu_si128((__m128i *)state->key, seed_vec);
+    _mm_storeu_si128((__m128i *)state->key, seed_u8x16);
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
     for (int lane_index = 0; lane_index < 4; ++lane_index)
         _mm_storeu_si128((__m128i *)&state->aes[lane_index * 16],
-                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2))));
+                         _mm_xor_si128(seed_u8x16, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2))));
     for (int lane_index = 0; lane_index < 4; ++lane_index)
         _mm_storeu_si128((__m128i *)&state->sum[lane_index * 16],
-                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2 + 8))));
+                         _mm_xor_si128(seed_u8x16, _mm_lddqu_si128((__m128i const *)(pi + lane_index * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
     _mm_storeu_si128((__m128i *)&state->ins[0], _mm_setzero_si128());
@@ -136,15 +137,15 @@ SZ_HELPER_AUTO void sz_hash_state_store_westmere_(sz_hash_state_t *packed, sz_ha
  *  @param state Pointer to the aligned hash state whose `ins` lanes are consumed.
  */
 SZ_HELPER_AUTO void sz_hash_state_update_westmere_(sz_hash_state_aligned_t *state) {
-    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.xmms[0] = _mm_aesenc_si128(state->aes.xmms[0], state->ins.xmms[0]);
     state->aes.xmms[1] = _mm_aesenc_si128(state->aes.xmms[1], state->ins.xmms[1]);
     state->aes.xmms[2] = _mm_aesenc_si128(state->aes.xmms[2], state->ins.xmms[2]);
     state->aes.xmms[3] = _mm_aesenc_si128(state->aes.xmms[3], state->ins.xmms[3]);
-    state->sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], order), state->ins.xmms[0]);
-    state->sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], order), state->ins.xmms[1]);
-    state->sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], order), state->ins.xmms[2]);
-    state->sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], order), state->ins.xmms[3]);
+    state->sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], order_u8x16), state->ins.xmms[0]);
+    state->sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], order_u8x16), state->ins.xmms[1]);
+    state->sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], order_u8x16), state->ins.xmms[2]);
+    state->sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], order_u8x16), state->ins.xmms[3]);
 }
 
 /**
@@ -154,39 +155,40 @@ SZ_HELPER_AUTO void sz_hash_state_update_westmere_(sz_hash_state_aligned_t *stat
  */
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_westmere_(sz_hash_state_aligned_t const *state) {
     // Mix the length into the key
-    __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, state->ins_length));
+    __m128i key_with_length_u64x2 = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, state->ins_length));
 
     // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
     // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
     // digest defer it and share this single finalization with no state copy.
-    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-    __m128i ins0 = state->ins.xmms[0];
-    __m128i ins1 = state->ins.xmms[1];
-    __m128i ins2 = state->ins.xmms[2];
-    __m128i ins3 = state->ins.xmms[3];
-    __m128i aes0 = _mm_aesenc_si128(state->aes.xmms[0], ins0);
-    __m128i aes1 = _mm_aesenc_si128(state->aes.xmms[1], ins1);
-    __m128i aes2 = _mm_aesenc_si128(state->aes.xmms[2], ins2);
-    __m128i aes3 = _mm_aesenc_si128(state->aes.xmms[3], ins3);
-    __m128i sum0 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], order), ins0);
-    __m128i sum1 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], order), ins1);
-    __m128i sum2 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], order), ins2);
-    __m128i sum3 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], order), ins3);
+    __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i ins0_u8x16 = state->ins.xmms[0];
+    __m128i ins1_u8x16 = state->ins.xmms[1];
+    __m128i ins2_u8x16 = state->ins.xmms[2];
+    __m128i ins3_u8x16 = state->ins.xmms[3];
+    __m128i aes0_u8x16 = _mm_aesenc_si128(state->aes.xmms[0], ins0_u8x16);
+    __m128i aes1_u8x16 = _mm_aesenc_si128(state->aes.xmms[1], ins1_u8x16);
+    __m128i aes2_u8x16 = _mm_aesenc_si128(state->aes.xmms[2], ins2_u8x16);
+    __m128i aes3_u8x16 = _mm_aesenc_si128(state->aes.xmms[3], ins3_u8x16);
+    __m128i sum0_u64x2 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], order_u8x16), ins0_u8x16);
+    __m128i sum1_u64x2 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], order_u8x16), ins1_u8x16);
+    __m128i sum2_u64x2 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], order_u8x16), ins2_u8x16);
+    __m128i sum3_u64x2 = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], order_u8x16), ins3_u8x16);
 
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed0 = _mm_aesenc_si128(sum0, aes0);
-    __m128i mixed1 = _mm_aesenc_si128(sum1, aes1);
-    __m128i mixed2 = _mm_aesenc_si128(sum2, aes2);
-    __m128i mixed3 = _mm_aesenc_si128(sum3, aes3);
+    __m128i mixed0_u8x16 = _mm_aesenc_si128(sum0_u64x2, aes0_u8x16);
+    __m128i mixed1_u8x16 = _mm_aesenc_si128(sum1_u64x2, aes1_u8x16);
+    __m128i mixed2_u8x16 = _mm_aesenc_si128(sum2_u64x2, aes2_u8x16);
+    __m128i mixed3_u8x16 = _mm_aesenc_si128(sum3_u64x2, aes3_u8x16);
     // Combine the mixed registers
-    __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
-    __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
-    __m128i mixed = _mm_aesenc_si128(mixed01, mixed23);
+    __m128i mixed01_u8x16 = _mm_aesenc_si128(mixed0_u8x16, mixed1_u8x16);
+    __m128i mixed23_u8x16 = _mm_aesenc_si128(mixed2_u8x16, mixed3_u8x16);
+    __m128i mixed_u8x16 = _mm_aesenc_si128(mixed01_u8x16, mixed23_u8x16);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    __m128i mixed_in_register = _mm_aesenc_si128(_mm_aesenc_si128(mixed, key_with_length), mixed);
+    __m128i mixed_in_register_u8x16 = _mm_aesenc_si128(_mm_aesenc_si128(mixed_u8x16, key_with_length_u64x2),
+                                                       mixed_u8x16);
     // Extract the low 64 bits
-    return _mm_cvtsi128_si64(mixed_in_register);
+    return _mm_cvtsi128_si64(mixed_in_register_u8x16);
 }
 
 SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -202,8 +204,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
         for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
@@ -218,9 +220,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
@@ -236,10 +238,10 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
@@ -256,11 +258,11 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else {
@@ -295,24 +297,25 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_westmere(sz_cptr_t start,
  *  @return The number of populated text-lanes (1..4).
  */
 SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_westmere_(sz_cptr_t text, sz_size_t length,
-                                                             sz_u512_vec_t *text_lanes) {
+                                                             sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
-        sz_u128_vec_t lane;
-        if (length == 16) { lane.xmm = _mm_lddqu_si128((__m128i const *)text); }
+        sz_u128_vec_t lane_vec;
+        if (length == 16) { lane_vec.xmm = _mm_lddqu_si128((__m128i const *)text); }
         else {
-            lane.xmm = _mm_setzero_si128();
-            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) lane.u8s[byte_index] = text[byte_index];
+            lane_vec.xmm = _mm_setzero_si128();
+            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
+                lane_vec.u8s[byte_index] = text[byte_index];
         }
-        text_lanes->u128s[0] = lane;
+        text_lanes_vec->u128s[0] = lane_vec;
         return 1;
     }
     sz_size_t const text_lanes_count = sz_size_divide_round_up(length, 16);
     for (sz_size_t lane_index = 0; lane_index + 1 < text_lanes_count; ++lane_index)
-        text_lanes->u128s[lane_index].xmm = _mm_lddqu_si128((__m128i const *)(text + lane_index * 16));
-    sz_u128_vec_t tail;
-    tail.xmm = _mm_lddqu_si128((__m128i const *)(text + length - 16));
-    sz_hash_shift_in_register_serial_(&tail, (int)(text_lanes_count * 16 - length));
-    text_lanes->u128s[text_lanes_count - 1] = tail;
+        text_lanes_vec->u128s[lane_index].xmm = _mm_lddqu_si128((__m128i const *)(text + lane_index * 16));
+    sz_u128_vec_t tail_vec;
+    tail_vec.xmm = _mm_lddqu_si128((__m128i const *)(text + length - 16));
+    sz_hash_shift_in_register_serial_(&tail_vec, (int)(text_lanes_count * 16 - length));
+    text_lanes_vec->u128s[text_lanes_count - 1] = tail_vec;
     return text_lanes_count;
 }
 
@@ -333,9 +336,9 @@ SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length
         return;
     }
 
-    sz_u512_vec_t text_lanes;
-    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_westmere_(text, length, &text_lanes);
-    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+    sz_u512_vec_t text_lanes_vec;
+    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_westmere_(text, length, &text_lanes_vec);
+    __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
 
     sz_size_t seed_index = 0;
     for (; seed_index + 2 <= seeds_count; seed_index += 2) {
@@ -343,8 +346,8 @@ SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length
         sz_hash_state_short_init_westmere_aligned_(&state0, seeds[seed_index + 0]);
         sz_hash_state_short_init_westmere_aligned_(&state1, seeds[seed_index + 1]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
-            sz_hash_state_short_update_westmere_aligned_(&state0, text_lanes.u128s[lane_index].xmm, order);
-            sz_hash_state_short_update_westmere_aligned_(&state1, text_lanes.u128s[lane_index].xmm, order);
+            sz_hash_state_short_update_westmere_aligned_(&state0, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
+            sz_hash_state_short_update_westmere_aligned_(&state1, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
         }
         hashes[seed_index + 0] = sz_hash_state_short_finalize_westmere_aligned_(&state0, length);
         hashes[seed_index + 1] = sz_hash_state_short_finalize_westmere_aligned_(&state1, length);
@@ -353,7 +356,7 @@ SZ_API_COMPTIME void sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_westmere_aligned_(&state, seeds[seed_index]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_state_short_update_westmere_aligned_(&state, text_lanes.u128s[lane_index].xmm, order);
+            sz_hash_state_short_update_westmere_aligned_(&state, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
         hashes[seed_index] = sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
 }
@@ -400,27 +403,27 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *st
     minimal_state.sum = state.sum.u128s[0];
 
     // The logic is different depending on the length of the input
-    __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+    __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     if (length <= 16) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
     }
     else if (length <= 32) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
     }
     else if (length <= 48) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
     }
     else {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[3], order);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[3], order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
     }
 }
@@ -428,97 +431,97 @@ SZ_API_COMPTIME sz_u64_t sz_hash_state_digest_westmere(sz_hash_state_t const *st
 SZ_API_COMPTIME void sz_fill_random_westmere(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
     if (length <= 16) {
-        __m128i input = _mm_set1_epi64x(nonce);
-        __m128i pi = _mm_load_si128((__m128i const *)pi_ptr);
-        __m128i key = _mm_xor_si128(_mm_set1_epi64x(nonce), pi);
-        __m128i generated = _mm_aesenc_si128(input, key);
+        __m128i input_u8x16 = _mm_set1_epi64x(nonce);
+        __m128i pi_u8x16 = _mm_load_si128((__m128i const *)pi_ptr);
+        __m128i key_u8x16 = _mm_xor_si128(_mm_set1_epi64x(nonce), pi_u8x16);
+        __m128i generated_u8x16 = _mm_aesenc_si128(input_u8x16, key_u8x16);
         // Now the tricky part is outputting this data to the user-supplied buffer
         // without masked writes, like in AVX-512.
         for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
-            text[byte_index] = ((sz_u8_t *)&generated)[byte_index];
+            text[byte_index] = ((sz_u8_t *)&generated_u8x16)[byte_index];
     }
     // Assuming the YMM register contains two 128-bit blocks, the input to the generator
     // will be more complex, containing the sum of the nonce and the block number.
     else if (length <= 32) {
-        __m128i inputs[2], pis[2], keys[2], generated[2];
-        inputs[0] = _mm_set1_epi64x(nonce);
-        inputs[1] = _mm_set1_epi64x(nonce + 1);
-        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
-        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
-        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
-        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
-        generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
-        generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
+        __m128i inputs_u8x16[2], pis_u8x16[2], keys_u8x16[2], generated_u8x16[2];
+        inputs_u8x16[0] = _mm_set1_epi64x(nonce);
+        inputs_u8x16[1] = _mm_set1_epi64x(nonce + 1);
+        pis_u8x16[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
+        pis_u8x16[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        keys_u8x16[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[0]);
+        keys_u8x16[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[1]);
+        generated_u8x16[0] = _mm_aesenc_si128(inputs_u8x16[0], keys_u8x16[0]);
+        generated_u8x16[1] = _mm_aesenc_si128(inputs_u8x16[1], keys_u8x16[1]);
         // The first store can easily be vectorized, but the second can be serial for now
-        _mm_storeu_si128((__m128i *)text, generated[0]);
+        _mm_storeu_si128((__m128i *)text, generated_u8x16[0]);
         for (sz_size_t byte_index = 16; byte_index < length; ++byte_index)
-            text[byte_index] = ((sz_u8_t *)&generated[1])[byte_index - 16];
+            text[byte_index] = ((sz_u8_t *)&generated_u8x16[1])[byte_index - 16];
     }
     // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
     else if (length <= 48) {
-        __m128i inputs[3], pis[3], keys[3], generated[3];
-        inputs[0] = _mm_set1_epi64x(nonce);
-        inputs[1] = _mm_set1_epi64x(nonce + 1);
-        inputs[2] = _mm_set1_epi64x(nonce + 2);
-        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
-        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
-        pis[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
-        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
-        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
-        keys[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[2]);
-        generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
-        generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
-        generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
+        __m128i inputs_u8x16[3], pis_u8x16[3], keys_u8x16[3], generated_u8x16[3];
+        inputs_u8x16[0] = _mm_set1_epi64x(nonce);
+        inputs_u8x16[1] = _mm_set1_epi64x(nonce + 1);
+        inputs_u8x16[2] = _mm_set1_epi64x(nonce + 2);
+        pis_u8x16[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
+        pis_u8x16[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        pis_u8x16[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
+        keys_u8x16[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[0]);
+        keys_u8x16[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[1]);
+        keys_u8x16[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[2]);
+        generated_u8x16[0] = _mm_aesenc_si128(inputs_u8x16[0], keys_u8x16[0]);
+        generated_u8x16[1] = _mm_aesenc_si128(inputs_u8x16[1], keys_u8x16[1]);
+        generated_u8x16[2] = _mm_aesenc_si128(inputs_u8x16[2], keys_u8x16[2]);
         // The first store can easily be vectorized, but the second can be serial for now
-        _mm_storeu_si128((__m128i *)(text + 0), generated[0]);
-        _mm_storeu_si128((__m128i *)(text + 16), generated[1]);
+        _mm_storeu_si128((__m128i *)(text + 0), generated_u8x16[0]);
+        _mm_storeu_si128((__m128i *)(text + 16), generated_u8x16[1]);
         for (sz_size_t byte_index = 32; byte_index < length; ++byte_index)
-            text[byte_index] = ((sz_u8_t *)generated)[byte_index];
+            text[byte_index] = ((sz_u8_t *)generated_u8x16)[byte_index];
     }
     // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
     else {
-        __m128i inputs[4], pis[4], keys[4], generated[4];
-        inputs[0] = _mm_set1_epi64x(nonce);
-        inputs[1] = _mm_set1_epi64x(nonce + 1);
-        inputs[2] = _mm_set1_epi64x(nonce + 2);
-        inputs[3] = _mm_set1_epi64x(nonce + 3);
+        __m128i inputs_u64x2[4], pis_u8x16[4], keys_u8x16[4], generated_u8x16[4];
+        inputs_u64x2[0] = _mm_set1_epi64x(nonce);
+        inputs_u64x2[1] = _mm_set1_epi64x(nonce + 1);
+        inputs_u64x2[2] = _mm_set1_epi64x(nonce + 2);
+        inputs_u64x2[3] = _mm_set1_epi64x(nonce + 3);
         // Load parts of PI into the registers
-        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
-        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
-        pis[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
-        pis[3] = _mm_load_si128((__m128i const *)(pi_ptr + 6));
+        pis_u8x16[0] = _mm_load_si128((__m128i const *)(pi_ptr + 0));
+        pis_u8x16[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        pis_u8x16[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
+        pis_u8x16[3] = _mm_load_si128((__m128i const *)(pi_ptr + 6));
         // XOR the nonce with the PI constants
-        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
-        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
-        keys[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[2]);
-        keys[3] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[3]);
+        keys_u8x16[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[0]);
+        keys_u8x16[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[1]);
+        keys_u8x16[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[2]);
+        keys_u8x16[3] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis_u8x16[3]);
 
         // Produce the output, fixing the key and enumerating input chunks.
         sz_size_t byte_index = 0;
-        __m128i const increment = _mm_set1_epi64x(4);
+        __m128i const increment_u64x2 = _mm_set1_epi64x(4);
         for (; byte_index + 64 <= length; byte_index += 64) {
-            generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
-            generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
-            generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
-            generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
-            _mm_storeu_si128((__m128i *)(text + byte_index + 0), generated[0]);
-            _mm_storeu_si128((__m128i *)(text + byte_index + 16), generated[1]);
-            _mm_storeu_si128((__m128i *)(text + byte_index + 32), generated[2]);
-            _mm_storeu_si128((__m128i *)(text + byte_index + 48), generated[3]);
-            inputs[0] = _mm_add_epi64(inputs[0], increment);
-            inputs[1] = _mm_add_epi64(inputs[1], increment);
-            inputs[2] = _mm_add_epi64(inputs[2], increment);
-            inputs[3] = _mm_add_epi64(inputs[3], increment);
+            generated_u8x16[0] = _mm_aesenc_si128(inputs_u64x2[0], keys_u8x16[0]);
+            generated_u8x16[1] = _mm_aesenc_si128(inputs_u64x2[1], keys_u8x16[1]);
+            generated_u8x16[2] = _mm_aesenc_si128(inputs_u64x2[2], keys_u8x16[2]);
+            generated_u8x16[3] = _mm_aesenc_si128(inputs_u64x2[3], keys_u8x16[3]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 0), generated_u8x16[0]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 16), generated_u8x16[1]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 32), generated_u8x16[2]);
+            _mm_storeu_si128((__m128i *)(text + byte_index + 48), generated_u8x16[3]);
+            inputs_u64x2[0] = _mm_add_epi64(inputs_u64x2[0], increment_u64x2);
+            inputs_u64x2[1] = _mm_add_epi64(inputs_u64x2[1], increment_u64x2);
+            inputs_u64x2[2] = _mm_add_epi64(inputs_u64x2[2], increment_u64x2);
+            inputs_u64x2[3] = _mm_add_epi64(inputs_u64x2[3], increment_u64x2);
         }
 
         // Handle the tail of the buffer.
         {
-            generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
-            generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
-            generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
-            generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
+            generated_u8x16[0] = _mm_aesenc_si128(inputs_u64x2[0], keys_u8x16[0]);
+            generated_u8x16[1] = _mm_aesenc_si128(inputs_u64x2[1], keys_u8x16[1]);
+            generated_u8x16[2] = _mm_aesenc_si128(inputs_u64x2[2], keys_u8x16[2]);
+            generated_u8x16[3] = _mm_aesenc_si128(inputs_u64x2[3], keys_u8x16[3]);
             for (sz_size_t tail_index = 0; byte_index < length; ++byte_index, ++tail_index)
-                text[byte_index] = ((sz_u8_t *)generated)[tail_index];
+                text[byte_index] = ((sz_u8_t *)generated_u8x16)[tail_index];
         }
     }
 }

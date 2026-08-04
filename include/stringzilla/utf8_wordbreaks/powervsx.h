@@ -125,15 +125,16 @@ SZ_HELPER_AUTO __vector unsigned char sz_utf8_word_break_ascii_class_powervsx_(_
  *          consumed only on 2-/3-byte codepoint-START lanes, so this gathers their `(high, low)` bytes into a dense
  *          buffer (left-packed through the substrate `vec_perm` shuffle-LUT, no scalar `ctz`), runs the flat lookup
  *          only over the populated quarters, then scatters the dense class bytes back to their original byte lanes in
- *          @p bmp_out (zeroed elsewhere). Bit-identical to four full @ref sz_utf8_word_break_bmp_class_powervsx_
+ *          @p bmp_out_u8x16 (zeroed elsewhere). Bit-identical to four full @ref sz_utf8_word_break_bmp_class_powervsx_
  *          quarters on every BMP-start lane. */
-SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts, __vector unsigned char const *high,
-                                                             __vector unsigned char const *low,
-                                                             __vector unsigned char *bmp_out) {
+SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts,
+                                                             __vector unsigned char const *high_u8x16,
+                                                             __vector unsigned char const *low_u8x16,
+                                                             __vector unsigned char *bmp_out_u8x16) {
     sz_u512_vec_t high_bytes_vec, low_bytes_vec;
     for (int quarter = 0; quarter < 4; ++quarter) {
-        vec_xst(high[quarter], 0, high_bytes_vec.u8s + quarter * 16);
-        vec_xst(low[quarter], 0, low_bytes_vec.u8s + quarter * 16);
+        vec_xst(high_u8x16[quarter], 0, high_bytes_vec.u8s + quarter * 16);
+        vec_xst(low_u8x16[quarter], 0, low_bytes_vec.u8s + quarter * 16);
     }
 
     sz_u8_t indices[64];
@@ -160,7 +161,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts
     sz_u8_t scatter[64];
     for (int lane = 0; lane < 64; ++lane) scatter[lane] = 0;
     for (sz_size_t dense = 0; dense < dense_count; ++dense) scatter[indices[dense]] = class_bytes[dense];
-    for (int quarter = 0; quarter < 4; ++quarter) bmp_out[quarter] = vec_xl(0, scatter + quarter * 16);
+    for (int quarter = 0; quarter < 4; ++quarter) bmp_out_u8x16[quarter] = vec_xl(0, scatter + quarter * 16);
 }
 
 /** @brief  Per-window byte-lane classification (VSX): the Word_Break class byte per lane as four `__vector unsigned
@@ -169,13 +170,13 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_powervsx_(sz_u64_t bmp_starts
  *          the property table, BMP through the flat lookup, 4-byte leads through the astral cascade with the
  *          codepoint high/low/plane reconstructed from the forward neighbours. */
 SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_powervsx_( //
-    sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes) {
-    __vector unsigned char const *raw = window.window;
+    sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes_u8x16) {
+    __vector unsigned char const *raw_u8x16 = window.window;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
 
     __vector unsigned char next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
-    sz_utf8_forward_neighbours_powervsx_(raw, next1_u8x16, next2_u8x16, next3_u8x16);
+    sz_utf8_forward_neighbours_powervsx_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
 
     __vector unsigned char const low_two_bits_u8x16 = vec_splats((unsigned char)0x03),
                                  low_three_bits_u8x16 = vec_splats((unsigned char)0x07),
@@ -196,7 +197,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_powervsx_( //
     if (bmp_starts) sz_utf8_word_break_bmp_compact_powervsx_(bmp_starts, window.high, window.low, bmp_out_u8x16);
 
     for (int quarter = 0; quarter < 4; ++quarter) {
-        __vector unsigned char const raw_q_u8x16 = raw[quarter];
+        __vector unsigned char const raw_q_u8x16 = raw_u8x16[quarter];
         int const lane_base = quarter * 16;
 
         __vector unsigned char out_q_u8x16 = bmp_out_u8x16[quarter];
@@ -229,7 +230,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_powervsx_( //
                 sz_utf8_word_break_astral_class_powervsx_(plane_off_u8x16, high_four_u8x16, low_four_u8x16),
                 (__vector bool char)four_select_u8x16);
         }
-        classes[quarter] = out_q_u8x16;
+        classes_u8x16[quarter] = out_q_u8x16;
     }
 }
 
@@ -238,12 +239,12 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_powervsx_( //
 #pragma region Mask algebra extractor
 
 /** @brief  A 64-bit "class byte == @p value" lane mask over the four class quarters (four `vec_cmpeq` -> combine). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_powervsx_(__vector unsigned char const *classes,
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_powervsx_(__vector unsigned char const *classes_u8x16,
                                                                   sz_u8_t value) {
     __vector unsigned char const value_u8x16 = vec_splats(value);
     __vector unsigned char equal_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter)
-        equal_u8x16[quarter] = (__vector unsigned char)vec_cmpeq(classes[quarter], value_u8x16);
+        equal_u8x16[quarter] = (__vector unsigned char)vec_cmpeq(classes_u8x16[quarter], value_u8x16);
     return sz_utf8_mask_combine_powervsx_(equal_u8x16);
 }
 
@@ -292,15 +293,15 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_word_break_range16_one_powervsx_
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window quarters,
  *          the VSX twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace / Extended_Pictographic). */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
-    __vector unsigned char const *high, __vector unsigned char const *low, sz_u16_t const *lo_table,
+    __vector unsigned char const *high_u8x16, __vector unsigned char const *low_u8x16, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
     __vector unsigned char hit_u8x16[4] = {vec_splats((unsigned char)0), vec_splats((unsigned char)0),
                                            vec_splats((unsigned char)0), vec_splats((unsigned char)0)};
     for (int range = 0; range < count; ++range)
         for (int quarter = 0; quarter < 4; ++quarter)
-            hit_u8x16[quarter] = vec_or(hit_u8x16[quarter],
-                                        sz_utf8_word_break_range16_one_powervsx_(high[quarter], low[quarter],
-                                                                                 lo_table[range], hi_table[range]));
+            hit_u8x16[quarter] = vec_or(
+                hit_u8x16[quarter], sz_utf8_word_break_range16_one_powervsx_(high_u8x16[quarter], low_u8x16[quarter],
+                                                                             lo_table[range], hi_table[range]));
     return sz_utf8_mask_combine_powervsx_(hit_u8x16);
 }
 
@@ -311,13 +312,13 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_powervsx_( //
  *          Extended_Pictographic mask (BMP + SMP range scan), and the per-lane class byte array.
  */
 SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervsx_(
-    sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes, sz_u64_t start_bytes_all,
+    sz_utf8_rune_window_powervsx_t window, __vector unsigned char *classes_u8x16, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    __vector unsigned char const *raw = window.window;
+    __vector unsigned char const *raw_u8x16 = window.window;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -332,31 +333,32 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
         for (int quarter = 0; quarter < 4; ++quarter) {
             __vector unsigned char const select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_powervsx_(truncated_raw,
                                                                                                          quarter * 16);
-            classes[quarter] = vec_sel(classes[quarter], other_u8x16, (__vector bool char)select_u8x16);
+            classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16, (__vector bool char)select_u8x16);
         }
     }
 
     sz_utf8_word_break_frame_t frame;
-    frame.class_aletter = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_aletter_k);
-    frame.class_hebrew = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_hebrew_letter_k);
-    frame.class_numeric = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_numeric_k);
-    frame.class_katakana = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_katakana_k);
-    frame.class_extendnumlet = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_extendnumlet_k);
-    frame.class_extend = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_extend_k);
-    frame.class_zwj = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_zwj_k);
-    frame.class_format = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_format_k);
-    frame.class_midletter = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_midletter_k);
-    frame.class_midnum = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_midnum_k);
-    frame.class_mid_quotes = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_mid_quotes_k);
-    frame.class_cr = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_cr_k);
-    frame.class_lf = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_lf_k);
-    frame.class_newline = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_newline_k);
-    frame.class_regional = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_regional_ind_k);
+    frame.class_aletter = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_aletter_k);
+    frame.class_hebrew = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_hebrew_letter_k);
+    frame.class_numeric = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_numeric_k);
+    frame.class_katakana = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_katakana_k);
+    frame.class_extendnumlet = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16,
+                                                                       sz_utf8_word_break_extendnumlet_k);
+    frame.class_extend = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_extend_k);
+    frame.class_zwj = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_zwj_k);
+    frame.class_format = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_format_k);
+    frame.class_midletter = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_midletter_k);
+    frame.class_midnum = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_midnum_k);
+    frame.class_mid_quotes = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_mid_quotes_k);
+    frame.class_cr = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_cr_k);
+    frame.class_lf = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_lf_k);
+    frame.class_newline = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_newline_k);
+    frame.class_regional = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16, sz_utf8_word_break_regional_ind_k);
 
-    sz_u64_t const non_ascii_lanes = sz_utf8_word_break_byte_ge_powervsx_(raw, 0x80) & valid;
+    sz_u64_t const non_ascii_lanes = sz_utf8_word_break_byte_ge_powervsx_(raw_u8x16, 0x80) & valid;
     frame.non_ascii_lanes = non_ascii_lanes;
-    frame.double_quote_byte = sz_utf8_word_break_byte_equal_powervsx_(raw, 0x22) & valid;
-    frame.single_quote_byte = sz_utf8_word_break_byte_equal_powervsx_(raw, 0x27) & valid;
+    frame.double_quote_byte = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0x22) & valid;
+    frame.single_quote_byte = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0x27) & valid;
 
     // WB3d WSegSpace raw membership: the ASCII U+0020 byte compare OR the multibyte (high,low) range scan.
     sz_u64_t wseg_multibyte = 0ull;
@@ -365,7 +367,7 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
                                                                    sz_utf8_word_break_wseg_hi_,
                                                                    sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
-    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_powervsx_(raw, 0x20) & valid));
+    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0x20) & valid));
 
     // WB3c Extended_Pictographic raw membership (BMP range scan on non-4-byte lanes, SMP range scan on plane-one
     // 4-byte lanes). Rare-class gated on `want_pictographic` (an in-window ZWJ or the carried `prev_ends_in_zwj`), so
@@ -374,7 +376,7 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
     sz_u64_t const four_byte = window.four_byte_starts & valid;
     if (want_pictographic) {
         __vector unsigned char next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
-        sz_utf8_forward_neighbours_powervsx_(raw, next1_u8x16, next2_u8x16, next3_u8x16);
+        sz_utf8_forward_neighbours_powervsx_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
         __vector unsigned char const low_two_bits_u8x16 = vec_splats((unsigned char)0x03),
                                      low_three_bits_u8x16 = vec_splats((unsigned char)0x07),
                                      low_nibble_u8x16 = vec_splats((unsigned char)0x0F),
@@ -387,7 +389,7 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
                                      shift_six_u8x16 = vec_splats((unsigned char)6);
         __vector unsigned char plane_q_u8x16[4], smp_high_u8x16[4], smp_low_u8x16[4];
         for (int quarter = 0; quarter < 4; ++quarter) {
-            __vector unsigned char const raw_q_u8x16 = raw[quarter], n1_u8x16 = next1_u8x16[quarter],
+            __vector unsigned char const raw_q_u8x16 = raw_u8x16[quarter], n1_u8x16 = next1_u8x16[quarter],
                                          n2_u8x16 = next2_u8x16[quarter], n3_u8x16 = next3_u8x16[quarter];
             plane_q_u8x16[quarter] = vec_or(
                 vec_and(vec_sl(vec_and(raw_q_u8x16, low_three_bits_u8x16), shift_two_u8x16), plane_high_bits_u8x16),
@@ -414,7 +416,7 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
                              (pictographic_smp & four_byte & plane_one);
     }
 
-    for (int quarter = 0; quarter < 4; ++quarter) vec_xst(classes[quarter], 0, frame.classes_byte + quarter * 16);
+    for (int quarter = 0; quarter < 4; ++quarter) vec_xst(classes_u8x16[quarter], 0, frame.classes_byte + quarter * 16);
     return frame;
 }
 
@@ -427,29 +429,30 @@ SZ_HELPER_AUTO sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_powervs
  *          @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_powervsx_( //
     sz_utf8_rune_window_powervsx_t window, sz_u64_t valid, int at_end_of_text) {
-    __vector unsigned char const *raw = window.window;
+    __vector unsigned char const *raw_u8x16 = window.window;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD -> 2, 0xE -> 3, 0xF -> 4. The strict
     // `two`/`three_byte_starts` masks already match 0xC0-0xDF and 0xE0-0xEF; only `length_four` needs widening to fold
     // the ill-formed leads 0xF8-0xFF so they collapse to U+FFFD like serial/Haswell instead of leaking as a class.
     sz_u64_t const length_two = window.two_byte_starts & valid;
     sz_u64_t const length_three = window.three_byte_starts & valid;
-    sz_u64_t const length_four = (window.four_byte_starts | sz_utf8_word_break_byte_ge_powervsx_(raw, 0xF8)) & valid;
+    sz_u64_t const length_four = (window.four_byte_starts | sz_utf8_word_break_byte_ge_powervsx_(raw_u8x16, 0xF8)) &
+                                 valid;
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
         __vector unsigned char next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
-        sz_utf8_forward_neighbours_powervsx_(raw, next1_u8x16, next2_u8x16, next3_u8x16);
+        sz_utf8_forward_neighbours_powervsx_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
         sz_u64_t const next1_at_least_a0 = sz_utf8_word_break_byte_ge_powervsx_(next1_u8x16, 0xA0);
         sz_u64_t const next1_at_least_90 = sz_utf8_word_break_byte_ge_powervsx_(next1_u8x16, 0x90);
-        sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_powervsx_(raw, 0xC0) |
-                                     sz_utf8_word_break_byte_equal_powervsx_(raw, 0xC1)) &
+        sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xC0) |
+                                     sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xC1)) &
                                     valid;
-        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_powervsx_(raw, 0xE0) & valid;
-        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_powervsx_(raw, 0xED) & valid;
-        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_powervsx_(raw, 0xF0) & valid;
-        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_powervsx_(raw, 0xF4) & valid;
-        sz_u64_t const lead_f5_or_more = sz_utf8_word_break_byte_ge_powervsx_(raw, 0xF5) & valid;
+        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xE0) & valid;
+        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xED) & valid;
+        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xF0) & valid;
+        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_powervsx_(raw_u8x16, 0xF4) & valid;
+        sz_u64_t const lead_f5_or_more = sz_utf8_word_break_byte_ge_powervsx_(raw_u8x16, 0xF5) & valid;
         bad_second_byte = lead_c0_c1 | (lead_e0 & ~next1_at_least_a0) | (lead_ed & next1_at_least_a0) |
                           (lead_f0 & ~next1_at_least_90) | (lead_f4 & next1_at_least_90) | lead_f5_or_more;
     }
@@ -490,8 +493,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
         sz_size_t const loaded = window.loaded;
         sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
 
-        __vector unsigned char classes[4];
-        sz_utf8_word_break_classify_window_powervsx_(window, classes);
+        __vector unsigned char classes_u8x16[4];
+        sz_utf8_word_break_classify_window_powervsx_(window, classes_u8x16);
 
         sz_utf8_word_break_partition_t const partition = sz_utf8_word_break_partition_powervsx_(
             window, valid, position + loaded >= length);
@@ -506,7 +509,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
             for (int quarter = 0; quarter < 4; ++quarter) {
                 __vector unsigned char const select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_powervsx_(
                     forced_other, quarter * 16);
-                classes[quarter] = vec_sel(classes[quarter], other_u8x16, (__vector bool char)select_u8x16);
+                classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16, (__vector bool char)select_u8x16);
             }
         }
 
@@ -534,10 +537,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx( //
             if (limit > 0) complete_limit = limit;
         }
 
-        int const want_pictographic = sz_utf8_word_break_class_mask_powervsx_(classes, sz_utf8_word_break_zwj_k) != 0 ||
+        int const want_pictographic = sz_utf8_word_break_class_mask_powervsx_(classes_u8x16,
+                                                                              sz_utf8_word_break_zwj_k) != 0 ||
                                       carry.prev_ends_in_zwj;
         sz_utf8_word_break_frame_t const frame = sz_utf8_word_break_build_frame_powervsx_(
-            window, classes, start_bytes_all, length_two, length_three, length_four, want_pictographic);
+            window, classes_u8x16, start_bytes_all, length_two, length_three, length_four, want_pictographic);
 
         sz_utf8_word_break_carry_t carry_full = carry;
         sz_utf8_word_break_window_t const win = sz_utf8_word_break_decide_window_(

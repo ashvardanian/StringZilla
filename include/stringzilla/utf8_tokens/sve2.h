@@ -30,8 +30,8 @@ extern "C" {
  *  rides a biased iota) and one `svcompact_u32` packs the start indices while a lockstep `svcompact_u32` packs
  *  their byte lengths; the offsets turn absolute only after the 64-bit widening, so multi-gigabyte inputs never
  *  truncate. The caller's `while` loop resumes past the last emitted match when the capacity cuts the tile. */
-SZ_HELPER_AUTO void sz_utf8_token_drain_sve2_(                                  //
-    svbool_t starts, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
+SZ_HELPER_AUTO void sz_utf8_token_drain_sve2_(                                      //
+    svbool_t starts_b8x, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
     sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
     svbool_t const all_b32x = svptrue_b32();
@@ -39,7 +39,7 @@ SZ_HELPER_AUTO void sz_utf8_token_drain_sve2_(                                  
     sz_size_t const quarter_lanes = svcntw();
     sz_size_t const half_lanes = svcntd();
     svbool_t const span_b8x = svwhilelt_b8_u64(0, (sz_u64_t)span);
-    svuint8_t const start_flags_u8x = svdup_u8_z(svand_b_z(span_b8x, starts, span_b8x), 1);
+    svuint8_t const start_flags_u8x = svdup_u8_z(svand_b_z(span_b8x, starts_b8x, span_b8x), 1);
     svuint16_t const flags_low_u16x = svunpklo_u16(start_flags_u8x), flags_high_u16x = svunpkhi_u16(start_flags_u8x);
     svuint16_t const lengths_low_u16x = svunpklo_u16(lengths_u8x), lengths_high_u16x = svunpkhi_u16(lengths_u8x);
 

@@ -16,8 +16,8 @@ extern "C" {
 #if SZ_USE_LASX
 /** @brief  Recombine the two per-128-bit-lane 16-bit `__lasx_xvmskltz_b` sign-bit masks into one 32-bit mask,
  *          matching AVX2's `_mm256_movemask_epi8` (word 0 = low lane, word 4 = high lane). */
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
-    __m256i comparison_result_u8x32 = __lasx_xvmskltz_b(sign_extended);
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended_u8x32) {
+    __m256i comparison_result_u8x32 = __lasx_xvmskltz_b(sign_extended_u8x32);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(comparison_result_u8x32, 4);
     return (low & 0xFFFFu) | ((high & 0xFFFFu) << 16);
@@ -26,16 +26,18 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_lasx_(__m256i sign_extended) {
 /** @brief  Per-lane logical right shift by 4 bits, keeping only the low nibble of every byte lane. The single shift
  *          amount the classifier needs is spelled out (LASX `xvsrli.h` requires an immediate; it shifts 16-bit lanes,
  *          so we mask back to byte width afterwards). */
-SZ_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value) {
-    return __lasx_xvand_v(__lasx_xvsrli_h(value, 4), __lasx_xvreplgr2vr_b((char)0x0F));
+SZ_HELPER_INLINE __m256i sz_utf8_high_nibble_lasx_(__m256i value_u8x32) {
+    return __lasx_xvand_v(__lasx_xvsrli_h(value_u8x32, 4), __lasx_xvreplgr2vr_b((char)0x0F));
 }
 
 /** @brief  Shift the whole 32-byte window left by one byte (lane `i` receives original lane `i + 1`), zero-filling the
  *          top. Built from an in-lane `xvbsrl.v` (per-128-bit down-shift) stitched with the cross-lane high half via
  *          `xvpermi.q` so byte 16 receives original byte 17 across the 128-bit seam. */
-SZ_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window) {
-    __m256i const high_half_duplicated_u8x32 = __lasx_xvpermi_q(window, window, 0x31); // both halves := original high
-    __m256i const shift_within_lane_u8x32 = __lasx_xvbsrl_v(window, 1); // bytes down by 1 within each 128-bit half
+SZ_HELPER_INLINE __m256i sz_utf8_next1_lasx_(__m256i window_u8x32) {
+    __m256i const high_half_duplicated_u8x32 = __lasx_xvpermi_q(window_u8x32, window_u8x32,
+                                                                0x31); // both halves := original high
+    __m256i const shift_within_lane_u8x32 = __lasx_xvbsrl_v(window_u8x32,
+                                                            1); // bytes down by 1 within each 128-bit half
     __m256i const cross_lane_carry_u8x32 = __lasx_xvbsll_v(high_half_duplicated_u8x32,
                                                            15); // high-half byte 0 → lane 15
     return __lasx_xvor_v(shift_within_lane_u8x32, cross_lane_carry_u8x32);
@@ -344,7 +346,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out)
 #pragma endregion Shuffle LUT left pack
 
 /**
- *  @brief  Decode the emitted-start lanes @p emit_starts of a classified @p window into sequential UTF-32 runes, the
+ *  @brief  Decode the emitted-start lanes @p emit_starts of a classified @p window_u8x32 into sequential UTF-32 runes, the
  *          LASX sibling of `sz_utf8_rune_drain_icelake_`. The start byte-offsets are left-packed by a
  *          single `xvshuf.b` shuffle-LUT (no scalar per-bit walk, no spill compaction); the lead/+1/+2/+3 bytes are
  *          gathered at the packed offsets with `xvshuf.b` over a broadcast window, the value is reconstructed by a
@@ -354,8 +356,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_pack_indices_lasx_(sz_u32_t mask, sz_u8_t *out)
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_lasx_( //
-    __m256i window, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length, int has_three, int has_four,
-    sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
+    __m256i window_u8x32, sz_u32_t emit_starts, sz_u32_t ill_formed, __m256i consumed_length_u8x32, int has_three,
+    int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     // The width-blend gathers the lead, 2nd byte, and 2-byte form unconditionally; the 3-byte and 4-byte forms are
     // gathered and assembled only when `has_three`/`has_four` say a 3- or 4-byte start exists in this window, so a
@@ -368,11 +370,11 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_lasx_( //
     // Broadcast the window's low/high 128-bit halves into both lanes so a single `xvshuf.b` gathers any byte 0..31:
     // index 0..15 selects the low half (`window_low_u8x32`), 16..31 the high half (`window_high_u8x32`), in EVERY
     // 128-bit lane.
-    __m256i const window_low_u8x32 = __lasx_xvpermi_q(window, window, 0x00);
-    __m256i const window_high_u8x32 = __lasx_xvpermi_q(window, window, 0x11);
+    __m256i const window_low_u8x32 = __lasx_xvpermi_q(window_u8x32, window_u8x32, 0x00);
+    __m256i const window_high_u8x32 = __lasx_xvpermi_q(window_u8x32, window_u8x32, 0x11);
     // The per-lane maximal-subpart length, read at the packed start offsets for the resume cursor.
     sz_u256_vec_t consumed_byte_lengths_vec;
-    consumed_byte_lengths_vec.lasx = consumed_length;
+    consumed_byte_lengths_vec.lasx = consumed_length_u8x32;
 
     __m256i const mask_word_1f_u32x8 = __lasx_xvreplgr2vr_w(0x1F), mask_word_3f_u32x8 = __lasx_xvreplgr2vr_w(0x3F);
     __m256i const mask_word_0f_u32x8 = __lasx_xvreplgr2vr_w(0x0F), mask_word_07_u32x8 = __lasx_xvreplgr2vr_w(0x07);
@@ -919,12 +921,12 @@ SZ_HELPER_AUTO void sz_utf8_load_window_lasx_(sz_u8_t const *text, sz_size_t loa
         *out_high_u8x32 = __lasx_xvld(text + 32, 0);
         return;
     }
-    sz_u512_vec_t staging;
-    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging.u8s + 0, 0);
-    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging.u8s + 32, 0);
-    for (sz_size_t i = 0; i < loaded; ++i) staging.u8s[i] = text[i];
-    *out_low_u8x32 = __lasx_xvld(staging.u8s + 0, 0);
-    *out_high_u8x32 = __lasx_xvld(staging.u8s + 32, 0);
+    sz_u512_vec_t staging_vec;
+    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s + 0, 0);
+    __lasx_xvst(__lasx_xvreplgr2vr_b(0), staging_vec.u8s + 32, 0);
+    for (sz_size_t i = 0; i < loaded; ++i) staging_vec.u8s[i] = text[i];
+    *out_low_u8x32 = __lasx_xvld(staging_vec.u8s + 0, 0);
+    *out_high_u8x32 = __lasx_xvld(staging_vec.u8s + 32, 0);
 }
 
 /** @brief  Forward neighbours `nextK[i] = window[i+K]` for K in {1,2,3} over all 64 lanes, with lanes past the window
@@ -1142,8 +1144,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_lasx_( //
         return produced;
     }
 
-    sz_u512_vec_t indices;
-    sz_utf8_rune_pack_boundaries_lasx_(boundary, indices.u8s);
+    sz_u512_vec_t indices_vec;
+    sz_utf8_rune_pack_boundaries_lasx_(boundary, indices_vec.u8s);
 
     // Shift the four u64 positions up one lane (lane j <- position j-1), seating the carry at lane 0 afterwards: as
     // 32-bit words, {p0,p0, p0,p1, p2,p3, p4,p5} restated to u64 lanes [p0, p0, p1, p2].
@@ -1154,13 +1156,13 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_lasx_( //
     while (emitted < boundary_count && produced < capacity) {
         sz_size_t const wave = sz_min_of_three(boundary_count - emitted, capacity - produced, 4);
         __m256i positions_u64x4 = __lasx_xvreplgr2vr_d(0);
-        positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices.u8s[emitted + 0]), 0);
+        positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices_vec.u8s[emitted + 0]), 0);
         if (wave >= 2)
-            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices.u8s[emitted + 1]), 1);
+            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices_vec.u8s[emitted + 1]), 1);
         if (wave >= 3)
-            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices.u8s[emitted + 2]), 2);
+            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices_vec.u8s[emitted + 2]), 2);
         if (wave >= 4)
-            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices.u8s[emitted + 3]), 3);
+            positions_u64x4 = __lasx_xvinsgr2vr_d(positions_u64x4, (long long)(base + indices_vec.u8s[emitted + 3]), 3);
         __m256i segment_starts_u64x4 = __lasx_xvperm_w(positions_u64x4, shift_up_u32x8);
         segment_starts_u64x4 = __lasx_xvinsgr2vr_d(segment_starts_u64x4, (long long)previous, 0);
         __m256i const segment_lengths_u64x4 = __lasx_xvsub_d(positions_u64x4, segment_starts_u64x4);

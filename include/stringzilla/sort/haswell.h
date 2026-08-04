@@ -94,9 +94,9 @@ SZ_HELPER_INLINE sz_size_t sz_sort_haswell_compact4_(    //
     };
 
     sz_size_t const taken = (sz_size_t)_mm_popcnt_u32(mask4);
-    __m256i const permutation = _mm256_loadu_si256((__m256i const *)compact_lut[mask4]);
-    _mm256_storeu_si256((__m256i *)out_pgrams, _mm256_permutevar8x32_epi32(keys_u64x4, permutation));
-    _mm256_storeu_si256((__m256i *)out_order, _mm256_permutevar8x32_epi32(order_u64x4, permutation));
+    __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)compact_lut[mask4]);
+    _mm256_storeu_si256((__m256i *)out_pgrams, _mm256_permutevar8x32_epi32(keys_u64x4, permutation_u32x8));
+    _mm256_storeu_si256((__m256i *)out_order, _mm256_permutevar8x32_epi32(order_u64x4, permutation_u32x8));
     return taken;
 }
 

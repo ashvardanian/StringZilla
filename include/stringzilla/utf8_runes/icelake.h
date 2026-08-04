@@ -53,8 +53,8 @@ SZ_HELPER_INLINE __m512i sz_utf8_lane_identity_icelake_(void) {
 /** @brief  Mask of codepoint-start bytes in a loaded window: every lane that is not a continuation byte `0x80..0xBF`.
  *          Continuation bytes are signed `-128..-65`, so a single signed `vpcmpgtb` against `-65` selects starts -
  *          the one-op form shared by count, find-nth, and the unpack classifier (was written four different ways). */
-SZ_HELPER_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window, __mmask64 load_mask) {
-    return _mm512_mask_cmpgt_epi8_mask(load_mask, window, _mm512_set1_epi8((char)-65));
+SZ_HELPER_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window_u8x64, __mmask64 load_mask_m64) {
+    return _mm512_mask_cmpgt_epi8_mask(load_mask_m64, window_u8x64, _mm512_set1_epi8((char)-65));
 }
 
 /**
@@ -62,30 +62,30 @@ SZ_HELPER_INLINE __mmask64 sz_utf8_rune_start_mask_icelake_(__m512i window, __mm
  *          widen-stores. `_mm512_alignr_epi64` shifts the compressed registers down between waves, so @p emit may
  *          exceed 8. Per-lane byte length is 1, plus 1 on a 2-byte start, plus 2 on a 3-byte start (disjoint masks).
  */
-SZ_HELPER_AUTO void sz_utf8_rune_peel_icelake_(                                  //
-    sz_u64_t start_bits, __mmask64 two_byte_starts, __mmask64 three_byte_starts, //
-    sz_size_t emit, sz_size_t position, __m512i lane_identity,                   //
+SZ_HELPER_AUTO void sz_utf8_rune_peel_icelake_(                                          //
+    sz_u64_t start_bits, __mmask64 two_byte_starts_m64, __mmask64 three_byte_starts_m64, //
+    sz_size_t emit, sz_size_t position, __m512i lane_identity_u8x64,                     //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
-    __mmask64 const compress_mask = _cvtu64_mask64(start_bits);
+    __mmask64 const compress_mask_m64 = _cvtu64_mask64(start_bits);
 
     __m512i length_per_lane_u8x64 = _mm512_set1_epi8(1);
-    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, two_byte_starts, length_per_lane_u8x64,
+    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, two_byte_starts_m64, length_per_lane_u8x64,
                                                  _mm512_set1_epi8(1));
-    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, three_byte_starts, length_per_lane_u8x64,
+    length_per_lane_u8x64 = _mm512_mask_add_epi8(length_per_lane_u8x64, three_byte_starts_m64, length_per_lane_u8x64,
                                                  _mm512_set1_epi8(2));
 
-    __m512i compressed_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
-    __m512i compressed_lengths_u8x64 = _mm512_maskz_compress_epi8(compress_mask, length_per_lane_u8x64);
+    __m512i compressed_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask_m64, lane_identity_u8x64);
+    __m512i compressed_lengths_u8x64 = _mm512_maskz_compress_epi8(compress_mask_m64, length_per_lane_u8x64);
     __m512i const position_broadcast_u64x8 = _mm512_set1_epi64((long long)position);
 
     __m512i const zero_u64x8 = _mm512_setzero_si512();
     for (sz_size_t emitted = 0; emitted < emit; emitted += 8) {
-        __mmask8 const store_mask = sz_u8_clamp_mask_until_(emit - emitted);
+        __mmask8 const store_mask_m8 = sz_u8_clamp_mask_until_(emit - emitted);
         _mm512_mask_storeu_epi64(
-            (void *)(match_offsets + emitted), store_mask,
+            (void *)(match_offsets + emitted), store_mask_m8,
             _mm512_add_epi64(_mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_offsets_u8x64)),
                              position_broadcast_u64x8));
-        _mm512_mask_storeu_epi64((void *)(match_lengths + emitted), store_mask,
+        _mm512_mask_storeu_epi64((void *)(match_lengths + emitted), store_mask_m8,
                                  _mm512_cvtepu8_epi64(_mm512_castsi512_si128(compressed_lengths_u8x64)));
         compressed_offsets_u8x64 = _mm512_alignr_epi64(zero_u64x8, compressed_offsets_u8x64, 1);
         compressed_lengths_u8x64 = _mm512_alignr_epi64(zero_u64x8, compressed_lengths_u8x64, 1);
@@ -95,8 +95,8 @@ SZ_HELPER_AUTO void sz_utf8_rune_peel_icelake_(                                 
 #pragma region Decode window
 
 /** @brief  Per-byte logical right shift by @p shift, retaining only the low @p keep bits of every lane. */
-SZ_HELPER_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value, int shift, sz_u8_t keep) {
-    return _mm512_and_si512(_mm512_srli_epi16(value, shift), _mm512_set1_epi8((char)keep));
+SZ_HELPER_INLINE __m512i sz_utf8_srl8_icelake_(__m512i value_u8x64, int shift, sz_u8_t keep) {
+    return _mm512_and_si512(_mm512_srli_epi16(value_u8x64, shift), _mm512_set1_epi8((char)keep));
 }
 
 /**
@@ -123,30 +123,30 @@ typedef struct sz_utf8_rune_window_t {
 
 /** @brief  Load up to 64 bytes from @p text (masked tail) and decode every lane into byte-domain halves. */
 SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
-    sz_u8_t const *text, sz_size_t available, __m512i lane_identity) {
+    sz_u8_t const *text, sz_size_t available, __m512i lane_identity_u8x64) {
     sz_utf8_rune_window_t result;
     result.loaded = available < 64 ? available : 64;
-    __mmask64 const load_mask = sz_u64_clamp_mask_until_(result.loaded);
-    __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask, text);
+    __mmask64 const load_mask_m64 = sz_u64_clamp_mask_until_(result.loaded);
+    __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask_m64, text);
     result.window = window_u8x64;
 
     // The three forward neighbours of each lane, gathered via in-register permutes (never `vpgather`).
-    __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)),
+    __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
                                                         window_u8x64);
-    __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)),
+    __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),
                                                         window_u8x64);
 
-    __mmask64 const loaded_lanes = load_mask;
-    __mmask64 const is_continuation = _mm512_mask_cmpeq_epi8_mask(
-        loaded_lanes, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xC0)), _mm512_set1_epi8((char)0x80));
-    result.continuation = is_continuation;
-    result.codepoint_starts = loaded_lanes & ~is_continuation;
+    __mmask64 const loaded_lanes_m64 = load_mask_m64;
+    __mmask64 const is_continuation_m64 = _mm512_mask_cmpeq_epi8_mask(
+        loaded_lanes_m64, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xC0)), _mm512_set1_epi8((char)0x80));
+    result.continuation = is_continuation_m64;
+    result.codepoint_starts = loaded_lanes_m64 & ~is_continuation_m64;
     result.two_byte_starts = _mm512_mask_cmpeq_epi8_mask(
-        loaded_lanes, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xE0)), _mm512_set1_epi8((char)0xC0));
+        loaded_lanes_m64, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xE0)), _mm512_set1_epi8((char)0xC0));
     result.three_byte_starts = _mm512_mask_cmpeq_epi8_mask(
-        loaded_lanes, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF0)), _mm512_set1_epi8((char)0xE0));
+        loaded_lanes_m64, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF0)), _mm512_set1_epi8((char)0xE0));
     result.four_byte_starts = _mm512_mask_cmpeq_epi8_mask(
-        loaded_lanes, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF8)), _mm512_set1_epi8((char)0xF0));
+        loaded_lanes_m64, _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF8)), _mm512_set1_epi8((char)0xF0));
 
     // 2-byte: cp = ((lead & 0x1F) << 6) | (next1 & 0x3F); high = cp >> 8, low = cp & 0xFF.
     __m512i const lead_five_bits_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x1F));
@@ -173,14 +173,14 @@ SZ_HELPER_AUTO sz_utf8_rune_window_t sz_utf8_rune_decode_window_icelake_( //
 
 /**
  *  @brief  Gather one byte per 16-bit lane from a register-resident byte table @p table of @p count entries,
- *          addressed by the 16-bit @p indices, using a `vpermi2b` page network (NO `vpgather`). Each 128-byte
+ *          addressed by the 16-bit @p indices_u16x32, using a `vpermi2b` page network (NO `vpgather`). Each 128-byte
  *          page is two ZMM tiles selected by `vpermi2b` on the low 7 index bits, with the page chosen by the
  *          high index bits via masked moves. The final partial page is `maskz`-loaded so an unpadded @p table
  *          is never over-read. Out-of-range lanes (none in valid trie use) read as zero.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, __m512i indices) {
-    __m512i const within_u16x32 = _mm512_and_si512(indices, _mm512_set1_epi16(0x7F));
-    __m512i const page_u16x32 = _mm512_srli_epi16(indices, 7);
+SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count, __m512i indices_u16x32) {
+    __m512i const within_u16x32 = _mm512_and_si512(indices_u16x32, _mm512_set1_epi16(0x7F));
+    __m512i const page_u16x32 = _mm512_srli_epi16(indices_u16x32, 7);
     int const page_count = (count + 127) / 128;
     // Visit only the distinct 128-byte pages present across the lanes (real text targets ~1-3 of up to ~20), not the
     // whole table: the present-page set is a `1 << page` OR-reduction; an absent page is bit-exact to skip (its
@@ -206,26 +206,26 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_gather_byte_(sz_u8_t const *table, int count
                                                 table + tile_base + 64)
                                           : _mm512_setzero_si512();
         __m512i const permuted_u8x64 = _mm512_permutex2var_epi8(tile_lo_u8x64, within_u16x32, tile_hi_u8x64);
-        __mmask32 const hit = _mm512_cmpeq_epi16_mask(page_u16x32, _mm512_set1_epi16((short)page_index));
-        result_u16x32 = _mm512_mask_mov_epi16(result_u16x32, hit,
+        __mmask32 const hit_m32 = _mm512_cmpeq_epi16_mask(page_u16x32, _mm512_set1_epi16((short)page_index));
+        result_u16x32 = _mm512_mask_mov_epi16(result_u16x32, hit_m32,
                                               _mm512_and_si512(permuted_u8x64, _mm512_set1_epi16(0x00FF)));
     }
     return result_u16x32;
 }
 
 /**
- *  @brief  256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane @p index in [0,256). A
- *          `vpermb` over the four resident quads; the high two bits of the index select the quad via masked blends.
- *          Tiles load directly from `.rodata` (no per-call materialization), so the family classifiers stay
- *          re-init-free. @p table must be `sz_align_(64)` and exactly 256 bytes.
+ *  @brief  256-entry byte LUT read over a 64-byte-aligned 256-byte @p table, per 32-bit lane @p index_u32x16 in
+ *          [0,256). A `vpermb` over the four resident quads; the high two bits of the index select the quad via
+ *          masked blends. Tiles load directly from `.rodata` (no per-call materialization), so the family
+ *          classifiers stay re-init-free. @p table must be `sz_align_(64)` and exactly 256 bytes.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index) {
+SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __m512i index_u32x16) {
     __m512i const quad0_u8x64 = _mm512_load_si512((void const *)(table + 0 * 64));
     __m512i const quad1_u8x64 = _mm512_load_si512((void const *)(table + 1 * 64));
     __m512i const quad2_u8x64 = _mm512_load_si512((void const *)(table + 2 * 64));
     __m512i const quad3_u8x64 = _mm512_load_si512((void const *)(table + 3 * 64));
-    __m512i const low_six_u32x16 = _mm512_and_si512(index, _mm512_set1_epi32(0x3F));
-    __m512i const top_two_u32x16 = _mm512_and_si512(index, _mm512_set1_epi32(0xC0));
+    __m512i const low_six_u32x16 = _mm512_and_si512(index_u32x16, _mm512_set1_epi32(0x3F));
+    __m512i const top_two_u32x16 = _mm512_and_si512(index_u32x16, _mm512_set1_epi32(0xC0));
     __m512i const permuted0_u32x16 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six_u32x16, quad0_u8x64),
                                                       _mm512_set1_epi32(0xFF));
     __m512i const permuted1_u32x16 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six_u32x16, quad1_u8x64),
@@ -246,17 +246,18 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_permute256_icelake_(sz_u8_t const *table, __
 
 /**
  *  @brief  In-register indexed read of a 64-byte-aligned byte LUT spanning @p tile_count tiles of 64 bytes, with a
- *          per-32-bit-lane byte @p index_dwords in [0, tile_count*64). A `vpermi2b` cascade: each ZMM pair covers 128
- *          byte slots addressed by the low 7 bits; the high bits select the pair via masked blends. Tiles load
- *          directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init.
+ *          per-32-bit-lane byte @p index_dwords_u32x16 in [0, tile_count*64). A `vpermi2b` cascade: each ZMM pair
+ *          covers 128 byte slots addressed by the low 7 bits; the high bits select the pair via masked blends. Tiles
+ *          load directly from the aligned `.rodata` @p table — no `luts` struct, no per-call init.
  *          @p table must be `sz_align_(64)` and zero-padded to `tile_count * 64` bytes.
  *
  *  ! Cost scales with @p tile_count, not with the window: every tile is scanned on the single cross-lane shuffle port.
  *  ! The BMP classifiers use @ref sz_utf8_rune_flat_lookup_icelake_ instead for exactly that reason.
  */
-SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count, __m512i index_dwords) {
-    __m512i const within_u32x16 = _mm512_and_si512(index_dwords, _mm512_set1_epi32(0x7F));
-    __m512i const selector_u32x16 = _mm512_srli_epi32(index_dwords, 7);
+SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, int tile_count,
+                                                         __m512i index_dwords_u32x16) {
+    __m512i const within_u32x16 = _mm512_and_si512(index_dwords_u32x16, _mm512_set1_epi32(0x7F));
+    __m512i const selector_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 7);
     __m512i result_u32x16 = _mm512_setzero_si512();
     int const pairs = (tile_count + 1) / 2;
     for (int pair = 0; pair < pairs; ++pair) {
@@ -265,8 +266,8 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, i
                                             ? _mm512_load_si512((void const *)(table + (pair * 2 + 1) * 64))
                                             : _mm512_setzero_si512();
         __m512i const picked_u8x64 = _mm512_permutex2var_epi8(low_tile_u8x64, within_u32x16, high_tile_u8x64);
-        __mmask16 const here = _mm512_cmpeq_epi32_mask(selector_u32x16, _mm512_set1_epi32(pair));
-        result_u32x16 = _mm512_mask_blend_epi32(here, result_u32x16,
+        __mmask16 const here_m16 = _mm512_cmpeq_epi32_mask(selector_u32x16, _mm512_set1_epi32(pair));
+        result_u32x16 = _mm512_mask_blend_epi32(here_m16, result_u32x16,
                                                 _mm512_and_si512(picked_u8x64, _mm512_set1_epi32(0xFF)));
     }
     return result_u32x16;
@@ -277,17 +278,18 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_icelake_(sz_u8_t const *table, i
  *          nibble of `packed[i/2]` for even `i`, the high nibble for odd `i`). Halves the table and so HALVES the
  *          `vpermi2b` cascade depth vs a byte-per-cell layout, for tables whose outputs fit in 4 bits (e.g. the
  *          grapheme `stage_sub` descriptor index, the word `astral_leaf` class). @p tile_count counts the packed
- *          tiles; @p index_dwords is the unpacked cell index per 32-bit lane. Reads straight from aligned `.rodata`.
+ *          tiles; @p index_dwords_u32x16 is the unpacked cell index per 32-bit lane. Reads straight from aligned
+ *          `.rodata`.
  */
 SZ_HELPER_AUTO __m512i sz_utf8_rune_lut_cascade_nibble_icelake_(sz_u8_t const *packed, int tile_count,
-                                                                __m512i index_dwords) {
-    __m512i const byte_index_u32x16 = _mm512_srli_epi32(index_dwords, 1);
+                                                                __m512i index_dwords_u32x16) {
+    __m512i const byte_index_u32x16 = _mm512_srli_epi32(index_dwords_u32x16, 1);
     __m512i const packed_byte_u8x64 = sz_utf8_rune_lut_cascade_icelake_(packed, tile_count, byte_index_u32x16);
-    __mmask16 const odd_cell = _mm512_test_epi32_mask(index_dwords, _mm512_set1_epi32(1));
+    __mmask16 const odd_cell_m16 = _mm512_test_epi32_mask(index_dwords_u32x16, _mm512_set1_epi32(1));
     __m512i const low_nibble_u32x16 = _mm512_and_si512(packed_byte_u8x64, _mm512_set1_epi32(0x0F));
     __m512i const high_nibble_u32x16 = _mm512_and_si512(_mm512_srli_epi32(packed_byte_u8x64, 4),
                                                         _mm512_set1_epi32(0x0F));
-    return _mm512_mask_blend_epi32(odd_cell, low_nibble_u32x16, high_nibble_u32x16);
+    return _mm512_mask_blend_epi32(odd_cell_m16, low_nibble_u32x16, high_nibble_u32x16);
 }
 
 #pragma endregion In register page networks
@@ -328,11 +330,11 @@ SZ_HELPER_AUTO __m512i sz_utf8_rune_flat_lookup_icelake_( //
  *  `starts[]` / `lengths[]` in waves of eight, carrying the open segment across waves and windows via @p previous_io.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_( //
-    sz_u64_t boundary, sz_size_t base, __m512i lane_identity, sz_size_t *starts, sz_size_t *lengths, sz_size_t produced,
-    sz_size_t capacity, sz_size_t *previous_io) {
-    __m512i const wave_shift_u8x64 = _mm512_add_epi8(lane_identity, _mm512_set1_epi8(8));
+    sz_u64_t boundary, sz_size_t base, __m512i lane_identity_u8x64, sz_size_t *starts, sz_size_t *lengths,
+    sz_size_t produced, sz_size_t capacity, sz_size_t *previous_io) {
+    __m512i const wave_shift_u8x64 = _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(8));
     sz_size_t const boundary_count = (sz_size_t)_mm_popcnt_u64(boundary);
-    __m512i packed_u8x64 = _mm512_maskz_compress_epi8(_cvtu64_mask64(boundary), lane_identity);
+    __m512i packed_u8x64 = _mm512_maskz_compress_epi8(_cvtu64_mask64(boundary), lane_identity_u8x64);
     sz_u64_t previous = (sz_u64_t)*previous_io;
     sz_size_t emitted = 0;
     while (emitted < boundary_count && produced < capacity) {
@@ -341,9 +343,9 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_( //
                                                          _mm512_set1_epi64((long long)base));
         __m512i const segment_starts_u64x8 = _mm512_alignr_epi64(positions_u64x8,
                                                                  _mm512_set1_epi64((long long)previous), 7);
-        __mmask8 const store_mask = sz_u8_clamp_mask_until_(wave);
-        _mm512_mask_storeu_epi64((void *)(starts + produced), store_mask, segment_starts_u64x8);
-        _mm512_mask_storeu_epi64((void *)(lengths + produced), store_mask,
+        __mmask8 const store_mask_m8 = sz_u8_clamp_mask_until_(wave);
+        _mm512_mask_storeu_epi64((void *)(starts + produced), store_mask_m8, segment_starts_u64x8);
+        _mm512_mask_storeu_epi64((void *)(lengths + produced), store_mask_m8,
                                  _mm512_sub_epi64(positions_u64x8, segment_starts_u64x8));
         produced += wave, emitted += wave;
         previous = (sz_u64_t)(starts[produced - 1] + lengths[produced - 1]);
@@ -353,11 +355,12 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_( //
     return produced;
 }
 
-/** @brief  Bring the @p block-th group of 16 bytes of @p value down to the low 128 bits (for `vpmovzxbd` widening),
- *          selecting the group with a runtime `vpermb` (the block index need not be a compile-time immediate). */
-SZ_HELPER_INLINE __m128i sz_utf8_rune_pick16_icelake_(__m512i value, __m512i lane_identity, int block) {
-    return _mm512_castsi512_si128(
-        _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8((char)(block * 16))), value));
+/** @brief  Bring the @p block-th group of 16 bytes of @p value_u8x64 down to the low 128 bits (for `vpmovzxbd`
+ *          widening), selecting the group with a runtime `vpermb` (the block index need not be a compile-time
+ *          immediate). */
+SZ_HELPER_INLINE __m128i sz_utf8_rune_pick16_icelake_(__m512i value_u8x64, __m512i lane_identity_u8x64, int block) {
+    return _mm512_castsi512_si128(_mm512_permutexvar_epi8(
+        _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8((char)(block * 16))), value_u8x64));
 }
 
 /**
@@ -370,86 +373,89 @@ SZ_HELPER_INLINE __m128i sz_utf8_rune_pick16_icelake_(__m512i value, __m512i lan
  *  TOTAL decode: @p emit_starts also covers promoted orphan continuation bytes, and @p ill_formed marks every start
  *  lane whose maximal ill-formed subpart must collapse to a single U+FFFD (Unicode 17.0 §3.9 / W3C). After the
  *  width-blend assembles the (for ill-formed lanes, garbage) values, those lanes are overwritten with U+FFFD per
- *  16-lane block. The resume cursor is read from @p consumed_length (the per-lane maximal-subpart length, in window
- *  order) at the last emitted lane, so an ill-formed trailing lane never skips bytes that owe their own next U+FFFD.
+ *  16-lane block. The resume cursor is read from @p consumed_length_u8x64 (the per-lane maximal-subpart length, in
+ *  window order) at the last emitted lane, so an ill-formed trailing lane never skips bytes that owe their own next
+ *  U+FFFD.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_icelake_( //
-    __m512i window, sz_u64_t emit_starts, sz_u64_t ill_formed, __m512i consumed_length, __m512i lane_identity,
-    int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
-    sz_size_t *consumed_bytes) {
+    __m512i window_u8x64, sz_u64_t emit_starts, sz_u64_t ill_formed, __m512i consumed_length_u8x64,
+    __m512i lane_identity_u8x64, int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes,
+    sz_size_t capacity, sz_size_t *consumed_bytes) {
 
-    __mmask64 const compress_mask = _cvtu64_mask64(emit_starts);
-    __m512i const start_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask, lane_identity);
-    __m512i const consumed_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask, consumed_length);
-    __m512i const lead_bytes_u8x64 = _mm512_permutexvar_epi8(start_offsets_u8x64, window);
+    __mmask64 const compress_mask_m64 = _cvtu64_mask64(emit_starts);
+    __m512i const start_offsets_u8x64 = _mm512_maskz_compress_epi8(compress_mask_m64, lane_identity_u8x64);
+    __m512i const consumed_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask_m64, consumed_length_u8x64);
+    __m512i const lead_bytes_u8x64 = _mm512_permutexvar_epi8(start_offsets_u8x64, window_u8x64);
     __m512i const second_bytes_u8x64 = _mm512_permutexvar_epi8(
-        _mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(1)), window);
+        _mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(1)), window_u8x64);
     // The 3rd and 4th trailing bytes are gathered only when a 3/4-byte lead is present in this window (their
     // forms are otherwise dead, and a narrower lead never satisfies the `is_three`/`is_four` blend predicate).
     // `third_bytes_u8x64` is hoisted so the 4-byte sibling reuses it (has_four implies has_three).
     __m512i third_bytes_u8x64 = _mm512_setzero_si512();
     __m512i fourth_bytes_u8x64 = _mm512_setzero_si512();
     if (has_three)
-        third_bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(2)), window);
+        third_bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(2)),
+                                                    window_u8x64);
     if (has_four)
-        fourth_bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(3)), window);
+        fourth_bytes_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(start_offsets_u8x64, _mm512_set1_epi8(3)),
+                                                     window_u8x64);
 
     // Per-lane (window-order) ill-formed selector, broadcast into a dword mask we can compact in lockstep with the
     // start offsets: lane holds 0xFF where the start is ill-formed, 0 otherwise. After the same `vpcompressb`, lane
     // `j` of `ill_compressed` is the ill-formed flag of the `j`-th emitted start.
     __m512i const ill_byte_u8x64 = _mm512_maskz_mov_epi8(_cvtu64_mask64(ill_formed), _mm512_set1_epi8((char)0xFF));
-    __m512i const ill_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask, ill_byte_u8x64);
+    __m512i const ill_compressed_u8x64 = _mm512_maskz_compress_epi8(compress_mask_m64, ill_byte_u8x64);
 
     sz_size_t const want = emit_count < capacity ? emit_count : capacity;
     sz_size_t produced = 0;
     for (sz_size_t block_start = 0; block_start < want; block_start += 16) {
         int const block = (int)(block_start >> 4);
         __m512i const b0_u32x16 = _mm512_cvtepu8_epi32(
-            sz_utf8_rune_pick16_icelake_(lead_bytes_u8x64, lane_identity, block));
+            sz_utf8_rune_pick16_icelake_(lead_bytes_u8x64, lane_identity_u8x64, block));
         __m512i const b1_u32x16 = _mm512_cvtepu8_epi32(
-            sz_utf8_rune_pick16_icelake_(second_bytes_u8x64, lane_identity, block));
+            sz_utf8_rune_pick16_icelake_(second_bytes_u8x64, lane_identity_u8x64, block));
 
         // Width-blend by the lead-byte range: each wider path only fires for its own lead, and a value blended into
         // a narrower lead is already inert, so the cases compose and stay bit-identical. The 2-byte form is always
         // assembled; the 3/4-byte forms (and their trailing-byte widens) run only when such a lead is present in the
         // window, so a 3-byte window never gathers/assembles the 4th byte (the regression that flattening added).
-        __mmask16 const is_two = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)),
-                                               _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xC0)));
+        __mmask16 const is_two_m16 = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)),
+                                                   _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xC0)));
         __m512i const two_byte_u32x16 = _mm512_or_si512(
             _mm512_slli_epi32(_mm512_and_si512(b0_u32x16, _mm512_set1_epi32(0x1F)), 6),
             _mm512_and_si512(b1_u32x16, _mm512_set1_epi32(0x3F)));
-        __m512i codepoints_u32x16 = _mm512_mask_blend_epi32(is_two, b0_u32x16, two_byte_u32x16);
+        __m512i codepoints_u32x16 = _mm512_mask_blend_epi32(is_two_m16, b0_u32x16, two_byte_u32x16);
         if (has_three) {
             __m512i const b2_u32x16 = _mm512_cvtepu8_epi32(
-                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
-            __mmask16 const is_three = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0)),
-                                                     _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)));
+                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity_u8x64, block));
+            __mmask16 const is_three_m16 = _kandn_mask16(_mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0)),
+                                                         _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xE0)));
             __m512i const three_byte_u32x16 = _mm512_or_si512(
                 _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(b0_u32x16, _mm512_set1_epi32(0x0F)), 12),
                                 _mm512_slli_epi32(_mm512_and_si512(b1_u32x16, _mm512_set1_epi32(0x3F)), 6)),
                 _mm512_and_si512(b2_u32x16, _mm512_set1_epi32(0x3F)));
-            codepoints_u32x16 = _mm512_mask_blend_epi32(is_three, codepoints_u32x16, three_byte_u32x16);
+            codepoints_u32x16 = _mm512_mask_blend_epi32(is_three_m16, codepoints_u32x16, three_byte_u32x16);
         }
         if (has_four) {
             __m512i const b2_u32x16 = _mm512_cvtepu8_epi32(
-                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity, block));
+                sz_utf8_rune_pick16_icelake_(third_bytes_u8x64, lane_identity_u8x64, block));
             __m512i const b3_u32x16 = _mm512_cvtepu8_epi32(
-                sz_utf8_rune_pick16_icelake_(fourth_bytes_u8x64, lane_identity, block));
-            __mmask16 const is_four = _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0));
+                sz_utf8_rune_pick16_icelake_(fourth_bytes_u8x64, lane_identity_u8x64, block));
+            __mmask16 const is_four_m16 = _mm512_cmpge_epu32_mask(b0_u32x16, _mm512_set1_epi32(0xF0));
             __m512i const four_byte_u32x16 = _mm512_or_si512(
                 _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(b0_u32x16, _mm512_set1_epi32(0x07)), 18),
                                 _mm512_slli_epi32(_mm512_and_si512(b1_u32x16, _mm512_set1_epi32(0x3F)), 12)),
                 _mm512_or_si512(_mm512_slli_epi32(_mm512_and_si512(b2_u32x16, _mm512_set1_epi32(0x3F)), 6),
                                 _mm512_and_si512(b3_u32x16, _mm512_set1_epi32(0x3F))));
-            codepoints_u32x16 = _mm512_mask_blend_epi32(is_four, codepoints_u32x16, four_byte_u32x16);
+            codepoints_u32x16 = _mm512_mask_blend_epi32(is_four_m16, codepoints_u32x16, four_byte_u32x16);
         }
 
         // Overwrite every ill-formed lane in this block with U+FFFD (the garbage decode is discarded).
         __m512i const ill_block_u32x16 = _mm512_cvtepu8_epi32(
-            sz_utf8_rune_pick16_icelake_(ill_compressed_u8x64, lane_identity, block));
-        __mmask16 const ill_mask = _mm512_test_epi32_mask(ill_block_u32x16, ill_block_u32x16);
-        codepoints_u32x16 = _mm512_mask_mov_epi32(codepoints_u32x16, ill_mask,
+            sz_utf8_rune_pick16_icelake_(ill_compressed_u8x64, lane_identity_u8x64, block));
+        __mmask16 const ill_mask_m16 = _mm512_test_epi32_mask(ill_block_u32x16, ill_block_u32x16);
+        codepoints_u32x16 = _mm512_mask_mov_epi32(codepoints_u32x16, ill_mask_m16,
                                                   _mm512_set1_epi32((int)sz_rune_replacement_k));
         sz_size_t lanes = want - produced;
         if (lanes > 16) lanes = 16;
@@ -483,18 +489,18 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length
     sz_u512_vec_t text_vec;
     while (length >= 64) {
         text_vec.zmm = _mm512_loadu_epi8(text_u8);
-        __mmask64 start_byte_mask = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, ~(__mmask64)0);
-        char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask));
+        __mmask64 start_byte_mask_m64 = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, ~(__mmask64)0);
+        char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask_m64));
         text_u8 += 64;
         length -= 64;
     }
 
-    // Process remaining bytes with a masked variant - lanes outside `load_mask` stay clear in the result.
+    // Process remaining bytes with a masked variant - lanes outside `load_mask_m64` stay clear in the result.
     if (length) {
-        __mmask64 load_mask = sz_u64_mask_until_(length);
-        text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, text_u8);
-        __mmask64 start_byte_mask = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, load_mask);
-        char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask));
+        __mmask64 load_mask_m64 = sz_u64_mask_until_(length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask_m64, text_u8);
+        __mmask64 start_byte_mask_m64 = sz_utf8_rune_start_mask_icelake_(text_vec.zmm, load_mask_m64);
+        char_count += _mm_popcnt_u64(_cvtmask64_u64(start_byte_mask_m64));
     }
     return char_count;
 }
@@ -546,11 +552,11 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
 
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
     sz_size_t const chunk = length < 64 ? length : 64;
-    __mmask64 const load_mask = sz_u64_mask_until_(chunk);
-    __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask, (sz_u8_t const *)text);
+    __mmask64 const load_mask_m64 = sz_u64_mask_until_(chunk);
+    __m512i const window_u8x64 = _mm512_maskz_loadu_epi8(load_mask_m64, (sz_u8_t const *)text);
 
     // ASCII fast lane: an entire window of 1-byte runes widens directly with `vpmovzxbd`, no classification needed.
-    if ((_mm512_movepi8_mask(window_u8x64) & load_mask) == 0) {
+    if ((_mm512_movepi8_mask(window_u8x64) & load_mask_m64) == 0) {
         sz_size_t const runes_to_unpack = chunk < runes_capacity ? chunk : runes_capacity;
         _mm512_mask_storeu_epi32(runes, sz_u16_clamp_mask_until_(runes_to_unpack),
                                  _mm512_cvtepu8_epi32(_mm512_castsi512_si128(window_u8x64)));
@@ -571,18 +577,18 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     // the width-blend derive from it, so a lead and its length can never disagree (the class of malformed-gate bug).
     __m512i const length_lut_u8x64 = _mm512_broadcast_i32x4(
         _mm_setr_epi8(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4));
-    __mmask64 const starts = sz_utf8_rune_start_mask_icelake_(window_u8x64, load_mask);
-    __mmask64 const continuations = _kandn_mask64(starts, load_mask);
+    __mmask64 const starts_m64 = sz_utf8_rune_start_mask_icelake_(window_u8x64, load_mask_m64);
+    __mmask64 const continuations_m64 = _kandn_mask64(starts_m64, load_mask_m64);
     __m512i const high_nibble_u8x64 = _mm512_and_si512(_mm512_srli_epi16(window_u8x64, 4), _mm512_set1_epi8(0x0F));
     __m512i const lengths_u8x64 = _mm512_shuffle_epi8(length_lut_u8x64, high_nibble_u8x64);
-    sz_u64_t const starts_bits = _cvtmask64_u64(starts);
+    sz_u64_t const starts_bits = _cvtmask64_u64(starts_m64);
     // Any start whose declared sequence would reach past the window is deferred: well-formed text has only the
     // trailing one (a resumable truncation), but a malformed lead-in-lead (e.g. `E0 C0`) can overrun earlier - the
     // FIRST overrunning start bounds the decodable prefix, and its bytes resume in the next window or via serial.
     __m512i const sequence_end_u8x64 = _mm512_add_epi8(lane_identity_u8x64, lengths_u8x64);
-    __mmask64 const overruns = _kand_mask64(_mm512_cmpgt_epu8_mask(sequence_end_u8x64, _mm512_set1_epi8((char)chunk)),
-                                            starts);
-    sz_u64_t const overruns_bits = _cvtmask64_u64(overruns);
+    __mmask64 const overruns_m64 = _kand_mask64(
+        _mm512_cmpgt_epu8_mask(sequence_end_u8x64, _mm512_set1_epi8((char)chunk)), starts_m64);
+    sz_u64_t const overruns_bits = _cvtmask64_u64(overruns_m64);
     sz_size_t const decodable_end = overruns_bits ? (sz_size_t)_tzcnt_u64(overruns_bits) : chunk;
     sz_u64_t const decodable_mask = _cvtmask64_u64(sz_u64_mask_until_(decodable_end));
 
@@ -594,19 +600,19 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     // and maximal-subpart machinery. Gated to windows with no 4-byte-or-invalid lead; anything irregular declines
     // to the general path below at the same cursor. Bit-exact because a genuinely clean window makes the general
     // path build the identical `emit_starts` / zero `ill_formed` / declared `consumed_length` this feeds the drain.
-    if (_cvtmask64_u64(_kand_mask64(_mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF0)), load_mask)) ==
-        0) {
+    if (_cvtmask64_u64(
+            _kand_mask64(_mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF0)), load_mask_m64)) == 0) {
         sz_u64_t const clean_ascii_bits = _cvtmask64_u64(
                                               _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0x80))) &
-                                          _cvtmask64_u64(load_mask);
+                                          _cvtmask64_u64(load_mask_m64);
         sz_u64_t const clean_lead2_bits = _cvtmask64_u64(_kand_mask64(
                                               _mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xC2)),
                                               _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0)))) &
-                                          _cvtmask64_u64(load_mask);
+                                          _cvtmask64_u64(load_mask_m64);
         sz_u64_t const clean_lead3_bits = _cvtmask64_u64(_mm512_cmpeq_epu8_mask(
                                               _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xF0)),
                                               _mm512_set1_epi8((char)0xE0))) &
-                                          _cvtmask64_u64(load_mask);
+                                          _cvtmask64_u64(load_mask_m64);
         sz_u64_t const clean_owe1_bits = clean_lead2_bits | clean_lead3_bits;
 
         // Defer any lead whose sequence crosses the window edge: a 2-/3-byte lead in the last lane, or a 3-byte
@@ -615,7 +621,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
         if (chunk && ((clean_owe1_bits >> (chunk - 1)) & 1u)) { clean_end = chunk - 1; }
         else if (chunk >= 2 && ((clean_lead3_bits >> (chunk - 2)) & 1u)) { clean_end = chunk - 2; }
         sz_u64_t const clean_decodable = _cvtmask64_u64(sz_u64_mask_until_(clean_end));
-        sz_u64_t const clean_continuation_bits = _cvtmask64_u64(continuations);
+        sz_u64_t const clean_continuation_bits = _cvtmask64_u64(continuations_m64);
         sz_u64_t const clean_covered = (clean_owe1_bits << 1) | (clean_lead3_bits << 2);
 
         int const clean_has_three = clean_lead3_bits != 0;
@@ -655,31 +661,34 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     // well-formed leads decode to their value, ill-formed leads (bad lead, broken continuation chain, overlong /
     // surrogate / out-of-range first continuation) and orphan continuation bytes each collapse to one U+FFFD over the
     // maximal ill-formed subpart (Unicode 17.0 §3.9 / W3C), bit-exact with the serial reference.
-    __mmask64 const length_ge_two = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(2)), starts);
-    __mmask64 const length_ge_three = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(3)), starts);
-    __mmask64 const length_ge_four = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(4)), starts);
-    sz_u64_t const length_one_bits = starts_bits & ~_cvtmask64_u64(length_ge_two);
-    sz_u64_t const length_two_bits = _cvtmask64_u64(length_ge_two) & ~_cvtmask64_u64(length_ge_three);
-    sz_u64_t const length_three_bits = _cvtmask64_u64(length_ge_three) & ~_cvtmask64_u64(length_ge_four);
-    sz_u64_t const length_four_bits = _cvtmask64_u64(length_ge_four);
-    sz_u64_t const continuation_bits = _cvtmask64_u64(continuations);
+    __mmask64 const length_ge_two_m64 = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(2)),
+                                                     starts_m64);
+    __mmask64 const length_ge_three_m64 = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(3)),
+                                                       starts_m64);
+    __mmask64 const length_ge_four_m64 = _kand_mask64(_mm512_cmpge_epu8_mask(lengths_u8x64, _mm512_set1_epi8(4)),
+                                                      starts_m64);
+    sz_u64_t const length_one_bits = starts_bits & ~_cvtmask64_u64(length_ge_two_m64);
+    sz_u64_t const length_two_bits = _cvtmask64_u64(length_ge_two_m64) & ~_cvtmask64_u64(length_ge_three_m64);
+    sz_u64_t const length_three_bits = _cvtmask64_u64(length_ge_three_m64) & ~_cvtmask64_u64(length_ge_four_m64);
+    sz_u64_t const length_four_bits = _cvtmask64_u64(length_ge_four_m64);
+    sz_u64_t const continuation_bits = _cvtmask64_u64(continuations_m64);
 
     // Bad lead: 0xC0/0xC1 (overlong 2-byte by the LUT) or 0xF5..0xFF (out of range, length-4 by the LUT).
-    __mmask64 const bad_lead = _kor_mask64(
+    __mmask64 const bad_lead_m64 = _kor_mask64(
         _kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(2)),
                      _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xC2))),
         _kand_mask64(_mm512_cmpeq_epi8_mask(lengths_u8x64, _mm512_set1_epi8(4)),
                      _mm512_cmpgt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF4))));
-    sz_u64_t const bad_lead_bits = _cvtmask64_u64(bad_lead);
+    sz_u64_t const bad_lead_bits = _cvtmask64_u64(bad_lead_m64);
     // First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF). Computed
     // whenever a 3/4-byte lead is present; for any other lead this mask is empty, so `b1_ok` keeps the lane.
-    int const has_three = _cvtmask64_u64(length_ge_three) != 0;
-    int const has_four = _cvtmask64_u64(length_ge_four) != 0;
+    int const has_three = _cvtmask64_u64(length_ge_three_m64) != 0;
+    int const has_four = _cvtmask64_u64(length_ge_four_m64) != 0;
     sz_u64_t overlong_or_surrogate_or_range_bits = 0;
     if (has_three || has_four) {
         __m512i const next_byte_u8x64 = _mm512_permutexvar_epi8(
             _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), window_u8x64);
-        __mmask64 const overlong_or_surrogate_or_range = _kor_mask64(
+        __mmask64 const overlong_or_surrogate_or_range_m64 = _kor_mask64(
             _kor_mask64(_kand_mask64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0)),
                                      _mm512_cmplt_epu8_mask(next_byte_u8x64, _mm512_set1_epi8((char)0xA0))),
                         _kand_mask64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xED)),
@@ -688,7 +697,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
                                      _mm512_cmplt_epu8_mask(next_byte_u8x64, _mm512_set1_epi8((char)0x90))),
                         _kand_mask64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xF4)),
                                      _mm512_cmpge_epu8_mask(next_byte_u8x64, _mm512_set1_epi8((char)0x90)))));
-        overlong_or_surrogate_or_range_bits = _cvtmask64_u64(overlong_or_surrogate_or_range) & starts_bits;
+        overlong_or_surrogate_or_range_bits = _cvtmask64_u64(overlong_or_surrogate_or_range_m64) & starts_bits;
     }
 
     // Per-lane continuation availability at the declared trailing slots, evaluated at the lead lane.
@@ -709,9 +718,9 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     // Per-lane maximal-subpart length (mirror of `sz_utf8_maximal_subpart_`): start at 1 and extend across each
     // continuation slot that a well-formed sequence would still accept. For well-formed lanes this equals the
     // declared length; for ill-formed lanes it is the 1-3 byte subpart that one U+FFFD consumes.
-    sz_u64_t const step2 = _cvtmask64_u64(length_ge_two) & first_ok;
-    sz_u64_t const step3 = step2 & _cvtmask64_u64(length_ge_three) & cont2;
-    sz_u64_t const step4 = step3 & _cvtmask64_u64(length_ge_four) & cont3;
+    sz_u64_t const step2 = _cvtmask64_u64(length_ge_two_m64) & first_ok;
+    sz_u64_t const step3 = step2 & _cvtmask64_u64(length_ge_three_m64) & cont2;
+    sz_u64_t const step4 = step3 & _cvtmask64_u64(length_ge_four_m64) & cont3;
 
     // Orphan promotion: a continuation byte not covered by ANY lead's maximal-subpart span (well-formed OR the bytes
     // an ill-formed lead's single U+FFFD consumes) becomes its own 1-byte U+FFFD. The subpart spans are exactly the
@@ -736,8 +745,8 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_icelake_( //
     // `length_ge_three` already subsumes `length_ge_four`, so `(length_ge_three | length_ge_four) != 0` is just
     // `length_ge_three != 0`. Distinct from the validity-gate `has_three`/`has_four` above (those guard the
     // first-continuation range-check) — these only steer the drain's conditional trailing-byte assembly.
-    int const drain_has_three = (_cvtmask64_u64(length_ge_three) | _cvtmask64_u64(length_ge_four)) != 0;
-    int const drain_has_four = _cvtmask64_u64(length_ge_four) != 0;
+    int const drain_has_three = (_cvtmask64_u64(length_ge_three_m64) | _cvtmask64_u64(length_ge_four_m64)) != 0;
+    int const drain_has_four = _cvtmask64_u64(length_ge_four_m64) != 0;
     sz_size_t consumed = 0;
     sz_size_t const produced = sz_utf8_rune_drain_icelake_(window_u8x64, emit_starts, ill_formed, consumed_length_u8x64,
                                                            lane_identity_u8x64, drain_has_three, drain_has_four,

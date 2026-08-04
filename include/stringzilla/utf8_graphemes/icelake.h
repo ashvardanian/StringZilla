@@ -62,20 +62,22 @@ enum {
 };
 
 /** @brief  Descriptor of a codepoint < 0x80 by a `vpermb` over the two aligned `ascii_desc` `.rodata` tiles. */
-SZ_HELPER_AUTO __m512i sz_grapheme_ascii_descriptor_icelake_(__m512i codepoints) {
-    __m512i const low_six = _mm512_and_si512(codepoints, _mm512_set1_epi32(0x3F));
-    __mmask16 const high_half = _mm512_test_epi32_mask(codepoints, _mm512_set1_epi32(0x40));
-    __m512i const tile_low = _mm512_load_si512((void const *)(sz_utf8_grapheme_break_ascii_desc_ + 0));
-    __m512i const tile_high = _mm512_load_si512((void const *)(sz_utf8_grapheme_break_ascii_desc_ + 64));
-    __m512i const low = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, tile_low), _mm512_set1_epi32(0xFF));
-    __m512i const high = _mm512_and_si512(_mm512_permutexvar_epi8(low_six, tile_high), _mm512_set1_epi32(0xFF));
-    return _mm512_mask_blend_epi32(high_half, low, high);
+SZ_HELPER_AUTO __m512i sz_grapheme_ascii_descriptor_icelake_(__m512i codepoints_u32x16) {
+    __m512i const low_six_u32x16 = _mm512_and_si512(codepoints_u32x16, _mm512_set1_epi32(0x3F));
+    __mmask16 const high_half_m16 = _mm512_test_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(0x40));
+    __m512i const tile_low_u8x64 = _mm512_load_si512((void const *)(sz_utf8_grapheme_break_ascii_desc_ + 0));
+    __m512i const tile_high_u8x64 = _mm512_load_si512((void const *)(sz_utf8_grapheme_break_ascii_desc_ + 64));
+    __m512i const low_u32x16 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six_u32x16, tile_low_u8x64),
+                                                _mm512_set1_epi32(0xFF));
+    __m512i const high_u32x16 = _mm512_and_si512(_mm512_permutexvar_epi8(low_six_u32x16, tile_high_u8x64),
+                                                 _mm512_set1_epi32(0xFF));
+    return _mm512_mask_blend_epi32(high_half_m16, low_u32x16, high_u32x16);
 }
 
 /** @brief  Descriptor of a codepoint < 0x800 via the aligned `page_0800` LUT (a substrate `vpermi2b` cascade). */
-SZ_HELPER_INLINE __m512i sz_grapheme_small_page_icelake_(__m512i codepoints) {
+SZ_HELPER_INLINE __m512i sz_grapheme_small_page_icelake_(__m512i codepoints_u32x16) {
     return sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_page_0800_, 32,
-                                             _mm512_and_si512(codepoints, _mm512_set1_epi32(0x7FF)));
+                                             _mm512_and_si512(codepoints_u32x16, _mm512_set1_epi32(0x7FF)));
 }
 
 /** @brief  Descriptor of a BMP codepoint: the `bmp_page_lut_` page LUT (one `vpermb`) selects one of the 54 distinct
@@ -90,22 +92,25 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_u32x
 /** @brief  Descriptor of an astral codepoint (>= 0x10000) via the 4-stage trie over offset = codepoint - 0x10000
  *          (an 8/4/4/4 split), every tile read straight from aligned `.rodata`. Byte-identical to the serial
  *          sorted-range scan, replacing the per-window linear fold. */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints) {
-    __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
-    __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
-        sz_utf8_grapheme_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
-    __m512i const stage2_index = _mm512_add_epi32(
-        _mm512_slli_epi32(stage1, 4), _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xF)));
-    __m512i const stage2 = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s1_,
-                                                             sz_grapheme_break_astral_stage1_tiles_k, stage2_index);
-    __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
-                                                _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_s2_,
-                                                           sz_grapheme_break_astral_stage2_tiles_k, leaf_index);
-    __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
-                                                 _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
+SZ_HELPER_AUTO __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+    __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
+    __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
+        sz_utf8_grapheme_break_astral_s0_,
+        _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
+    __m512i const stage2_index_u32x16 = _mm512_add_epi32(
+        _mm512_slli_epi32(stage1_u32x16, 4),
+        _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 8), _mm512_set1_epi32(0xF)));
+    __m512i const stage2_u32x16 = sz_utf8_rune_lut_cascade_icelake_(
+        sz_utf8_grapheme_break_astral_s1_, sz_grapheme_break_astral_stage1_tiles_k, stage2_index_u32x16);
+    __m512i const leaf_index_u32x16 = _mm512_add_epi32(
+        _mm512_slli_epi32(stage2_u32x16, 4),
+        _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 4), _mm512_set1_epi32(0xF)));
+    __m512i const leaf_u32x16 = sz_utf8_rune_lut_cascade_icelake_(
+        sz_utf8_grapheme_break_astral_s2_, sz_grapheme_break_astral_stage2_tiles_k, leaf_index_u32x16);
+    __m512i const class_index_u32x16 = _mm512_add_epi32(_mm512_slli_epi32(leaf_u32x16, 4),
+                                                        _mm512_and_si512(offset_u32x16, _mm512_set1_epi32(0xF)));
     return sz_utf8_rune_lut_cascade_icelake_(sz_utf8_grapheme_break_astral_leaf_, sz_grapheme_break_astral_leaf_tiles_k,
-                                             class_index);
+                                             class_index_u32x16);
 }
 
 /**
@@ -114,21 +119,21 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints
  *          (Extend voicing marks `302A-3030` / `3099-309A`, `303D`, enclosed `3297` / `3299`). Mirrors the word
  *          kernel's `cjk_combined` carve. Six `vpcmp`; called only when a cold lane is present.
  */
-SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints) {
-    __mmask16 const run_a = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3000)),
-                                         _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xA66E)));
-    __mmask16 const run_b = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0xD7FC)),
-                                         _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xFB1D)));
-    __mmask16 const exception_run = _kor_mask16(
-        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x302A)),
-                     _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x3030))),
-        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, _mm512_set1_epi32(0x3099)),
-                     _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0x309A))));
-    __mmask16 const exception_point = _kor_mask16(
-        _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x303D)),
-        _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3297)),
-                    _mm512_cmpeq_epi32_mask(codepoints, _mm512_set1_epi32(0x3299))));
-    return _kandn_mask16(_kor_mask16(exception_run, exception_point), _kor_mask16(run_a, run_b));
+SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints_u32x16) {
+    __mmask16 const run_a_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3000)),
+                                             _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xA66E)));
+    __mmask16 const run_b_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xD7FC)),
+                                             _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xFB1D)));
+    __mmask16 const exception_run_m16 = _kor_mask16(
+        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x302A)),
+                     _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3030))),
+        _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3099)),
+                     _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x309A))));
+    __mmask16 const exception_point_m16 = _kor_mask16(
+        _mm512_cmpeq_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(0x303D)),
+        _kor_mask16(_mm512_cmpeq_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3297)),
+                    _mm512_cmpeq_epi32_mask(codepoints_u32x16, _mm512_set1_epi32(0x3299))));
+    return _kandn_mask16(_kor_mask16(exception_run_m16, exception_point_m16), _kor_mask16(run_a_m16, run_b_m16));
 }
 
 /**
@@ -140,49 +145,57 @@ SZ_HELPER_AUTO __mmask16 sz_grapheme_cjk_other_icelake_(__m512i codepoints) {
  *  table (one `vpgatherdd`); and codepoint >= 0x10000 by the 4-stage astral trie. No linear range scan and no
  *  scalar loop.
  */
-SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
-    __m512i const hangul_base = _mm512_set1_epi32(0xAC00);
-    __mmask16 const is_hangul = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints, hangul_base),
-                                             _mm512_cmple_epu32_mask(codepoints, _mm512_set1_epi32(0xD7A3)));
-    __m512i const hangul_relative = _mm512_sub_epi32(codepoints, hangul_base);
+SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints_u32x16) {
+    __m512i const hangul_base_u32x16 = _mm512_set1_epi32(0xAC00);
+    __mmask16 const is_hangul_m16 = _kand_mask16(_mm512_cmpge_epu32_mask(codepoints_u32x16, hangul_base_u32x16),
+                                                 _mm512_cmple_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0xD7A3)));
+    __m512i const hangul_relative_u32x16 = _mm512_sub_epi32(codepoints_u32x16, hangul_base_u32x16);
     // relative < 11172, so a mul-hi reciprocal for `/ 28` is exact (2342 = ceil(2^16 / 28)).
-    __m512i const quotient = _mm512_srli_epi32(_mm512_mullo_epi32(hangul_relative, _mm512_set1_epi32(2342)), 16);
-    __mmask16 const is_lv = _mm512_cmpeq_epi32_mask(
-        _mm512_sub_epi32(hangul_relative, _mm512_mullo_epi32(quotient, _mm512_set1_epi32(28))), _mm512_setzero_si512());
-    __m512i const hangul_descriptor = _mm512_mask_blend_epi32(is_lv,
-                                                              _mm512_set1_epi32((int)sz_grapheme_break_hangul_lvt_k),
-                                                              _mm512_set1_epi32((int)sz_grapheme_break_hangul_lv_k));
+    __m512i const quotient_u32x16 = _mm512_srli_epi32(
+        _mm512_mullo_epi32(hangul_relative_u32x16, _mm512_set1_epi32(2342)), 16);
+    __mmask16 const is_lv_m16 = _mm512_cmpeq_epi32_mask(
+        _mm512_sub_epi32(hangul_relative_u32x16, _mm512_mullo_epi32(quotient_u32x16, _mm512_set1_epi32(28))),
+        _mm512_setzero_si512());
+    __m512i const hangul_descriptor_u32x16 = _mm512_mask_blend_epi32(
+        is_lv_m16, _mm512_set1_epi32((int)sz_grapheme_break_hangul_lvt_k),
+        _mm512_set1_epi32((int)sz_grapheme_break_hangul_lv_k));
 
-    __mmask16 const is_ascii = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x80));
-    __mmask16 const below_0800 = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x800));
-    __mmask16 const is_bmp = _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32(0x10000));
-    __mmask16 const is_small = _kandn_mask16(is_ascii, below_0800);                         // 0x80..0x7FF
-    __mmask16 const cold_raw = _kandn_mask16(is_hangul, _kandn_mask16(below_0800, is_bmp)); // 0x800..0xFFFF, non-Hangul
+    __mmask16 const is_ascii_m16 = _mm512_cmplt_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x80));
+    __mmask16 const below_0800_m16 = _mm512_cmplt_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x800));
+    __mmask16 const is_bmp_m16 = _mm512_cmplt_epu32_mask(codepoints_u32x16, _mm512_set1_epi32(0x10000));
+    __mmask16 const is_small_m16 = _kandn_mask16(is_ascii_m16, below_0800_m16); // 0x80..0x7FF
+    __mmask16 const cold_raw_m16 = _kandn_mask16(
+        is_hangul_m16, _kandn_mask16(below_0800_m16, is_bmp_m16)); // 0x800..0xFFFF, non-Hangul
     // CJK / Kana arithmetic fast-path, gated behind any-cold-lane so ASCII / Hangul windows pay nothing: the carved
     // lanes resolve to GCB=Other (descriptor 0, the zero-init value), so a pure-CJK window skips the flat-table
     // gather. Byte-identical: the flat table holds the same Other for these lanes whether or not cold residue remains.
-    __mmask16 is_cold = cold_raw;
-    if (cold_raw) is_cold = _kandn_mask16(sz_grapheme_cjk_other_icelake_(codepoints), cold_raw);
+    __mmask16 is_cold_m16 = cold_raw_m16;
+    if (cold_raw_m16) is_cold_m16 = _kandn_mask16(sz_grapheme_cjk_other_icelake_(codepoints_u32x16), cold_raw_m16);
     // `cp >= 0x110000` (e.g. the overlong `F4 90 80 80`) stays Other, matching serial.
-    __mmask16 const is_astral = _kand_mask16(_kandn_mask16(is_bmp, (__mmask16)0xFFFF),
-                                             _mm512_cmplt_epu32_mask(codepoints, _mm512_set1_epi32((int)0x110000)));
+    __mmask16 const is_astral_m16 = _kand_mask16(
+        _kandn_mask16(is_bmp_m16, (__mmask16)0xFFFF),
+        _mm512_cmplt_epu32_mask(codepoints_u32x16, _mm512_set1_epi32((int)0x110000)));
 
-    __mmask16 const bmp_non_hangul = _kandn_mask16(is_hangul, is_bmp);
-    __m512i descriptor = _mm512_setzero_si512();
-    if (is_cold) {
+    __mmask16 const bmp_non_hangul_m16 = _kandn_mask16(is_hangul_m16, is_bmp_m16);
+    __m512i descriptor_u32x16 = _mm512_setzero_si512();
+    if (is_cold_m16) {
         // A cold 3-byte lane is present: the flat gather resolves EVERY BMP lane (ASCII and 2-byte included), so a
         // mixed CJK/ASCII window pays one gather instead of the gather plus the ASCII and page fast paths.
-        descriptor = _mm512_mask_mov_epi32(descriptor, bmp_non_hangul, sz_grapheme_classify_bmp_icelake_(codepoints));
+        descriptor_u32x16 = _mm512_mask_mov_epi32(descriptor_u32x16, bmp_non_hangul_m16,
+                                                  sz_grapheme_classify_bmp_icelake_(codepoints_u32x16));
     }
     else {
-        if (is_ascii)
-            descriptor = _mm512_mask_mov_epi32(descriptor, is_ascii, sz_grapheme_ascii_descriptor_icelake_(codepoints));
-        if (is_small)
-            descriptor = _mm512_mask_mov_epi32(descriptor, is_small, sz_grapheme_small_page_icelake_(codepoints));
+        if (is_ascii_m16)
+            descriptor_u32x16 = _mm512_mask_mov_epi32(descriptor_u32x16, is_ascii_m16,
+                                                      sz_grapheme_ascii_descriptor_icelake_(codepoints_u32x16));
+        if (is_small_m16)
+            descriptor_u32x16 = _mm512_mask_mov_epi32(descriptor_u32x16, is_small_m16,
+                                                      sz_grapheme_small_page_icelake_(codepoints_u32x16));
     }
-    if (is_astral)
-        descriptor = _mm512_mask_mov_epi32(descriptor, is_astral, sz_grapheme_classify_astral16_icelake_(codepoints));
-    return _mm512_mask_blend_epi32(is_hangul, descriptor, hangul_descriptor);
+    if (is_astral_m16)
+        descriptor_u32x16 = _mm512_mask_mov_epi32(descriptor_u32x16, is_astral_m16,
+                                                  sz_grapheme_classify_astral16_icelake_(codepoints_u32x16));
+    return _mm512_mask_blend_epi32(is_hangul_m16, descriptor_u32x16, hangul_descriptor_u32x16);
 }
 
 /**
@@ -191,16 +204,17 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify16_icelake_(__m512i codepoints) {
  *          `(high << 8) | low`. Returns 16 descriptors in the low byte of each 32-bit lane.
  */
 SZ_HELPER_AUTO __m512i sz_grapheme_classify_quarter_icelake_( //
-    __m128i high_slice, __m128i low_slice, __m128i plane_slice, __m128i mid_slice, __m128i lo_slice,
-    __mmask16 astral_quarter) {
-    __m512i const codepoint_bmp = _mm512_or_si512(_mm512_slli_epi32(_mm512_cvtepu8_epi32(high_slice), 8),
-                                                  _mm512_cvtepu8_epi32(low_slice));
-    __m512i const codepoint_astral = _mm512_or_si512(
-        _mm512_or_si512(_mm512_slli_epi32(_mm512_cvtepu8_epi32(plane_slice), 16),
-                        _mm512_slli_epi32(_mm512_cvtepu8_epi32(mid_slice), 8)),
-        _mm512_cvtepu8_epi32(lo_slice));
-    __m512i const codepoint = _mm512_mask_blend_epi32(astral_quarter, codepoint_bmp, codepoint_astral);
-    return sz_grapheme_classify16_icelake_(codepoint);
+    __m128i high_slice_u8x16, __m128i low_slice_u8x16, __m128i plane_slice_u8x16, __m128i mid_slice_u8x16,
+    __m128i lo_slice_u8x16, __mmask16 astral_quarter_m16) {
+    __m512i const codepoint_bmp_u32x16 = _mm512_or_si512(_mm512_slli_epi32(_mm512_cvtepu8_epi32(high_slice_u8x16), 8),
+                                                         _mm512_cvtepu8_epi32(low_slice_u8x16));
+    __m512i const codepoint_astral_u32x16 = _mm512_or_si512(
+        _mm512_or_si512(_mm512_slli_epi32(_mm512_cvtepu8_epi32(plane_slice_u8x16), 16),
+                        _mm512_slli_epi32(_mm512_cvtepu8_epi32(mid_slice_u8x16), 8)),
+        _mm512_cvtepu8_epi32(lo_slice_u8x16));
+    __m512i const codepoint_u32x16 = _mm512_mask_blend_epi32(astral_quarter_m16, codepoint_bmp_u32x16,
+                                                             codepoint_astral_u32x16);
+    return sz_grapheme_classify16_icelake_(codepoint_u32x16);
 }
 
 /**
@@ -212,71 +226,79 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_quarter_icelake_( //
  *  as one byte per lane. No scalar per-lane loop and no spill round-trip.
  */
 SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
-    sz_utf8_rune_window_t const *decoded, __m512i next1, __m512i next2, __m512i next3) {
+    sz_utf8_rune_window_t const *decoded, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64) {
     // Astral (4-byte) lead reconstruction: plane = ((b0 & 7) << 2) | ((b1 >> 4) & 3); mid = ((b1 & F) << 4) |
     // ((b2 >> 2) & F); low = ((b2 & 3) << 6) | (b3 & 3F); codepoint = (plane << 16) | (mid << 8) | low.
-    __m512i const window = decoded->window;
+    __m512i const window_u8x64 = decoded->window;
     // The BMP `high`/`low` are reconstructed HERE from the raw lead and the (already edge-zeroed) neighbour bytes
     // `next1`/`next2`, not read from `decoded->high`/`decoded->low`. The substrate's neighbour fetch is an in-register
     // rotate that wraps the window head into a truncated trailing lead's missing continuation byte; recomputing from
     // the zeroed neighbours pads out-of-window bytes with 0, matching the serial blind decode byte-for-byte so a
     // 2-/3-byte lead at the loaded edge classifies neighbour-independently. ASCII (1-byte) lanes take the identity
     // codepoint `(0, raw byte)`; the 2-/3-byte formulas mirror `sz_grapheme_break_property_at_`.
-    __mmask64 const ascii = _mm512_cmplt_epu8_mask(window, _mm512_set1_epi8((char)0x80));
-    __mmask64 const three_byte = decoded->three_byte_starts;
+    __mmask64 const ascii_m64 = _mm512_cmplt_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0x80));
+    __mmask64 const three_byte_m64 = decoded->three_byte_starts;
     // 2-byte lead `110xxxxx`: high = ((lead & 0x1F) >> 2) & 0x07; low = ((lead & 0x03) << 6) | (next1 & 0x3F).
-    __m512i const two_high = sz_utf8_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
-    __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
-                                            _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
+    __m512i const two_high_u8x64 = sz_utf8_srl8_icelake_(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x1F)), 2,
+                                                         0x07);
+    __m512i const two_low_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x03)), 6),
+        _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F)));
     // 3-byte lead `1110xxxx`: high = ((lead & 0x0F) << 4) | ((next1 >> 2) & 0x0F); low = ((next1 & 0x03) << 6) |
     // (next2 & 0x3F).
-    __m512i const three_high = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-                                               sz_utf8_srl8_icelake_(next1, 2, 0x0F));
-    __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
-                                              _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
-    __m512i const non_ascii_high = _mm512_mask_blend_epi8(three_byte, two_high, three_high);
-    __m512i const non_ascii_low = _mm512_mask_blend_epi8(three_byte, two_low, three_low);
-    __m512i const high = _mm512_maskz_mov_epi8(_knot_mask64(ascii), non_ascii_high);
-    __m512i const low = _mm512_mask_blend_epi8(ascii, non_ascii_low, window);
-    __m512i const plane = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x07)), 2),
-                                          sz_utf8_srl8_icelake_(next1, 4, 0x03));
-    __m512i const mid_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
-                                             sz_utf8_srl8_icelake_(next2, 2, 0x0F));
-    __m512i const lo_byte = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6),
-                                            _mm512_and_si512(next3, _mm512_set1_epi8(0x3F)));
+    __m512i const three_high_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x0F)), 4),
+        sz_utf8_srl8_icelake_(next1_u8x64, 2, 0x0F));
+    __m512i const three_low_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x03)), 6),
+        _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F)));
+    __m512i const non_ascii_high_u8x64 = _mm512_mask_blend_epi8(three_byte_m64, two_high_u8x64, three_high_u8x64);
+    __m512i const non_ascii_low_u8x64 = _mm512_mask_blend_epi8(three_byte_m64, two_low_u8x64, three_low_u8x64);
+    __m512i const high_u8x64 = _mm512_maskz_mov_epi8(_knot_mask64(ascii_m64), non_ascii_high_u8x64);
+    __m512i const low_u8x64 = _mm512_mask_blend_epi8(ascii_m64, non_ascii_low_u8x64, window_u8x64);
+    __m512i const plane_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07)), 2),
+        sz_utf8_srl8_icelake_(next1_u8x64, 4, 0x03));
+    __m512i const mid_byte_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x0F)), 4),
+        sz_utf8_srl8_icelake_(next2_u8x64, 2, 0x0F));
+    __m512i const lo_byte_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x03)), 6),
+        _mm512_and_si512(next3_u8x64, _mm512_set1_epi8(0x3F)));
     sz_u64_t const four_byte = _cvtmask64_u64(decoded->four_byte_starts);
 
-    __m512i const quarter0 = sz_grapheme_classify_quarter_icelake_(
-        _mm512_extracti32x4_epi32(high, 0), _mm512_extracti32x4_epi32(low, 0), _mm512_extracti32x4_epi32(plane, 0),
-        _mm512_extracti32x4_epi32(mid_byte, 0), _mm512_extracti32x4_epi32(lo_byte, 0), (__mmask16)(four_byte & 0xFFFF));
-    __m512i const quarter1 = sz_grapheme_classify_quarter_icelake_(
-        _mm512_extracti32x4_epi32(high, 1), _mm512_extracti32x4_epi32(low, 1), _mm512_extracti32x4_epi32(plane, 1),
-        _mm512_extracti32x4_epi32(mid_byte, 1), _mm512_extracti32x4_epi32(lo_byte, 1),
-        (__mmask16)((four_byte >> 16) & 0xFFFF));
-    __m512i const quarter2 = sz_grapheme_classify_quarter_icelake_(
-        _mm512_extracti32x4_epi32(high, 2), _mm512_extracti32x4_epi32(low, 2), _mm512_extracti32x4_epi32(plane, 2),
-        _mm512_extracti32x4_epi32(mid_byte, 2), _mm512_extracti32x4_epi32(lo_byte, 2),
-        (__mmask16)((four_byte >> 32) & 0xFFFF));
-    __m512i const quarter3 = sz_grapheme_classify_quarter_icelake_(
-        _mm512_extracti32x4_epi32(high, 3), _mm512_extracti32x4_epi32(low, 3), _mm512_extracti32x4_epi32(plane, 3),
-        _mm512_extracti32x4_epi32(mid_byte, 3), _mm512_extracti32x4_epi32(lo_byte, 3),
-        (__mmask16)((four_byte >> 48) & 0xFFFF));
+    __m512i const quarter0_u32x16 = sz_grapheme_classify_quarter_icelake_(
+        _mm512_extracti32x4_epi32(high_u8x64, 0), _mm512_extracti32x4_epi32(low_u8x64, 0),
+        _mm512_extracti32x4_epi32(plane_u8x64, 0), _mm512_extracti32x4_epi32(mid_byte_u8x64, 0),
+        _mm512_extracti32x4_epi32(lo_byte_u8x64, 0), (__mmask16)(four_byte & 0xFFFF));
+    __m512i const quarter1_u32x16 = sz_grapheme_classify_quarter_icelake_(
+        _mm512_extracti32x4_epi32(high_u8x64, 1), _mm512_extracti32x4_epi32(low_u8x64, 1),
+        _mm512_extracti32x4_epi32(plane_u8x64, 1), _mm512_extracti32x4_epi32(mid_byte_u8x64, 1),
+        _mm512_extracti32x4_epi32(lo_byte_u8x64, 1), (__mmask16)((four_byte >> 16) & 0xFFFF));
+    __m512i const quarter2_u32x16 = sz_grapheme_classify_quarter_icelake_(
+        _mm512_extracti32x4_epi32(high_u8x64, 2), _mm512_extracti32x4_epi32(low_u8x64, 2),
+        _mm512_extracti32x4_epi32(plane_u8x64, 2), _mm512_extracti32x4_epi32(mid_byte_u8x64, 2),
+        _mm512_extracti32x4_epi32(lo_byte_u8x64, 2), (__mmask16)((four_byte >> 32) & 0xFFFF));
+    __m512i const quarter3_u32x16 = sz_grapheme_classify_quarter_icelake_(
+        _mm512_extracti32x4_epi32(high_u8x64, 3), _mm512_extracti32x4_epi32(low_u8x64, 3),
+        _mm512_extracti32x4_epi32(plane_u8x64, 3), _mm512_extracti32x4_epi32(mid_byte_u8x64, 3),
+        _mm512_extracti32x4_epi32(lo_byte_u8x64, 3), (__mmask16)((four_byte >> 48) & 0xFFFF));
 
     // Re-pack the four 16-lane descriptor quarters (each in the low byte of its 32-bit lanes) into one byte/lane.
-    __m512i const packed01 = _mm512_packus_epi32(_mm512_and_si512(quarter0, _mm512_set1_epi32(0xFF)),
-                                                 _mm512_and_si512(quarter1, _mm512_set1_epi32(0xFF)));
-    __m512i const packed23 = _mm512_packus_epi32(_mm512_and_si512(quarter2, _mm512_set1_epi32(0xFF)),
-                                                 _mm512_and_si512(quarter3, _mm512_set1_epi32(0xFF)));
-    __m512i const packed = _mm512_packus_epi16(packed01, packed23);
+    __m512i const packed01_u16x32 = _mm512_packus_epi32(_mm512_and_si512(quarter0_u32x16, _mm512_set1_epi32(0xFF)),
+                                                        _mm512_and_si512(quarter1_u32x16, _mm512_set1_epi32(0xFF)));
+    __m512i const packed23_u16x32 = _mm512_packus_epi32(_mm512_and_si512(quarter2_u32x16, _mm512_set1_epi32(0xFF)),
+                                                        _mm512_and_si512(quarter3_u32x16, _mm512_set1_epi32(0xFF)));
+    __m512i const packed_u8x64 = _mm512_packus_epi16(packed01_u16x32, packed23_u16x32);
     // `vpackus` interleaves the four 128-bit lanes as {q0a,q1a,q2a,q3a, q0b,...}; restore ascending lane order.
-    __m512i const restore = _mm512_setr_epi32(0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
-    __m512i const descriptors = _mm512_permutexvar_epi32(restore, packed);
+    __m512i const restore_u32x16 = _mm512_setr_epi32(0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+    __m512i const descriptors_u8x64 = _mm512_permutexvar_epi32(restore_u32x16, packed_u8x64);
     // `0xF8..0xFF` begin no valid UTF-8 sequence and match no lead-length mask, so the 2-byte fold above read a
     // wrapped neighbour and classified them by a junk value (neighbour-dependent at the 64-byte window edge). Force
     // those start lanes to the Other descriptor (U+FFFD substitution) so they classify neighbour-independently,
     // identically to the serial backend. One masked compare, no scalar walk.
-    __mmask64 const invalid_lead = _mm512_cmpge_epu8_mask(window, _mm512_set1_epi8((char)0xF8));
-    return _mm512_maskz_mov_epi8(_knot_mask64(invalid_lead), descriptors);
+    __mmask64 const invalid_lead_m64 = _mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF8));
+    return _mm512_maskz_mov_epi8(_knot_mask64(invalid_lead_m64), descriptors_u8x64);
 }
 
 #pragma endregion Grapheme_Cluster_Break classifier
@@ -291,21 +313,25 @@ SZ_HELPER_AUTO __m512i sz_grapheme_classify_window_icelake_( //
  *  @brief  Reduce the codepoint-dense packed descriptor bytes (in a ZMM) into per-class membership masks for the
  *          rule algebra. One `vpcmpeqb`/`kmov` per grapheme class plus the InCB / Extended_Pictographic bit tests.
  */
-SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_icelake_(__m512i descriptors, sz_u64_t valid) {
+SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_icelake_(__m512i descriptors_u8x64,
+                                                                             sz_u64_t valid) {
     sz_grapheme_window_masks_t masks;
-    __m512i const class_field = _mm512_and_si512(descriptors, _mm512_set1_epi8(0x0F));
+    __m512i const class_field_u8x64 = _mm512_and_si512(descriptors_u8x64, _mm512_set1_epi8(0x0F));
     for (int class_index = 0; class_index < 14; ++class_index)
         masks.class_bit[class_index] =
-            _cvtmask64_u64(_mm512_cmpeq_epi8_mask(class_field, _mm512_set1_epi8((char)class_index))) & valid;
-    masks.extended_pictographic = _cvtmask64_u64(_mm512_test_epi8_mask(descriptors, _mm512_set1_epi8(0x40))) & valid;
-    __m512i const incb_field = _mm512_and_si512(_mm512_srli_epi16(descriptors, 4), _mm512_set1_epi8(0x03));
+            _cvtmask64_u64(_mm512_cmpeq_epi8_mask(class_field_u8x64, _mm512_set1_epi8((char)class_index))) & valid;
+    masks.extended_pictographic = _cvtmask64_u64(_mm512_test_epi8_mask(descriptors_u8x64, _mm512_set1_epi8(0x40))) &
+                                  valid;
+    __m512i const incb_field_u8x64 = _mm512_and_si512(_mm512_srli_epi16(descriptors_u8x64, 4), _mm512_set1_epi8(0x03));
     masks.indic_consonant = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(
-                                incb_field, _mm512_set1_epi8((char)sz_grapheme_incb_consonant_k))) &
+                                incb_field_u8x64, _mm512_set1_epi8((char)sz_grapheme_incb_consonant_k))) &
                             valid;
-    masks.indic_extend =
-        _cvtmask64_u64(_mm512_cmpeq_epi8_mask(incb_field, _mm512_set1_epi8((char)sz_grapheme_incb_extend_k))) & valid;
-    masks.indic_linker =
-        _cvtmask64_u64(_mm512_cmpeq_epi8_mask(incb_field, _mm512_set1_epi8((char)sz_grapheme_incb_linker_k))) & valid;
+    masks.indic_extend = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(incb_field_u8x64,
+                                                               _mm512_set1_epi8((char)sz_grapheme_incb_extend_k))) &
+                         valid;
+    masks.indic_linker = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(incb_field_u8x64,
+                                                               _mm512_set1_epi8((char)sz_grapheme_incb_linker_k))) &
+                         valid;
     return masks;
 }
 
@@ -314,10 +340,10 @@ SZ_HELPER_INLINE sz_grapheme_window_masks_t sz_grapheme_build_masks_icelake_(__m
  *          i. Builds the per-class masks in-register (the only `__m512i`->`sz_u64_t` contact), then delegates every
  *          GB1-GB13 decision to the shared portable @ref sz_grapheme_window_boundaries_ engine.
  */
-SZ_HELPER_AUTO sz_u64_t sz_grapheme_window_boundaries_icelake_(__m512i descriptors, int codepoint_count,
+SZ_HELPER_AUTO sz_u64_t sz_grapheme_window_boundaries_icelake_(__m512i descriptors_u8x64, int codepoint_count,
                                                                sz_grapheme_carry_t *carry) {
     sz_u64_t const valid = (codepoint_count >= 64) ? ~0ull : ((1ull << codepoint_count) - 1);
-    sz_grapheme_window_masks_t const window = sz_grapheme_build_masks_icelake_(descriptors, valid);
+    sz_grapheme_window_masks_t const window = sz_grapheme_build_masks_icelake_(descriptors_u8x64, valid);
     return sz_grapheme_window_boundaries_(&window, codepoint_count, valid, carry);
 }
 
@@ -345,10 +371,10 @@ typedef struct sz_grapheme_window_t {
  *          window so cross-window runs stay exact. Pure register dataflow: one decode, one classify, one compress.
  */
 SZ_HELPER_AUTO sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( //
-    sz_u8_t const *text, sz_size_t length, sz_size_t base, __m512i lane_identity, sz_grapheme_carry_t *carry) {
+    sz_u8_t const *text, sz_size_t length, sz_size_t base, __m512i lane_identity_u8x64, sz_grapheme_carry_t *carry) {
 
     sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text + base, length - base,
-                                                                              lane_identity);
+                                                                              lane_identity_u8x64);
     sz_size_t const loaded = decoded.loaded;
     sz_u64_t start_lanes = _cvtmask64_u64(decoded.codepoint_starts);
 
@@ -378,25 +404,26 @@ SZ_HELPER_AUTO sz_grapheme_window_t sz_grapheme_classify_window_full_icelake_( /
     // are the top one or two truncated leads, which the effective-window trim already deferred to the next window where
     // their real continuation bytes live; zeroing them here is inert. No scalar walk, one masked move per neighbour.
     sz_u64_t const in_window = _cvtmask64_u64(sz_u64_mask_until_(loaded));
-    __mmask64 const next1_present = _cvtu64_mask64(in_window >> 1);
-    __mmask64 const next2_present = _cvtu64_mask64(in_window >> 2);
-    __mmask64 const next3_present = _cvtu64_mask64(in_window >> 3);
-    __m512i const next1 = _mm512_maskz_permutexvar_epi8(
-        next1_present, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), decoded.window);
-    __m512i const next2 = _mm512_maskz_permutexvar_epi8(
-        next2_present, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), decoded.window);
-    __m512i const next3 = _mm512_maskz_permutexvar_epi8(
-        next3_present, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)), decoded.window);
-    __m512i const descriptors_per_lane = sz_grapheme_classify_window_icelake_(&decoded, next1, next2, next3);
+    __mmask64 const next1_present_m64 = _cvtu64_mask64(in_window >> 1);
+    __mmask64 const next2_present_m64 = _cvtu64_mask64(in_window >> 2);
+    __mmask64 const next3_present_m64 = _cvtu64_mask64(in_window >> 3);
+    __m512i const next1_u8x64 = _mm512_maskz_permutexvar_epi8(
+        next1_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), decoded.window);
+    __m512i const next2_u8x64 = _mm512_maskz_permutexvar_epi8(
+        next2_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)), decoded.window);
+    __m512i const next3_u8x64 = _mm512_maskz_permutexvar_epi8(
+        next3_present_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(3)), decoded.window);
+    __m512i const descriptors_per_lane_u8x64 = sz_grapheme_classify_window_icelake_(&decoded, next1_u8x64, next2_u8x64,
+                                                                                    next3_u8x64);
 
     // Compact the per-lane descriptors at codepoint-start lanes into the dense codepoint domain (one `vpcompressb`)
     // so the rule algebra runs on adjacent codepoints with no continuation-byte gaps.
-    __mmask64 const start_mask = _cvtu64_mask64(start_lanes);
+    __mmask64 const start_mask_m64 = _cvtu64_mask64(start_lanes);
     sz_grapheme_window_t result;
     result.codepoint_count = (sz_size_t)_mm_popcnt_u64(start_lanes);
     result.byte_span = byte_span;
-    __m512i const dense_descriptors = _mm512_maskz_compress_epi8(start_mask, descriptors_per_lane);
-    sz_u64_t const dense_boundary = sz_grapheme_window_boundaries_icelake_(dense_descriptors,
+    __m512i const dense_descriptors_u8x64 = _mm512_maskz_compress_epi8(start_mask_m64, descriptors_per_lane_u8x64);
+    sz_u64_t const dense_boundary = sz_grapheme_window_boundaries_icelake_(dense_descriptors_u8x64,
                                                                            (int)result.codepoint_count, carry);
     // Scatter the dense boundary bits back to their codepoint-start byte lanes: `_pdep_u64` deposits the j-th dense
     // bit into the j-th set bit of `start_lanes`, recovering the byte-domain boundary mask the drains consume.
@@ -419,7 +446,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_icelake(       //
         return 0;
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
+    __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
 
     sz_grapheme_carry_t carry = sz_grapheme_carry_empty_();
     sz_size_t cluster_start = 0;
@@ -427,14 +454,14 @@ SZ_API_COMPTIME sz_size_t sz_utf8_graphemes_icelake(       //
 
     while (base < length) {
         sz_grapheme_window_t const window = sz_grapheme_classify_window_full_icelake_(text_u8, length, base,
-                                                                                      lane_identity, &carry);
+                                                                                      lane_identity_u8x64, &carry);
         if (window.codepoint_count == 0) break; // defensive: no resolvable start (cannot happen for valid input)
 
         // The GB1 anchor at byte 0 of the first window is the open cluster's own start, not a new break: clear it so
         // the substrate drain (which has no zero-length-cluster guard) never emits an empty leading cluster.
         sz_u64_t boundary = base == 0 ? (window.boundary & ~1ull) : window.boundary;
-        clusters = sz_utf8_rune_drain_forward_(boundary, base, lane_identity, cluster_starts, cluster_lengths, clusters,
-                                               clusters_capacity, &cluster_start);
+        clusters = sz_utf8_rune_drain_forward_(boundary, base, lane_identity_u8x64, cluster_starts, cluster_lengths,
+                                               clusters, clusters_capacity, &cluster_start);
         if (clusters == clusters_capacity) {
             if (bytes_consumed) *bytes_consumed = cluster_start;
             return clusters;

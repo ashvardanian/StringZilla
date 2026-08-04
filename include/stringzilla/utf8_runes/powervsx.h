@@ -62,11 +62,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t lengt
  *  byte → bit 0) via `vec_vbpermq`, identical to `sz_utf8_movemask_powervsx_` below but reachable before its
  *  first user (`sz_utf8_seek_powervsx` and the multistep iterators); distinctly named so both coexist in
  *  one translation unit. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char compared) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_iterate_movemask_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
-        compared, gather_indices_u8x16);
+        boolean_lanes_u8x16, gather_indices_u8x16);
 #if SZ_IS_BIG_ENDIAN_
     return (sz_u32_t)(gathered_mask_u64x2[0] & 0xFFFFull);
 #else
@@ -375,40 +375,41 @@ static sz_u8_t const sz_utf8_compress8_powervsx_[256][8] = {{255, 255, 255, 255,
                                                             {1, 2, 3, 4, 5, 6, 7, 255},
                                                             {0, 1, 2, 3, 4, 5, 6, 7}};
 
-/** @brief  Reduce the 16 byte-lane booleans (0x00/0xFF) of @p compared into a 16-bit lane mask (bit `i` <=> lane `i`,
- *          lowest-addressed byte → bit 0), the VSX `vpmovmskb` via `vec_vbpermq`. Mirror of
+/** @brief  Reduce the 16 byte-lane booleans (0x00/0xFF) of @p boolean_lanes_u8x16 into a 16-bit lane mask
+ *          (bit `i` <=> lane `i`, lowest-addressed byte → bit 0), the VSX `vpmovmskb` via `vec_vbpermq`. Mirror of
  *          @ref sz_utf8_iterate_movemask_powervsx_ but kept local to the decode path for clarity at the call sites. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char compared) {
+SZ_HELPER_INLINE sz_u32_t sz_utf8_movemask16_powervsx_(__vector unsigned char boolean_lanes_u8x16) {
     __vector unsigned char const gather_indices_u8x16 = {120, 112, 104, 96, 88, 80, 72, 64,
                                                          56,  48,  40,  32, 24, 16, 8,  0};
     __vector unsigned long long const gathered_mask_u64x2 = (__vector unsigned long long)vec_vbpermq(
-        compared, gather_indices_u8x16);
+        boolean_lanes_u8x16, gather_indices_u8x16);
     return (sz_u32_t)(gathered_mask_u64x2[1] & 0xFFFFull);
 }
 
-/** @brief  Combine the four per-register VSX movemasks of @p booleans into one 64-bit lane mask: register `r` → bits
- *          [16*r, 16*r+16). The VSX twin of the NEON `mask_combine` and the Ice Lake native `__mmask64`. */
+/** @brief  Combine the four per-register VSX movemasks of @p booleans_u8x16 into one 64-bit lane mask: register `r` →
+ *          bits [16*r, 16*r+16). The VSX twin of the NEON `mask_combine` and the Ice Lake native `__mmask64`. */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_powervsx_( //
-    __vector unsigned char const *booleans) {
-    sz_u64_t mask = (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[0]);
-    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[1]) << 16;
-    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[2]) << 32;
-    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans[3]) << 48;
+    __vector unsigned char const *booleans_u8x16) {
+    sz_u64_t mask = (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[0]);
+    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[1]) << 16;
+    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[2]) << 32;
+    mask |= (sz_u64_t)sz_utf8_movemask16_powervsx_(booleans_u8x16[3]) << 48;
     return mask;
 }
 
-/** @brief  Gather 16 bytes from the 64-byte window held in @p regs at the byte offsets @p index (lanes in [0,64)),
- *          gather-free. VSX `vec_perm` addresses only a 32-byte register pair, so the low half `(regs[0],regs[1])`
- *          and high half `(regs[2],regs[3])` are each permuted and the per-lane `index >= 32` predicate selects the
- *          half. Lanes whose offset runs past the window read the zero padding (the value is discarded downstream). */
+/** @brief  Gather 16 bytes from the 64-byte window held in @p regs_u8x16 at the byte offsets @p index_u8x16 (lanes
+ *          in [0,64)), gather-free. VSX `vec_perm` addresses only a 32-byte register pair, so the low half
+ *          `(regs_u8x16[0],regs_u8x16[1])` and high half `(regs_u8x16[2],regs_u8x16[3])` are each permuted and the
+ *          per-lane `index_u8x16 >= 32` predicate selects the half. Lanes whose offset runs past the window read
+ *          the zero padding (the value is discarded downstream). */
 SZ_HELPER_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
-    __vector unsigned char const *regs, __vector unsigned char index) {
+    __vector unsigned char const *regs_u8x16, __vector unsigned char index_u8x16) {
     __vector unsigned char const half_select_threshold_u8x16 = vec_splats((unsigned char)32);
-    __vector unsigned char const gathered_low_u8x16 = vec_perm(regs[0], regs[1], index);
-    __vector unsigned char const gathered_high_u8x16 = vec_perm(regs[2], regs[3],
-                                                                vec_sub(index, half_select_threshold_u8x16));
-    __vector bool char const select_high_mask = vec_cmpge(index, half_select_threshold_u8x16);
-    return vec_sel(gathered_low_u8x16, gathered_high_u8x16, select_high_mask);
+    __vector unsigned char const gathered_low_u8x16 = vec_perm(regs_u8x16[0], regs_u8x16[1], index_u8x16);
+    __vector unsigned char const gathered_high_u8x16 = vec_perm(regs_u8x16[2], regs_u8x16[3],
+                                                                vec_sub(index_u8x16, half_select_threshold_u8x16));
+    __vector bool char const select_high_mask_u8x16 = vec_cmpge(index_u8x16, half_select_threshold_u8x16);
+    return vec_sel(gathered_low_u8x16, gathered_high_u8x16, select_high_mask_u8x16);
 }
 
 /**
@@ -446,8 +447,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_compress_starts_powervsx_( //
 }
 
 /**
- *  @brief  Decode the emitted start lanes @p emit_starts of a classified 64-byte window (held in the four @p regs
- *          16-byte registers) into sequential UTF-32 runes, the VSX sibling of
+ *  @brief  Decode the emitted start lanes @p emit_starts of a classified 64-byte window (held in the four
+ *          @p regs_u8x16 16-byte registers) into sequential UTF-32 runes, the VSX sibling of
  *          @ref sz_utf8_rune_drain_icelake_. The start byte-offsets are
  *          left-packed by the shuffle-LUT, then a single 16-lane-block loop gathers the lead + up to three trailing
  *          bytes via @ref sz_utf8_gather16_powervsx_ and width-blends each codepoint; the wider 3rd/4th trailing
@@ -458,7 +459,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_compress_starts_powervsx_( //
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_powervsx_( //
-    __vector unsigned char const *regs, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length,
+    __vector unsigned char const *regs_u8x16, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length,
     int has_three, int has_four, sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity,
     sz_size_t *consumed_bytes) {
 
@@ -482,14 +483,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_powervsx_( //
             index_lanes_vec.u8s[lane] = source < want ? packed_offsets_vec.u8s[source] : (sz_u8_t)0xFF;
         }
         __vector unsigned char const gather_index_u8x16 = index_lanes_vec.vsx_u8;
-        __vector unsigned char const lead_byte_u8x16 = sz_utf8_gather16_powervsx_(regs, gather_index_u8x16);
+        __vector unsigned char const lead_byte_u8x16 = sz_utf8_gather16_powervsx_(regs_u8x16, gather_index_u8x16);
         __vector unsigned char const continuation_byte_1_u8x16 = sz_utf8_gather16_powervsx_(
-            regs, vec_add(gather_index_u8x16, one_byte_u8x16));
+            regs_u8x16, vec_add(gather_index_u8x16, one_byte_u8x16));
         __vector unsigned char const continuation_byte_2_u8x16 =
-            has_three ? sz_utf8_gather16_powervsx_(regs, vec_add(gather_index_u8x16, two_byte_u8x16))
+            has_three ? sz_utf8_gather16_powervsx_(regs_u8x16, vec_add(gather_index_u8x16, two_byte_u8x16))
                       : vec_splats((unsigned char)0);
         __vector unsigned char const continuation_byte_3_u8x16 =
-            has_four ? sz_utf8_gather16_powervsx_(regs, vec_add(gather_index_u8x16, three_byte_u8x16))
+            has_four ? sz_utf8_gather16_powervsx_(regs_u8x16, vec_add(gather_index_u8x16, three_byte_u8x16))
                      : vec_splats((unsigned char)0);
 
         // Widen each of the 16 byte lanes to a 32-bit codepoint lane and width-blend (1/2/3/4-byte) branchlessly.
@@ -796,16 +797,17 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_powervsx_( //
                                                                               : input_register_u8x16[3];
             __vector unsigned char const next_byte_u8x16 = vec_perm(register_value_u8x16, successor_register_u8x16,
                                                                     successor_iota_u8x16);
-            __vector bool char const length_2_mask = vec_cmpeq(sequence_length_per_register_u8x16[reg],
-                                                               vec_splats((unsigned char)2));
-            __vector bool char const length_4_mask = vec_cmpeq(sequence_length_per_register_u8x16[reg],
-                                                               vec_splats((unsigned char)4));
+            __vector bool char const length_2_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                                     vec_splats((unsigned char)2));
+            __vector bool char const length_4_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                                     vec_splats((unsigned char)4));
             __vector unsigned char const lead_lt_c2_mask_u8x16 = (__vector unsigned char)vec_cmplt(register_value_u8x16,
                                                                                                    byte_c2_u8x16);
             __vector unsigned char const lead_gt_f4_mask_u8x16 = (__vector unsigned char)vec_cmpgt(register_value_u8x16,
                                                                                                    byte_f4_u8x16);
-            bad_lead_mask_u8x16[reg] = vec_or(vec_and((__vector unsigned char)length_2_mask, lead_lt_c2_mask_u8x16),
-                                              vec_and((__vector unsigned char)length_4_mask, lead_gt_f4_mask_u8x16));
+            bad_lead_mask_u8x16[reg] = vec_or(
+                vec_and((__vector unsigned char)length_2_mask_u8x16, lead_lt_c2_mask_u8x16),
+                vec_and((__vector unsigned char)length_4_mask_u8x16, lead_gt_f4_mask_u8x16));
             __vector unsigned char const e0_bad_mask_u8x16 = vec_and(
                 (__vector unsigned char)vec_cmpeq(register_value_u8x16, byte_e0_u8x16),
                 (__vector unsigned char)vec_cmplt(next_byte_u8x16, byte_a0_u8x16));
@@ -910,21 +912,22 @@ SZ_HELPER_INLINE __vector unsigned char sz_utf8_srl8_powervsx_(__vector unsigned
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero, staged through a zeroed
  *          `sz_u512_vec_t` byte buffer so no read runs past `text + loaded` (the sanctioned union tail idiom).
  *          Mirrors @ref sz_utf8_load_window_neon_. */
-SZ_HELPER_AUTO void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size_t loaded, __vector unsigned char *out) {
+SZ_HELPER_AUTO void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size_t loaded,
+                                                  __vector unsigned char *out_u8x16) {
     if (loaded >= 64) {
-        out[0] = vec_xl(0, text + 0);
-        out[1] = vec_xl(0, text + 16);
-        out[2] = vec_xl(0, text + 32);
-        out[3] = vec_xl(0, text + 48);
+        out_u8x16[0] = vec_xl(0, text + 0);
+        out_u8x16[1] = vec_xl(0, text + 16);
+        out_u8x16[2] = vec_xl(0, text + 32);
+        out_u8x16[3] = vec_xl(0, text + 48);
         return;
     }
     sz_u512_vec_t window_vec;
     for (sz_size_t index = 0; index < 64; ++index) window_vec.u8s[index] = 0;
     for (sz_size_t index = 0; index < loaded; ++index) window_vec.u8s[index] = text[index];
-    out[0] = vec_xl(0, window_vec.u8s + 0);
-    out[1] = vec_xl(0, window_vec.u8s + 16);
-    out[2] = vec_xl(0, window_vec.u8s + 32);
-    out[3] = vec_xl(0, window_vec.u8s + 48);
+    out_u8x16[0] = vec_xl(0, window_vec.u8s + 0);
+    out_u8x16[1] = vec_xl(0, window_vec.u8s + 16);
+    out_u8x16[2] = vec_xl(0, window_vec.u8s + 32);
+    out_u8x16[3] = vec_xl(0, window_vec.u8s + 48);
 }
 
 /** @brief  Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]`, `next3[i] = window[i+3]` over all
@@ -933,17 +936,17 @@ SZ_HELPER_AUTO void sz_utf8_load_window_powervsx_(sz_u8_t const *text, sz_size_t
  *          `{window[r], window[(r+1)&3]}`, indexed by `{k, k+1, ..., k+15}` (index `>= 16` reads the successor).
  *          Requires the zero-padded window so wrapped lanes past `loaded` are deterministic zeros. */
 SZ_HELPER_AUTO void sz_utf8_forward_neighbours_powervsx_( //
-    __vector unsigned char const *window, __vector unsigned char *next1, __vector unsigned char *next2,
-    __vector unsigned char *next3) {
+    __vector unsigned char const *window_u8x16, __vector unsigned char *next1_u8x16,
+    __vector unsigned char *next2_u8x16, __vector unsigned char *next3_u8x16) {
     __vector unsigned char const index_next1_u8x16 = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     __vector unsigned char const index_next2_u8x16 = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17};
     __vector unsigned char const index_next3_u8x16 = {3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18};
     for (int quarter = 0; quarter < 4; ++quarter) {
-        __vector unsigned char const here_u8x16 = window[quarter];
-        __vector unsigned char const successor_u8x16 = window[(quarter + 1) & 3];
-        next1[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next1_u8x16);
-        next2[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next2_u8x16);
-        next3[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next3_u8x16);
+        __vector unsigned char const here_u8x16 = window_u8x16[quarter];
+        __vector unsigned char const successor_u8x16 = window_u8x16[(quarter + 1) & 3];
+        next1_u8x16[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next1_u8x16);
+        next2_u8x16[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next2_u8x16);
+        next3_u8x16[quarter] = vec_perm(here_u8x16, successor_u8x16, index_next3_u8x16);
     }
 }
 

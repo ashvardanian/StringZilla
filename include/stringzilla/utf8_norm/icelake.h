@@ -36,13 +36,13 @@ extern "C" {
 #endif
 
 /** @brief 64-entry lead lookup in one `vpermb` (AVX-512 VBMI), reading the shared LUT verbatim. */
-SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes, __mmask64 is_lead,
+SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_vbmi_icelake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
                                                                       sz_u8_t form_flag) {
-    __m512i index = _mm512_and_si512(bytes, _mm512_set1_epi8(0x3F));
-    __m512i table = _mm512_loadu_si512((void const *)sz_utf8_norm_lead_lut_);
-    __m512i families = _mm512_permutexvar_epi8(index, table);
-    __mmask64 has_flag = _mm512_test_epi8_mask(families, _mm512_set1_epi8((char)form_flag));
-    return is_lead & has_flag;
+    __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
+    __m512i table_u8x64 = _mm512_loadu_si512((void const *)sz_utf8_norm_lead_lut_);
+    __m512i families_u8x64 = _mm512_permutexvar_epi8(index_u8x64, table_u8x64);
+    __mmask64 has_flag_m64 = _mm512_test_epi8_mask(families_u8x64, _mm512_set1_epi8((char)form_flag));
+    return is_lead_m64 & has_flag_m64;
 }
 
 /** @brief Scan primitive (Ice Lake): the Skylake skeleton with the single-`vpermb` lead classifier. */

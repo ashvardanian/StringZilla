@@ -38,14 +38,15 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
         if (blocks > 128) blocks = 128;
         length -= blocks * 16;
         for (sz_size_t block_index = 0; block_index < blocks; ++block_index, text += 16) {
-            v128_t vec = wasm_v128_load(text);
+            v128_t vec_u8x16 = wasm_v128_load(text);
             // 16x u8 -> 8x u16 pairwise sums, accumulated in-lane (associative, no reduction).
-            sum16_vec.v128 = wasm_i16x8_add(sum16_vec.v128, wasm_u16x8_extadd_pairwise_u8x16(vec));
+            sum16_vec.v128 = wasm_i16x8_add(sum16_vec.v128, wasm_u16x8_extadd_pairwise_u8x16(vec_u8x16));
         }
         // Flush: widen the 8x u16 partials to 4x u32, then to 2x u64, and fold into `sum64`.
-        v128_t pair32 = wasm_u32x4_extadd_pairwise_u16x8(sum16_vec.v128);
+        v128_t pair32_u32x4 = wasm_u32x4_extadd_pairwise_u16x8(sum16_vec.v128);
         sum64_vec.v128 = wasm_i64x2_add( //
-            sum64_vec.v128, wasm_i64x2_add(wasm_u64x2_extend_low_u32x4(pair32), wasm_u64x2_extend_high_u32x4(pair32)));
+            sum64_vec.v128,
+            wasm_i64x2_add(wasm_u64x2_extend_low_u32x4(pair32_u32x4), wasm_u64x2_extend_high_u32x4(pair32_u32x4)));
         sum16_vec.v128 = wasm_u64x2_splat(0);
     }
 
@@ -55,33 +56,35 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length) {
 }
 
 /** @brief Evaluate a GF(2)-linear byte map `x -> low_table[x&0xF] ^ high_table[x>>4]` across all 16 lanes. */
-SZ_HELPER_INLINE v128_t sz_aes_linear_v128_(v128_t low_table, v128_t high_table, v128_t x) {
-    v128_t low_nibbles = wasm_v128_and(x, wasm_i8x16_splat((sz_i8_t)0x0F));
-    v128_t high_nibbles = wasm_u8x16_shr(x, 4);
-    return wasm_v128_xor(wasm_i8x16_swizzle(low_table, low_nibbles), wasm_i8x16_swizzle(high_table, high_nibbles));
+SZ_HELPER_INLINE v128_t sz_aes_linear_v128_(v128_t low_table_u8x16, v128_t high_table_u8x16, v128_t x_u8x16) {
+    v128_t low_nibbles_u8x16 = wasm_v128_and(x_u8x16, wasm_i8x16_splat((sz_i8_t)0x0F));
+    v128_t high_nibbles_u8x16 = wasm_u8x16_shr(x_u8x16, 4);
+    return wasm_v128_xor(wasm_i8x16_swizzle(low_table_u8x16, low_nibbles_u8x16),
+                         wasm_i8x16_swizzle(high_table_u8x16, high_nibbles_u8x16));
 }
 
 /** @brief GF(2^4) (modulus `x^4+x+1`) lane-wise multiply via log/antilog swizzles with zero masking. */
-SZ_HELPER_AUTO v128_t sz_aes_gf4_mul_v128_(v128_t a, v128_t b) {
+SZ_HELPER_AUTO v128_t sz_aes_gf4_mul_v128_(v128_t a_u8x16, v128_t b_u8x16) {
     static sz_align_(16) sz_u8_t const log_table[16] = {0x00, 0x00, 0x01, 0x04, 0x02, 0x08, 0x05, 0x0a,
                                                         0x03, 0x0e, 0x09, 0x07, 0x06, 0x0d, 0x0b, 0x0c};
     static sz_align_(16) sz_u8_t const exp_lo_table[16] = {0x01, 0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b,
                                                            0x05, 0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x01};
     static sz_align_(16) sz_u8_t const exp_hi_table[16] = {0x02, 0x04, 0x08, 0x03, 0x06, 0x0c, 0x0b, 0x05,
                                                            0x0a, 0x07, 0x0e, 0x0f, 0x0d, 0x09, 0x00, 0x00};
-    v128_t log_vec = wasm_v128_load(log_table);
-    v128_t exp_lo_vec = wasm_v128_load(exp_lo_table);
-    v128_t exp_hi_vec = wasm_v128_load(exp_hi_table);
-    v128_t zero = wasm_i8x16_splat(0);
+    v128_t log_u8x16 = wasm_v128_load(log_table);
+    v128_t exp_lo_u8x16 = wasm_v128_load(exp_lo_table);
+    v128_t exp_hi_u8x16 = wasm_v128_load(exp_hi_table);
+    v128_t zero_u8x16 = wasm_i8x16_splat(0);
 
     // `sum = log[a] + log[b]` ranges over 0..28; the low antilog swizzle covers 0..15 (others -> 0),
     // and the high antilog swizzle is fed `sum - 16` so it covers 16..28 (others wrap >= 16 -> 0).
-    v128_t sum = wasm_i8x16_add(wasm_i8x16_swizzle(log_vec, a), wasm_i8x16_swizzle(log_vec, b));
-    v128_t product = wasm_v128_xor(wasm_i8x16_swizzle(exp_lo_vec, sum),
-                                   wasm_i8x16_swizzle(exp_hi_vec, wasm_i8x16_sub(sum, wasm_i8x16_splat(16))));
+    v128_t sum_u8x16 = wasm_i8x16_add(wasm_i8x16_swizzle(log_u8x16, a_u8x16), wasm_i8x16_swizzle(log_u8x16, b_u8x16));
+    v128_t product_u8x16 = wasm_v128_xor(
+        wasm_i8x16_swizzle(exp_lo_u8x16, sum_u8x16),
+        wasm_i8x16_swizzle(exp_hi_u8x16, wasm_i8x16_sub(sum_u8x16, wasm_i8x16_splat(16))));
     // Force a zero result wherever either operand was zero (`log[0]` is otherwise indistinguishable).
-    v128_t any_zero = wasm_v128_or(wasm_i8x16_eq(a, zero), wasm_i8x16_eq(b, zero));
-    return wasm_v128_andnot(product, any_zero);
+    v128_t any_zero_u8x16 = wasm_v128_or(wasm_i8x16_eq(a_u8x16, zero_u8x16), wasm_i8x16_eq(b_u8x16, zero_u8x16));
+    return wasm_v128_andnot(product_u8x16, any_zero_u8x16);
 }
 
 /**
@@ -116,56 +119,58 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_v128_(sz_u128_vec_t state_vec, sz
     static sz_align_(16) sz_u8_t const next_col[16] = {0x01, 0x02, 0x03, 0x00, 0x05, 0x06, 0x07, 0x04,
                                                        0x09, 0x0a, 0x0b, 0x08, 0x0d, 0x0e, 0x0f, 0x0c};
 
-    v128_t state = state_vec.v128;
-    v128_t low_nibble_mask = wasm_i8x16_splat((sz_i8_t)0x0F);
+    v128_t state_u8x16 = state_vec.v128;
+    v128_t low_nibble_mask_u8x16 = wasm_i8x16_splat((sz_i8_t)0x0F);
 
     // SubBytes: inverse in GF(2^8) via the tower field, then the AES affine map.
-    v128_t mapped = sz_aes_linear_v128_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state);
-    v128_t high_nibble = wasm_u8x16_shr(mapped, 4);             // high nibble = `a_hi`
-    v128_t low_nibble = wasm_v128_and(mapped, low_nibble_mask); // low nibble  = `a_lo`
+    v128_t mapped_u8x16 = sz_aes_linear_v128_(wasm_v128_load(fwd_lo), wasm_v128_load(fwd_hi), state_u8x16);
+    v128_t high_nibble_u8x16 = wasm_u8x16_shr(mapped_u8x16, 4);                   // high nibble = `a_hi`
+    v128_t low_nibble_u8x16 = wasm_v128_and(mapped_u8x16, low_nibble_mask_u8x16); // low nibble  = `a_lo`
 
     // d = a_hi^2 * N  ^  a_hi * a_lo  ^  a_lo^2   (all in GF(2^4))
-    v128_t high_sqr_n = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), high_nibble);
-    v128_t high_low_product = sz_aes_gf4_mul_v128_(high_nibble, low_nibble);
-    v128_t low_sqr = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), low_nibble);
-    v128_t d = wasm_v128_xor(wasm_v128_xor(high_sqr_n, high_low_product), low_sqr);
-    v128_t d_inv = wasm_i8x16_swizzle(wasm_v128_load(gf4_inv), d);
+    v128_t high_sqr_n_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr_n), high_nibble_u8x16);
+    v128_t high_low_product_u8x16 = sz_aes_gf4_mul_v128_(high_nibble_u8x16, low_nibble_u8x16);
+    v128_t low_sqr_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(gf4_sqr), low_nibble_u8x16);
+    v128_t d_u8x16 = wasm_v128_xor(wasm_v128_xor(high_sqr_n_u8x16, high_low_product_u8x16), low_sqr_u8x16);
+    v128_t d_inv_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(gf4_inv), d_u8x16);
 
-    v128_t high_inverse = sz_aes_gf4_mul_v128_(high_nibble, d_inv);
-    v128_t low_inverse = sz_aes_gf4_mul_v128_(wasm_v128_xor(high_nibble, low_nibble), d_inv);
-    v128_t inverted = wasm_v128_or(wasm_i8x16_shl(high_inverse, 4), low_inverse); // recombine nibbles into the byte
+    v128_t high_inverse_u8x16 = sz_aes_gf4_mul_v128_(high_nibble_u8x16, d_inv_u8x16);
+    v128_t low_inverse_u8x16 = sz_aes_gf4_mul_v128_(wasm_v128_xor(high_nibble_u8x16, low_nibble_u8x16), d_inv_u8x16);
+    v128_t inverted_u8x16 = wasm_v128_or(wasm_i8x16_shl(high_inverse_u8x16, 4),
+                                         low_inverse_u8x16); // recombine nibbles into the byte
 
-    v128_t back = sz_aes_linear_v128_(wasm_v128_load(inv_lo), wasm_v128_load(inv_hi), inverted);
-    v128_t subbed = sz_aes_linear_v128_(wasm_v128_load(aff_lo), wasm_v128_load(aff_hi), back);
+    v128_t back_u8x16 = sz_aes_linear_v128_(wasm_v128_load(inv_lo), wasm_v128_load(inv_hi), inverted_u8x16);
+    v128_t subbed_u8x16 = sz_aes_linear_v128_(wasm_v128_load(aff_lo), wasm_v128_load(aff_hi), back_u8x16);
 
     // ShiftRows: one swizzle (also de-interleaves into the serial row-major layout).
-    v128_t shifted = wasm_i8x16_swizzle(subbed, wasm_v128_load(shift_rows));
+    v128_t shifted_u8x16 = wasm_i8x16_swizzle(subbed_u8x16, wasm_v128_load(shift_rows));
 
     // MixColumns: U (row XOR) plus xtime of adjacent column differences.
-    v128_t col_table = wasm_v128_load(next_col);
-    v128_t col1 = wasm_i8x16_swizzle(shifted, col_table);
-    v128_t col2 = wasm_i8x16_swizzle(col1, col_table);
-    v128_t col3 = wasm_i8x16_swizzle(col2, col_table);
-    v128_t row_xor = wasm_v128_xor(wasm_v128_xor(shifted, col1), wasm_v128_xor(col2, col3));
+    v128_t col_table_u8x16 = wasm_v128_load(next_col);
+    v128_t col1_u8x16 = wasm_i8x16_swizzle(shifted_u8x16, col_table_u8x16);
+    v128_t col2_u8x16 = wasm_i8x16_swizzle(col1_u8x16, col_table_u8x16);
+    v128_t col3_u8x16 = wasm_i8x16_swizzle(col2_u8x16, col_table_u8x16);
+    v128_t row_xor_u8x16 = wasm_v128_xor(wasm_v128_xor(shifted_u8x16, col1_u8x16),
+                                         wasm_v128_xor(col2_u8x16, col3_u8x16));
 
-    v128_t diff = wasm_v128_xor(shifted, col1);   // s[c] ^ s[c+1]
-    v128_t need_reduce = wasm_i8x16_shr(diff, 7); // 0xFF where the top bit is set, else 0x00
-    v128_t reduce = wasm_v128_and(need_reduce, wasm_i8x16_splat((sz_i8_t)0x1B));
-    v128_t xtime = wasm_v128_xor(wasm_i8x16_shl(diff, 1), reduce);
+    v128_t diff_u8x16 = wasm_v128_xor(shifted_u8x16, col1_u8x16); // s[c] ^ s[c+1]
+    v128_t need_reduce_u8x16 = wasm_i8x16_shr(diff_u8x16, 7);     // 0xFF where the top bit is set, else 0x00
+    v128_t reduce_u8x16 = wasm_v128_and(need_reduce_u8x16, wasm_i8x16_splat((sz_i8_t)0x1B));
+    v128_t xtime_u8x16 = wasm_v128_xor(wasm_i8x16_shl(diff_u8x16, 1), reduce_u8x16);
 
-    v128_t mixed = wasm_v128_xor(wasm_v128_xor(shifted, row_xor), xtime);
+    v128_t mixed_u8x16 = wasm_v128_xor(wasm_v128_xor(shifted_u8x16, row_xor_u8x16), xtime_u8x16);
 
     // AddRoundKey.
-    sz_u128_vec_t result;
-    result.v128 = wasm_v128_xor(mixed, round_key_vec.v128);
-    return result;
+    sz_u128_vec_t result_vec;
+    result_vec.v128 = wasm_v128_xor(mixed_u8x16, round_key_vec.v128);
+    return result_vec;
 }
 
 /** @brief Vectorized counterpart of `sz_emulate_shuffle_epi8_serial_` using one `wasm_i8x16_swizzle`. */
-SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128_(sz_u128_vec_t state_vec, v128_t order) {
-    sz_u128_vec_t result;
-    result.v128 = wasm_i8x16_swizzle(state_vec.v128, order);
-    return result;
+SZ_HELPER_INLINE sz_u128_vec_t sz_emulate_shuffle_epi8_v128_(sz_u128_vec_t state_vec, v128_t order_u8x16) {
+    sz_u128_vec_t result_vec;
+    result_vec.v128 = wasm_i8x16_swizzle(state_vec.v128, order_u8x16);
+    return result_vec;
 }
 
 #pragma region Hash with SIMD128 AES
@@ -174,20 +179,22 @@ SZ_HELPER_AUTO void sz_hash_state_short_init_v128_(sz_hash_state_aligned_for_sho
     sz_hash_state_short_init_serial_(state, seed);
 }
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_v128_(sz_hash_state_aligned_for_short_t *state, sz_u128_vec_t block) {
-    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
-    state->aes = sz_emulate_aesenc_v128_(state->aes, block);
-    state->sum = sz_emulate_shuffle_epi8_v128_(state->sum, shuffle);
-    state->sum.v128 = wasm_i64x2_add(state->sum.v128, block.v128);
+SZ_HELPER_AUTO void sz_hash_state_short_update_v128_(sz_hash_state_aligned_for_short_t *state,
+                                                     sz_u128_vec_t block_vec) {
+    v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    state->aes = sz_emulate_aesenc_v128_(state->aes, block_vec);
+    state->sum = sz_emulate_shuffle_epi8_v128_(state->sum, shuffle_u8x16);
+    state->sum.v128 = wasm_i64x2_add(state->sum.v128, block_vec.v128);
 }
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_v128_(sz_hash_state_aligned_for_short_t const *state,
                                                            sz_size_t length) {
-    sz_u128_vec_t key_with_length = state->key;
-    key_with_length.u64s[0] += length;
-    sz_u128_vec_t mixed = sz_emulate_aesenc_v128_(state->sum, state->aes);
-    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128_(sz_emulate_aesenc_v128_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t key_with_length_vec = state->key;
+    key_with_length_vec.u64s[0] += length;
+    sz_u128_vec_t mixed_vec = sz_emulate_aesenc_v128_(state->sum, state->aes);
+    sz_u128_vec_t mixed_in_register_vec = sz_emulate_aesenc_v128_(
+        sz_emulate_aesenc_v128_(mixed_vec, key_with_length_vec), mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
 /** @brief Loads the packed public state into the aligned internal twin (4x `wasm_v128_load` per 64-byte field). */
@@ -217,51 +224,52 @@ SZ_HELPER_AUTO void sz_hash_state_store_v128_(sz_hash_state_t *packed, sz_hash_s
 }
 
 SZ_HELPER_AUTO void sz_hash_state_update_v128_(sz_hash_state_aligned_t *state) {
-    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_u128_vec_t ins_vec = state->ins.u128s[lane_index];
         state->aes.u128s[lane_index] = sz_emulate_aesenc_v128_(state->aes.u128s[lane_index], ins_vec);
-        state->sum.u128s[lane_index] = sz_emulate_shuffle_epi8_v128_(state->sum.u128s[lane_index], shuffle);
+        state->sum.u128s[lane_index] = sz_emulate_shuffle_epi8_v128_(state->sum.u128s[lane_index], shuffle_u8x16);
         state->sum.u128s[lane_index].v128 = wasm_i64x2_add(state->sum.u128s[lane_index].v128, ins_vec.v128);
     }
 }
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_v128_(sz_hash_state_aligned_t state) {
-    v128_t shuffle = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
-    sz_u128_vec_t key_with_length;
-    key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
-    key_with_length.u64s[1] = state.key.u64s[1];
+    v128_t shuffle_u8x16 = wasm_v128_load(sz_hash_u8x16x4_shuffle_());
+    sz_u128_vec_t key_with_length_vec;
+    key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
+    key_with_length_vec.u64s[1] = state.key.u64s[1];
 
-    sz_u128_vec_t ins0 = state.ins.u128s[0], ins1 = state.ins.u128s[1];
-    sz_u128_vec_t ins2 = state.ins.u128s[2], ins3 = state.ins.u128s[3];
+    sz_u128_vec_t ins0_vec = state.ins.u128s[0], ins1_vec = state.ins.u128s[1];
+    sz_u128_vec_t ins2_vec = state.ins.u128s[2], ins3_vec = state.ins.u128s[3];
 
     // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
     // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
     // digest defer it and share this single finalization with no state copy.
-    sz_u128_vec_t aes0 = sz_emulate_aesenc_v128_(state.aes.u128s[0], ins0);
-    sz_u128_vec_t aes1 = sz_emulate_aesenc_v128_(state.aes.u128s[1], ins1);
-    sz_u128_vec_t aes2 = sz_emulate_aesenc_v128_(state.aes.u128s[2], ins2);
-    sz_u128_vec_t aes3 = sz_emulate_aesenc_v128_(state.aes.u128s[3], ins3);
-    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[0], shuffle);
-    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[1], shuffle);
-    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[2], shuffle);
-    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[3], shuffle);
-    sum0.v128 = wasm_i64x2_add(sum0.v128, ins0.v128);
-    sum1.v128 = wasm_i64x2_add(sum1.v128, ins1.v128);
-    sum2.v128 = wasm_i64x2_add(sum2.v128, ins2.v128);
-    sum3.v128 = wasm_i64x2_add(sum3.v128, ins3.v128);
+    sz_u128_vec_t aes0_vec = sz_emulate_aesenc_v128_(state.aes.u128s[0], ins0_vec);
+    sz_u128_vec_t aes1_vec = sz_emulate_aesenc_v128_(state.aes.u128s[1], ins1_vec);
+    sz_u128_vec_t aes2_vec = sz_emulate_aesenc_v128_(state.aes.u128s[2], ins2_vec);
+    sz_u128_vec_t aes3_vec = sz_emulate_aesenc_v128_(state.aes.u128s[3], ins3_vec);
+    sz_u128_vec_t sum0_vec = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[0], shuffle_u8x16);
+    sz_u128_vec_t sum1_vec = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[1], shuffle_u8x16);
+    sz_u128_vec_t sum2_vec = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[2], shuffle_u8x16);
+    sz_u128_vec_t sum3_vec = sz_emulate_shuffle_epi8_v128_(state.sum.u128s[3], shuffle_u8x16);
+    sum0_vec.v128 = wasm_i64x2_add(sum0_vec.v128, ins0_vec.v128);
+    sum1_vec.v128 = wasm_i64x2_add(sum1_vec.v128, ins1_vec.v128);
+    sum2_vec.v128 = wasm_i64x2_add(sum2_vec.v128, ins2_vec.v128);
+    sum3_vec.v128 = wasm_i64x2_add(sum3_vec.v128, ins3_vec.v128);
 
-    sz_u128_vec_t mixed0 = sz_emulate_aesenc_v128_(sum0, aes0);
-    sz_u128_vec_t mixed1 = sz_emulate_aesenc_v128_(sum1, aes1);
-    sz_u128_vec_t mixed2 = sz_emulate_aesenc_v128_(sum2, aes2);
-    sz_u128_vec_t mixed3 = sz_emulate_aesenc_v128_(sum3, aes3);
+    sz_u128_vec_t mixed0_vec = sz_emulate_aesenc_v128_(sum0_vec, aes0_vec);
+    sz_u128_vec_t mixed1_vec = sz_emulate_aesenc_v128_(sum1_vec, aes1_vec);
+    sz_u128_vec_t mixed2_vec = sz_emulate_aesenc_v128_(sum2_vec, aes2_vec);
+    sz_u128_vec_t mixed3_vec = sz_emulate_aesenc_v128_(sum3_vec, aes3_vec);
 
-    sz_u128_vec_t mixed01 = sz_emulate_aesenc_v128_(mixed0, mixed1);
-    sz_u128_vec_t mixed23 = sz_emulate_aesenc_v128_(mixed2, mixed3);
-    sz_u128_vec_t mixed = sz_emulate_aesenc_v128_(mixed01, mixed23);
+    sz_u128_vec_t mixed01_vec = sz_emulate_aesenc_v128_(mixed0_vec, mixed1_vec);
+    sz_u128_vec_t mixed23_vec = sz_emulate_aesenc_v128_(mixed2_vec, mixed3_vec);
+    sz_u128_vec_t mixed_vec = sz_emulate_aesenc_v128_(mixed01_vec, mixed23_vec);
 
-    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_v128_(sz_emulate_aesenc_v128_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t mixed_in_register_vec = sz_emulate_aesenc_v128_(
+        sz_emulate_aesenc_v128_(mixed_vec, key_with_length_vec), mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
 SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -325,8 +333,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_v128(sz_cptr_t start, sz_
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zero-padded buffer; finalize folds them.
-        v128_t const zero_vec = wasm_u64x2_splat(0);
-        for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_vec;
+        v128_t const zero_u64x2 = wasm_u64x2_splat(0);
+        for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_u64x2;
         sz_size_t const tail_length = length - state.ins_length;
         for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
             state.ins.u8s[byte_index] = start[state.ins_length + byte_index];
@@ -349,13 +357,13 @@ SZ_API_COMPTIME void sz_hash_state_update_v128(sz_hash_state_t *packed, sz_cptr_
     // reads back as `ins_length % 64 == 0 && ins_length != 0`; treat that as `buffered == 64`. The copy touches
     // only `[buffered, buffered+take)`, and we re-zero `ins` after each absorb, so the high lanes stay zero-padded
     // for `finalize` to fold.
-    v128_t const zero_vec = wasm_u64x2_splat(0);
+    v128_t const zero_u64x2 = wasm_u64x2_splat(0);
     sz_size_t buffered = state.ins_length % 64;
     if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
             sz_hash_state_update_v128_(&state);
-            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_vec;
+            for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) state.ins.u128s[lane_index].v128 = zero_u64x2;
             buffered = 0;
         }
         sz_size_t const take = sz_min_of_two(length, (sz_size_t)64 - buffered);
@@ -424,12 +432,12 @@ SZ_API_COMPTIME void sz_fill_random_v128(sz_ptr_t text, sz_size_t length, sz_u64
  *  @return 64-bit hash, bit-identical to `sz_hash_v128(text, length, seed)` (hence to serial).
  *  @sa sz_hash_multiseed_replay_serial_, sz_hash_multiseed_prepare_serial_
  */
-SZ_HELPER_AUTO sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *text_lanes, sz_size_t text_lanes_count,
+SZ_HELPER_AUTO sz_u64_t sz_hash_multiseed_replay_v128_(sz_u512_vec_t const *text_lanes_vec, sz_size_t text_lanes_count,
                                                        sz_size_t length, sz_u64_t seed) {
     sz_align_(16) sz_hash_state_aligned_for_short_t state;
     sz_hash_state_short_init_v128_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-        sz_hash_state_short_update_v128_(&state, text_lanes->u128s[lane_index]);
+        sz_hash_state_short_update_v128_(&state, text_lanes_vec->u128s[lane_index]);
     return sz_hash_state_short_finalize_v128_(&state, length);
 }
 
@@ -451,10 +459,10 @@ SZ_API_COMPTIME void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,   
         return;
     }
     if (length <= 64) {
-        sz_u512_vec_t text_lanes;
-        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes);
+        sz_u512_vec_t text_lanes_vec;
+        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes_vec);
         for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_multiseed_replay_v128_(&text_lanes, text_lanes_count, length,
+            hashes[seed_index] = sz_hash_multiseed_replay_v128_(&text_lanes_vec, text_lanes_count, length,
                                                                 seeds[seed_index]);
     }
     else {
@@ -468,17 +476,18 @@ SZ_API_COMPTIME void sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length,   
 #pragma endregion // Hash with SIMD128 AES
 
 /** @brief 32-bit lane-wise rotate-right (no native WASM rotate; built from two shifts and an OR). */
-SZ_HELPER_INLINE v128_t sz_sha256_rotr_v128_(v128_t x, int count) {
-    return wasm_v128_or(wasm_u32x4_shr(x, count), wasm_i32x4_shl(x, 32 - count));
+SZ_HELPER_INLINE v128_t sz_sha256_rotr_v128_(v128_t x_u32x4, int count) {
+    return wasm_v128_or(wasm_u32x4_shr(x_u32x4, count), wasm_i32x4_shl(x_u32x4, 32 - count));
 }
 /** @brief 4-wide `sigma0` of the message schedule: ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3). */
-SZ_HELPER_INLINE v128_t sz_sha256_sigma0_lower_v128_(v128_t x) {
-    return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x, 7), sz_sha256_rotr_v128_(x, 18)), wasm_u32x4_shr(x, 3));
+SZ_HELPER_INLINE v128_t sz_sha256_sigma0_lower_v128_(v128_t x_u32x4) {
+    return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x_u32x4, 7), sz_sha256_rotr_v128_(x_u32x4, 18)),
+                         wasm_u32x4_shr(x_u32x4, 3));
 }
 /** @brief 4-wide `sigma1` of the message schedule: ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10). */
-SZ_HELPER_INLINE v128_t sz_sha256_sigma1_lower_v128_(v128_t x) {
-    return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x, 17), sz_sha256_rotr_v128_(x, 19)),
-                         wasm_u32x4_shr(x, 10));
+SZ_HELPER_INLINE v128_t sz_sha256_sigma1_lower_v128_(v128_t x_u32x4) {
+    return wasm_v128_xor(wasm_v128_xor(sz_sha256_rotr_v128_(x_u32x4, 17), sz_sha256_rotr_v128_(x_u32x4, 19)),
+                         wasm_u32x4_shr(x_u32x4, 10));
 }
 
 /**
@@ -498,25 +507,27 @@ SZ_HELPER_AUTO void sz_sha256_process_block_v128_(sz_u32_t hash[sz_at_least_(8)]
     // compile-time-CONSTANT permutation, so `wasm_i8x16_shuffle` (a fixed lane shuffle) is optimal —
     // there is no data-dependent table here, hence nothing for `relaxed_swizzle` to accelerate.
     for (sz_size_t group_index = 0; group_index < 4; ++group_index) {
-        v128_t loaded = wasm_v128_load(block + group_index * 16);
-        wasm_v128_store(&w[group_index * 4],
-                        wasm_i8x16_shuffle(loaded, loaded, 3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12));
+        v128_t loaded_u8x16 = wasm_v128_load(block + group_index * 16);
+        wasm_v128_store(&w[group_index * 4], wasm_i8x16_shuffle(loaded_u8x16, loaded_u8x16, 3, 2, 1, 0, 7, 6, 5, 4, 11,
+                                                                10, 9, 8, 15, 14, 13, 12));
     }
 
     // Extend to 64 words, four at a time.
     for (sz_size_t word_index = 16; word_index < 64; word_index += 4) {
-        v128_t w_m16 = wasm_v128_load(&w[word_index - 16]);
-        v128_t w_m15 = wasm_v128_load(&w[word_index - 15]);
-        v128_t w_m7 = wasm_v128_load(&w[word_index - 7]);
-        v128_t w_m2 = wasm_v128_load(&w[word_index - 2]); // lanes 2,3 = W[i],W[i+1] are still zero (computed below)
-        v128_t partial = wasm_i32x4_add(wasm_i32x4_add(w_m16, sz_sha256_sigma0_lower_v128_(w_m15)), w_m7);
+        v128_t w_m16_u32x4 = wasm_v128_load(&w[word_index - 16]);
+        v128_t w_m15_u32x4 = wasm_v128_load(&w[word_index - 15]);
+        v128_t w_m7_u32x4 = wasm_v128_load(&w[word_index - 7]);
+        v128_t w_m2_u32x4 = wasm_v128_load(
+            &w[word_index - 2]); // lanes 2,3 = W[i],W[i+1] are still zero (computed below)
+        v128_t partial_u32x4 = wasm_i32x4_add(wasm_i32x4_add(w_m16_u32x4, sz_sha256_sigma0_lower_v128_(w_m15_u32x4)),
+                                              w_m7_u32x4);
         // Phase 1: sigma1 of lanes 0,1 (W[i-2],W[i-1]) gives correct W[i],W[i+1] in t0's low lanes.
-        v128_t t0 = wasm_i32x4_add(partial, sz_sha256_sigma1_lower_v128_(w_m2));
+        v128_t t0_u32x4 = wasm_i32x4_add(partial_u32x4, sz_sha256_sigma1_lower_v128_(w_m2_u32x4));
         // Phase 2: feed those W[i],W[i+1] into lanes 2,3 for the remaining sigma1.
-        v128_t w_hi = wasm_i32x4_shuffle(t0, t0, 0, 1, 0, 1); // lanes 2,3 = W[i],W[i+1]
-        v128_t t1 = wasm_i32x4_add(partial, sz_sha256_sigma1_lower_v128_(w_hi));
+        v128_t w_hi_u32x4 = wasm_i32x4_shuffle(t0_u32x4, t0_u32x4, 0, 1, 0, 1); // lanes 2,3 = W[i],W[i+1]
+        v128_t t1_u32x4 = wasm_i32x4_add(partial_u32x4, sz_sha256_sigma1_lower_v128_(w_hi_u32x4));
         // Blend: low two lanes from phase 1, high two from phase 2.
-        wasm_v128_store(&w[word_index], wasm_i32x4_shuffle(t0, t1, 0, 1, 6, 7));
+        wasm_v128_store(&w[word_index], wasm_i32x4_shuffle(t0_u32x4, t1_u32x4, 0, 1, 6, 7));
     }
 
     sz_u32_t a = hash[0], b = hash[1], c = hash[2], d = hash[3];

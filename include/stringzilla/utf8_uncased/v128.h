@@ -35,18 +35,18 @@ extern "C" {
 #pragma region Helpers
 
 /** @brief `result[0] = carry`, `result[i] = vector[i-1]` — slide-up carrying a real predecessor across windows. */
-SZ_HELPER_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector, sz_u8_t carry) {
-    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-                              13, 14);
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector_u8x16, sz_u8_t carry) {
+    return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                              12, 13, 14);
 }
 
 /** @brief 0/1 byte (not 0xFF): 1 where `bytes == value`. */
-SZ_HELPER_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes, sz_u8_t value) {
-    return wasm_v128_and(wasm_i8x16_eq(bytes, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes_u8x16, sz_u8_t value) {
+    return wasm_v128_and(wasm_i8x16_eq(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
 }
 /** @brief 0/1 byte: 1 where `bytes` in `[start, start+length)`. */
-SZ_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes, sz_u8_t start, sz_u8_t length) {
-    return wasm_v128_and(sz_utf8_in_range_v128_(bytes, start, length), wasm_i8x16_splat(1));
+SZ_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
+    return wasm_v128_and(sz_utf8_in_range_v128_(bytes_u8x16, start, length), wasm_i8x16_splat(1));
 }
 
 /** @brief Zero a scratch buffer then copy `length` bytes, so strip kernels can read one byte past. */
@@ -58,26 +58,27 @@ SZ_HELPER_AUTO sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source
 }
 
 /** @brief Gather the C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits (irregular flag kept). */
-SZ_HELPER_AUTO v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source, v128_t after_c4, v128_t after_c5,
-                                                        v128_t after_c6, v128_t is_continuation) {
-    v128_t low6 = wasm_v128_and(source, wasm_i8x16_splat(0x3F));
-    v128_t c4 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[48]), low6);
-    v128_t c5 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[48]), low6);
-    v128_t c6 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[48]), low6);
-    v128_t delta = wasm_i8x16_splat(0);
-    delta = wasm_v128_bitselect(c4, delta, after_c4);
-    delta = wasm_v128_bitselect(c5, delta, after_c5);
-    delta = wasm_v128_bitselect(c6, delta, after_c6);
-    return wasm_v128_and(delta, is_continuation);
+SZ_HELPER_AUTO v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
+                                                        v128_t after_c5_u8x16, v128_t after_c6_u8x16,
+                                                        v128_t is_continuation_u8x16) {
+    v128_t low6_u8x16 = wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x3F));
+    v128_t c4_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[48]), low6_u8x16);
+    v128_t c5_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[48]), low6_u8x16);
+    v128_t c6_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[48]), low6_u8x16);
+    v128_t delta_u8x16 = wasm_i8x16_splat(0);
+    delta_u8x16 = wasm_v128_bitselect(c4_u8x16, delta_u8x16, after_c4_u8x16);
+    delta_u8x16 = wasm_v128_bitselect(c5_u8x16, delta_u8x16, after_c5_u8x16);
+    delta_u8x16 = wasm_v128_bitselect(c6_u8x16, delta_u8x16, after_c6_u8x16);
+    return wasm_v128_and(delta_u8x16, is_continuation_u8x16);
 }
 
 /** @brief A 16-byte fold window: the chunk at `src + pos` plus its cross-boundary neighbours. */
@@ -113,18 +114,20 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t after_c3 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC3));
-        v128_t folded = sz_ascii_fold_v128_(source);
-        v128_t latin1_range = sz_utf8_in_range_v128_(source, 0x80, 0x1F);
-        v128_t is_latin1_upper = wasm_v128_andnot(wasm_v128_and(after_c3, latin1_range),
-                                                  wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x97)));
-        folded = sz_utf8_masked_add_v128_(folded, is_latin1_upper, 0x20);
-        v128_t eszett_lead = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xC3)),
-                                           wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x9F)));
-        v128_t eszett_second = wasm_v128_and(after_c3, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x9F)));
-        folded = wasm_v128_bitselect(wasm_i8x16_splat('s'), folded, wasm_v128_or(eszett_lead, eszett_second));
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+        v128_t latin1_range_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x1F);
+        v128_t is_latin1_upper_u8x16 = wasm_v128_andnot(wasm_v128_and(after_c3_u8x16, latin1_range_u8x16),
+                                                        wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x97)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_latin1_upper_u8x16, 0x20);
+        v128_t eszett_lead_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3)),
+                                                 wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x9F)));
+        v128_t eszett_second_u8x16 = wasm_v128_and(after_c3_u8x16,
+                                                   wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x9F)));
+        folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat('s'), folded_u8x16,
+                                           wasm_v128_or(eszett_lead_u8x16, eszett_second_u8x16));
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
@@ -133,42 +136,44 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        (void)next;
-        v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                               wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t after_c3 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC3));
-        v128_t after_c4 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4));
-        v128_t after_c5 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5));
-        v128_t folded = sz_ascii_fold_v128_(source);
-        v128_t latin1_range = sz_utf8_in_range_v128_(source, 0x80, 0x1F);
-        v128_t is_latin1_upper = wasm_v128_andnot(wasm_v128_and(after_c3, latin1_range),
-                                                  wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x97)));
-        folded = sz_utf8_masked_add_v128_(folded, is_latin1_upper, 0x20);
-        v128_t delta = sz_utf8_uncased_latin_delta_v128_(source, after_c4, after_c5, wasm_i8x16_splat(0),
-                                                         is_continuation);
-        folded = wasm_i8x16_add(folded, wasm_v128_and(delta, wasm_i8x16_splat(0x01)));
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        (void)next_u8x16;
+        v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                     wasm_i8x16_splat((sz_i8_t)0x80));
+        v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));
+        v128_t after_c4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC4));
+        v128_t after_c5_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC5));
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+        v128_t latin1_range_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x1F);
+        v128_t is_latin1_upper_u8x16 = wasm_v128_andnot(wasm_v128_and(after_c3_u8x16, latin1_range_u8x16),
+                                                        wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x97)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_latin1_upper_u8x16, 0x20);
+        v128_t delta_u8x16 = sz_utf8_uncased_latin_delta_v128_(source_u8x16, after_c4_u8x16, after_c5_u8x16,
+                                                               wasm_i8x16_splat(0), is_continuation_u8x16);
+        folded_u8x16 = wasm_i8x16_add(folded_u8x16, wasm_v128_and(delta_u8x16, wasm_i8x16_splat(0x01)));
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
 SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
                                                                   sz_u8_t *dst) {
     static sz_align_(16) sz_u8_t const offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
-    v128_t offsets_lut = wasm_v128_load(offsets);
+    v128_t offsets_lut_u8x16 = wasm_v128_load(offsets);
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t after_d0 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD0));
-        v128_t is_d0 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD0));
-        v128_t folded = sz_ascii_fold_v128_(source);
-        v128_t offset = wasm_v128_and(wasm_i8x16_swizzle(offsets_lut, wasm_u8x16_shr(source, 4)), after_d0);
-        folded = wasm_i8x16_add(folded, offset);
-        v128_t needs_d1 = wasm_v128_and(
-            is_d0, wasm_v128_or(sz_utf8_in_range_v128_(next, 0x80, 0x10), sz_utf8_in_range_v128_(next, 0xA0, 0x10)));
-        folded = sz_utf8_masked_add_v128_(folded, needs_d1, 1);
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t after_d0_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
+        v128_t is_d0_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+        v128_t offset_u8x16 = wasm_v128_and(wasm_i8x16_swizzle(offsets_lut_u8x16, wasm_u8x16_shr(source_u8x16, 4)),
+                                            after_d0_u8x16);
+        folded_u8x16 = wasm_i8x16_add(folded_u8x16, offset_u8x16);
+        v128_t needs_d1_u8x16 = wasm_v128_and(is_d0_u8x16,
+                                              wasm_v128_or(sz_utf8_in_range_v128_(next_u8x16, 0x80, 0x10),
+                                                           sz_utf8_in_range_v128_(next_u8x16, 0xA0, 0x10)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, needs_d1_u8x16, 1);
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
@@ -189,43 +194,47 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *sr
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                               wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t after_ce = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xCE));
-        v128_t after_cf = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xCF));
-        v128_t after_c2 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC2));
-        v128_t is_ce_lead = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xCE));
-        v128_t after_ce_cont = wasm_v128_and(after_ce, is_continuation);
-        v128_t folded = sz_ascii_fold_v128_(source);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                     wasm_i8x16_splat((sz_i8_t)0x80));
+        v128_t after_ce_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xCE));
+        v128_t after_cf_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xCF));
+        v128_t after_c2_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2));
+        v128_t is_ce_lead_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xCE));
+        v128_t after_ce_cont_u8x16 = wasm_v128_and(after_ce_u8x16, is_continuation_u8x16);
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
 
-        v128_t deltas_lo = wasm_v128_load(&ce_deltas[0]);
-        v128_t deltas_1 = wasm_v128_load(&ce_deltas[16]);
-        v128_t deltas_2 = wasm_v128_load(&ce_deltas[32]);
-        v128_t deltas_3 = wasm_v128_load(&ce_deltas[48]);
-        v128_t promo_lo = wasm_v128_load(&ce_promotes[0]);
-        v128_t promo_1 = wasm_v128_load(&ce_promotes[16]);
-        v128_t promo_2 = wasm_v128_load(&ce_promotes[32]);
-        v128_t promo_3 = wasm_v128_load(&ce_promotes[48]);
-        v128_t ce_delta = wasm_v128_and(sz_utf8_gather64_v128_(deltas_lo, deltas_1, deltas_2, deltas_3,
-                                                               wasm_v128_and(source, wasm_i8x16_splat(0x3F))),
-                                        after_ce_cont);
-        folded = wasm_i8x16_add(folded, ce_delta);
+        v128_t deltas_lo_u8x16 = wasm_v128_load(&ce_deltas[0]);
+        v128_t deltas_1_u8x16 = wasm_v128_load(&ce_deltas[16]);
+        v128_t deltas_2_u8x16 = wasm_v128_load(&ce_deltas[32]);
+        v128_t deltas_3_u8x16 = wasm_v128_load(&ce_deltas[48]);
+        v128_t promo_lo_u8x16 = wasm_v128_load(&ce_promotes[0]);
+        v128_t promo_1_u8x16 = wasm_v128_load(&ce_promotes[16]);
+        v128_t promo_2_u8x16 = wasm_v128_load(&ce_promotes[32]);
+        v128_t promo_3_u8x16 = wasm_v128_load(&ce_promotes[48]);
+        v128_t ce_delta_u8x16 = wasm_v128_and(
+            sz_utf8_gather64_v128_(deltas_lo_u8x16, deltas_1_u8x16, deltas_2_u8x16, deltas_3_u8x16,
+                                   wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x3F))),
+            after_ce_cont_u8x16);
+        folded_u8x16 = wasm_i8x16_add(folded_u8x16, ce_delta_u8x16);
 
-        v128_t final_sigma = wasm_v128_and(after_cf, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x82)));
-        folded = sz_utf8_masked_add_v128_(folded, final_sigma, 0x01);
-        v128_t micro_second = wasm_v128_and(after_c2, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xB5)));
-        folded = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xBC), folded, micro_second);
+        v128_t final_sigma_u8x16 = wasm_v128_and(after_cf_u8x16,
+                                                 wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x82)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, final_sigma_u8x16, 0x01);
+        v128_t micro_second_u8x16 = wasm_v128_and(after_c2_u8x16,
+                                                  wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xB5)));
+        folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xBC), folded_u8x16, micro_second_u8x16);
 
         // Lead rewrites computed directly from the lead + its `next` byte (cross-window safe).
-        v128_t next_promote = sz_utf8_gather64_v128_(promo_lo, promo_1, promo_2, promo_3,
-                                                     wasm_v128_and(next, wasm_i8x16_splat(0x3F)));
-        v128_t promote_lead = wasm_v128_and(is_ce_lead, wasm_i8x16_ne(next_promote, wasm_i8x16_splat(0)));
-        v128_t micro_lead = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xC2)),
-                                          wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB5)));
-        folded = sz_utf8_masked_add_v128_(folded, promote_lead, 0x01);
-        folded = sz_utf8_masked_add_v128_(folded, micro_lead, 0x0C);
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t next_promote_u8x16 = sz_utf8_gather64_v128_(promo_lo_u8x16, promo_1_u8x16, promo_2_u8x16, promo_3_u8x16,
+                                                           wasm_v128_and(next_u8x16, wasm_i8x16_splat(0x3F)));
+        v128_t promote_lead_u8x16 = wasm_v128_and(is_ce_lead_u8x16,
+                                                  wasm_i8x16_ne(next_promote_u8x16, wasm_i8x16_splat(0)));
+        v128_t micro_lead_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2)),
+                                                wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB5)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, promote_lead_u8x16, 0x01);
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, micro_lead_u8x16, 0x0C);
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
@@ -234,21 +243,23 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const 
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t is_d4 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD4));
-        v128_t is_d5 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD5));
-        v128_t after_d4 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD4));
-        v128_t after_d5 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD5));
-        v128_t folded = sz_ascii_fold_v128_(source);
-        v128_t d4_second = wasm_v128_and(after_d4, wasm_u8x16_ge(source, wasm_i8x16_splat((sz_i8_t)0xB1)));
-        v128_t d5_plus30 = wasm_v128_and(after_d5, sz_utf8_in_range_v128_(source, 0x80, 0x10));
-        v128_t d5_minus10 = wasm_v128_and(after_d5, sz_utf8_in_range_v128_(source, 0x90, 0x07));
-        folded = sz_utf8_masked_add_v128_(folded, wasm_v128_or(d4_second, d5_minus10), 0xF0);
-        folded = sz_utf8_masked_add_v128_(folded, d5_plus30, 0x30);
-        v128_t promotes_d4 = wasm_v128_and(is_d4, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xB1)));
-        v128_t promotes_d5 = wasm_v128_and(is_d5, sz_utf8_in_range_v128_(next, 0x90, 0x07));
-        folded = sz_utf8_masked_add_v128_(folded, wasm_v128_or(promotes_d4, promotes_d5), 0x01);
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t is_d4_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
+        v128_t is_d5_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD5));
+        v128_t after_d4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
+        v128_t after_d5_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD5));
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+        v128_t d4_second_u8x16 = wasm_v128_and(after_d4_u8x16,
+                                               wasm_u8x16_ge(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xB1)));
+        v128_t d5_plus30_u8x16 = wasm_v128_and(after_d5_u8x16, sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x10));
+        v128_t d5_minus10_u8x16 = wasm_v128_and(after_d5_u8x16, sz_utf8_in_range_v128_(source_u8x16, 0x90, 0x07));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, wasm_v128_or(d4_second_u8x16, d5_minus10_u8x16), 0xF0);
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, d5_plus30_u8x16, 0x30);
+        v128_t promotes_d4_u8x16 = wasm_v128_and(is_d4_u8x16,
+                                                 wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB1)));
+        v128_t promotes_d5_u8x16 = wasm_v128_and(is_d5_u8x16, sz_utf8_in_range_v128_(next_u8x16, 0x90, 0x07));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, wasm_v128_or(promotes_d4_u8x16, promotes_d5_u8x16), 0x01);
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
@@ -256,27 +267,30 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t cons
                                                                     sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
-        v128_t source = wasm_v128_load(src + pos);
-        v128_t previous = sz_utf8_uncased_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
-        v128_t previous2 = sz_utf8_uncased_slide1up_v128_(previous, pos > 1 ? src[pos - 2] : 0);
-        v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                               wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t after_c3 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC3));
-        v128_t after_c4 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4));
-        v128_t after_c5 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5));
-        v128_t after_c6 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC6));
-        v128_t folded = sz_ascii_fold_v128_(source);
-        v128_t latin1_range = sz_utf8_in_range_v128_(source, 0x80, 0x1F);
-        v128_t is_latin1_upper = wasm_v128_andnot(wasm_v128_and(after_c3, latin1_range),
-                                                  wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x97)));
-        folded = sz_utf8_masked_add_v128_(folded, is_latin1_upper, 0x20);
-        v128_t delta = sz_utf8_uncased_latin_delta_v128_(source, after_c4, after_c5, after_c6, is_continuation);
-        folded = wasm_i8x16_add(folded, wasm_v128_and(delta, wasm_i8x16_splat(0x01)));
-        v128_t after_e1_pair = wasm_v128_and(wasm_i8x16_eq(previous2, wasm_i8x16_splat((sz_i8_t)0xE1)),
-                                             sz_utf8_in_range_v128_(previous, 0xB8, 0x04));
-        v128_t third_even = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat(0x01)), wasm_i8x16_splat(0));
-        folded = sz_utf8_masked_add_v128_(folded, wasm_v128_and(after_e1_pair, third_even), 0x01);
-        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded, window);
+        v128_t source_u8x16 = wasm_v128_load(src + pos);
+        v128_t previous_u8x16 = sz_utf8_uncased_slide1up_v128_(source_u8x16, pos > 0 ? src[pos - 1] : 0);
+        v128_t previous2_u8x16 = sz_utf8_uncased_slide1up_v128_(previous_u8x16, pos > 1 ? src[pos - 2] : 0);
+        v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                     wasm_i8x16_splat((sz_i8_t)0x80));
+        v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));
+        v128_t after_c4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC4));
+        v128_t after_c5_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC5));
+        v128_t after_c6_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC6));
+        v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+        v128_t latin1_range_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x1F);
+        v128_t is_latin1_upper_u8x16 = wasm_v128_andnot(wasm_v128_and(after_c3_u8x16, latin1_range_u8x16),
+                                                        wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x97)));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_latin1_upper_u8x16, 0x20);
+        v128_t delta_u8x16 = sz_utf8_uncased_latin_delta_v128_(source_u8x16, after_c4_u8x16, after_c5_u8x16,
+                                                               after_c6_u8x16, is_continuation_u8x16);
+        folded_u8x16 = wasm_i8x16_add(folded_u8x16, wasm_v128_and(delta_u8x16, wasm_i8x16_splat(0x01)));
+        v128_t after_e1_pair_u8x16 = wasm_v128_and(wasm_i8x16_eq(previous2_u8x16, wasm_i8x16_splat((sz_i8_t)0xE1)),
+                                                   sz_utf8_in_range_v128_(previous_u8x16, 0xB8, 0x04));
+        v128_t third_even_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x01)),
+                                                wasm_i8x16_splat(0));
+        folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, wasm_v128_and(after_e1_pair_u8x16, third_even_u8x16),
+                                                0x01);
+        sz_store_partial_v128_((sz_ptr_t)(dst + pos), folded_u8x16, window);
     }
 }
 
@@ -285,8 +299,9 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t cons
 #pragma region Per script alarm strips
 
 /** @brief Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
-SZ_HELPER_AUTO void sz_utf8_uncased_alarm_window_(v128_t danger_second, sz_size_t pos, sz_size_t window, long *best) {
-    sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second, wasm_i8x16_splat(0)));
+SZ_HELPER_AUTO void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
+                                                  long *best) {
+    sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second_u8x16, wasm_i8x16_splat(0)));
     if (window < 16) bits &= ((sz_u32_t)1 << window) - 1;
     while (bits) {
         sz_size_t g = pos + sz_u32_ctz(bits);
@@ -304,23 +319,26 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t after_c3 = sz_utf8_uncased_eq01_v128_(previous, 0xC3);
-        v128_t after_c5 = sz_utf8_uncased_eq01_v128_(previous, 0xC5);
-        v128_t danger = wasm_v128_and(
-            wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBA), sz_utf8_uncased_eq01_v128_(previous, 0xE1)),
-            sz_utf8_uncased_inrange01_v128_(next, 0x96, 0x09));
-        danger = wasm_v128_or(
-            danger,
-            wasm_v128_and(
-                wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84), sz_utf8_uncased_eq01_v128_(previous, 0xE2)),
-                wasm_v128_or(sz_utf8_uncased_eq01_v128_(next, 0xAA), sz_utf8_uncased_eq01_v128_(next, 0xAB))));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xB8)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c3, sz_utf8_uncased_eq01_v128_(source, 0x9F)));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t after_c3_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC3);
+        v128_t after_c5_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC5);
+        v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBA),
+                                                          sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1)),
+                                            sz_utf8_uncased_inrange01_v128_(next_u8x16, 0x96, 0x09));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x84),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE2)),
+                                                  wasm_v128_or(sz_utf8_uncased_eq01_v128_(next_u8x16, 0xAA),
+                                                               sz_utf8_uncased_eq01_v128_(next_u8x16, 0xAB))));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xAC),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xEF)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c5_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBF)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c5_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB8)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c3_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0x9F)));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -330,21 +348,26 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
-        v128_t source = wasm_v128_load(src + pos);
-        v128_t previous = sz_utf8_uncased_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
-        v128_t after_c3 = sz_utf8_uncased_eq01_v128_(previous, 0xC3);
-        v128_t after_c4 = sz_utf8_uncased_eq01_v128_(previous, 0xC4);
-        v128_t after_c5 = sz_utf8_uncased_eq01_v128_(previous, 0xC5);
-        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
-                                      sz_utf8_uncased_eq01_v128_(previous, 0xE2));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c3, sz_utf8_uncased_eq01_v128_(source, 0x9F)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c4, sz_utf8_uncased_eq01_v128_(source, 0xB0)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c4, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xBF)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_c5, sz_utf8_uncased_eq01_v128_(source, 0xB8)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = wasm_v128_load(src + pos);
+        v128_t previous_u8x16 = sz_utf8_uncased_slide1up_v128_(source_u8x16, pos > 0 ? src[pos - 1] : 0);
+        v128_t after_c3_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC3);
+        v128_t after_c4_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC4);
+        v128_t after_c5_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC5);
+        v128_t danger_u8x16 = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x84),
+                                            sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE2));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c3_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0x9F)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c4_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB0)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c4_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBF)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c5_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBF)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_c5_u8x16, sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB8)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xAC),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xEF)));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -355,11 +378,11 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t danger = wasm_v128_and(
-            wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB2), sz_utf8_uncased_eq01_v128_(previous, 0xE1)),
-            sz_utf8_uncased_inrange01_v128_(next, 0x80, 0x09));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB2),
+                                                          sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1)),
+                                            sz_utf8_uncased_inrange01_v128_(next_u8x16, 0x80, 0x09));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -369,28 +392,31 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *s
     long best = -1, blanket = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
-        v128_t source = wasm_v128_load(src + pos);
-        v128_t previous = sz_utf8_uncased_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
-        v128_t after_ce = sz_utf8_uncased_eq01_v128_(previous, 0xCE);
-        v128_t after_cf = sz_utf8_uncased_eq01_v128_(previous, 0xCF);
-        v128_t second_90_b0_a2 = wasm_v128_or(
-            wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0x90), sz_utf8_uncased_eq01_v128_(source, 0xB0)),
-            sz_utf8_uncased_eq01_v128_(source, 0xA2));
-        v128_t danger = wasm_v128_and(after_ce, second_90_b0_a2);
-        v128_t second_9x = wasm_v128_or(
-            wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0x90), sz_utf8_uncased_eq01_v128_(source, 0x91)),
-            wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0x95), sz_utf8_uncased_eq01_v128_(source, 0x96)));
-        v128_t second_bx = wasm_v128_or(
-            wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0xB0), sz_utf8_uncased_eq01_v128_(source, 0xB1)),
-            wasm_v128_or(sz_utf8_uncased_eq01_v128_(source, 0xB4), sz_utf8_uncased_eq01_v128_(source, 0xB5)));
-        danger = wasm_v128_or(danger, wasm_v128_and(after_cf, wasm_v128_or(second_9x, second_bx)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = wasm_v128_load(src + pos);
+        v128_t previous_u8x16 = sz_utf8_uncased_slide1up_v128_(source_u8x16, pos > 0 ? src[pos - 1] : 0);
+        v128_t after_ce_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xCE);
+        v128_t after_cf_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xCF);
+        v128_t second_90_b0_a2_u8x16 = wasm_v128_or(wasm_v128_or(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x90),
+                                                                 sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB0)),
+                                                    sz_utf8_uncased_eq01_v128_(source_u8x16, 0xA2));
+        v128_t danger_u8x16 = wasm_v128_and(after_ce_u8x16, second_90_b0_a2_u8x16);
+        v128_t second_9x_u8x16 = wasm_v128_or(wasm_v128_or(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x90),
+                                                           sz_utf8_uncased_eq01_v128_(source_u8x16, 0x91)),
+                                              wasm_v128_or(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x95),
+                                                           sz_utf8_uncased_eq01_v128_(source_u8x16, 0x96)));
+        v128_t second_bx_u8x16 = wasm_v128_or(wasm_v128_or(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB0),
+                                                           sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB1)),
+                                              wasm_v128_or(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB4),
+                                                           sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB5)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16,
+                                    wasm_v128_and(after_cf_u8x16, wasm_v128_or(second_9x_u8x16, second_bx_u8x16)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x84),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE2)));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (blanket < 0) {
-            v128_t lead_blanket = wasm_v128_or(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xE1)),
-                                               wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xCD)));
-            int first = sz_utf8_first_set_v128_(lead_blanket, window);
+            v128_t lead_blanket_u8x16 = wasm_v128_or(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xE1)),
+                                                     wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xCD)));
+            int first = sz_utf8_first_set_v128_(lead_blanket_u8x16, window);
             if (first >= 0) blanket = (long)(pos + (sz_size_t)first);
         }
         if (best >= 0 || blanket >= 0) break;
@@ -404,13 +430,13 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
-        v128_t source = wasm_v128_load(src + pos);
-        v128_t previous = sz_utf8_uncased_slide1up_v128_(source, pos > 0 ? src[pos - 1] : 0);
-        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x87),
-                                      sz_utf8_uncased_eq01_v128_(previous, 0xD6));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = wasm_v128_load(src + pos);
+        v128_t previous_u8x16 = sz_utf8_uncased_slide1up_v128_(source_u8x16, pos > 0 ? src[pos - 1] : 0);
+        v128_t danger_u8x16 = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x87),
+                                            sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xD6));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xAC),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xEF)));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -421,29 +447,29 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t con
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t danger = wasm_v128_and(
-            wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBA), sz_utf8_uncased_eq01_v128_(previous, 0xE1)),
-            sz_utf8_uncased_inrange01_v128_(next, 0x96, 0x0A));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x9F),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xC3)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xBF),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xC5)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xAC),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xEF)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x84),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
-        v128_t is_cont = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                       wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t delta = sz_utf8_uncased_latin_delta_v128_(
-            source, wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4)),
-            wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5)),
-            wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC6)), is_cont);
-        v128_t irregular = wasm_v128_and(
-            wasm_i8x16_eq(wasm_v128_and(delta, wasm_i8x16_splat((sz_i8_t)0x80)), wasm_i8x16_splat((sz_i8_t)0x80)),
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t danger_u8x16 = wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBA),
+                                                          sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1)),
+                                            sz_utf8_uncased_inrange01_v128_(next_u8x16, 0x96, 0x0A));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x9F),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC3)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xBF),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xC5)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xAC),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xEF)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x84),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE2)));
+        v128_t is_cont_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                             wasm_i8x16_splat((sz_i8_t)0x80));
+        v128_t delta_u8x16 = sz_utf8_uncased_latin_delta_v128_(
+            source_u8x16, wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC4)),
+            wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC5)),
+            wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC6)), is_cont_u8x16);
+        v128_t irregular_u8x16 = wasm_v128_and(
+            wasm_i8x16_eq(wasm_v128_and(delta_u8x16, wasm_i8x16_splat((sz_i8_t)0x80)), wasm_i8x16_splat((sz_i8_t)0x80)),
             wasm_i8x16_splat(1));
-        danger = wasm_v128_or(danger, irregular);
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        danger_u8x16 = wasm_v128_or(danger_u8x16, irregular_u8x16);
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -454,14 +480,15 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
-        v128_t source = chunk.source, previous = chunk.previous, next = chunk.next;
-        v128_t after_e1 = sz_utf8_uncased_eq01_v128_(previous, 0xE1);
-        v128_t danger = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB2), after_e1);
-        danger = wasm_v128_or(danger, wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0x82), after_e1),
-                                                    sz_utf8_uncased_inrange01_v128_(next, 0xA0, 0x46)));
-        danger = wasm_v128_or(danger, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source, 0xB4),
-                                                    sz_utf8_uncased_eq01_v128_(previous, 0xE2)));
-        sz_utf8_uncased_alarm_window_(danger, pos, window, &best);
+        v128_t source_u8x16 = chunk.source, previous_u8x16 = chunk.previous, next_u8x16 = chunk.next;
+        v128_t after_e1_u8x16 = sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE1);
+        v128_t danger_u8x16 = wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB2), after_e1_u8x16);
+        danger_u8x16 = wasm_v128_or(
+            danger_u8x16, wasm_v128_and(wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0x82), after_e1_u8x16),
+                                        sz_utf8_uncased_inrange01_v128_(next_u8x16, 0xA0, 0x46)));
+        danger_u8x16 = wasm_v128_or(danger_u8x16, wasm_v128_and(sz_utf8_uncased_eq01_v128_(source_u8x16, 0xB4),
+                                                                sz_utf8_uncased_eq01_v128_(previous_u8x16, 0xE2)));
+        sz_utf8_uncased_alarm_window_(danger_u8x16, pos, window, &best);
         if (best >= 0) break;
     }
     return best;
@@ -524,15 +551,18 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(               
 
         for (sz_size_t position = 0; position < valid_starts; position += 16) {
             sz_size_t lanes = valid_starts - position < 16 ? valid_starts - position : 16;
-            v128_t match_vec = wasm_i8x16_eq(wasm_v128_load(folded_buffer + position),
-                                             wasm_i8x16_splat((sz_i8_t)probe_first));
-            match_vec = wasm_v128_and(match_vec, wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_second),
-                                                               wasm_i8x16_splat((sz_i8_t)probe_second)));
-            match_vec = wasm_v128_and(match_vec, wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_third),
-                                                               wasm_i8x16_splat((sz_i8_t)probe_third)));
-            match_vec = wasm_v128_and(match_vec, wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_last),
-                                                               wasm_i8x16_splat((sz_i8_t)probe_last)));
-            sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_vec);
+            v128_t match_u8x16 = wasm_i8x16_eq(wasm_v128_load(folded_buffer + position),
+                                               wasm_i8x16_splat((sz_i8_t)probe_first));
+            match_u8x16 = wasm_v128_and(match_u8x16,
+                                        wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_second),
+                                                      wasm_i8x16_splat((sz_i8_t)probe_second)));
+            match_u8x16 = wasm_v128_and(match_u8x16,
+                                        wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_third),
+                                                      wasm_i8x16_splat((sz_i8_t)probe_third)));
+            match_u8x16 = wasm_v128_and(match_u8x16,
+                                        wasm_i8x16_eq(wasm_v128_load(folded_buffer + position + offset_last),
+                                                      wasm_i8x16_splat((sz_i8_t)probe_last)));
+            sz_u32_t matches = (sz_u32_t)wasm_i8x16_bitmask(match_u8x16);
             if (lanes < 16) matches &= ((sz_u32_t)1 << lanes) - 1;
             while (matches) {
                 sz_size_t const candidate_offset = position + sz_u32_ctz(matches);
@@ -638,8 +668,9 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
 #pragma region Case Invariance
 
 /** @brief 32-bit movemask of two 16-byte registers: bit `i` = lane `i` of `low`, bit `16+i` = lane `i` of `high`. */
-SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low, v128_t high) {
-    return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low) | ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high) << 16);
+SZ_HELPER_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low_u8x16, v128_t high_u8x16) {
+    return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low_u8x16) |
+           ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high_u8x16) << 16);
 }
 
 SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
@@ -647,78 +678,88 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t lengt
     while (length) {
         sz_size_t block_length = length < 29 ? length : 29;
         sz_u32_t lead_mask = block_length >= 32 ? 0xFFFFFFFFu : (((sz_u32_t)1 << block_length) - 1);
-        v128_t low, high;
-        if (length >= 32) { low = wasm_v128_load(text_cursor), high = wasm_v128_load(text_cursor + 16); }
+        v128_t low_u8x16, high_u8x16;
+        if (length >= 32) { low_u8x16 = wasm_v128_load(text_cursor), high_u8x16 = wasm_v128_load(text_cursor + 16); }
         else {
-            low = sz_load_partial_v128_((sz_cptr_t)text_cursor, length < 16 ? length : 16);
-            high = length > 16 ? sz_load_partial_v128_((sz_cptr_t)(text_cursor + 16), length - 16)
-                               : wasm_i8x16_splat(0);
+            low_u8x16 = sz_load_partial_v128_((sz_cptr_t)text_cursor, length < 16 ? length : 16);
+            high_u8x16 = length > 16 ? sz_load_partial_v128_((sz_cptr_t)(text_cursor + 16), length - 16)
+                                     : wasm_i8x16_splat(0);
         }
-        sz_u32_t is_upper = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'A', 26),
-                                                             sz_utf8_in_range_v128_(high, 'A', 26));
-        sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 'a', 26),
-                                                             sz_utf8_in_range_v128_(high, 'a', 26));
+        sz_u32_t is_upper = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 'A', 26),
+                                                             sz_utf8_in_range_v128_(high_u8x16, 'A', 26));
+        sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 'a', 26),
+                                                             sz_utf8_in_range_v128_(high_u8x16, 'a', 26));
         if (is_upper | is_lower) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
 
-        v128_t x80 = wasm_i8x16_splat((sz_i8_t)0x80);
-        sz_u32_t is_non_ascii = sz_utf8_uncased_movemask_v128x2_(wasm_u8x16_ge(low, x80), wasm_u8x16_ge(high, x80)) &
+        v128_t x80_u8x16 = wasm_i8x16_splat((sz_i8_t)0x80);
+        sz_u32_t is_non_ascii = sz_utf8_uncased_movemask_v128x2_(wasm_u8x16_ge(low_u8x16, x80_u8x16),
+                                                                 wasm_u8x16_ge(high_u8x16, x80_u8x16)) &
                                 lead_mask;
         if (is_non_ascii) {
-            v128_t xe0 = wasm_i8x16_splat((sz_i8_t)0xE0), xf0 = wasm_i8x16_splat((sz_i8_t)0xF0);
-            v128_t xc0 = wasm_i8x16_splat((sz_i8_t)0xC0), xf8 = wasm_i8x16_splat((sz_i8_t)0xF8);
-            sz_u32_t is_two = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xe0), xc0),
-                                                               wasm_i8x16_eq(wasm_v128_and(high, xe0), xc0)) &
+            v128_t xe0_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE0), xf0_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF0);
+            v128_t xc0_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0), xf8_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF8);
+            sz_u32_t is_two = sz_utf8_uncased_movemask_v128x2_(
+                                  wasm_i8x16_eq(wasm_v128_and(low_u8x16, xe0_u8x16), xc0_u8x16),
+                                  wasm_i8x16_eq(wasm_v128_and(high_u8x16, xe0_u8x16), xc0_u8x16)) &
                               lead_mask;
-            sz_u32_t is_three = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xf0), xe0),
-                                                                 wasm_i8x16_eq(wasm_v128_and(high, xf0), xe0)) &
+            sz_u32_t is_three = sz_utf8_uncased_movemask_v128x2_(
+                                    wasm_i8x16_eq(wasm_v128_and(low_u8x16, xf0_u8x16), xe0_u8x16),
+                                    wasm_i8x16_eq(wasm_v128_and(high_u8x16, xf0_u8x16), xe0_u8x16)) &
                                 lead_mask;
-            sz_u32_t is_four = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(wasm_v128_and(low, xf8), xf0),
-                                                                wasm_i8x16_eq(wasm_v128_and(high, xf8), xf0)) &
+            sz_u32_t is_four = sz_utf8_uncased_movemask_v128x2_(
+                                   wasm_i8x16_eq(wasm_v128_and(low_u8x16, xf8_u8x16), xf0_u8x16),
+                                   wasm_i8x16_eq(wasm_v128_and(high_u8x16, xf8_u8x16), xf0_u8x16)) &
                                lead_mask;
             if (is_four) {
                 static sz_u8_t const seconds[5] = {0x90, 0x91, 0x96, 0x9D, 0x9E};
                 sz_u32_t hit = 0;
                 for (int value = 0; value < 5; ++value) {
-                    v128_t b = wasm_i8x16_splat((sz_i8_t)seconds[value]);
-                    hit |= sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, b), wasm_i8x16_eq(high, b));
+                    v128_t second_u8x16 = wasm_i8x16_splat((sz_i8_t)seconds[value]);
+                    hit |= sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, second_u8x16),
+                                                            wasm_i8x16_eq(high_u8x16, second_u8x16));
                 }
                 if ((is_four << 1) & hit) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
             if (is_two) {
-                sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xC3, 0x14),
-                                                                         sz_utf8_in_range_v128_(high, 0xC3, 0x14));
-                v128_t xc2 = wasm_i8x16_splat((sz_i8_t)0xC2), xb5 = wasm_i8x16_splat((sz_i8_t)0xB5);
-                sz_u32_t is_c2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xc2), wasm_i8x16_eq(high, xc2)) &
+                sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(
+                    sz_utf8_in_range_v128_(low_u8x16, 0xC3, 0x14), sz_utf8_in_range_v128_(high_u8x16, 0xC3, 0x14));
+                v128_t xc2_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC2), xb5_u8x16 = wasm_i8x16_splat((sz_i8_t)0xB5);
+                sz_u32_t is_c2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xc2_u8x16),
+                                                                  wasm_i8x16_eq(high_u8x16, xc2_u8x16)) &
                                  is_two;
                 if (is_c2) {
-                    sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xb5),
-                                                                      wasm_i8x16_eq(high, xb5));
+                    sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xb5_u8x16),
+                                                                      wasm_i8x16_eq(high_u8x16, xb5_u8x16));
                     if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
                 if (is_bicameral & is_two) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
             }
             if (is_three) {
-                v128_t xe1 = wasm_i8x16_splat((sz_i8_t)0xE1), xef = wasm_i8x16_splat((sz_i8_t)0xEF);
-                sz_u32_t is_e1 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe1), wasm_i8x16_eq(high, xe1));
+                v128_t xe1_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE1), xef_u8x16 = wasm_i8x16_splat((sz_i8_t)0xEF);
+                sz_u32_t is_e1 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xe1_u8x16),
+                                                                  wasm_i8x16_eq(high_u8x16, xe1_u8x16));
                 if (is_e1 & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
-                sz_u32_t is_ef = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xef), wasm_i8x16_eq(high, xef));
+                sz_u32_t is_ef = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xef_u8x16),
+                                                                  wasm_i8x16_eq(high_u8x16, xef_u8x16));
                 if (is_ef & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
-                v128_t xe2 = wasm_i8x16_splat((sz_i8_t)0xE2);
-                sz_u32_t is_e2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xe2), wasm_i8x16_eq(high, xe2)) &
+                v128_t xe2_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE2);
+                sz_u32_t is_e2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xe2_u8x16),
+                                                                  wasm_i8x16_eq(high_u8x16, xe2_u8x16)) &
                                  is_three;
                 if (is_e2) {
-                    sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x80, 0x04),
-                                                                        sz_utf8_in_range_v128_(high, 0x80, 0x04));
+                    sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 0x80, 0x04),
+                                                                        sz_utf8_in_range_v128_(high_u8x16, 0x80, 0x04));
                     if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }
-                v128_t xea = wasm_i8x16_splat((sz_i8_t)0xEA);
-                sz_u32_t is_ea = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low, xea), wasm_i8x16_eq(high, xea)) &
+                v128_t xea_u8x16 = wasm_i8x16_splat((sz_i8_t)0xEA);
+                sz_u32_t is_ea = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xea_u8x16),
+                                                                  wasm_i8x16_eq(high_u8x16, xea_u8x16)) &
                                  is_three;
                 if (is_ea) {
-                    sz_u32_t is_99 = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0x99, 0x07),
-                                                                      sz_utf8_in_range_v128_(high, 0x99, 0x07));
-                    sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low, 0xAC, 0x03),
-                                                                      sz_utf8_in_range_v128_(high, 0xAC, 0x03));
+                    sz_u32_t is_99 = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 0x99, 0x07),
+                                                                      sz_utf8_in_range_v128_(high_u8x16, 0x99, 0x07));
+                    sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 0xAC, 0x03),
+                                                                      sz_utf8_in_range_v128_(high_u8x16, 0xAC, 0x03));
                     if ((is_ea << 1) & (is_99 | is_ac))
                         return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
                 }

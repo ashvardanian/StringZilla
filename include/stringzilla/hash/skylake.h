@@ -39,28 +39,28 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
     // When the buffer is small, there isn't much to innovate.
     // Separately handling even smaller payloads doesn't increase performance even on synthetic benchmarks.
     if (length <= 16) {
-        __mmask16 mask = sz_u16_mask_until_(length);
-        text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask, text);
+        __mmask16 mask_m16 = sz_u16_mask_until_(length);
+        text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask_m16, text);
         sums_vec.xmms[0] = _mm_sad_epu8(text_vec.xmms[0], _mm_setzero_si128());
         sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_vec.xmms[0]);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_vec.xmms[0], 1);
         return low + high;
     }
     else if (length <= 32) {
-        __mmask32 mask = sz_u32_mask_until_(length);
-        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(mask, text);
+        __mmask32 mask_m32 = sz_u32_mask_until_(length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(mask_m32, text);
         sums_vec.ymms[0] = _mm256_sad_epu8(text_vec.ymms[0], _mm256_setzero_si256());
         // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
-        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymms[0]);
-        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymms[0], 1);
-        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
-        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        __m128i low_u64x2 = _mm256_castsi256_si128(sums_vec.ymms[0]);
+        __m128i high_u64x2 = _mm256_extracti128_si256(sums_vec.ymms[0], 1);
+        __m128i sums_u64x2 = _mm_add_epi64(low_u64x2, high_u64x2);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_u64x2);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_u64x2, 1);
         return low + high;
     }
     else if (length <= 64) {
-        __mmask64 mask = sz_u64_mask_until_(length);
-        text_vec.zmm = _mm512_maskz_loadu_epi8(mask, text);
+        __mmask64 mask_m64 = sz_u64_mask_until_(length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(mask_m64, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         return _mm512_reduce_add_epi64(sums_vec.zmm);
     }
@@ -76,16 +76,16 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
         sz_size_t tail_length = (sz_size_t)(text + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length; // Multiple of 64.
         sz_assert_(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
 
-        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         for (text += head_length; body_length >= 64; text += 64, body_length -= 64) {
             text_vec.zmm = _mm512_load_si512((__m512i const *)text);
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
         }
-        text_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_m64, text);
         sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
         return _mm512_reduce_add_epi64(sums_vec.zmm);
     }
@@ -101,12 +101,12 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
         sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64;
         sz_size_t tail_length = (sz_size_t)(text + length) % 64;
         sz_size_t body_length = length - head_length - tail_length;
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
 
-        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
-        text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
+        text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_m64, text + head_length + body_length);
         sums_reversed_vec.zmm = _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512());
 
         // Now in the main loop, we can use non-temporal loads, performing the operation in both directions.
@@ -128,17 +128,17 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
 
 SZ_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
-    __m512i seed_vec = _mm512_set1_epi64(seed);
+    __m512i seed_u64x8 = _mm512_set1_epi64(seed);
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
     // ! we must use `_mm_storeu_si128` stores to update the state.
-    _mm_storeu_si128((__m128i *)state->key, _mm512_castsi512_si128(seed_vec));
+    _mm_storeu_si128((__m128i *)state->key, _mm512_castsi512_si128(seed_u64x8));
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
-    __m512i const pi0 = _mm512_load_epi64((__m512i const *)(pi));
-    __m512i const pi1 = _mm512_load_epi64((__m512i const *)(pi + 8));
-    _mm512_storeu_si512((__m512i *)state->aes, _mm512_xor_si512(seed_vec, pi0));
-    _mm512_storeu_si512((__m512i *)state->sum, _mm512_xor_si512(seed_vec, pi1));
+    __m512i const pi0_u64x8 = _mm512_load_epi64((__m512i const *)(pi));
+    __m512i const pi1_u64x8 = _mm512_load_epi64((__m512i const *)(pi + 8));
+    _mm512_storeu_si512((__m512i *)state->aes, _mm512_xor_si512(seed_u64x8, pi0_u64x8));
+    _mm512_storeu_si512((__m512i *)state->sum, _mm512_xor_si512(seed_u64x8, pi1_u64x8));
 
     // The inputs are zeroed out at the beginning
     _mm512_storeu_si512((__m512i *)state->ins, _mm512_setzero_si512());
@@ -157,8 +157,8 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
         data_vec.xmm = _mm_maskz_loadu_epi8(sz_u16_mask_until_(length), start);
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 32) {
@@ -172,9 +172,9 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
         data1_vec.xmm = _mm_maskz_loadu_epi8(sz_u16_mask_until_(length - 16), start + 16);
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 48) {
@@ -189,10 +189,10 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
         data2_vec.xmm = _mm_maskz_loadu_epi8(sz_u16_mask_until_(length - 32), start + 32);
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     else if (length <= 64) {
@@ -208,11 +208,11 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_skylake(sz_cptr_t start, 
         data3_vec.xmm = _mm_maskz_loadu_epi8(sz_u16_mask_until_(length - 48), start + 48);
 
         // Shuffle with the same mask
-        __m128i const order = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order);
-        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order);
+        __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
+        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order_u8x16);
         return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
     }
     // Skylake has no VAES, so its four-lane AES-NI absorb has no throughput edge over Westmere; in 512-bit form it
@@ -240,9 +240,9 @@ SZ_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz
             buffered = 0;
         }
         sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        __mmask64 const place_mask = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
-        __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(place_mask, (void const *)(text - buffered));
-        state.ins.zmm = _mm512_mask_blend_epi8(place_mask, state.ins.zmm, incoming_u8x64);
+        __mmask64 const place_mask_m64 = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
+        __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(place_mask_m64, (void const *)(text - buffered));
+        state.ins.zmm = _mm512_mask_blend_epi8(place_mask_m64, state.ins.zmm, incoming_u8x64);
         buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
     sz_hash_state_store_westmere_(state_ptr, &state);

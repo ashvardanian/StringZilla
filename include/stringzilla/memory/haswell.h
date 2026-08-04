@@ -24,7 +24,7 @@ extern "C" {
 
 SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     char value_char = *(char *)&value;
-    __m256i value_vec = _mm256_set1_epi8(value_char);
+    __m256i value_u8x32 = _mm256_set1_epi8(value_char);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores".
     //
@@ -52,7 +52,7 @@ SZ_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t 
         sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
-        for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_vec);
+        for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_u8x32);
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
         sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");

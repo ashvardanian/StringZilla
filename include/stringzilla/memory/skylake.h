@@ -26,17 +26,17 @@ extern "C" {
 #endif
 
 SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    __m512i value_vec = _mm512_set1_epi8(value);
+    __m512i value_u8x64 = _mm512_set1_epi8(value);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores".
     //
-    //    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, value_vec);
-    //    _mm512_mask_storeu_epi8(target, sz_u64_mask_until_(length), value_vec);
+    //    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, value_u8x64);
+    //    _mm512_mask_storeu_epi8(target, sz_u64_mask_until_(length), value_u8x64);
     //
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
-        __mmask64 mask = sz_u64_mask_until_(length);
-        _mm512_mask_storeu_epi8(target, mask, value_vec);
+        __mmask64 mask_m64 = sz_u64_mask_until_(length);
+        _mm512_mask_storeu_epi8(target, mask_m64, value_u8x64);
     }
     // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
     // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
@@ -46,12 +46,12 @@ SZ_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t 
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
-        _mm512_mask_storeu_epi8(target, head_mask, value_vec);
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask_m64, value_u8x64);
         for (target += head_length; body_length >= 64; target += 64, body_length -= 64)
-            _mm512_store_si512(target, value_vec);
-        _mm512_mask_storeu_epi8(target, tail_mask, value_vec);
+            _mm512_store_si512(target, value_u8x64);
+        _mm512_mask_storeu_epi8(target, tail_mask_m64, value_u8x64);
     }
 }
 
@@ -61,8 +61,8 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
     //
     //    for (; length >= 64; target += 64, source += 64, length -= 64)
     //        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
-    //    __mmask64 mask = sz_u64_mask_until_(length);
-    //    _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+    //    __mmask64 mask_m64 = sz_u64_mask_until_(length);
+    //    _mm512_mask_storeu_epi8(target, mask_m64, _mm512_maskz_loadu_epi8(mask_m64, source));
     //
     // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
     // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
@@ -71,8 +71,8 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
 
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
-        __mmask64 mask = sz_u64_mask_until_(length);
-        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+        __mmask64 mask_m64 = sz_u64_mask_until_(length);
+        _mm512_mask_storeu_epi8(target, mask_m64, _mm512_maskz_loadu_epi8(mask_m64, source));
     }
     // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_skylake` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
@@ -81,9 +81,9 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
         for (; length >= 64; target += 64, source += 64, length -= 64)
             _mm512_store_si512(target, _mm512_load_si512(source));
         // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = sz_u64_mask_until_(length);
+        __mmask64 mask_m64 = sz_u64_mask_until_(length);
         // Aligned load and stores would work too, but it's not defined.
-        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+        _mm512_mask_storeu_epi8(target, mask_m64, _mm512_maskz_loadu_epi8(mask_m64, source));
     }
     // The trickiest case is when both `source` and `target` are not aligned.
     // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
@@ -92,13 +92,13 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
-        _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask_m64, _mm512_maskz_loadu_epi8(head_mask_m64, source));
         for (target += head_length, source += head_length; body_length >= 64;
              target += 64, source += 64, body_length -= 64)
             _mm512_store_si512(target, _mm512_loadu_si512(source)); // Unaligned load, but aligned store!
-        _mm512_mask_storeu_epi8(target, tail_mask, _mm512_maskz_loadu_epi8(tail_mask, source));
+        _mm512_mask_storeu_epi8(target, tail_mask_m64, _mm512_maskz_loadu_epi8(tail_mask_m64, source));
     }
     // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
     //
@@ -115,11 +115,11 @@ SZ_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64;
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;
         sz_size_t body_length = length - head_length - tail_length;
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
-        _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
-        _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
-                                _mm512_maskz_loadu_epi8(tail_mask, source + head_length + body_length));
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask_m64, _mm512_maskz_loadu_epi8(head_mask_m64, source));
+        _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask_m64,
+                                _mm512_maskz_loadu_epi8(tail_mask_m64, source + head_length + body_length));
 
         // Now in the main loop, we can use non-temporal loads and stores,
         // performing the operation in both directions.
@@ -143,38 +143,38 @@ SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
     // We can also avoid any data-dependencies between iterations, assuming we have 32 registers
     // to pre-load the data, before writing it back.
     if (length <= 64) {
-        __mmask64 mask = sz_u64_mask_until_(length);
-        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+        __mmask64 mask_m64 = sz_u64_mask_until_(length);
+        _mm512_mask_storeu_epi8(target, mask_m64, _mm512_maskz_loadu_epi8(mask_m64, source));
     }
     else if (length <= 128) {
         sz_size_t last_length = length - 64;
-        __mmask64 mask = sz_u64_mask_until_(last_length);
-        __m512i source0 = _mm512_loadu_epi8(source);
-        __m512i source1 = _mm512_maskz_loadu_epi8(mask, source + 64);
-        _mm512_storeu_epi8(target, source0);
-        _mm512_mask_storeu_epi8(target + 64, mask, source1);
+        __mmask64 mask_m64 = sz_u64_mask_until_(last_length);
+        __m512i source0_u8x64 = _mm512_loadu_epi8(source);
+        __m512i source1_u8x64 = _mm512_maskz_loadu_epi8(mask_m64, source + 64);
+        _mm512_storeu_epi8(target, source0_u8x64);
+        _mm512_mask_storeu_epi8(target + 64, mask_m64, source1_u8x64);
     }
     else if (length <= 192) {
         sz_size_t last_length = length - 128;
-        __mmask64 mask = sz_u64_mask_until_(last_length);
-        __m512i source0 = _mm512_loadu_epi8(source);
-        __m512i source1 = _mm512_loadu_epi8(source + 64);
-        __m512i source2 = _mm512_maskz_loadu_epi8(mask, source + 128);
-        _mm512_storeu_epi8(target, source0);
-        _mm512_storeu_epi8(target + 64, source1);
-        _mm512_mask_storeu_epi8(target + 128, mask, source2);
+        __mmask64 mask_m64 = sz_u64_mask_until_(last_length);
+        __m512i source0_u8x64 = _mm512_loadu_epi8(source);
+        __m512i source1_u8x64 = _mm512_loadu_epi8(source + 64);
+        __m512i source2_u8x64 = _mm512_maskz_loadu_epi8(mask_m64, source + 128);
+        _mm512_storeu_epi8(target, source0_u8x64);
+        _mm512_storeu_epi8(target + 64, source1_u8x64);
+        _mm512_mask_storeu_epi8(target + 128, mask_m64, source2_u8x64);
     }
     else if (length <= 256) {
         sz_size_t last_length = length - 192;
-        __mmask64 mask = sz_u64_mask_until_(last_length);
-        __m512i source0 = _mm512_loadu_epi8(source);
-        __m512i source1 = _mm512_loadu_epi8(source + 64);
-        __m512i source2 = _mm512_loadu_epi8(source + 128);
-        __m512i source3 = _mm512_maskz_loadu_epi8(mask, source + 192);
-        _mm512_storeu_epi8(target, source0);
-        _mm512_storeu_epi8(target + 64, source1);
-        _mm512_storeu_epi8(target + 128, source2);
-        _mm512_mask_storeu_epi8(target + 192, mask, source3);
+        __mmask64 mask_m64 = sz_u64_mask_until_(last_length);
+        __m512i source0_u8x64 = _mm512_loadu_epi8(source);
+        __m512i source1_u8x64 = _mm512_loadu_epi8(source + 64);
+        __m512i source2_u8x64 = _mm512_loadu_epi8(source + 128);
+        __m512i source3_u8x64 = _mm512_maskz_loadu_epi8(mask_m64, source + 192);
+        _mm512_storeu_epi8(target, source0_u8x64);
+        _mm512_storeu_epi8(target + 64, source1_u8x64);
+        _mm512_storeu_epi8(target + 128, source2_u8x64);
+        _mm512_mask_storeu_epi8(target + 192, mask_m64, source3_u8x64);
     }
 
     // If the regions don't overlap at all, just use "copy" and save some brain cells thinking about corner cases.
@@ -188,8 +188,8 @@ SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = sz_u64_mask_until_(head_length);
-        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
+        __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
 
         // The absolute most common case of using "moves" is shifting the data within a continuous buffer
         // when adding a removing some values in it. In such cases, a typical shift is by 1, 2, 4, 8, 16,
@@ -223,20 +223,20 @@ SZ_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_
         // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memmove-avx512-no-vzeroupper.S.html
         if (left_to_right_traversal) {
             // Head, body, and tail.
-            _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+            _mm512_mask_storeu_epi8(target, head_mask_m64, _mm512_maskz_loadu_epi8(head_mask_m64, source));
             for (target += head_length, source += head_length; body_length >= 64;
                  target += 64, source += 64, body_length -= 64)
                 _mm512_store_si512(target, _mm512_loadu_si512(source));
-            _mm512_mask_storeu_epi8(target, tail_mask, _mm512_maskz_loadu_epi8(tail_mask, source));
+            _mm512_mask_storeu_epi8(target, tail_mask_m64, _mm512_maskz_loadu_epi8(tail_mask_m64, source));
         }
         else {
             // Tail, body, and head.
-            _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
-                                    _mm512_maskz_loadu_epi8(tail_mask, source + head_length + body_length));
+            _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask_m64,
+                                    _mm512_maskz_loadu_epi8(tail_mask_m64, source + head_length + body_length));
             for (; body_length >= 64; body_length -= 64)
                 _mm512_store_si512(target + head_length + body_length - 64,
                                    _mm512_loadu_si512(source + head_length + body_length - 64));
-            _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+            _mm512_mask_storeu_epi8(target, head_mask_m64, _mm512_maskz_loadu_epi8(head_mask_m64, source));
         }
     }
 }

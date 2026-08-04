@@ -33,14 +33,14 @@ SZ_HELPER_AUTO __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)
 SZ_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length <= 32) { sz_fill_serial(target, length, value); }
     else {
-        __m256i value_vec = __lasx_xvreplgr2vr_b((char)value);
+        __m256i value_u8x32 = __lasx_xvreplgr2vr_b((char)value);
         // Store the unaligned head, then walk the aligned body, overlapping the tail at the end.
-        __lasx_xvst(value_vec, target, 0);
+        __lasx_xvst(value_u8x32, target, 0);
         sz_ptr_t end = target + length;
         target = (sz_ptr_t)(((sz_size_t)target + 32) & ~(sz_size_t)31); // First 32-aligned address past the head.
-        for (; target + 32 <= end; target += 32) __lasx_xvst(value_vec, target, 0);
+        for (; target + 32 <= end; target += 32) __lasx_xvst(value_u8x32, target, 0);
         // Store the unaligned tail, overlapping the last aligned body store if needed.
-        if (target != end) __lasx_xvst(value_vec, end - 32, 0);
+        if (target != end) __lasx_xvst(value_u8x32, end - 32, 0);
     }
 }
 
@@ -71,11 +71,11 @@ SZ_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t l
     }
     else {
         // Copy the unaligned head, then run an aligned-store body and an overlapping tail.
-        __m256i head_vec = __lasx_xvld(source, 0);
+        __m256i head_u8x32 = __lasx_xvld(source, 0);
         sz_ptr_t target_end = target + length;
         sz_ptr_t target_aligned = (sz_ptr_t)(((sz_size_t)target + 32) & ~(sz_size_t)31);
         sz_size_t head_bytes = (sz_size_t)(target_aligned - target);
-        __lasx_xvst(head_vec, target, 0);
+        __lasx_xvst(head_u8x32, target, 0);
         source += head_bytes;
         for (target = target_aligned; target + 32 <= target_end; target += 32, source += 32)
             __lasx_xvst(__lasx_xvld(source, 0), target, 0);
@@ -167,69 +167,77 @@ SZ_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t
     sz_u256_vec_t blended_0_to_31_vec, blended_32_to_63_vec, blended_64_to_95_vec, blended_96_to_127_vec,
         blended_128_to_159_vec, blended_160_to_191_vec, blended_192_to_223_vec, blended_224_to_255_vec;
 
-    __m256i const zero_vec = __lasx_xvreplgr2vr_b(0);
-    __m256i const nibble_mask = __lasx_xvreplgr2vr_b(0x0F);
+    __m256i const zero_u8x32 = __lasx_xvreplgr2vr_b(0);
+    __m256i const nibble_mask_u8x32 = __lasx_xvreplgr2vr_b(0x0F);
 
     // `__lasx_xvbitsel_v(a, b, c)` selects bit-by-bit: result = (a & ~c) | (b & c).
     // We build full-byte selector masks (0xFF -> pick `b`, 0x00 -> pick `a`) by testing one source bit
     // via `__lasx_xvslt_bu(0, byte & mask)`, which yields 0xFF whenever the masked byte is non-zero.
     while (length >= 32) {
         source_vec.lasx = __lasx_xvld(source, 0);
-        source_bot_vec.lasx = __lasx_xvand_v(source_vec.lasx, nibble_mask);
+        source_bot_vec.lasx = __lasx_xvand_v(source_vec.lasx, nibble_mask_u8x32);
 
         // Round 1: select within each 32-entry pair using bit 4 (0x10).
-        __m256i bit4_set = __lasx_xvslt_bu(zero_vec, __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x10)));
-        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(                              //
-            __lasx_xvshuf_b(zero_vec, lut_0_to_15_vec.lasx, source_bot_vec.lasx),  //
-            __lasx_xvshuf_b(zero_vec, lut_16_to_31_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_32_to_63_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_32_to_47_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_48_to_63_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_64_to_95_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_64_to_79_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_80_to_95_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_96_to_127_vec.lasx = __lasx_xvbitsel_v(                              //
-            __lasx_xvshuf_b(zero_vec, lut_96_to_111_vec.lasx, source_bot_vec.lasx),  //
-            __lasx_xvshuf_b(zero_vec, lut_112_to_127_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_128_to_159_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_128_to_143_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_144_to_159_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_160_to_191_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_160_to_175_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_176_to_191_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_192_to_223_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_192_to_207_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_208_to_223_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
-        blended_224_to_255_vec.lasx = __lasx_xvbitsel_v(                             //
-            __lasx_xvshuf_b(zero_vec, lut_224_to_239_vec.lasx, source_bot_vec.lasx), //
-            __lasx_xvshuf_b(zero_vec, lut_240_to_255_vec.lasx, source_bot_vec.lasx), //
-            bit4_set);
+        __m256i bit4_set_u8x32 = __lasx_xvslt_bu(zero_u8x32,
+                                                 __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x10)));
+        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(                                //
+            __lasx_xvshuf_b(zero_u8x32, lut_0_to_15_vec.lasx, source_bot_vec.lasx),  //
+            __lasx_xvshuf_b(zero_u8x32, lut_16_to_31_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_32_to_63_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_32_to_47_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_48_to_63_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_64_to_95_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_64_to_79_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_80_to_95_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_96_to_127_vec.lasx = __lasx_xvbitsel_v(                                //
+            __lasx_xvshuf_b(zero_u8x32, lut_96_to_111_vec.lasx, source_bot_vec.lasx),  //
+            __lasx_xvshuf_b(zero_u8x32, lut_112_to_127_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_128_to_159_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_128_to_143_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_144_to_159_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_160_to_191_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_160_to_175_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_176_to_191_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_192_to_223_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_192_to_207_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_208_to_223_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
+        blended_224_to_255_vec.lasx = __lasx_xvbitsel_v(                               //
+            __lasx_xvshuf_b(zero_u8x32, lut_224_to_239_vec.lasx, source_bot_vec.lasx), //
+            __lasx_xvshuf_b(zero_u8x32, lut_240_to_255_vec.lasx, source_bot_vec.lasx), //
+            bit4_set_u8x32);
 
         // Round 2: select using bit 5 (0x20).
-        __m256i bit5_set = __lasx_xvslt_bu(zero_vec, __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x20)));
-        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_32_to_63_vec.lasx, bit5_set);
-        blended_64_to_95_vec.lasx = __lasx_xvbitsel_v(blended_64_to_95_vec.lasx, blended_96_to_127_vec.lasx, bit5_set);
+        __m256i bit5_set_u8x32 = __lasx_xvslt_bu(zero_u8x32,
+                                                 __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x20)));
+        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_32_to_63_vec.lasx,
+                                                     bit5_set_u8x32);
+        blended_64_to_95_vec.lasx = __lasx_xvbitsel_v(blended_64_to_95_vec.lasx, blended_96_to_127_vec.lasx,
+                                                      bit5_set_u8x32);
         blended_128_to_159_vec.lasx = __lasx_xvbitsel_v(blended_128_to_159_vec.lasx, blended_160_to_191_vec.lasx,
-                                                        bit5_set);
+                                                        bit5_set_u8x32);
         blended_192_to_223_vec.lasx = __lasx_xvbitsel_v(blended_192_to_223_vec.lasx, blended_224_to_255_vec.lasx,
-                                                        bit5_set);
+                                                        bit5_set_u8x32);
 
         // Round 3: select using bit 6 (0x40).
-        __m256i bit6_set = __lasx_xvslt_bu(zero_vec, __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x40)));
-        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_64_to_95_vec.lasx, bit6_set);
+        __m256i bit6_set_u8x32 = __lasx_xvslt_bu(zero_u8x32,
+                                                 __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b(0x40)));
+        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_64_to_95_vec.lasx,
+                                                     bit6_set_u8x32);
         blended_128_to_159_vec.lasx = __lasx_xvbitsel_v(blended_128_to_159_vec.lasx, blended_192_to_223_vec.lasx,
-                                                        bit6_set);
+                                                        bit6_set_u8x32);
 
         // Round 4: select using bit 7 (0x80).
-        __m256i bit7_set = __lasx_xvslt_bu(zero_vec, __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b((char)0x80)));
-        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_128_to_159_vec.lasx, bit7_set);
+        __m256i bit7_set_u8x32 = __lasx_xvslt_bu(zero_u8x32,
+                                                 __lasx_xvand_v(source_vec.lasx, __lasx_xvreplgr2vr_b((char)0x80)));
+        blended_0_to_31_vec.lasx = __lasx_xvbitsel_v(blended_0_to_31_vec.lasx, blended_128_to_159_vec.lasx,
+                                                     bit7_set_u8x32);
 
         __lasx_xvst(blended_0_to_31_vec.lasx, target, 0);
         source += 32, target += 32, length -= 32;

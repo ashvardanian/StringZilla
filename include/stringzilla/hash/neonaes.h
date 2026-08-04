@@ -62,12 +62,12 @@ SZ_HELPER_AUTO void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_sho
     sz_u64_t const *pi = sz_hash_pi_constants_();
     uint64x2_t const pi0_u64x2 = vld1q_u64(pi);
     uint64x2_t const pi1_u64x2 = vld1q_u64(pi + 8);
-    uint64x2_t aes_state_key = veorq_u64(seed_u64x2, pi0_u64x2);
-    uint64x2_t sum_state_key = veorq_u64(seed_u64x2, pi1_u64x2);
+    uint64x2_t aes_state_key_u64x2 = veorq_u64(seed_u64x2, pi0_u64x2);
+    uint64x2_t sum_state_key_u64x2 = veorq_u64(seed_u64x2, pi1_u64x2);
 
     // The first 128 bits of the "sum" and "AES" blocks are the same for the "minimal" and full state
-    state->aes.u64x2 = aes_state_key;
-    state->sum.u64x2 = sum_state_key;
+    state->aes.u64x2 = aes_state_key_u64x2;
+    state->sum.u64x2 = sum_state_key_u64x2;
 }
 
 /**
@@ -367,27 +367,30 @@ SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_neonaes(sz_cptr_t text, s
  *         the `< 16` case, where a 16-byte NEON load could read past the input.
  *  @return The number of populated text-lanes (1..4).
  */
-SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length, sz_u512_vec_t *text_lanes) {
+SZ_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
+                                                         sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
-        sz_u128_vec_t lane;
-        if (length == 16) { lane.u8x16 = vld1q_u8((sz_u8_t const *)text); }
+        sz_u128_vec_t lane_vec;
+        if (length == 16) { lane_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); }
         else {
-            lane.u8x16 = vdupq_n_u8(0);
-            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) lane.u8s[byte_index] = text[byte_index];
+            lane_vec.u8x16 = vdupq_n_u8(0);
+            for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
+                lane_vec.u8s[byte_index] = text[byte_index];
         }
-        text_lanes->u128s[0] = lane;
+        text_lanes_vec->u128s[0] = lane_vec;
         return 1;
     }
     sz_size_t const text_lanes_count = sz_size_divide_round_up(length, 16);
     for (sz_size_t lane_index = 0; lane_index + 1 < text_lanes_count; ++lane_index)
-        text_lanes->u128s[lane_index].u8x16 = vld1q_u8((sz_u8_t const *)(text + lane_index * 16));
+        text_lanes_vec->u128s[lane_index].u8x16 = vld1q_u8((sz_u8_t const *)(text + lane_index * 16));
     // De-interleave the partial tail lane with a single table lookup: output byte i pulls input byte
     // (i + shift); indices that run past 15 make `vqtbl1q_u8` emit a zero - a clean in-register right
     // shift, without the compile-time immediate that `vextq_u8` would demand for a data-dependent shift.
     sz_align_(16) static sz_u8_t const lane_iota[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    uint8x16_t const tail = vld1q_u8((sz_u8_t const *)(text + length - 16));
-    uint8x16_t const shift = vdupq_n_u8((sz_u8_t)(text_lanes_count * 16 - length));
-    text_lanes->u128s[text_lanes_count - 1].u8x16 = vqtbl1q_u8(tail, vaddq_u8(vld1q_u8(lane_iota), shift));
+    uint8x16_t const tail_u8x16 = vld1q_u8((sz_u8_t const *)(text + length - 16));
+    uint8x16_t const shift_u8x16 = vdupq_n_u8((sz_u8_t)(text_lanes_count * 16 - length));
+    text_lanes_vec->u128s[text_lanes_count - 1].u8x16 = vqtbl1q_u8(tail_u8x16,
+                                                                   vaddq_u8(vld1q_u8(lane_iota), shift_u8x16));
     return text_lanes_count;
 }
 
@@ -408,8 +411,8 @@ SZ_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,
         return;
     }
 
-    sz_u512_vec_t text_lanes;
-    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_neon_(text, length, &text_lanes);
+    sz_u512_vec_t text_lanes_vec;
+    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_neon_(text, length, &text_lanes_vec);
 
     sz_size_t seed_index = 0;
     for (; seed_index + 2 <= seeds_count; seed_index += 2) {
@@ -417,8 +420,8 @@ SZ_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,
         sz_hash_state_short_init_neon_(&state0, seeds[seed_index + 0]);
         sz_hash_state_short_init_neon_(&state1, seeds[seed_index + 1]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
-            sz_hash_state_short_update_neon_(&state0, text_lanes.u128s[lane_index].u8x16);
-            sz_hash_state_short_update_neon_(&state1, text_lanes.u128s[lane_index].u8x16);
+            sz_hash_state_short_update_neon_(&state0, text_lanes_vec.u128s[lane_index].u8x16);
+            sz_hash_state_short_update_neon_(&state1, text_lanes_vec.u128s[lane_index].u8x16);
         }
         hashes[seed_index + 0] = sz_hash_state_short_finalize_neon_(&state0, length);
         hashes[seed_index + 1] = sz_hash_state_short_finalize_neon_(&state1, length);
@@ -427,7 +430,7 @@ SZ_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,
         sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_neon_(&state, seeds[seed_index]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_state_short_update_neon_(&state, text_lanes.u128s[lane_index].u8x16);
+            sz_hash_state_short_update_neon_(&state, text_lanes_vec.u128s[lane_index].u8x16);
         hashes[seed_index] = sz_hash_state_short_finalize_neon_(&state, length);
     }
 }

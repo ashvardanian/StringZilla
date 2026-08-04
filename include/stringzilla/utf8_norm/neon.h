@@ -32,12 +32,13 @@ extern "C" {
 #endif
 
 /** @brief Per-16B classify: nonzero lanes mark lead bytes that are candidate-non-inert for the form. */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v, uint8x16x4_t lut, uint8x16_t flag_vec) {
-    uint8x16_t non_ascii = vcgeq_u8(v, vdupq_n_u8(0x80));
-    uint8x16_t continuation = vcltq_u8(vsubq_u8(v, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
-    uint8x16_t is_lead = vbicq_u8(non_ascii, continuation);
-    uint8x16_t families = vqtbl4q_u8(lut, vandq_u8(v, vdupq_n_u8(0x3F)));
-    return vandq_u8(vandq_u8(families, flag_vec), is_lead);
+SZ_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
+                                                             uint8x16_t flag_vec_u8x16) {
+    uint8x16_t non_ascii_u8x16 = vcgeq_u8(v_u8x16, vdupq_n_u8(0x80));
+    uint8x16_t continuation_u8x16 = vcltq_u8(vsubq_u8(v_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+    uint8x16_t is_lead_u8x16 = vbicq_u8(non_ascii_u8x16, continuation_u8x16);
+    uint8x16_t families_u8x16 = vqtbl4q_u8(lut_u8x16x4, vandq_u8(v_u8x16, vdupq_n_u8(0x3F)));
+    return vandq_u8(vandq_u8(families_u8x16, flag_vec_u8x16), is_lead_u8x16);
 }
 
 /**
@@ -52,29 +53,30 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size
     sz_u8_t const *const end = ptr + length;
     sz_u8_t const flag = sz_utf8_norm_form_flag_(form);
 
-    uint8x16x4_t lut;
-    lut.val[0] = vld1q_u8(sz_utf8_norm_lead_lut_ + 0);
-    lut.val[1] = vld1q_u8(sz_utf8_norm_lead_lut_ + 16);
-    lut.val[2] = vld1q_u8(sz_utf8_norm_lead_lut_ + 32);
-    lut.val[3] = vld1q_u8(sz_utf8_norm_lead_lut_ + 48);
-    uint8x16_t const flag_vec = vdupq_n_u8(flag);
+    uint8x16x4_t lut_u8x16x4;
+    lut_u8x16x4.val[0] = vld1q_u8(sz_utf8_norm_lead_lut_ + 0);
+    lut_u8x16x4.val[1] = vld1q_u8(sz_utf8_norm_lead_lut_ + 16);
+    lut_u8x16x4.val[2] = vld1q_u8(sz_utf8_norm_lead_lut_ + 32);
+    lut_u8x16x4.val[3] = vld1q_u8(sz_utf8_norm_lead_lut_ + 48);
+    uint8x16_t const flag_vec_u8x16 = vdupq_n_u8(flag);
     sz_u8_t previous_canonical_combining_class = 0;
 
     // 64-byte superchunk gate: one horizontal reduction per 64B for the (overwhelmingly common) inert
     // case. All-ASCII blocks skip with zero LUT work; otherwise the flagged-lead OR is reduced once.
     while (ptr + 64 <= end) {
-        uint8x16_t v0 = vld1q_u8(ptr), v1 = vld1q_u8(ptr + 16);
-        uint8x16_t v2 = vld1q_u8(ptr + 32), v3 = vld1q_u8(ptr + 48);
-        uint8x16_t any = vorrq_u8(vorrq_u8(v0, v1), vorrq_u8(v2, v3));
-        if (vmaxvq_u8(any) < 0x80) {
+        uint8x16_t v0_u8x16 = vld1q_u8(ptr), v1_u8x16 = vld1q_u8(ptr + 16);
+        uint8x16_t v2_u8x16 = vld1q_u8(ptr + 32), v3_u8x16 = vld1q_u8(ptr + 48);
+        uint8x16_t any_u8x16 = vorrq_u8(vorrq_u8(v0_u8x16, v1_u8x16), vorrq_u8(v2_u8x16, v3_u8x16));
+        if (vmaxvq_u8(any_u8x16) < 0x80) {
             ptr += 64, previous_canonical_combining_class = 0;
             continue;
         } // all 64 bytes ASCII: inert
-        uint8x16_t flagged = vorrq_u8(vorrq_u8(sz_utf8_norm_classify_neon_lead_(v0, lut, flag_vec),
-                                               sz_utf8_norm_classify_neon_lead_(v1, lut, flag_vec)),
-                                      vorrq_u8(sz_utf8_norm_classify_neon_lead_(v2, lut, flag_vec),
-                                               sz_utf8_norm_classify_neon_lead_(v3, lut, flag_vec)));
-        if (vmaxvq_u8(flagged) == 0) { // 64 bytes inert for the form
+        uint8x16_t flagged_u8x16 = vorrq_u8(
+            vorrq_u8(sz_utf8_norm_classify_neon_lead_(v0_u8x16, lut_u8x16x4, flag_vec_u8x16),
+                     sz_utf8_norm_classify_neon_lead_(v1_u8x16, lut_u8x16x4, flag_vec_u8x16)),
+            vorrq_u8(sz_utf8_norm_classify_neon_lead_(v2_u8x16, lut_u8x16x4, flag_vec_u8x16),
+                     sz_utf8_norm_classify_neon_lead_(v3_u8x16, lut_u8x16x4, flag_vec_u8x16)));
+        if (vmaxvq_u8(flagged_u8x16) == 0) { // 64 bytes inert for the form
             ptr += 64, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue;
@@ -86,21 +88,21 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size
     }
 
     while (ptr + 16 <= end) {
-        uint8x16_t v = vld1q_u8(ptr);
+        uint8x16_t v_u8x16 = vld1q_u8(ptr);
         // After a skip, realign to a codepoint boundary - a 16-byte step can land mid-sequence, and the
         // straddling codepoint's lead was already classified inert in the chunk we are leaving.
-        if (vmaxvq_u8(v) < 0x80) {
+        if (vmaxvq_u8(v_u8x16) < 0x80) {
             ptr += 16, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue; // all-ASCII: inert
         }
         // Lead bytes only (non-ASCII and not a 10xxxxxx continuation), classified via the 64-entry LUT.
-        uint8x16_t non_ascii = vcgeq_u8(v, vdupq_n_u8(0x80));
-        uint8x16_t continuation = vcltq_u8(vsubq_u8(v, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
-        uint8x16_t is_lead = vbicq_u8(non_ascii, continuation);
-        uint8x16_t families = vqtbl4q_u8(lut, vandq_u8(v, vdupq_n_u8(0x3F)));
-        uint8x16_t flagged = vandq_u8(vandq_u8(families, flag_vec), is_lead);
-        if (vmaxvq_u8(flagged) == 0) { // no flagged lead: inert for form
+        uint8x16_t non_ascii_u8x16 = vcgeq_u8(v_u8x16, vdupq_n_u8(0x80));
+        uint8x16_t continuation_u8x16 = vcltq_u8(vsubq_u8(v_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
+        uint8x16_t is_lead_u8x16 = vbicq_u8(non_ascii_u8x16, continuation_u8x16);
+        uint8x16_t families_u8x16 = vqtbl4q_u8(lut_u8x16x4, vandq_u8(v_u8x16, vdupq_n_u8(0x3F)));
+        uint8x16_t flagged_u8x16 = vandq_u8(vandq_u8(families_u8x16, flag_vec_u8x16), is_lead_u8x16);
+        if (vmaxvq_u8(flagged_u8x16) == 0) { // no flagged lead: inert for form
             ptr += 16, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;
             continue;

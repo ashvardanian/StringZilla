@@ -194,14 +194,15 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t hay
  *  @brief 2-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 2-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
-    sz_u64_vec_t vec;
-    vec.u64 = ~(a.u64 ^ b.u64);
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_2byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+    sz_u64_vec_t vec_vec;
+    vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 2-byte group is set.
     // For that take the bottom 15 bits of each 2-byte group, add one to them,
     // and if this sets the top bit to one, then all the 15 bits are ones as well.
-    vec.u64 = ((vec.u64 & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) & ((vec.u64 & 0x8000800080008000ull));
-    return vec;
+    vec_vec.u64 = ((vec_vec.u64 & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) &
+                  ((vec_vec.u64 & 0x8000800080008000ull));
+    return vec_vec;
 }
 
 SZ_HELPER_NOINLINE sz_cptr_t sz_find_1byte_serial_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -268,14 +269,15 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_size_t
  *  @brief 4-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 4-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
-    sz_u64_vec_t vec;
-    vec.u64 = ~(a.u64 ^ b.u64);
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_4byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+    sz_u64_vec_t vec_vec;
+    vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 4-byte group is set.
     // For that take the bottom 31 bits of each 4-byte group, add one to them,
     // and if this sets the top bit to one, then all the 31 bits are ones as well.
-    vec.u64 = ((vec.u64 & 0x7FFFFFFF7FFFFFFFull) + 0x0000000100000001ull) & ((vec.u64 & 0x8000000080000000ull));
-    return vec;
+    vec_vec.u64 = ((vec_vec.u64 & 0x7FFFFFFF7FFFFFFFull) + 0x0000000100000001ull) &
+                  ((vec_vec.u64 & 0x8000000080000000ull));
+    return vec_vec;
 }
 
 /**
@@ -352,14 +354,15 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_size_t
  *  @brief 3-byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 3-byte group signifies a match.
  */
-SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
-    sz_u64_vec_t vec;
-    vec.u64 = ~(a.u64 ^ b.u64);
+SZ_HELPER_INLINE sz_u64_vec_t sz_u64_each_3byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+    sz_u64_vec_t vec_vec;
+    vec_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each 4-byte group is set.
     // For that take the bottom 31 bits of each 4-byte group, add one to them,
     // and if this sets the top bit to one, then all the 31 bits are ones as well.
-    vec.u64 = ((vec.u64 & 0xFFFF7FFFFF7FFFFFull) + 0x0000000001000001ull) & ((vec.u64 & 0x0000800000800000ull));
-    return vec;
+    vec_vec.u64 = ((vec_vec.u64 & 0xFFFF7FFFFF7FFFFFull) + 0x0000000001000001ull) &
+                  ((vec_vec.u64 & 0x0000800000800000ull));
+    return vec_vec;
 }
 
 /**
@@ -449,7 +452,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
     // Smith: https://www-igm.univ-mlv.fr/~lecroq/string/node21.html
     union {
         sz_u8_t jumps[256];
-        sz_u64_vec_t vecs[64];
+        sz_u64_vec_t vecs_vec[64];
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
@@ -459,7 +462,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_find_horspool_upto_256bytes_serial_( //
         sz_u64_vec_t needle_length_vec;
         needle_length_vec.u64 = ((sz_u8_t)(needle_length - 1)) * 0x0101010101010101ull; // broadcast
         for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
-            bad_shift_table.vecs[byte_index].u64 = needle_length_vec.u64;
+            bad_shift_table.vecs_vec[byte_index].u64 = needle_length_vec.u64;
         for (sz_size_t byte_index = 0; byte_index + 1 < needle_length; ++byte_index)
             bad_shift_table.jumps[needle_u8[byte_index]] = (sz_u8_t)(needle_length - byte_index - 1);
     }
@@ -509,7 +512,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
     sz_assert_(haystack_length >= needle_length && "The haystack is too short.");
     union {
         sz_u8_t jumps[256];
-        sz_u64_vec_t vecs[64];
+        sz_u64_vec_t vecs_vec[64];
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
@@ -519,7 +522,7 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_rfind_horspool_upto_256bytes_serial_( //
         sz_u64_vec_t needle_length_vec;
         needle_length_vec.u64 = ((sz_u8_t)(needle_length - 1)) * 0x0101010101010101ull; // broadcast
         for (sz_size_t byte_index = 0; byte_index != 64; ++byte_index)
-            bad_shift_table.vecs[byte_index].u64 = needle_length_vec.u64;
+            bad_shift_table.vecs_vec[byte_index].u64 = needle_length_vec.u64;
         for (sz_size_t byte_index = 0; byte_index + 1 < needle_length; ++byte_index)
             bad_shift_table.jumps[needle_u8[needle_length - byte_index - 1]] = (sz_u8_t)(needle_length - byte_index -
                                                                                          1);

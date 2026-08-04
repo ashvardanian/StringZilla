@@ -45,11 +45,11 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
         // and shifting the data within the register to zero-out the duplicate bytes.
 
         // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
-        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
-        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
-        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
-        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        __m128i low_u64x2 = _mm256_castsi256_si128(sums_vec.ymm);
+        __m128i high_u64x2 = _mm256_extracti128_si256(sums_vec.ymm, 1);
+        __m128i sums_u64x2 = _mm_add_epi64(low_u64x2, high_u64x2);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_u64x2);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_u64x2, 1);
         sz_u64_t result = low + high;
         if (length) result += sz_bytesum_serial(text, length);
         return result;
@@ -92,11 +92,11 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
         sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
 
         // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
-        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
-        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
-        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
-        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        __m128i low_u64x2 = _mm256_castsi256_si128(sums_vec.ymm);
+        __m128i high_u64x2 = _mm256_extracti128_si256(sums_vec.ymm, 1);
+        __m128i sums_u64x2 = _mm_add_epi64(low_u64x2, high_u64x2);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_u64x2);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_u64x2, 1);
         result += low + high;
         return result;
     }

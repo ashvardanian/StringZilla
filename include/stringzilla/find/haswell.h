@@ -222,8 +222,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t leng
         //          sz_assert_(bitset_odd_vec.u8s[i] == bitset_odd);
         //      }
         //
-        __m256i take_first = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
-        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first);
+        __m256i take_first_u8x32 = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
+        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first_u8x32);
 
         // It would have been great to have an instruction that tests the bits and then broadcasts
         // the matching bit into all bits in that byte. But we don't have that, so we have to
@@ -285,8 +285,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t len
         higher_nibbles_vec.ymm = _mm256_and_si256(_mm256_srli_epi16(text_vec.ymm, 4), _mm256_set1_epi8(0x0f));
         bitset_even_vec.ymm = _mm256_shuffle_epi8(filter_even_vec.ymm, higher_nibbles_vec.ymm);
         bitset_odd_vec.ymm = _mm256_shuffle_epi8(filter_odd_vec.ymm, higher_nibbles_vec.ymm);
-        __m256i take_first = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
-        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first);
+        __m256i take_first_u8x32 = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
+        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first_u8x32);
         matches_vec.ymm = _mm256_and_si256(bitset_even_vec.ymm, bitmask_vec.ymm);
         matches_vec.ymm = _mm256_cmpeq_epi8(matches_vec.ymm, _mm256_setzero_si256());
         int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);

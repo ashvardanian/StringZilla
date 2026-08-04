@@ -28,15 +28,15 @@ extern "C" {
  *      onto [0, limit] and `VPMINUB` + `VPCMPEQB` realize the unsigned `≤` in two single-uop
  *      instructions - cheaper and clearer than the sign-flip `VPXOR` + `VPCMPGTB` alternative.
  */
-SZ_HELPER_INLINE __m256i sz_haswell_in_byte_range_(__m256i values_ymm, sz_u8_t range_start, sz_u8_t range_length) {
-    __m256i offsets_ymm = _mm256_sub_epi8(values_ymm, _mm256_set1_epi8((char)range_start));
-    return _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_ymm, _mm256_set1_epi8((char)(range_length - 1))), offsets_ymm);
+SZ_HELPER_INLINE __m256i sz_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start, sz_u8_t range_length) {
+    __m256i offsets_u8x32 = _mm256_sub_epi8(values_u8x32, _mm256_set1_epi8((char)range_start));
+    return _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_u8x32, _mm256_set1_epi8((char)(range_length - 1))), offsets_u8x32);
 }
 
 /** @brief Folds ASCII A-Z to a-z across the whole vector via a masked +0x20 (no `VPBLENDVB` needed). */
-SZ_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_ymm) {
-    __m256i is_ascii_upper_ymm = sz_haswell_in_byte_range_(source_ymm, 'A', 26);
-    return _mm256_add_epi8(source_ymm, _mm256_and_si256(is_ascii_upper_ymm, _mm256_set1_epi8(0x20)));
+SZ_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_u8x32) {
+    __m256i is_ascii_upper_u8x32 = sz_haswell_in_byte_range_(source_u8x32, 'A', 26);
+    return _mm256_add_epi8(source_u8x32, _mm256_and_si256(is_ascii_upper_u8x32, _mm256_set1_epi8(0x20)));
 }
 
 /**
@@ -45,19 +45,19 @@ SZ_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_ymm) {
  *      characters, so a chunk never starts with a continuation byte that would need its true predecessor.
  *      AVX2 `VPALIGNR` works per 128-bit lane, so a `VPERM2I128` first materializes the cross-lane carry.
  */
-SZ_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_ymm, int byte_offset) {
-    __m256i carry_ymm = _mm256_permute2x128_si256(source_ymm, source_ymm, 0x08); // [zero, source.low]
-    return byte_offset == 1 ? _mm256_alignr_epi8(source_ymm, carry_ymm, 15)
-                            : _mm256_alignr_epi8(source_ymm, carry_ymm, 14);
+SZ_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x32, int byte_offset) {
+    __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x08); // [zero, source.low]
+    return byte_offset == 1 ? _mm256_alignr_epi8(source_u8x32, carry_u8x32, 15)
+                            : _mm256_alignr_epi8(source_u8x32, carry_u8x32, 14);
 }
 
 /**
  *  @brief Shifts the 32 source bytes left by one lane, so lane `i` holds byte `i + 1`.
  *      Lane 31 receives zero; any 2-byte lead there is trimmed as incomplete before folding anyway.
  */
-SZ_HELPER_INLINE __m256i sz_haswell_next_bytes_(__m256i source_ymm) {
-    __m256i carry_ymm = _mm256_permute2x128_si256(source_ymm, source_ymm, 0x81); // [source.high, zero]
-    return _mm256_alignr_epi8(carry_ymm, source_ymm, 1);
+SZ_HELPER_INLINE __m256i sz_haswell_next_bytes_(__m256i source_u8x32) {
+    __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
+    return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
 /** @brief First N bits set; BZHI keeps `n == 32` defined, unlike the `(1 << n) − 1` idiom. */
@@ -76,8 +76,8 @@ SZ_HELPER_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) { return (sz_u32_t
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
-    __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
-    sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     sz_size_t fold_length = is_foreign_lead_mask ? (sz_size_t)sz_u32_ctz(is_foreign_lead_mask) : 32;
 
@@ -89,7 +89,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
     if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
     if (fold_length == 0) return 0;
 
-    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
     return fold_length;
 }
 
@@ -120,98 +120,101 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
-    __m256i source_ymm, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
-    sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     // Shifted views of the data replace Ice Lake's k-mask shifts: comparing `previous_bytes`
     // against a lead value marks the continuation lanes directly, with no vector→GPR round-trip.
-    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
-    __m256i second_previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 2);
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
+    __m256i second_previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 2);
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
 
-    __m256i is_after_c2_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC2));
-    __m256i is_after_c3_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC3));
-    __m256i is_after_c4_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC4));
-    __m256i is_after_c5_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC5));
-    __m256i is_after_c6_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xC6));
-    __m256i is_after_e1_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xE1));
+    __m256i is_after_c2_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC2));
+    __m256i is_after_c3_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC3));
+    __m256i is_after_c4_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC4));
+    __m256i is_after_c5_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC5));
+    __m256i is_after_c6_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xC6));
+    __m256i is_after_e1_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xE1));
 
     // The codepoint's low bit lives in the continuation byte's low bit, deciding the +1 parity fold
-    __m256i is_odd_byte_ymm = _mm256_cmpeq_epi8(_mm256_and_si256(source_ymm, _mm256_set1_epi8(0x01)),
-                                                _mm256_set1_epi8(0x01));
+    __m256i is_odd_byte_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(source_u8x32, _mm256_set1_epi8(0x01)),
+                                                  _mm256_set1_epi8(0x01));
 
     // Latin Ext-A first half after C4 ('Ā' U+0100 - 'Ŀ' U+013F): even continuations fold across
     // 80-B7, odd ones across B9-BD ('Ĺ' U+0139 - 'Ľ' U+013D). 'İ' (U+0130, C4 B0) expands and
     // 'Ŀ' (U+013F, C4 BF) folds to 'ŀ' (U+0140, C5 80) - the +1 would cross lead bytes - so both
     // are irregular.
-    __m256i c4_fold_ymm = _mm256_and_si256(
-        is_after_c4_ymm, _mm256_or_si256(_mm256_andnot_si256(is_odd_byte_ymm, //
-                                                             sz_haswell_in_byte_range_(source_ymm, 0x80, 0x38)),
-                                         _mm256_and_si256(is_odd_byte_ymm, //
-                                                          sz_haswell_in_byte_range_(source_ymm, 0xB9, 0x05))));
-    __m256i c4_irregular_ymm = _mm256_and_si256(
-        is_after_c4_ymm, _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB0)),
-                                         _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xBF))));
+    __m256i c4_fold_u8x32 = _mm256_and_si256(
+        is_after_c4_u8x32, _mm256_or_si256(_mm256_andnot_si256(is_odd_byte_u8x32, //
+                                                               sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x38)),
+                                           _mm256_and_si256(is_odd_byte_u8x32, //
+                                                            sz_haswell_in_byte_range_(source_u8x32, 0xB9, 0x05))));
+    __m256i c4_irregular_u8x32 = _mm256_and_si256(
+        is_after_c4_u8x32, _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xB0)),
+                                           _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xBF))));
 
     // Latin Ext-A second half after C5 ('ŀ' U+0140 - 'ſ' U+017F): odd continuations fold across
     // 81-87 ('Ł'-'Ň') and B9-BD ('Ź'-'Ž'), even ones across 8A-B6 ('Ŋ'-'Ŷ'). 'ŉ' (U+0149, C5 89)
     // expands, 'Ÿ' (U+0178, C5 B8) folds down to 'ÿ' (U+00FF), and 'ſ' (U+017F, C5 BF) folds to
     // ASCII 's' - all three are irregular.
-    __m256i c5_fold_ymm = _mm256_and_si256(
-        is_after_c5_ymm,
-        _mm256_or_si256(_mm256_and_si256(is_odd_byte_ymm, //
-                                         _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0x81, 0x07),
-                                                         sz_haswell_in_byte_range_(source_ymm, 0xB9, 0x05))),
-                        _mm256_andnot_si256(is_odd_byte_ymm, //
-                                            sz_haswell_in_byte_range_(source_ymm, 0x8A, 0x2D))));
-    __m256i c5_irregular_ymm = _mm256_and_si256(
-        is_after_c5_ymm, _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x89)),
-                                         _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB8)),
-                                                         _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xBF)))));
+    __m256i c5_fold_u8x32 = _mm256_and_si256(
+        is_after_c5_u8x32,
+        _mm256_or_si256(_mm256_and_si256(is_odd_byte_u8x32, //
+                                         _mm256_or_si256(sz_haswell_in_byte_range_(source_u8x32, 0x81, 0x07),
+                                                         sz_haswell_in_byte_range_(source_u8x32, 0xB9, 0x05))),
+                        _mm256_andnot_si256(is_odd_byte_u8x32, //
+                                            sz_haswell_in_byte_range_(source_u8x32, 0x8A, 0x2D))));
+    __m256i c5_irregular_u8x32 = _mm256_and_si256(
+        is_after_c5_u8x32,
+        _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x89)),
+                        _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xB8)),
+                                        _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xBF)))));
 
     // Latin Ext-B after C6 ('ƀ' U+0180 - 'ƿ' U+01BF): membership bitsets from the Ice Lake delta
     // LUT, decomposed into nibble lookups. Each table byte holds, for one continuation low-nibble,
     // a 4-bit map across the four 16-codepoint quadrants of the block.
-    __m256i const c6_fold_bitmap_lut = _mm256_setr_epi8(  //
-        4, 2, 5, 8, 5, 8, 0, 5, 10, 0, 0, 1, 12, 0, 0, 4, //
+    __m256i const c6_fold_bitmap_lut_u8x32 = _mm256_setr_epi8( //
+        4, 2, 5, 8, 5, 8, 0, 5, 10, 0, 0, 1, 12, 0, 0, 4,      //
         4, 2, 5, 8, 5, 8, 0, 5, 10, 0, 0, 1, 12, 0, 0, 4);
-    __m256i const c6_irregular_bitmap_lut = _mm256_setr_epi8( //
-        2, 9, 8, 2, 2, 0, 7, 10, 0, 5, 1, 0, 2, 2, 5, 3,      //
+    __m256i const c6_irregular_bitmap_lut_u8x32 = _mm256_setr_epi8( //
+        2, 9, 8, 2, 2, 0, 7, 10, 0, 5, 1, 0, 2, 2, 5, 3,            //
         2, 9, 8, 2, 2, 0, 7, 10, 0, 5, 1, 0, 2, 2, 5, 3);
-    __m256i const quadrant_bit_lut = _mm256_setr_epi8(  //
-        1, 2, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, //
+    __m256i const quadrant_bit_lut_u8x32 = _mm256_setr_epi8( //
+        1, 2, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,      //
         1, 2, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    __m256i low_nibbles_ymm = _mm256_and_si256(source_ymm, _mm256_set1_epi8(0x0F));
-    __m256i quadrant_indices_ymm = _mm256_and_si256(_mm256_srli_epi16(source_ymm, 4), _mm256_set1_epi8(0x03));
-    __m256i quadrant_bits_ymm = _mm256_shuffle_epi8(quadrant_bit_lut, quadrant_indices_ymm);
-    __m256i c6_fold_ymm = _mm256_and_si256(
-        is_after_c6_ymm,
-        _mm256_cmpeq_epi8(_mm256_and_si256(_mm256_shuffle_epi8(c6_fold_bitmap_lut, low_nibbles_ymm), quadrant_bits_ymm),
-                          quadrant_bits_ymm));
-    __m256i c6_irregular_ymm = _mm256_and_si256(
-        is_after_c6_ymm, _mm256_cmpeq_epi8(_mm256_and_si256(_mm256_shuffle_epi8(c6_irregular_bitmap_lut, //
-                                                                                low_nibbles_ymm),
-                                                            quadrant_bits_ymm),
-                                           quadrant_bits_ymm));
+    __m256i low_nibbles_u8x32 = _mm256_and_si256(source_u8x32, _mm256_set1_epi8(0x0F));
+    __m256i quadrant_indices_u8x32 = _mm256_and_si256(_mm256_srli_epi16(source_u8x32, 4), _mm256_set1_epi8(0x03));
+    __m256i quadrant_bits_u8x32 = _mm256_shuffle_epi8(quadrant_bit_lut_u8x32, quadrant_indices_u8x32);
+    __m256i c6_fold_u8x32 = _mm256_and_si256(
+        is_after_c6_u8x32, _mm256_cmpeq_epi8(_mm256_and_si256(_mm256_shuffle_epi8(c6_fold_bitmap_lut_u8x32, //
+                                                                                  low_nibbles_u8x32),
+                                                              quadrant_bits_u8x32),
+                                             quadrant_bits_u8x32));
+    __m256i c6_irregular_u8x32 = _mm256_and_si256(
+        is_after_c6_u8x32,
+        _mm256_cmpeq_epi8(_mm256_and_si256(_mm256_shuffle_epi8(c6_irregular_bitmap_lut_u8x32, //
+                                                               low_nibbles_u8x32),
+                                           quadrant_bits_u8x32),
+                          quadrant_bits_u8x32));
 
     // E1 sequences qualify only when the second byte is B8-BB (Latin Extended Additional);
     // other E1 sub-families (Georgian, Greek Extended) route to the serial path.
-    __m256i is_b8_bb_second_ymm = sz_haswell_in_byte_range_(source_ymm, 0xB8, 0x04);
-    __m256i foreign_e1_second_ymm = _mm256_andnot_si256(is_b8_bb_second_ymm, is_after_e1_ymm);
-    __m256i e1_latin_third_ymm = _mm256_and_si256( //
-        _mm256_cmpeq_epi8(second_previous_bytes_ymm, _mm256_set1_epi8((char)0xE1)),
-        sz_haswell_in_byte_range_(previous_bytes_ymm, 0xB8, 0x04));
+    __m256i is_b8_bb_second_u8x32 = sz_haswell_in_byte_range_(source_u8x32, 0xB8, 0x04);
+    __m256i foreign_e1_second_u8x32 = _mm256_andnot_si256(is_b8_bb_second_u8x32, is_after_e1_u8x32);
+    __m256i e1_latin_third_u8x32 = _mm256_and_si256( //
+        _mm256_cmpeq_epi8(second_previous_bytes_u8x32, _mm256_set1_epi8((char)0xE1)),
+        sz_haswell_in_byte_range_(previous_bytes_u8x32, 0xB8, 0x04));
     // Latin Extended Additional irregulars: E1 BA 96-9E ('ẖ'-'ẞ') expand or shrink when folded
-    __m256i e1_irregular_ymm = _mm256_and_si256(
-        _mm256_and_si256(e1_latin_third_ymm, _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xBA))),
-        sz_haswell_in_byte_range_(source_ymm, 0x96, 0x09));
+    __m256i e1_irregular_u8x32 = _mm256_and_si256(
+        _mm256_and_si256(e1_latin_third_u8x32, _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xBA))),
+        sz_haswell_in_byte_range_(source_u8x32, 0x96, 0x09));
 
     // Truncate at the first irregular codepoint, foreign E1 sub-family, or foreign-family lead -
     // an irregular-flagged lane is a continuation, so walk back over continuations to the start
     // of that sequence (foreign leads are already at a sequence start, so the walk is a no-op)
-    sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_or_si256(_mm256_or_si256(c4_irregular_ymm, c5_irregular_ymm),
-                        _mm256_or_si256(c6_irregular_ymm, _mm256_or_si256(e1_irregular_ymm, foreign_e1_second_ymm))));
+    sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_or_si256(
+        _mm256_or_si256(c4_irregular_u8x32, c5_irregular_u8x32),
+        _mm256_or_si256(c6_irregular_u8x32, _mm256_or_si256(e1_irregular_u8x32, foreign_e1_second_u8x32))));
     stop_mask |= is_foreign_lead_mask;
     sz_size_t fold_length = 32;
     if (stop_mask) {
@@ -223,7 +226,8 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
 
     // Don't split a trailing 2-byte or 3-byte sequence across chunks; C2-C6 are this family's
     // only 2-byte leads, so one range compare covers them all
-    sz_u32_t is_two_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xC2, 0x05));
+    sz_u32_t is_two_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
+        sz_haswell_in_byte_range_(source_u8x32, 0xC2, 0x05));
     sz_u32_t incomplete_mask = //
         (is_two_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0)) |
         (is_three_byte_lead_mask & ~sz_haswell_mask_until_(fold_length > 2 ? fold_length - 2 : 0));
@@ -232,40 +236,40 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
     if (fold_length == 0) return 0;
 
     // 1. ASCII A-Z
-    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+    __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
 
     // 2. Latin-1 Supplement: 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20
-    __m256i is_latin1_upper_ymm = _mm256_andnot_si256(
-        _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x97)),
-        _mm256_and_si256(is_after_c3_ymm, sz_haswell_in_byte_range_(source_ymm, 0x80, 0x1F)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_latin1_upper_ymm, _mm256_set1_epi8(0x20)));
+    __m256i is_latin1_upper_u8x32 = _mm256_andnot_si256(
+        _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x97)),
+        _mm256_and_si256(is_after_c3_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x1F)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_latin1_upper_u8x32, _mm256_set1_epi8(0x20)));
 
     // 3. 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73): both bytes become 's' via masked
     //    subtractions (C3 − 0x50 = 9F − 0x2C = 0x73), keeping the no-`VPBLENDVB` discipline
-    __m256i is_eszett_second_ymm = _mm256_and_si256(is_after_c3_ymm,
-                                                    _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x9F)));
-    __m256i is_eszett_lead_ymm = _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xC3)),
-                                                  _mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0x9F)));
-    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_eszett_lead_ymm, _mm256_set1_epi8(0x50)));
-    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_eszett_second_ymm, _mm256_set1_epi8(0x2C)));
+    __m256i is_eszett_second_u8x32 = _mm256_and_si256(is_after_c3_u8x32,
+                                                      _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x9F)));
+    __m256i is_eszett_lead_u8x32 = _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xC3)),
+                                                    _mm256_cmpeq_epi8(next_bytes_u8x32, _mm256_set1_epi8((char)0x9F)));
+    folded_u8x32 = _mm256_sub_epi8(folded_u8x32, _mm256_and_si256(is_eszett_lead_u8x32, _mm256_set1_epi8(0x50)));
+    folded_u8x32 = _mm256_sub_epi8(folded_u8x32, _mm256_and_si256(is_eszett_second_u8x32, _mm256_set1_epi8(0x2C)));
 
     // 4. 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC): masked additions (C2 + 0x0C = CE, B5 + 7 = BC)
-    __m256i is_micro_second_ymm = _mm256_and_si256(is_after_c2_ymm,
-                                                   _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB5)));
-    __m256i is_micro_lead_ymm = _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xC2)),
-                                                 _mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0xB5)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_micro_lead_ymm, _mm256_set1_epi8(0x0C)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_micro_second_ymm, _mm256_set1_epi8(0x07)));
+    __m256i is_micro_second_u8x32 = _mm256_and_si256(is_after_c2_u8x32,
+                                                     _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xB5)));
+    __m256i is_micro_lead_u8x32 = _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xC2)),
+                                                   _mm256_cmpeq_epi8(next_bytes_u8x32, _mm256_set1_epi8((char)0xB5)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_micro_lead_u8x32, _mm256_set1_epi8(0x0C)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_micro_second_u8x32, _mm256_set1_epi8(0x07)));
 
     // 5. Latin Extended-A/B masked +1, and Latin Extended Additional (+1 on even third bytes of
     //    E1 B8-BB sequences); irregular lanes may fold wrongly here, but they sit at or beyond
     //    `fold_length`, so the next chunk's store replaces them
-    __m256i extended_fold_ymm = _mm256_or_si256(_mm256_or_si256(c4_fold_ymm, c5_fold_ymm), c6_fold_ymm);
-    __m256i e1_fold_ymm = _mm256_andnot_si256(is_odd_byte_ymm, e1_latin_third_ymm);
-    folded_ymm = _mm256_add_epi8(
-        folded_ymm, _mm256_and_si256(_mm256_or_si256(extended_fold_ymm, e1_fold_ymm), _mm256_set1_epi8(0x01)));
+    __m256i extended_fold_u8x32 = _mm256_or_si256(_mm256_or_si256(c4_fold_u8x32, c5_fold_u8x32), c6_fold_u8x32);
+    __m256i e1_fold_u8x32 = _mm256_andnot_si256(is_odd_byte_u8x32, e1_latin_third_u8x32);
+    folded_u8x32 = _mm256_add_epi8(
+        folded_u8x32, _mm256_and_si256(_mm256_or_si256(extended_fold_u8x32, e1_fold_u8x32), _mm256_set1_epi8(0x01)));
 
-    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    _mm256_storeu_si256((__m256i *)target, folded_u8x32);
     return fold_length;
 }
 
@@ -294,23 +298,24 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
-    __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
-    __m256i is_after_d0_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD0));
-    __m256i is_after_d1_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD1));
+    __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
+    __m256i is_after_d0_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD0));
+    __m256i is_after_d1_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD1));
 
     // Cyrillic Extended-A ('Ѡ' U+0460 onward) starts at D1 A0 and folds by +1 parity - its
     // flagged continuation maps back to the lead one lane before via `>> 1`; foreign-family
     // leads are already at a sequence start
     sz_u32_t is_extended_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(is_after_d1_ymm, sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x20)));
+        _mm256_and_si256(is_after_d1_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0xA0, 0x20)));
     sz_u32_t stop_mask = is_foreign_lead_mask | (is_extended_second_mask >> 1);
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
     // Don't split a trailing D0/D1 lead across chunks - this family's only multi-byte leads
-    sz_u32_t is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xD0, 0x02));
+    sz_u32_t is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
+        sz_haswell_in_byte_range_(source_u8x32, 0xD0, 0x02));
     sz_u32_t incomplete_mask = is_cyrillic_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
     if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
@@ -318,24 +323,24 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
 
     // The second byte's high nibble keys the fold offset: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0),
     // B → 0. `VPSHUFB` works per 128-bit lane, so the 16-entry table is mirrored into both halves.
-    __m256i const cyrillic_offset_lut = _mm256_setr_epi8(              //
+    __m256i const cyrillic_offset_lut_u8x32 = _mm256_setr_epi8(        //
         0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, (char)0xE0, 0, 0, 0, 0, 0, //
         0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, (char)0xE0, 0, 0, 0, 0, 0);
-    __m256i high_nibbles_ymm = _mm256_and_si256(_mm256_srli_epi16(source_ymm, 4), _mm256_set1_epi8(0x0F));
-    __m256i offsets_ymm = _mm256_shuffle_epi8(cyrillic_offset_lut, high_nibbles_ymm);
+    __m256i high_nibbles_u8x32 = _mm256_and_si256(_mm256_srli_epi16(source_u8x32, 4), _mm256_set1_epi8(0x0F));
+    __m256i offsets_u8x32 = _mm256_shuffle_epi8(cyrillic_offset_lut_u8x32, high_nibbles_u8x32);
 
-    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_after_d0_ymm, offsets_ymm));
+    __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_after_d0_u8x32, offsets_u8x32));
 
     // Lead fixup: Ѐ-Џ (seconds 80-8F) and Р-Я (seconds A0-AF) land in the D1 block, so their
     // D0 lead takes a masked +1; А-П (seconds 90-9F) stay under D0
-    __m256i is_d0_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xD0));
-    __m256i needs_d1_ymm = _mm256_and_si256(is_d0_ymm,
-                                            _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x80, 0x10),
-                                                            sz_haswell_in_byte_range_(next_bytes_ymm, 0xA0, 0x10)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(needs_d1_ymm, _mm256_set1_epi8(0x01)));
+    __m256i is_d0_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xD0));
+    __m256i needs_d1_u8x32 = _mm256_and_si256(is_d0_u8x32,
+                                              _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_u8x32, 0x80, 0x10),
+                                                              sz_haswell_in_byte_range_(next_bytes_u8x32, 0xA0, 0x10)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(needs_d1_u8x32, _mm256_set1_epi8(0x01)));
 
-    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    _mm256_storeu_si256((__m256i *)target, folded_u8x32);
     return fold_length;
 }
 
@@ -363,58 +368,59 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
-    __m256i source_ymm, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
-    __m256i is_after_ce_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCE));
-    __m256i is_after_cf_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xCF));
+    __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
+    __m256i is_after_ce_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xCE));
+    __m256i is_after_cf_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xCF));
 
     // Irregular folds truncate the chunk: CE 80-90 tonos/accents, CE B0 'ΰ' expansion, CF 8F+
     // accented lowercase and archaic symbols. CF 8C/8D/8E ('ό'/'ύ'/'ώ' U+03CC-03CE) are common
     // identity-folding lowercase vowels, so the exclusion starts at CF 8F ('Ϗ' U+03CF, which
     // folds onto 'ϗ'). The flagged lane is a continuation, mapping back to its lead one lane
     // before via `>> 1`; foreign leads are already at a sequence start.
-    __m256i ce_irregular_ymm = _mm256_and_si256(
-        is_after_ce_ymm, _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0x80, 0x11),
-                                         _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xB0))));
-    __m256i cf_irregular_ymm = _mm256_and_si256(is_after_cf_ymm, sz_haswell_in_byte_range_(source_ymm, 0x8F, 0x31));
+    __m256i ce_irregular_u8x32 = _mm256_and_si256(
+        is_after_ce_u8x32, _mm256_or_si256(sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x11),
+                                           _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xB0))));
+    __m256i cf_irregular_u8x32 = _mm256_and_si256(is_after_cf_u8x32,
+                                                  sz_haswell_in_byte_range_(source_u8x32, 0x8F, 0x31));
     sz_u32_t is_irregular_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_or_si256(ce_irregular_ymm, cf_irregular_ymm));
+        _mm256_or_si256(ce_irregular_u8x32, cf_irregular_u8x32));
     sz_u32_t stop_mask = is_foreign_lead_mask | (is_irregular_second_mask >> 1);
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
     // Don't split a trailing CE/CF lead across chunks - this family's only multi-byte leads
-    sz_u32_t is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xCE, 0x02));
+    sz_u32_t is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xCE, 0x02));
     sz_u32_t incomplete_mask = is_greek_lead_mask & ~sz_haswell_mask_until_(fold_length > 1 ? fold_length - 1 : 0);
     incomplete_mask &= sz_haswell_mask_until_(fold_length);
     if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
     if (fold_length == 0) return 0;
 
-    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+    __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
 
     // Α-Ο (CE 91-9F): second byte +0x20, lead stays CE
-    __m256i plus_fold_ymm = _mm256_and_si256(is_after_ce_ymm, sz_haswell_in_byte_range_(source_ymm, 0x91, 0x0F));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(plus_fold_ymm, _mm256_set1_epi8(0x20)));
+    __m256i plus_fold_u8x32 = _mm256_and_si256(is_after_ce_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0x91, 0x0F));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(plus_fold_u8x32, _mm256_set1_epi8(0x20)));
 
     // Π-Ρ (CE A0-A1) and Σ-Ϋ (CE A3-AB): second byte −0x20, lead CE → CF via masked +1;
     // A2 is skipped because U+03A2 is unassigned
-    __m256i minus_second_ymm = _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x02),
-                                               sz_haswell_in_byte_range_(source_ymm, 0xA3, 0x09));
-    __m256i minus_fold_ymm = _mm256_and_si256(is_after_ce_ymm, minus_second_ymm);
-    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(minus_fold_ymm, _mm256_set1_epi8(0x20)));
-    __m256i is_ce_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xCE));
-    __m256i needs_cf_ymm = _mm256_and_si256(is_ce_ymm,
-                                            _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0xA0, 0x02),
-                                                            sz_haswell_in_byte_range_(next_bytes_ymm, 0xA3, 0x09)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(needs_cf_ymm, _mm256_set1_epi8(0x01)));
+    __m256i minus_second_u8x32 = _mm256_or_si256(sz_haswell_in_byte_range_(source_u8x32, 0xA0, 0x02),
+                                                 sz_haswell_in_byte_range_(source_u8x32, 0xA3, 0x09));
+    __m256i minus_fold_u8x32 = _mm256_and_si256(is_after_ce_u8x32, minus_second_u8x32);
+    folded_u8x32 = _mm256_sub_epi8(folded_u8x32, _mm256_and_si256(minus_fold_u8x32, _mm256_set1_epi8(0x20)));
+    __m256i is_ce_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xCE));
+    __m256i needs_cf_u8x32 = _mm256_and_si256(is_ce_u8x32,
+                                              _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_u8x32, 0xA0, 0x02),
+                                                              sz_haswell_in_byte_range_(next_bytes_u8x32, 0xA3, 0x09)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(needs_cf_u8x32, _mm256_set1_epi8(0x01)));
 
     // Final sigma: 'ς' (U+03C2, CF 82) → 'σ' (U+03C3, CF 83) is a +1 on the second byte
-    __m256i is_final_sigma_ymm = _mm256_and_si256(is_after_cf_ymm,
-                                                  _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x82)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_final_sigma_ymm, _mm256_set1_epi8(0x01)));
+    __m256i is_final_sigma_u8x32 = _mm256_and_si256(is_after_cf_u8x32,
+                                                    _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x82)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_final_sigma_u8x32, _mm256_set1_epi8(0x01)));
 
-    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    _mm256_storeu_si256((__m256i *)target, folded_u8x32);
     return fold_length;
 }
 
@@ -449,22 +455,23 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
-    __m256i source_ymm, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
-    __m256i second_previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 2);
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
+    __m256i second_previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 2);
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
 
     // A Georgian sequence is an E1 lead whose second byte is 82 or 83. Non-Georgian E1 leads
     // (Greek Extended E1 BC-BF and the caseless Georgian-adjacent blocks) are stops: their lead
     // lane truncates the chunk so the serial fallback - or, for E1 B8-BB, the earlier Latin
     // handler - takes them one rune at a time.
-    __m256i is_e1_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE1));
-    __m256i is_georgian_second_ymm = _mm256_or_si256(_mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0x82)),
-                                                     _mm256_cmpeq_epi8(next_bytes_ymm, _mm256_set1_epi8((char)0x83)));
-    __m256i foreign_e1_lead_ymm = _mm256_andnot_si256(is_georgian_second_ymm, is_e1_ymm);
+    __m256i is_e1_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE1));
+    __m256i is_georgian_second_u8x32 = _mm256_or_si256(
+        _mm256_cmpeq_epi8(next_bytes_u8x32, _mm256_set1_epi8((char)0x82)),
+        _mm256_cmpeq_epi8(next_bytes_u8x32, _mm256_set1_epi8((char)0x83)));
+    __m256i foreign_e1_lead_u8x32 = _mm256_andnot_si256(is_georgian_second_u8x32, is_e1_u8x32);
 
-    sz_u32_t stop_mask = is_foreign_lead_mask | (sz_u32_t)_mm256_movemask_epi8(foreign_e1_lead_ymm);
+    sz_u32_t stop_mask = is_foreign_lead_mask | (sz_u32_t)_mm256_movemask_epi8(foreign_e1_lead_u8x32);
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
     // Don't split a trailing E1 three-byte sequence across chunks - this family's only lead
@@ -475,35 +482,36 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
 
     // The uppercase classification lives at the third byte: E1 (two back) + 82/83 (one back) +
     // an uppercase third byte. E1 82 A0-BF folds with −0x20; E1 83 {80-85, 87, 8D} folds with +0x20.
-    __m256i is_e1_two_back_ymm = _mm256_cmpeq_epi8(second_previous_bytes_ymm, _mm256_set1_epi8((char)0xE1));
-    __m256i is_82_one_back_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0x82));
-    __m256i is_83_one_back_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0x83));
-    __m256i is_82_upper_third_ymm = _mm256_and_si256(_mm256_and_si256(is_e1_two_back_ymm, is_82_one_back_ymm),
-                                                     sz_haswell_in_byte_range_(source_ymm, 0xA0, 0x20));
-    __m256i is_83_upper_range_ymm = _mm256_or_si256(
-        sz_haswell_in_byte_range_(source_ymm, 0x80, 0x06),
-        _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x87)),
-                        _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x8D))));
-    __m256i is_83_upper_third_ymm = _mm256_and_si256(_mm256_and_si256(is_e1_two_back_ymm, is_83_one_back_ymm),
-                                                     is_83_upper_range_ymm);
+    __m256i is_e1_two_back_u8x32 = _mm256_cmpeq_epi8(second_previous_bytes_u8x32, _mm256_set1_epi8((char)0xE1));
+    __m256i is_82_one_back_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0x82));
+    __m256i is_83_one_back_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0x83));
+    __m256i is_82_upper_third_u8x32 = _mm256_and_si256(_mm256_and_si256(is_e1_two_back_u8x32, is_82_one_back_u8x32),
+                                                       sz_haswell_in_byte_range_(source_u8x32, 0xA0, 0x20));
+    __m256i is_83_upper_range_u8x32 = _mm256_or_si256(
+        sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x06),
+        _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x87)),
+                        _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x8D))));
+    __m256i is_83_upper_third_u8x32 = _mm256_and_si256(_mm256_and_si256(is_e1_two_back_u8x32, is_83_one_back_u8x32),
+                                                       is_83_upper_range_u8x32);
 
-    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+    __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
 
     // Third byte: −0x20 for the 82 range, +0x20 for the 83 range
-    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_82_upper_third_ymm, _mm256_set1_epi8(0x20)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_83_upper_third_ymm, _mm256_set1_epi8(0x20)));
+    folded_u8x32 = _mm256_sub_epi8(folded_u8x32, _mm256_and_si256(is_82_upper_third_u8x32, _mm256_set1_epi8(0x20)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_83_upper_third_u8x32, _mm256_set1_epi8(0x20)));
 
     // Second byte (one lane before the third): 82 → B4 is +0x32, 83 → B4 is +0x31
-    __m256i is_82_upper_second_ymm = sz_haswell_next_bytes_(is_82_upper_third_ymm);
-    __m256i is_83_upper_second_ymm = sz_haswell_next_bytes_(is_83_upper_third_ymm);
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_82_upper_second_ymm, _mm256_set1_epi8(0x32)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_83_upper_second_ymm, _mm256_set1_epi8(0x31)));
+    __m256i is_82_upper_second_u8x32 = sz_haswell_next_bytes_(is_82_upper_third_u8x32);
+    __m256i is_83_upper_second_u8x32 = sz_haswell_next_bytes_(is_83_upper_third_u8x32);
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_82_upper_second_u8x32, _mm256_set1_epi8(0x32)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_83_upper_second_u8x32, _mm256_set1_epi8(0x31)));
 
     // Lead byte (two lanes before the third): E1 → E2 is a masked +1 for either range
-    __m256i is_upper_lead_ymm = sz_haswell_next_bytes_(_mm256_or_si256(is_82_upper_second_ymm, is_83_upper_second_ymm));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_upper_lead_ymm, _mm256_set1_epi8(0x01)));
+    __m256i is_upper_lead_u8x32 = sz_haswell_next_bytes_(
+        _mm256_or_si256(is_82_upper_second_u8x32, is_83_upper_second_u8x32));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_upper_lead_u8x32, _mm256_set1_epi8(0x01)));
 
-    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    _mm256_storeu_si256((__m256i *)target, folded_u8x32);
     return fold_length;
 }
 
@@ -524,22 +532,22 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
-    __m256i source_ymm, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
-    sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
+    sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
-    __m256i is_e2_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE2));
-    __m256i is_ea_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEA));
-    __m256i is_ef_ymm = _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEF));
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
+    __m256i is_e2_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE2));
+    __m256i is_ea_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xEA));
+    __m256i is_ef_u8x32 = _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xEF));
 
     // An E2 lead in lane 31 sees a zero `next` byte, fails the 80-83 test, and truncates -
     // which doubles as the incomplete-sequence trim for that lane
-    __m256i unsafe_e2_ymm = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x80, 0x04), is_e2_ymm);
-    __m256i unsafe_ea_ymm = _mm256_and_si256(is_ea_ymm,
-                                             _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x99, 0x07),
-                                                             sz_haswell_in_byte_range_(next_bytes_ymm, 0xAD, 0x02)));
+    __m256i unsafe_e2_u8x32 = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_u8x32, 0x80, 0x04), is_e2_u8x32);
+    __m256i unsafe_ea_u8x32 = _mm256_and_si256(
+        is_ea_u8x32, _mm256_or_si256(sz_haswell_in_byte_range_(next_bytes_u8x32, 0x99, 0x07),
+                                     sz_haswell_in_byte_range_(next_bytes_u8x32, 0xAD, 0x02)));
     sz_u32_t stop_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_or_si256(_mm256_or_si256(unsafe_e2_ymm, unsafe_ea_ymm), is_ef_ymm));
+        _mm256_or_si256(_mm256_or_si256(unsafe_e2_u8x32, unsafe_ea_u8x32), is_ef_u8x32));
     stop_mask |= is_foreign_lead_mask;
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
@@ -552,7 +560,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
     if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
     if (fold_length == 0) return 0;
 
-    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
     return fold_length;
 }
 
@@ -583,21 +591,22 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
-    __m256i source_ymm, sz_u32_t is_lead_mask, sz_u32_t malformed_lead_mask, sz_ptr_t target) {
+    __m256i source_u8x32, sz_u32_t is_lead_mask, sz_u32_t malformed_lead_mask, sz_ptr_t target) {
 
-    __m256i previous_bytes_ymm = sz_haswell_previous_bytes_(source_ymm, 1);
-    __m256i is_after_d4_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD4));
-    __m256i is_after_d5_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD5));
-    __m256i is_after_d6_ymm = _mm256_cmpeq_epi8(previous_bytes_ymm, _mm256_set1_epi8((char)0xD6));
+    __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
+    __m256i is_after_d4_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD4));
+    __m256i is_after_d5_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD5));
+    __m256i is_after_d6_u8x32 = _mm256_cmpeq_epi8(previous_bytes_u8x32, _mm256_set1_epi8((char)0xD6));
 
     // The Ech-Yiwn ligature 'և' (D6 87) folds to "եւ" (4 bytes), so it must truncate the chunk;
     // its flagged lane is the continuation, mapping back to its D6 lead one lane before via `>> 1`.
     sz_u32_t expansion_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(is_after_d6_ymm, _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0x87))));
+        _mm256_and_si256(is_after_d6_u8x32, _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0x87))));
     // Non-Armenian leads (D2-D3 Cyrillic Extension, C7-CD, 4-byte F0+) and foreign-family leads
     // truncate before their lead; the Armenian family owns only D4-D6. Malformed leads - including
     // a D4-D6 lead with a non-continuation second byte - are stops too, so they resync one byte.
-    sz_u32_t is_armenian_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xD4, 0x03));
+    sz_u32_t is_armenian_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
+        sz_haswell_in_byte_range_(source_u8x32, 0xD4, 0x03));
     sz_u32_t stop_mask = (is_lead_mask & ~is_armenian_lead_mask) | malformed_lead_mask | (expansion_second_mask >> 1);
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
@@ -608,33 +617,34 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
     if (fold_length == 0) return 0;
 
     // The codepoint's low bit lives in the second byte's low bit, deciding the +1 parity fold
-    __m256i is_odd_byte_ymm = _mm256_cmpeq_epi8(_mm256_and_si256(source_ymm, _mm256_set1_epi8(0x01)),
-                                                _mm256_set1_epi8(0x01));
+    __m256i is_odd_byte_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(source_u8x32, _mm256_set1_epi8(0x01)),
+                                                  _mm256_set1_epi8(0x01));
 
     // Cyrillic Supplement under D4 (80-AF): even second bytes are uppercase and fold +1 in place;
     // the [B1, FF] range realizes the unbounded `≥ B1` Armenian check, matching the finder
-    __m256i is_d4_cyrillic_even_ymm = _mm256_andnot_si256(
-        is_odd_byte_ymm, _mm256_and_si256(is_after_d4_ymm, sz_haswell_in_byte_range_(source_ymm, 0x80, 0x30)));
-    __m256i is_d4_armenian_ymm = _mm256_and_si256(is_after_d4_ymm, sz_haswell_in_byte_range_(source_ymm, 0xB1, 0x4F));
-    __m256i is_d5_low_ymm = _mm256_and_si256(is_after_d5_ymm, sz_haswell_in_byte_range_(source_ymm, 0x80, 0x10));
-    __m256i is_d5_high_ymm = _mm256_and_si256(is_after_d5_ymm, sz_haswell_in_byte_range_(source_ymm, 0x90, 0x07));
+    __m256i is_d4_cyrillic_even_u8x32 = _mm256_andnot_si256(
+        is_odd_byte_u8x32, _mm256_and_si256(is_after_d4_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x30)));
+    __m256i is_d4_armenian_u8x32 = _mm256_and_si256(is_after_d4_u8x32,
+                                                    sz_haswell_in_byte_range_(source_u8x32, 0xB1, 0x4F));
+    __m256i is_d5_low_u8x32 = _mm256_and_si256(is_after_d5_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x10));
+    __m256i is_d5_high_u8x32 = _mm256_and_si256(is_after_d5_u8x32, sz_haswell_in_byte_range_(source_u8x32, 0x90, 0x07));
 
-    __m256i folded_ymm = sz_haswell_fold_ascii_(source_ymm);
+    __m256i folded_u8x32 = sz_haswell_fold_ascii_(source_u8x32);
 
     // Cyrillic Supplement parity fold: even D4 second bytes get +1
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_d4_cyrillic_even_ymm, _mm256_set1_epi8(0x01)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_d4_cyrillic_even_u8x32, _mm256_set1_epi8(0x01)));
 
     // Armenian second-byte deltas: D4 B1-BF and D5 90-96 take −0x10, D5 80-8F takes +0x30
-    __m256i is_minus_10_ymm = _mm256_or_si256(is_d4_armenian_ymm, is_d5_high_ymm);
-    folded_ymm = _mm256_sub_epi8(folded_ymm, _mm256_and_si256(is_minus_10_ymm, _mm256_set1_epi8(0x10)));
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(is_d5_low_ymm, _mm256_set1_epi8(0x30)));
+    __m256i is_minus_10_u8x32 = _mm256_or_si256(is_d4_armenian_u8x32, is_d5_high_u8x32);
+    folded_u8x32 = _mm256_sub_epi8(folded_u8x32, _mm256_and_si256(is_minus_10_u8x32, _mm256_set1_epi8(0x10)));
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(is_d5_low_u8x32, _mm256_set1_epi8(0x30)));
 
     // Both −0x10 classes bump their lead by one block (D4 → D5, D5 → D6); the second-byte flag
     // propagates one lane back to the lead via `next_bytes`, then a masked +1 rewrites it
-    __m256i lead_plus_one_ymm = sz_haswell_next_bytes_(is_minus_10_ymm);
-    folded_ymm = _mm256_add_epi8(folded_ymm, _mm256_and_si256(lead_plus_one_ymm, _mm256_set1_epi8(0x01)));
+    __m256i lead_plus_one_u8x32 = sz_haswell_next_bytes_(is_minus_10_u8x32);
+    folded_u8x32 = _mm256_add_epi8(folded_u8x32, _mm256_and_si256(lead_plus_one_u8x32, _mm256_set1_epi8(0x01)));
 
-    _mm256_storeu_si256((__m256i *)target, folded_ymm);
+    _mm256_storeu_si256((__m256i *)target, folded_u8x32);
     return fold_length;
 }
 
@@ -653,18 +663,18 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
-    __m256i source_ymm, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
+    __m256i source_u8x32, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
-    __m256i next_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
-    __m256i is_four_byte_lead_ymm = sz_haswell_in_byte_range_(source_ymm, 0xF0, 0x08);
+    __m256i next_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
+    __m256i is_four_byte_lead_u8x32 = sz_haswell_in_byte_range_(source_u8x32, 0xF0, 0x08);
 
     // A 4-byte lead in lane 31 sees a zero `next` byte, fails the ≥ 0x9F test, and truncates -
     // partially covering the incomplete-sequence trim; lanes 29-30 still need the trim below
-    __m256i folding_four_byte_ymm = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_ymm, 0x9F, 0x61),
-                                                        is_four_byte_lead_ymm);
+    __m256i folding_four_byte_u8x32 = _mm256_andnot_si256(sz_haswell_in_byte_range_(next_bytes_u8x32, 0x9F, 0x61),
+                                                          is_four_byte_lead_u8x32);
     sz_u32_t stop_mask = (is_complex_lead_mask & ~is_four_byte_lead_mask) | is_foreign_lead_mask |
-                         (sz_u32_t)_mm256_movemask_epi8(folding_four_byte_ymm);
+                         (sz_u32_t)_mm256_movemask_epi8(folding_four_byte_u8x32);
     sz_size_t fold_length = stop_mask ? (sz_size_t)sz_u32_ctz(stop_mask) : 32;
 
     // Don't split a trailing 4-byte sequence: a lead in lanes 29-31 lacks its continuations
@@ -673,7 +683,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
     if (incomplete_mask) fold_length = (sz_size_t)sz_u32_ctz(incomplete_mask);
     if (fold_length == 0) return 0;
 
-    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+    _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
     return fold_length;
 }
 
@@ -708,32 +718,33 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t {
  *      one contiguous D7-E0 span.
  */
 SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
-    __m256i source_ymm, sz_u32_t is_non_ascii_mask) {
+    __m256i source_u8x32, sz_u32_t is_non_ascii_mask) {
     sz_utf8_uncased_fold_haswell_leads_t leads;
 
     // Lead bytes are non-ASCII bytes outside the continuation range 10xxxxxx (80-BF).
     // Every family range starts at 0xC2 or above, so the range compares below cannot
     // misfire on ASCII or continuation bytes and can run on the raw source vector.
-    leads.is_continuation_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0x80, 0x40));
+    leads.is_continuation_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0x80, 0x40));
     leads.is_lead_mask = is_non_ascii_mask & ~leads.is_continuation_mask;
-    leads.is_three_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xE0, 0x10));
-    leads.is_four_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xF0, 0x08));
+    leads.is_three_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xE0, 0x10));
+    leads.is_four_byte_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xF0, 0x08));
     leads.is_two_byte_lead_mask = leads.is_lead_mask & ~leads.is_three_byte_lead_mask & ~leads.is_four_byte_lead_mask;
 
     leads.is_caseless_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0xD7, 0x0A),
-                        _mm256_or_si256(sz_haswell_in_byte_range_(source_ymm, 0xE3, 0x07),
-                                        sz_haswell_in_byte_range_(source_ymm, 0xEB, 0x04))));
-    leads.is_latin_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xC2, 0x02));
+        _mm256_or_si256(sz_haswell_in_byte_range_(source_u8x32, 0xD7, 0x0A),
+                        _mm256_or_si256(sz_haswell_in_byte_range_(source_u8x32, 0xE3, 0x07),
+                                        sz_haswell_in_byte_range_(source_u8x32, 0xEB, 0x04))));
+    leads.is_latin_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xC2, 0x02));
     leads.is_latin_extended_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
-        sz_haswell_in_byte_range_(source_ymm, 0xC4, 0x03));
-    leads.is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xD0, 0x02));
-    leads.is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_ymm, 0xCE, 0x02));
-    leads.is_e1_lead_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE1)));
+        sz_haswell_in_byte_range_(source_u8x32, 0xC4, 0x03));
+    leads.is_cyrillic_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xD0, 0x02));
+    leads.is_greek_lead_mask = (sz_u32_t)_mm256_movemask_epi8(sz_haswell_in_byte_range_(source_u8x32, 0xCE, 0x02));
+    leads.is_e1_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
+        _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE1)));
     leads.is_guarded_lead_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE2)),
-                        _mm256_or_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEA)),
-                                        _mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xEF)))));
+        _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE2)),
+                        _mm256_or_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xEA)),
+                                        _mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xEF)))));
     leads.is_complex_lead_mask = leads.is_lead_mask &
                                  ~(leads.is_caseless_lead_mask | leads.is_latin_lead_mask |
                                    leads.is_latin_extended_lead_mask | leads.is_cyrillic_lead_mask |
@@ -757,19 +768,19 @@ SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell
     // explicit subtraction. At the chunk boundary the down-shift reads zeros past lane 31, so a
     // multi-byte lead whose continuations spill into the next chunk reads as malformed; this coincides
     // exactly with the existing incomplete-sequence trim, so valid output is unchanged.
-    __m256i second_bytes_ymm = sz_haswell_next_bytes_(source_ymm);
+    __m256i second_bytes_u8x32 = sz_haswell_next_bytes_(source_u8x32);
     sz_u32_t e0_bad_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xE0)),
-                         sz_haswell_in_byte_range_(second_bytes_ymm, 0x00, 0xA0)));
+        _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xE0)),
+                         sz_haswell_in_byte_range_(second_bytes_u8x32, 0x00, 0xA0)));
     sz_u32_t ed_bad_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xED)),
-                         sz_haswell_in_byte_range_(second_bytes_ymm, 0xA0, 0x60)));
+        _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xED)),
+                         sz_haswell_in_byte_range_(second_bytes_u8x32, 0xA0, 0x60)));
     sz_u32_t f0_bad_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xF0)),
-                         sz_haswell_in_byte_range_(second_bytes_ymm, 0x00, 0x90)));
+        _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xF0)),
+                         sz_haswell_in_byte_range_(second_bytes_u8x32, 0x00, 0x90)));
     sz_u32_t f4_bad_second_mask = (sz_u32_t)_mm256_movemask_epi8(
-        _mm256_and_si256(_mm256_cmpeq_epi8(source_ymm, _mm256_set1_epi8((char)0xF4)),
-                         sz_haswell_in_byte_range_(second_bytes_ymm, 0x90, 0x70)));
+        _mm256_and_si256(_mm256_cmpeq_epi8(source_u8x32, _mm256_set1_epi8((char)0xF4)),
+                         sz_haswell_in_byte_range_(second_bytes_u8x32, 0x90, 0x70)));
 
     sz_u32_t two_byte_complete_mask = leads.is_two_byte_lead_mask & (leads.is_continuation_mask >> 1);
     sz_u32_t three_byte_complete_mask = leads.is_three_byte_lead_mask & (leads.is_continuation_mask >> 1) &
@@ -793,7 +804,7 @@ SZ_HELPER_AUTO sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell
  *      next family.
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i source_ymm,
+SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i source_u8x32,
                                                                       sz_utf8_uncased_fold_haswell_leads_t const *leads,
                                                                       sz_ptr_t target) {
 
@@ -805,14 +816,14 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i so
     sz_size_t handled = 0;
     if (leads->lead_families & sz_utf8_fold_lead_caseless_flag_k)
         handled = sz_utf8_uncased_fold_haswell_caseless_chunk_(
-            source_ymm, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
+            source_u8x32, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask & ~leads->is_caseless_lead_mask) | malformed, target);
     // Unlike Ice Lake, pure Latin-1 chunks (German, French) take this handler too: it covers
     // their C2/C3 folds exactly, and there is no separate Latin-1 cascade to fall back onto
     if (!handled && (leads->lead_families & (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k |
                                              sz_utf8_fold_lead_e1_flag_k)))
         handled = sz_utf8_uncased_fold_haswell_latin_chunk_(
-            source_ymm, leads->is_continuation_mask, leads->is_three_byte_lead_mask,
+            source_u8x32, leads->is_continuation_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask &
              ~(leads->is_latin_lead_mask | leads->is_latin_extended_lead_mask | leads->is_e1_lead_mask)) |
                 malformed,
@@ -821,31 +832,31 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(__m256i so
     // Georgian uppercase and truncates at E1 BC-BF Greek Extended and other E1 sub-families
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_e1_flag_k))
         handled = sz_utf8_uncased_fold_haswell_georgian_chunk_(
-            source_ymm, leads->is_three_byte_lead_mask, (leads->is_lead_mask & ~leads->is_e1_lead_mask) | malformed,
+            source_u8x32, leads->is_three_byte_lead_mask, (leads->is_lead_mask & ~leads->is_e1_lead_mask) | malformed,
             target);
     // Basic Cyrillic + ASCII - the common case for Russian, Ukrainian, and Bulgarian
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_cyrillic_flag_k))
         handled = sz_utf8_uncased_fold_haswell_cyrillic_chunk_(
-            source_ymm, (leads->is_lead_mask & ~leads->is_cyrillic_lead_mask) | malformed, target);
+            source_u8x32, (leads->is_lead_mask & ~leads->is_cyrillic_lead_mask) | malformed, target);
     // Basic Greek + ASCII
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_greek_flag_k))
         handled = sz_utf8_uncased_fold_haswell_greek_chunk_(
-            source_ymm, (leads->is_lead_mask & ~leads->is_greek_lead_mask) | malformed, target);
+            source_u8x32, (leads->is_lead_mask & ~leads->is_greek_lead_mask) | malformed, target);
     // Guarded 3-byte leads mixed with caseless scripts - CJK or Hangul with E2 punctuation;
     // the handler verifies the guarded seconds and truncates at the first folding sequence
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_guarded_flag_k))
         handled = sz_utf8_uncased_fold_haswell_guarded_chunk_(
-            source_ymm, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
+            source_u8x32, leads->is_two_byte_lead_mask, leads->is_three_byte_lead_mask,
             (leads->is_lead_mask & ~(leads->is_caseless_lead_mask | leads->is_guarded_lead_mask)) | malformed, target);
     // Armenian (D4-D6) + the Cyrillic Supplement that shares the D4 lead - both fall in the
     // complex family; this handler folds them and truncates at any non-Armenian complex lead
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_complex_flag_k))
-        handled = sz_utf8_uncased_fold_haswell_armenian_chunk_(source_ymm, leads->is_lead_mask, malformed, target);
+        handled = sz_utf8_uncased_fold_haswell_armenian_chunk_(source_u8x32, leads->is_lead_mask, malformed, target);
     // Complex chunks are usually emoji runs: 4-byte sequences with caseless second bytes
     // copy through; anything else in the family truncates to the serial path
     if (!handled && (leads->lead_families & sz_utf8_fold_lead_complex_flag_k))
         handled = sz_utf8_uncased_fold_haswell_supplementary_chunk_(
-            source_ymm, leads->is_complex_lead_mask, leads->is_four_byte_lead_mask,
+            source_u8x32, leads->is_complex_lead_mask, leads->is_four_byte_lead_mask,
             (leads->is_lead_mask & ~leads->is_complex_lead_mask) | malformed, target);
     return handled;
 }
@@ -890,21 +901,21 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size
         // Prefetch ahead to hide memory latency on large datasets that overflow the caches
         _mm_prefetch(source + 512, _MM_HINT_T0);
 
-        __m256i source_ymm = _mm256_lddqu_si256((__m256i const *)source);
-        sz_u32_t is_non_ascii_mask = (sz_u32_t)_mm256_movemask_epi8(source_ymm);
+        __m256i source_u8x32 = _mm256_lddqu_si256((__m256i const *)source);
+        sz_u32_t is_non_ascii_mask = (sz_u32_t)_mm256_movemask_epi8(source_u8x32);
 
         // FAST PATH: pure ASCII chunks - the most common case for English and many other
         // Latin-script texts - skip all classification work
         if (is_non_ascii_mask == 0) {
-            _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_ymm));
+            _mm256_storeu_si256((__m256i *)target, sz_haswell_fold_ascii_(source_u8x32));
             target += 32, source += 32, source_length -= 32;
             continue;
         }
 
         // Classify lead bytes once, then route through the family handlers in priority order
-        sz_utf8_uncased_fold_haswell_leads_t leads = sz_utf8_uncased_fold_haswell_classify_leads_(source_ymm,
+        sz_utf8_uncased_fold_haswell_leads_t leads = sz_utf8_uncased_fold_haswell_classify_leads_(source_u8x32,
                                                                                                   is_non_ascii_mask);
-        sz_size_t handled = sz_utf8_uncased_fold_haswell_dispatch_chunk_(source_ymm, &leads, target);
+        sz_size_t handled = sz_utf8_uncased_fold_haswell_dispatch_chunk_(source_u8x32, &leads, target);
         if (handled) {
             target += handled, source += handled, source_length -= handled;
             continue;

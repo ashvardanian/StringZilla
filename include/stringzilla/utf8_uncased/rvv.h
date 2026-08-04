@@ -71,11 +71,12 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_rvv_(sz_u8_t const *sou
                                                               sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Western Europe: ASCII A-Z, Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) +0x20, and the
@@ -85,31 +86,33 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_rvv_(sz_u8_t c
                                                                        sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
     sz_u8_t next_carry = source_ptr[vector_length]; // padded buffer guarantees one readable byte past `vector_length`
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
 
-    vbool1_t after_c3 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC3, vector_length);
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t after_c3_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC3, vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
 
     // Latin-1 'À'-'Þ' (C3 80-9E, excluding '×' 0x97) get +0x20.
-    vbool1_t latin1_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x1F,
-                                                      vector_length);
-    vbool1_t is_latin1_upper = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3, latin1_range, vector_length),
-                                                    __riscv_vmseq_vx_u8m8_b1(source, 0x97, vector_length),
-                                                    vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(is_latin1_upper, folded, folded, 0x20, vector_length);
+    vbool1_t latin1_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x1F,
+                                                         vector_length);
+    vbool1_t is_latin1_upper_b1 = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3_b1, latin1_range_b1, vector_length),
+                                                       __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x97, vector_length),
+                                                       vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(is_latin1_upper_b1, folded_u8m8, folded_u8m8, 0x20, vector_length);
     // ß (C3 9F) -> "ss": both bytes become 's'.
-    vbool1_t eszett_lead = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source, 0xC3, vector_length),
-                                               __riscv_vmseq_vx_u8m8_b1(next, 0x9F, vector_length), vector_length);
-    vbool1_t eszett_second = __riscv_vmand_mm_b1(after_c3, __riscv_vmseq_vx_u8m8_b1(source, 0x9F, vector_length),
-                                                 vector_length);
-    folded = __riscv_vmerge_vxm_u8m8(folded, 's', __riscv_vmor_mm_b1(eszett_lead, eszett_second, vector_length),
-                                     vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    vbool1_t eszett_lead_b1 = __riscv_vmand_mm_b1(__riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xC3, vector_length),
+                                                  __riscv_vmseq_vx_u8m8_b1(next_u8m8, 0x9F, vector_length),
+                                                  vector_length);
+    vbool1_t eszett_second_b1 = __riscv_vmand_mm_b1(
+        after_c3_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x9F, vector_length), vector_length);
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(
+        folded_u8m8, 's', __riscv_vmor_mm_b1(eszett_lead_b1, eszett_second_b1, vector_length), vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Central Europe: Latin-1 Supplement +0x20 (C3 80-9E, except '×' 0x97) and Latin Extended-A +1 parity
@@ -119,41 +122,42 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_t c
                                                                        sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t after_c3 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC3, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t after_c3_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC3, vector_length);
     // After a C4/C5 lead: the previous byte is in [0xC4, 0xC5]; the family base is `(prev - 0xC4) * 64`.
-    vbool1_t after_c45 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 1,
-                                                   vector_length);
-
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
-
-    vbool1_t latin1_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x1F,
+    vbool1_t after_c45_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 1,
                                                       vector_length);
-    vbool1_t is_latin1_upper = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3, latin1_range, vector_length),
-                                                    __riscv_vmseq_vx_u8m8_b1(source, 0x97, vector_length),
-                                                    vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(is_latin1_upper, folded, folded, 0x20, vector_length);
+
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
+
+    vbool1_t latin1_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x1F,
+                                                         vector_length);
+    vbool1_t is_latin1_upper_b1 = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3_b1, latin1_range_b1, vector_length),
+                                                       __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x97, vector_length),
+                                                       vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(is_latin1_upper_b1, folded_u8m8, folded_u8m8, 0x20, vector_length);
 
     // Latin Extended-A/B +1 parity deltas: one indexed load over the combined C4/C5/C6 table keyed by
     // `family_base + low6`, only on continuation bytes after a C4/C5 lead.
-    vbool1_t delta_lanes = __riscv_vmand_mm_b1(after_c45, is_continuation, vector_length);
-    vuint8m8_t low6 = __riscv_vand_vx_u8m8(source, 0x3F, vector_length);
-    vuint8m8_t family_base = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 64,
-                                                  vector_length);
-    vuint8m8_t lut_index = __riscv_vadd_vv_u8m8(family_base, low6, vector_length);
-    vuint8m8_t delta = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta = __riscv_vluxei8_v_u8m8_mu(delta_lanes, delta, sz_utf8_fold_latin_c456_deltas_rvv_, lut_index,
-                                      vector_length);
+    vbool1_t delta_lanes_b1 = __riscv_vmand_mm_b1(after_c45_b1, is_continuation_b1, vector_length);
+    vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
+    vuint8m8_t family_base_u8m8 = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 64,
+                                                       vector_length);
+    vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
+    vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
+                                           lut_index_u8m8, vector_length);
     // Clear the 0x80 irregular flag (alarm already routed those positions away): keep only the +1 bit.
-    delta = __riscv_vand_vx_u8m8(delta, 0x01, vector_length);
-    folded = __riscv_vadd_vv_u8m8(folded, delta, vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    delta_u8m8 = __riscv_vand_vx_u8m8(delta_u8m8, 0x01, vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, delta_u8m8, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Cyrillic: basic D0/D1. Second-byte offset by high nibble after a D0 lead (8→+0x10, 9→+0x20, A→−0x20)
@@ -163,32 +167,33 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t const *
     static sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
     sz_u8_t next_carry = source_ptr[vector_length];
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
 
-    vbool1_t after_d0 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD0, vector_length);
-    vbool1_t is_d0 = __riscv_vmseq_vx_u8m8_b1(source, 0xD0, vector_length);
+    vbool1_t after_d0_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD0, vector_length);
+    vbool1_t is_d0_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD0, vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
 
     // Second-byte offset by high nibble via one indexed memory load (`vluxei8`), gated to after-D0 lanes.
-    vuint8m8_t offset = __riscv_vmv_v_x_u8m8(0, vector_length);
-    offset = __riscv_vluxei8_v_u8m8_mu(after_d0, offset, second_byte_offsets,
-                                       __riscv_vsrl_vx_u8m8(source, 4, vector_length), vector_length);
-    folded = __riscv_vadd_vv_u8m8(folded, offset, vector_length);
+    vuint8m8_t offset_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    offset_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_d0_b1, offset_u8m8, second_byte_offsets,
+                                            __riscv_vsrl_vx_u8m8(source_u8m8, 4, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, offset_u8m8, vector_length);
 
-    vbool1_t next_80_8f = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0x80, vector_length), 0x10,
-                                                    vector_length);
-    vbool1_t next_a0_af = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0xA0, vector_length), 0x10,
-                                                    vector_length);
-    vbool1_t needs_d1 = __riscv_vmand_mm_b1(is_d0, __riscv_vmor_mm_b1(next_80_8f, next_a0_af, vector_length),
-                                            vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(needs_d1, folded, folded, 1, vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    vbool1_t next_80_8f_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0x80, vector_length), 0x10,
+                                                       vector_length);
+    vbool1_t next_a0_af_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0xA0, vector_length), 0x10,
+                                                       vector_length);
+    vbool1_t needs_d1_b1 = __riscv_vmand_mm_b1(
+        is_d0_b1, __riscv_vmor_mm_b1(next_80_8f_b1, next_a0_af_b1, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(needs_d1_b1, folded_u8m8, folded_u8m8, 1, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Monotonic-Greek second-byte fold metadata after a CE lead, indexed by `text & 0x3F` (same values the NEON
@@ -227,49 +232,51 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *sou
                                                               sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t after_ce = __riscv_vmseq_vx_u8m8_b1(previous, 0xCE, vector_length);
-    vbool1_t after_cf = __riscv_vmseq_vx_u8m8_b1(previous, 0xCF, vector_length);
-    vbool1_t after_c2 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC2, vector_length);
-    vbool1_t after_ce_cont = __riscv_vmand_mm_b1(after_ce, is_continuation, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t after_ce_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xCE, vector_length);
+    vbool1_t after_cf_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xCF, vector_length);
+    vbool1_t after_c2_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC2, vector_length);
+    vbool1_t after_ce_cont_b1 = __riscv_vmand_mm_b1(after_ce_b1, is_continuation_b1, vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
 
     // Second-byte CE deltas and CE->CF promotion flags via two indexed loads over the combined CE table
     // (continuation-gated to avoid aliasing): the delta window at low6, the promote window at 64 + low6.
-    vuint8m8_t low6 = __riscv_vand_vx_u8m8(source, 0x3F, vector_length);
-    vuint8m8_t ce_delta = __riscv_vmv_v_x_u8m8(0, vector_length);
-    ce_delta = __riscv_vluxei8_v_u8m8_mu(after_ce_cont, ce_delta, sz_utf8_uncased_greek_ce_table_rvv_, low6,
-                                         vector_length);
-    vuint8m8_t promote_second = __riscv_vmv_v_x_u8m8(0, vector_length);
-    promote_second = __riscv_vluxei8_v_u8m8_mu(after_ce_cont, promote_second, sz_utf8_uncased_greek_ce_table_rvv_,
-                                               __riscv_vadd_vx_u8m8(low6, 64, vector_length), vector_length);
-    folded = __riscv_vadd_vv_u8m8(folded, ce_delta, vector_length);
+    vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
+    vuint8m8_t ce_delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    ce_delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_ce_cont_b1, ce_delta_u8m8, sz_utf8_uncased_greek_ce_table_rvv_,
+                                              low6_u8m8, vector_length);
+    vuint8m8_t promote_second_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    promote_second_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_ce_cont_b1, promote_second_u8m8,
+                                                    sz_utf8_uncased_greek_ce_table_rvv_,
+                                                    __riscv_vadd_vx_u8m8(low6_u8m8, 64, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, ce_delta_u8m8, vector_length);
 
     // Final sigma 'ς' (CF 82) +1; micro sign 'µ' (C2 B5) second byte -> 0xBC (μ).
-    vbool1_t final_sigma = __riscv_vmand_mm_b1(after_cf, __riscv_vmseq_vx_u8m8_b1(source, 0x82, vector_length),
-                                               vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(final_sigma, folded, folded, 0x01, vector_length);
-    vbool1_t micro_second = __riscv_vmand_mm_b1(after_c2, __riscv_vmseq_vx_u8m8_b1(source, 0xB5, vector_length),
-                                                vector_length);
-    folded = __riscv_vmerge_vxm_u8m8(folded, 0xBC, micro_second, vector_length);
+    vbool1_t final_sigma_b1 = __riscv_vmand_mm_b1(
+        after_cf_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x82, vector_length), vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(final_sigma_b1, folded_u8m8, folded_u8m8, 0x01, vector_length);
+    vbool1_t micro_second_b1 = __riscv_vmand_mm_b1(
+        after_c2_b1, __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xB5, vector_length), vector_length);
+    folded_u8m8 = __riscv_vmerge_vxm_u8m8(folded_u8m8, 0xBC, micro_second_b1, vector_length);
 
     // Lead rewrites carried one lane back from the second byte: CE->CF (+1) and C2->CE (+0x0C, micro sign).
-    vuint8m8_t micro_second_byte = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, micro_second,
-                                                           vector_length);
-    vuint8m8_t promote_lead = __riscv_vslide1down_vx_u8m8(promote_second, 0, vector_length);
-    vuint8m8_t micro_lead = __riscv_vslide1down_vx_u8m8(micro_second_byte, 0, vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmsne_vx_u8m8_b1(promote_lead, 0, vector_length), folded, folded, 0x01,
-                                     vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmsne_vx_u8m8_b1(micro_lead, 0, vector_length), folded, folded, 0x0C,
-                                     vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    vuint8m8_t micro_second_byte_u8m8 = __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
+                                                                micro_second_b1, vector_length);
+    vuint8m8_t promote_lead_u8m8 = __riscv_vslide1down_vx_u8m8(promote_second_u8m8, 0, vector_length);
+    vuint8m8_t micro_lead_u8m8 = __riscv_vslide1down_vx_u8m8(micro_second_byte_u8m8, 0, vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmsne_vx_u8m8_b1(promote_lead_u8m8, 0, vector_length), folded_u8m8,
+                                          folded_u8m8, 0x01, vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmsne_vx_u8m8_b1(micro_lead_u8m8, 0, vector_length), folded_u8m8,
+                                          folded_u8m8, 0x0C, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Armenian: D4/D5/D6. Disjoint second-byte offsets (D4 B1-BF and D5 90-96 fold −0x10, D5 80-8F folds
@@ -278,39 +285,42 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_rvv_(sz_u8_t const *
                                                                  sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
     sz_u8_t next_carry = source_ptr[vector_length];
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, next_carry, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, next_carry, vector_length);
 
-    vbool1_t is_d4 = __riscv_vmseq_vx_u8m8_b1(source, 0xD4, vector_length);
-    vbool1_t is_d5 = __riscv_vmseq_vx_u8m8_b1(source, 0xD5, vector_length);
-    vbool1_t after_d4 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD4, vector_length);
-    vbool1_t after_d5 = __riscv_vmseq_vx_u8m8_b1(previous, 0xD5, vector_length);
+    vbool1_t is_d4_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD4, vector_length);
+    vbool1_t is_d5_b1 = __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xD5, vector_length);
+    vbool1_t after_d4_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD4, vector_length);
+    vbool1_t after_d5_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xD5, vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
 
-    vbool1_t d4_second = __riscv_vmand_mm_b1(after_d4, __riscv_vmsgeu_vx_u8m8_b1(source, 0xB1, vector_length),
-                                             vector_length);
-    vbool1_t d5_plus30 = __riscv_vmand_mm_b1(
-        after_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x10, vector_length),
+    vbool1_t d4_second_b1 = __riscv_vmand_mm_b1(
+        after_d4_b1, __riscv_vmsgeu_vx_u8m8_b1(source_u8m8, 0xB1, vector_length), vector_length);
+    vbool1_t d5_plus30_b1 = __riscv_vmand_mm_b1(
+        after_d5_b1,
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x10, vector_length),
         vector_length);
-    vbool1_t d5_minus10 = __riscv_vmand_mm_b1(
-        after_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x90, vector_length), 0x07, vector_length),
+    vbool1_t d5_minus10_b1 = __riscv_vmand_mm_b1(
+        after_d5_b1,
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x90, vector_length), 0x07, vector_length),
         vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(d4_second, d5_minus10, vector_length), folded, folded, 0xF0,
-                                     vector_length); // -0x10
-    folded = __riscv_vadd_vx_u8m8_mu(d5_plus30, folded, folded, 0x30, vector_length);
-    vbool1_t promotes_d4 = __riscv_vmand_mm_b1(is_d4, __riscv_vmsgeu_vx_u8m8_b1(next, 0xB1, vector_length),
-                                               vector_length);
-    vbool1_t promotes_d5 = __riscv_vmand_mm_b1(
-        is_d5, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next, 0x90, vector_length), 0x07, vector_length),
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(d4_second_b1, d5_minus10_b1, vector_length), folded_u8m8,
+                                          folded_u8m8, 0xF0, vector_length); // -0x10
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(d5_plus30_b1, folded_u8m8, folded_u8m8, 0x30, vector_length);
+    vbool1_t promotes_d4_b1 = __riscv_vmand_mm_b1(is_d4_b1, __riscv_vmsgeu_vx_u8m8_b1(next_u8m8, 0xB1, vector_length),
+                                                  vector_length);
+    vbool1_t promotes_d5_b1 = __riscv_vmand_mm_b1(
+        is_d5_b1, __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(next_u8m8, 0x90, vector_length), 0x07, vector_length),
         vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(promotes_d4, promotes_d5, vector_length), folded, folded, 0x01,
-                                     vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(__riscv_vmor_mm_b1(promotes_d4_b1, promotes_d5_b1, vector_length),
+                                          folded_u8m8, folded_u8m8, 0x01, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 /*  Vietnamese: Latin-1 Supplement +0x20, Latin Extended-A parity, 'Ơ'/'Ư' (C6 A0/AF) +1, and Latin
@@ -320,52 +330,54 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const
                                                                    sz_u8_t *destination_ptr) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
-    vuint8m8_t previous2 = __riscv_vslide1up_vx_u8m8(previous, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
+    vuint8m8_t previous2_u8m8 = __riscv_vslide1up_vx_u8m8(previous_u8m8, 0, vector_length);
 
-    vbool1_t is_continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0xC0, vector_length), 0x80,
-                                                        vector_length);
-    vbool1_t after_c3 = __riscv_vmseq_vx_u8m8_b1(previous, 0xC3, vector_length);
+    vbool1_t is_continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0xC0, vector_length), 0x80,
+                                                           vector_length);
+    vbool1_t after_c3_b1 = __riscv_vmseq_vx_u8m8_b1(previous_u8m8, 0xC3, vector_length);
     // After a C4/C5/C6 lead: the previous byte is in [0xC4, 0xC6]; the family base is `(prev - 0xC4) * 64`.
-    vbool1_t after_c456 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 2,
-                                                    vector_length);
+    vbool1_t after_c456_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 2,
+                                                       vector_length);
 
-    vbool1_t is_upper = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 'A', vector_length), 25, vector_length);
-    vuint8m8_t folded = __riscv_vmerge_vvm_u8m8(source, __riscv_vadd_vx_u8m8(source, 0x20, vector_length), is_upper,
-                                                vector_length);
+    vbool1_t is_upper_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 'A', vector_length), 25,
+                                                     vector_length);
+    vuint8m8_t folded_u8m8 = __riscv_vmerge_vvm_u8m8(
+        source_u8m8, __riscv_vadd_vx_u8m8(source_u8m8, 0x20, vector_length), is_upper_b1, vector_length);
 
     // Latin-1 'À'-'Þ' +0x20 (except '×' 0x97).
-    vbool1_t latin1_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source, 0x80, vector_length), 0x1F,
-                                                      vector_length);
-    vbool1_t is_latin1_upper = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3, latin1_range, vector_length),
-                                                    __riscv_vmseq_vx_u8m8_b1(source, 0x97, vector_length),
-                                                    vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(is_latin1_upper, folded, folded, 0x20, vector_length);
+    vbool1_t latin1_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(source_u8m8, 0x80, vector_length), 0x1F,
+                                                         vector_length);
+    vbool1_t is_latin1_upper_b1 = __riscv_vmandn_mm_b1(__riscv_vmand_mm_b1(after_c3_b1, latin1_range_b1, vector_length),
+                                                       __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0x97, vector_length),
+                                                       vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(is_latin1_upper_b1, folded_u8m8, folded_u8m8, 0x20, vector_length);
 
     // Latin Extended-A/B +1 parity deltas: one indexed load over the combined C4/C5/C6 table keyed by
     // `family_base + low6`, only on continuation bytes after a C4/C5/C6 lead (keep only the +1 bit).
-    vbool1_t delta_lanes = __riscv_vmand_mm_b1(after_c456, is_continuation, vector_length);
-    vuint8m8_t low6 = __riscv_vand_vx_u8m8(source, 0x3F, vector_length);
-    vuint8m8_t family_base = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 64,
-                                                  vector_length);
-    vuint8m8_t lut_index = __riscv_vadd_vv_u8m8(family_base, low6, vector_length);
-    vuint8m8_t delta = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta = __riscv_vluxei8_v_u8m8_mu(delta_lanes, delta, sz_utf8_fold_latin_c456_deltas_rvv_, lut_index,
-                                      vector_length);
-    delta = __riscv_vand_vx_u8m8(delta, 0x01, vector_length);
-    folded = __riscv_vadd_vv_u8m8(folded, delta, vector_length);
+    vbool1_t delta_lanes_b1 = __riscv_vmand_mm_b1(after_c456_b1, is_continuation_b1, vector_length);
+    vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
+    vuint8m8_t family_base_u8m8 = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 64,
+                                                       vector_length);
+    vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
+    vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
+                                           lut_index_u8m8, vector_length);
+    delta_u8m8 = __riscv_vand_vx_u8m8(delta_u8m8, 0x01, vector_length);
+    folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, delta_u8m8, vector_length);
 
     // Latin Extended Additional E1 B8-BB: even third byte +1 (excluding the E1 BA 96-9F expanding block,
     // which is alarm-routed). Third byte sits two lanes after the E1 lead and one after the B8-BB second.
-    vbool1_t after_e1_pair = __riscv_vmand_mm_b1(
-        __riscv_vmseq_vx_u8m8_b1(previous2, 0xE1, vector_length),
-        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous, 0xB8, vector_length), 0x04, vector_length),
+    vbool1_t after_e1_pair_b1 = __riscv_vmand_mm_b1(
+        __riscv_vmseq_vx_u8m8_b1(previous2_u8m8, 0xE1, vector_length),
+        __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xB8, vector_length), 0x04, vector_length),
         vector_length);
-    vbool1_t third_even = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source, 0x01, vector_length), 0, vector_length);
-    vbool1_t fold_e1 = __riscv_vmand_mm_b1(after_e1_pair, third_even, vector_length);
-    folded = __riscv_vadd_vx_u8m8_mu(fold_e1, folded, folded, 0x01, vector_length);
-    __riscv_vse8_v_u8m8(destination_ptr, folded, vector_length);
+    vbool1_t third_even_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(source_u8m8, 0x01, vector_length), 0,
+                                                      vector_length);
+    vbool1_t fold_e1_b1 = __riscv_vmand_mm_b1(after_e1_pair_b1, third_even_b1, vector_length);
+    folded_u8m8 = __riscv_vadd_vx_u8m8_mu(fold_e1_b1, folded_u8m8, folded_u8m8, 0x01, vector_length);
+    __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
 #pragma endregion // Per Script Fold Strips
@@ -382,168 +394,180 @@ SZ_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t const
 /*  Danger lanes accumulate as a 0/1 byte vector (one `vor` per rule), keeping the rule algebra free of the
  *  nested mask-intrinsic arity that the mask-domain form invites. `eq` builds a 0/1 byte from a byte compare;
  *  `_to_lead_` shifts the second-byte danger flags back one lane onto the lead and reports the first set. */
-SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_eq_byte_(vuint8m8_t bytes, sz_u8_t value, sz_size_t vector_length) {
+SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_eq_byte_(vuint8m8_t bytes_u8m8, sz_u8_t value, sz_size_t vector_length) {
     return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1,
-                                   __riscv_vmseq_vx_u8m8_b1(bytes, value, vector_length), vector_length);
+                                   __riscv_vmseq_vx_u8m8_b1(bytes_u8m8, value, vector_length), vector_length);
 }
 
-SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_in_range_byte_(vuint8m8_t bytes, sz_u8_t start, sz_u8_t length,
+SZ_HELPER_INLINE vuint8m8_t sz_utf8_uncased_in_range_byte_(vuint8m8_t bytes_u8m8, sz_u8_t start, sz_u8_t length,
                                                            sz_size_t vector_length) {
-    vbool1_t in_range = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes, start, vector_length), length,
-                                                  vector_length);
-    return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, in_range, vector_length);
+    vbool1_t in_range_b1 = __riscv_vmsltu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(bytes_u8m8, start, vector_length), length,
+                                                     vector_length);
+    return __riscv_vmerge_vxm_u8m8(__riscv_vmv_v_x_u8m8(0, vector_length), 1, in_range_b1, vector_length);
 }
 
-SZ_HELPER_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_second, sz_size_t vector_length) {
+SZ_HELPER_INLINE long sz_utf8_uncased_alarm_to_lead_(vuint8m8_t danger_at_second_u8m8, sz_size_t vector_length) {
     // Carry the second-byte flags back one lane onto the lead (the lower index), then report the first set
     // lane. The lead precedes its second byte, so this is a slide-DOWN (`dst[i] = src[i+1]`).
-    vuint8m8_t flag_at_lead = __riscv_vslide1down_vx_u8m8(danger_at_second, 0, vector_length);
-    return __riscv_vfirst_m_b1(__riscv_vmsne_vx_u8m8_b1(flag_at_lead, 0, vector_length), vector_length);
+    vuint8m8_t flag_at_lead_u8m8 = __riscv_vslide1down_vx_u8m8(danger_at_second_u8m8, 0, vector_length);
+    return __riscv_vfirst_m_b1(__riscv_vmsne_vx_u8m8_b1(flag_at_lead_u8m8, 0, vector_length), vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_rvv_(sz_u8_t const *source_ptr,
                                                                         sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, source_ptr[vector_length], vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, source_ptr[vector_length], vector_length);
 
-    vuint8m8_t after_c3 = sz_utf8_uncased_eq_byte_(previous, 0xC3, vector_length);
-    vuint8m8_t after_c5 = sz_utf8_uncased_eq_byte_(previous, 0xC5, vector_length);
+    vuint8m8_t after_c3_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC3, vector_length);
+    vuint8m8_t after_c5_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC5, vector_length);
     // 'ẞ' & co (E1 BA 96-9E): expand to ASCII-led sequences.
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xBA, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE1, vector_length), vector_length),
-        sz_utf8_uncased_in_range_byte_(next, 0x96, 0x09, vector_length), vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xBA, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE1, vector_length), vector_length),
+        sz_utf8_uncased_in_range_byte_(next_u8m8, 0x96, 0x09, vector_length), vector_length);
     // Kelvin/Angstrom (E2 84 AA/AB).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
         __riscv_vand_vv_u8m8(
-            __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x84, vector_length),
-                                 sz_utf8_uncased_eq_byte_(previous, 0xE2, vector_length), vector_length),
-            __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(next, 0xAA, vector_length),
-                                sz_utf8_uncased_eq_byte_(next, 0xAB, vector_length), vector_length),
+            __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x84, vector_length),
+                                 sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length), vector_length),
+            __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(next_u8m8, 0xAA, vector_length),
+                                sz_utf8_uncased_eq_byte_(next_u8m8, 0xAB, vector_length), vector_length),
             vector_length),
         vector_length);
     // Ligatures (EF AC xx).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xAC, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xEF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xAC, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xEF, vector_length), vector_length),
         vector_length);
     // Long S (C5 BF) and 'Ÿ' (C5 B8).
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c5, sz_utf8_uncased_eq_byte_(source, 0xBF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c5_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xBF, vector_length), vector_length),
         vector_length);
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c5, sz_utf8_uncased_eq_byte_(source, 0xB8, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c5_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xB8, vector_length), vector_length),
         vector_length);
     // Sharp S (C3 9F).
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c3, sz_utf8_uncased_eq_byte_(source, 0x9F, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c3_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0x9F, vector_length), vector_length),
         vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_rvv_(sz_u8_t const *source_ptr,
                                                                         sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vuint8m8_t after_c3 = sz_utf8_uncased_eq_byte_(previous, 0xC3, vector_length);
-    vuint8m8_t after_c4 = sz_utf8_uncased_eq_byte_(previous, 0xC4, vector_length);
-    vuint8m8_t after_c5 = sz_utf8_uncased_eq_byte_(previous, 0xC5, vector_length);
+    vuint8m8_t after_c3_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC3, vector_length);
+    vuint8m8_t after_c4_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC4, vector_length);
+    vuint8m8_t after_c5_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC5, vector_length);
     // Kelvin (E2 84).
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x84, vector_length),
-                                             sz_utf8_uncased_eq_byte_(previous, 0xE2, vector_length), vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x84, vector_length),
+                                                  sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length),
+                                                  vector_length);
     // Sharp S (C3 9F).
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c3, sz_utf8_uncased_eq_byte_(source, 0x9F, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c3_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0x9F, vector_length), vector_length),
         vector_length);
     // Dotted I (C4 B0) and 'Ŀ' (C4 BF).
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c4, sz_utf8_uncased_eq_byte_(source, 0xB0, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c4_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xB0, vector_length), vector_length),
         vector_length);
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c4, sz_utf8_uncased_eq_byte_(source, 0xBF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c4_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xBF, vector_length), vector_length),
         vector_length);
     // Long S (C5 BF) and 'Ÿ' (C5 B8).
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c5, sz_utf8_uncased_eq_byte_(source, 0xBF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c5_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xBF, vector_length), vector_length),
         vector_length);
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_c5, sz_utf8_uncased_eq_byte_(source, 0xB8, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_c5_u8m8, sz_utf8_uncased_eq_byte_(source_u8m8, 0xB8, vector_length), vector_length),
         vector_length);
     // Ligatures (EF AC xx).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xAC, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xEF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xAC, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xEF, vector_length), vector_length),
         vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, source_ptr[vector_length], vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, source_ptr[vector_length], vector_length);
 
     // Cyrillic Extended-C (E1 B2 80-88) folds into basic 2-byte Cyrillic letters.
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xB2, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE1, vector_length), vector_length),
-        sz_utf8_uncased_in_range_byte_(next, 0x80, 0x09, vector_length), vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xB2, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE1, vector_length), vector_length),
+        sz_utf8_uncased_in_range_byte_(next_u8m8, 0x80, 0x09, vector_length), vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
-    vuint8m8_t after_ce = sz_utf8_uncased_eq_byte_(previous, 0xCE, vector_length);
-    vuint8m8_t after_cf = sz_utf8_uncased_eq_byte_(previous, 0xCF, vector_length);
+    vuint8m8_t after_ce_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xCE, vector_length);
+    vuint8m8_t after_cf_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xCF, vector_length);
     // 'ΐ','ΰ' (CE 90 / CE B0), plus the unassigned U+03A2 (CE A2) which folds to itself in serial but the
     // strip's promoting-range delta would mis-fold to 'ς' (CF 82) — route it to the serial scanner instead.
-    vuint8m8_t second_90_b0_a2 = __riscv_vor_vv_u8m8(
-        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x90, vector_length),
-                            sz_utf8_uncased_eq_byte_(source, 0xB0, vector_length), vector_length),
-        sz_utf8_uncased_eq_byte_(source, 0xA2, vector_length), vector_length);
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(after_ce, second_90_b0_a2, vector_length);
+    vuint8m8_t second_90_b0_a2_u8m8 = __riscv_vor_vv_u8m8(
+        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x90, vector_length),
+                            sz_utf8_uncased_eq_byte_(source_u8m8, 0xB0, vector_length), vector_length),
+        sz_utf8_uncased_eq_byte_(source_u8m8, 0xA2, vector_length), vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(after_ce_u8m8, second_90_b0_a2_u8m8, vector_length);
     // Greek symbols (CF 90/91/95/96, CF B0/B1/B4/B5).
-    vuint8m8_t second_9x = __riscv_vor_vv_u8m8(
-        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x90, vector_length),
-                            sz_utf8_uncased_eq_byte_(source, 0x91, vector_length), vector_length),
-        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x95, vector_length),
-                            sz_utf8_uncased_eq_byte_(source, 0x96, vector_length), vector_length),
+    vuint8m8_t second_9x_u8m8 = __riscv_vor_vv_u8m8(
+        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x90, vector_length),
+                            sz_utf8_uncased_eq_byte_(source_u8m8, 0x91, vector_length), vector_length),
+        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x95, vector_length),
+                            sz_utf8_uncased_eq_byte_(source_u8m8, 0x96, vector_length), vector_length),
         vector_length);
-    vuint8m8_t second_bx = __riscv_vor_vv_u8m8(
-        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xB0, vector_length),
-                            sz_utf8_uncased_eq_byte_(source, 0xB1, vector_length), vector_length),
-        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xB4, vector_length),
-                            sz_utf8_uncased_eq_byte_(source, 0xB5, vector_length), vector_length),
+    vuint8m8_t second_bx_u8m8 = __riscv_vor_vv_u8m8(
+        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xB0, vector_length),
+                            sz_utf8_uncased_eq_byte_(source_u8m8, 0xB1, vector_length), vector_length),
+        __riscv_vor_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xB4, vector_length),
+                            sz_utf8_uncased_eq_byte_(source_u8m8, 0xB5, vector_length), vector_length),
         vector_length);
-    danger = __riscv_vor_vv_u8m8(
-        danger, __riscv_vand_vv_u8m8(after_cf, __riscv_vor_vv_u8m8(second_9x, second_bx, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(after_cf_u8m8, __riscv_vor_vv_u8m8(second_9x_u8m8, second_bx_u8m8, vector_length),
+                             vector_length),
         vector_length);
     // Ohm sign (E2 84).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x84, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE2, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x84, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length), vector_length),
         vector_length);
-    long lead_danger = sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    long lead_danger = sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 
     // Blanket polytonic & archaic LEADS (E1 / CD): these are flagged at their own lane, not the second byte.
-    vbool1_t lead_blanket = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(source, 0xE1, vector_length),
-                                               __riscv_vmseq_vx_u8m8_b1(source, 0xCD, vector_length), vector_length);
-    long blanket_danger = __riscv_vfirst_m_b1(lead_blanket, vector_length);
+    vbool1_t lead_blanket_b1 = __riscv_vmor_mm_b1(__riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xE1, vector_length),
+                                                  __riscv_vmseq_vx_u8m8_b1(source_u8m8, 0xCD, vector_length),
+                                                  vector_length);
+    long blanket_danger = __riscv_vfirst_m_b1(lead_blanket_b1, vector_length);
 
     if (lead_danger < 0) return blanket_danger;
     if (blanket_danger < 0) return lead_danger;
@@ -553,57 +577,58 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_rvv_(sz_u8_t const *so
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
 
     // Ech-Yiwn (D6 87).
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x87, vector_length),
-                                             sz_utf8_uncased_eq_byte_(previous, 0xD6, vector_length), vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x87, vector_length),
+                                                  sz_utf8_uncased_eq_byte_(previous_u8m8, 0xD6, vector_length),
+                                                  vector_length);
     // Ligatures (EF AC xx).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xAC, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xEF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xAC, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xEF, vector_length), vector_length),
         vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t const *source_ptr,
                                                                     sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, source_ptr[vector_length], vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, source_ptr[vector_length], vector_length);
 
     // E1 BA 96-9F (expanding third byte).
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xBA, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE1, vector_length), vector_length),
-        sz_utf8_uncased_in_range_byte_(next, 0x96, 0x0A, vector_length), vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xBA, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE1, vector_length), vector_length),
+        sz_utf8_uncased_in_range_byte_(next_u8m8, 0x96, 0x0A, vector_length), vector_length);
     // Sharp S (C3 9F).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x9F, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xC3, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x9F, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC3, vector_length), vector_length),
         vector_length);
     // Long S (C5 BF).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xBF, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xC5, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xBF, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xC5, vector_length), vector_length),
         vector_length);
     // Ligatures (EF AC xx).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xAC, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xEF, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xAC, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xEF, vector_length), vector_length),
         vector_length);
     // Kelvin (E2 84).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x84, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE2, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x84, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length), vector_length),
         vector_length);
     // Cross-block Latin Extended folds the in-place strip can't do (e.g. 'Ŀ' C4 BF -> C5 80, 'Ÿ' C5 B8 ->
     // C3 BF, and many C6 letters): the shared C4/C5/C6 delta LUTs flag those continuation bytes with 0x80.
@@ -611,45 +636,46 @@ SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t cons
     // to the serial scanner instead of folding them wrong. Anchored at the second byte like the rest.
     // After a C4/C5/C6 lead: the previous byte is in [0xC4, 0xC6]; the family base is `(prev - 0xC4) * 64`.
     // One indexed load over the combined C4/C5/C6 table replaces the three per-family gathers.
-    vbool1_t after_c456 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 2,
-                                                    vector_length);
-    vuint8m8_t low6 = __riscv_vand_vx_u8m8(source, 0x3F, vector_length);
-    vuint8m8_t family_base = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous, 0xC4, vector_length), 64,
-                                                  vector_length);
-    vuint8m8_t lut_index = __riscv_vadd_vv_u8m8(family_base, low6, vector_length);
-    vuint8m8_t delta = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta = __riscv_vluxei8_v_u8m8_mu(after_c456, delta, sz_utf8_fold_latin_c456_deltas_rvv_, lut_index, vector_length);
-    vuint8m8_t irregular = sz_utf8_uncased_eq_byte_(__riscv_vand_vx_u8m8(delta, 0x80, vector_length), 0x80,
-                                                    vector_length);
-    danger = __riscv_vor_vv_u8m8(danger, irregular, vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    vbool1_t after_c456_b1 = __riscv_vmsleu_vx_u8m8_b1(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 2,
+                                                       vector_length);
+    vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
+    vuint8m8_t family_base_u8m8 = __riscv_vmul_vx_u8m8(__riscv_vsub_vx_u8m8(previous_u8m8, 0xC4, vector_length), 64,
+                                                       vector_length);
+    vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
+    vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_c456_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
+                                           lut_index_u8m8, vector_length);
+    vuint8m8_t irregular_u8m8 = sz_utf8_uncased_eq_byte_(__riscv_vand_vx_u8m8(delta_u8m8, 0x80, vector_length), 0x80,
+                                                         vector_length);
+    danger_u8m8 = __riscv_vor_vv_u8m8(danger_u8m8, irregular_u8m8, vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 SZ_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_rvv_(sz_u8_t const *source_ptr, sz_size_t vector_length) {
     vector_length = __riscv_vsetvl_e8m8(
         vector_length); // configure the vector unit (out-of-line callbacks inherit no config)
-    vuint8m8_t source = __riscv_vle8_v_u8m8(source_ptr, vector_length);
-    vuint8m8_t previous = __riscv_vslide1up_vx_u8m8(source, 0, vector_length);
-    vuint8m8_t next = __riscv_vslide1down_vx_u8m8(source, source_ptr[vector_length], vector_length);
+    vuint8m8_t source_u8m8 = __riscv_vle8_v_u8m8(source_ptr, vector_length);
+    vuint8m8_t previous_u8m8 = __riscv_vslide1up_vx_u8m8(source_u8m8, 0, vector_length);
+    vuint8m8_t next_u8m8 = __riscv_vslide1down_vx_u8m8(source_u8m8, source_ptr[vector_length], vector_length);
 
-    vuint8m8_t after_e1 = sz_utf8_uncased_eq_byte_(previous, 0xE1, vector_length);
+    vuint8m8_t after_e1_u8m8 = sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE1, vector_length);
     // Mtavruli (E1 B2).
-    vuint8m8_t danger = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xB2, vector_length), after_e1,
-                                             vector_length);
+    vuint8m8_t danger_u8m8 = __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xB2, vector_length),
+                                                  after_e1_u8m8, vector_length);
     // Asomtavruli (E1 82 A0-E5).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(
-            __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0x82, vector_length), after_e1, vector_length),
-            sz_utf8_uncased_in_range_byte_(next, 0xA0, 0x46, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(__riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0x82, vector_length),
+                                                  after_e1_u8m8, vector_length),
+                             sz_utf8_uncased_in_range_byte_(next_u8m8, 0xA0, 0x46, vector_length), vector_length),
         vector_length);
     // Nuskhuri (E2 B4).
-    danger = __riscv_vor_vv_u8m8(
-        danger,
-        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source, 0xB4, vector_length),
-                             sz_utf8_uncased_eq_byte_(previous, 0xE2, vector_length), vector_length),
+    danger_u8m8 = __riscv_vor_vv_u8m8(
+        danger_u8m8,
+        __riscv_vand_vv_u8m8(sz_utf8_uncased_eq_byte_(source_u8m8, 0xB4, vector_length),
+                             sz_utf8_uncased_eq_byte_(previous_u8m8, 0xE2, vector_length), vector_length),
         vector_length);
-    return sz_utf8_uncased_alarm_to_lead_(danger, vector_length);
+    return sz_utf8_uncased_alarm_to_lead_(danger_u8m8, vector_length);
 }
 
 #pragma endregion // Per Script Alarm Strips
@@ -750,20 +776,20 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
         sz_size_t position = 0;
         while (position < valid_starts) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(valid_starts - position);
-            vuint8m8_t first_view = __riscv_vle8_v_u8m8(folded_buffer + position, vector_length);
-            vuint8m8_t second_view = __riscv_vle8_v_u8m8(folded_buffer + position + offset_second, vector_length);
-            vuint8m8_t third_view = __riscv_vle8_v_u8m8(folded_buffer + position + offset_third, vector_length);
-            vuint8m8_t last_view = __riscv_vle8_v_u8m8(folded_buffer + position + offset_last, vector_length);
-            vbool1_t match_mask = __riscv_vmseq_vx_u8m8_b1(first_view, probe_first, vector_length);
-            match_mask = __riscv_vmand_mm_b1(
-                match_mask, __riscv_vmseq_vx_u8m8_b1(second_view, probe_second, vector_length), vector_length);
-            match_mask = __riscv_vmand_mm_b1(
-                match_mask, __riscv_vmseq_vx_u8m8_b1(third_view, probe_third, vector_length), vector_length);
-            match_mask = __riscv_vmand_mm_b1(match_mask, __riscv_vmseq_vx_u8m8_b1(last_view, probe_last, vector_length),
-                                             vector_length);
+            vuint8m8_t first_view_u8m8 = __riscv_vle8_v_u8m8(folded_buffer + position, vector_length);
+            vuint8m8_t second_view_u8m8 = __riscv_vle8_v_u8m8(folded_buffer + position + offset_second, vector_length);
+            vuint8m8_t third_view_u8m8 = __riscv_vle8_v_u8m8(folded_buffer + position + offset_third, vector_length);
+            vuint8m8_t last_view_u8m8 = __riscv_vle8_v_u8m8(folded_buffer + position + offset_last, vector_length);
+            vbool1_t match_mask_b1 = __riscv_vmseq_vx_u8m8_b1(first_view_u8m8, probe_first, vector_length);
+            match_mask_b1 = __riscv_vmand_mm_b1(
+                match_mask_b1, __riscv_vmseq_vx_u8m8_b1(second_view_u8m8, probe_second, vector_length), vector_length);
+            match_mask_b1 = __riscv_vmand_mm_b1(
+                match_mask_b1, __riscv_vmseq_vx_u8m8_b1(third_view_u8m8, probe_third, vector_length), vector_length);
+            match_mask_b1 = __riscv_vmand_mm_b1(
+                match_mask_b1, __riscv_vmseq_vx_u8m8_b1(last_view_u8m8, probe_last, vector_length), vector_length);
 
-            for (long match_index = __riscv_vfirst_m_b1(match_mask, vector_length); match_index >= 0;
-                 match_index = __riscv_vfirst_m_b1(match_mask, vector_length)) {
+            for (long match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length); match_index >= 0;
+                 match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length)) {
                 sz_size_t const candidate_offset = position + (sz_size_t)match_index;
                 sz_cptr_t const haystack_candidate_ptr = haystack_ptr + candidate_offset;
 
@@ -787,8 +813,8 @@ SZ_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
                         matched_length);
                     if (match) return match;
                 }
-                match_mask = __riscv_vmandn_mm_b1(match_mask, __riscv_vmsif_m_b1(match_mask, vector_length),
-                                                  vector_length);
+                match_mask_b1 = __riscv_vmandn_mm_b1(match_mask_b1, __riscv_vmsif_m_b1(match_mask_b1, vector_length),
+                                                     vector_length);
             }
             position += vector_length;
         }
@@ -969,13 +995,14 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_find_cased_rvv(sz_cptr_t str, sz_size_t length
         sz_size_t skip = 0;
         while (skip < remaining) {
             sz_size_t vector_length = __riscv_vsetvl_e8m8(remaining - skip);
-            vuint8m8_t bytes = __riscv_vle8_v_u8m8(cursor + skip, vector_length);
+            vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(cursor + skip, vector_length);
             // ASCII letter: (byte | 0x20) in [0x61, 0x7A]; folds to lowercase so it never false-matches >= 0x80.
-            vbool1_t is_letter = __riscv_vmsleu_vx_u8m8_b1(
-                __riscv_vsub_vx_u8m8(__riscv_vor_vx_u8m8(bytes, 0x20, vector_length), 0x61, vector_length), 0x19,
+            vbool1_t is_letter_b1 = __riscv_vmsleu_vx_u8m8_b1(
+                __riscv_vsub_vx_u8m8(__riscv_vor_vx_u8m8(bytes_u8m8, 0x20, vector_length), 0x61, vector_length), 0x19,
                 vector_length);
-            vbool1_t is_non_ascii = __riscv_vmsgtu_vx_u8m8_b1(bytes, 0x7F, vector_length);
-            long first = __riscv_vfirst_m_b1(__riscv_vmor_mm_b1(is_letter, is_non_ascii, vector_length), vector_length);
+            vbool1_t is_non_ascii_b1 = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0x7F, vector_length);
+            long first = __riscv_vfirst_m_b1(__riscv_vmor_mm_b1(is_letter_b1, is_non_ascii_b1, vector_length),
+                                             vector_length);
             if (first < 0) {
                 skip += vector_length;
                 continue;

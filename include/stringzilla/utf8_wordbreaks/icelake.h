@@ -101,119 +101,128 @@ enum {
  *          `astral_s0` → stage1 → stage2 → leaf, addressed by the 8/4/4/4 split of `offset = codepoint - 0x10000`,
  *          every tile read straight from aligned `.rodata` (re-init-free — no per-call `luts`). Byte-identical to
  *          `sz_rune_word_break_property` for astral, replacing the 476-range linear fold. */
-SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepoints) {
-    __m512i const offset = _mm512_sub_epi32(codepoints, _mm512_set1_epi32(0x10000));
-    __m512i const stage1 = sz_utf8_rune_permute256_icelake_(
-        sz_utf8_word_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset, 12), _mm512_set1_epi32(0xFF)));
-    __m512i const stage2_index = _mm512_add_epi32(
-        _mm512_slli_epi32(stage1, 4), _mm512_and_si512(_mm512_srli_epi32(offset, 8), _mm512_set1_epi32(0xF)));
-    __m512i const stage2 = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_word_break_astral_s1_,
-                                                             sz_utf8_word_break_astral_stage1_tiles_k, stage2_index);
-    __m512i const leaf_index = _mm512_add_epi32(_mm512_slli_epi32(stage2, 4),
-                                                _mm512_and_si512(_mm512_srli_epi32(offset, 4), _mm512_set1_epi32(0xF)));
-    __m512i const leaf = sz_utf8_rune_lut_cascade_icelake_(sz_utf8_word_break_astral_s2_,
-                                                           sz_utf8_word_break_astral_stage2_tiles_k, leaf_index);
-    __m512i const class_index = _mm512_add_epi32(_mm512_slli_epi32(leaf, 4),
-                                                 _mm512_and_si512(offset, _mm512_set1_epi32(0xF)));
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+    __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
+    __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
+        sz_utf8_word_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
+    __m512i const stage2_index_u32x16 = _mm512_add_epi32(
+        _mm512_slli_epi32(stage1_u32x16, 4),
+        _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 8), _mm512_set1_epi32(0xF)));
+    __m512i const stage2_u32x16 = sz_utf8_rune_lut_cascade_icelake_(
+        sz_utf8_word_break_astral_s1_, sz_utf8_word_break_astral_stage1_tiles_k, stage2_index_u32x16);
+    __m512i const leaf_index_u32x16 = _mm512_add_epi32(
+        _mm512_slli_epi32(stage2_u32x16, 4),
+        _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 4), _mm512_set1_epi32(0xF)));
+    __m512i const leaf_u32x16 = sz_utf8_rune_lut_cascade_icelake_(
+        sz_utf8_word_break_astral_s2_, sz_utf8_word_break_astral_stage2_tiles_k, leaf_index_u32x16);
+    __m512i const class_index_u32x16 = _mm512_add_epi32(_mm512_slli_epi32(leaf_u32x16, 4),
+                                                        _mm512_and_si512(offset_u32x16, _mm512_set1_epi32(0xF)));
     // The Word_Break class fits in 4 bits, so the leaf is stored two cells per byte (half the tiles); the nibble
     // cascade halves this stage's port-5 cost on the astral / emoji path.
     return sz_utf8_rune_lut_cascade_nibble_icelake_(sz_utf8_word_break_astral_leaf_packed_,
-                                                    sz_utf8_word_break_astral_leaf_packed_tiles_k, class_index);
+                                                    sz_utf8_word_break_astral_leaf_packed_tiles_k, class_index_u32x16);
 }
 
 /** @brief  AVX-512 classification of an all-ASCII 64-byte vector to WB properties via table lookup. */
-SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_ascii_icelake_(__m512i ascii_bytes) {
-    __m512i const low_table = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_);
-    __m512i const high_table = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_ + 64);
-    __mmask64 const high_half = _mm512_test_epi8_mask(ascii_bytes, _mm512_set1_epi8(0x40));
-    __m512i const low_result = _mm512_permutexvar_epi8(ascii_bytes, low_table);
-    __m512i const high_result = _mm512_permutexvar_epi8(ascii_bytes, high_table);
-    return _mm512_mask_blend_epi8(high_half, low_result, high_result);
+SZ_HELPER_INLINE __m512i sz_utf8_word_break_classify_ascii_icelake_(__m512i ascii_bytes_u8x64) {
+    __m512i const low_table_u8x64 = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_);
+    __m512i const high_table_u8x64 = _mm512_loadu_epi8(sz_utf8_word_break_property_ascii_ + 64);
+    __mmask64 const high_half_m64 = _mm512_test_epi8_mask(ascii_bytes_u8x64, _mm512_set1_epi8(0x40));
+    __m512i const low_result_u8x64 = _mm512_permutexvar_epi8(ascii_bytes_u8x64, low_table_u8x64);
+    __m512i const high_result_u8x64 = _mm512_permutexvar_epi8(ascii_bytes_u8x64, high_table_u8x64);
+    return _mm512_mask_blend_epi8(high_half_m64, low_result_u8x64, high_result_u8x64);
 }
 
 /** @brief  64-lane mask of bytes whose class equals @p value. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_icelake_(__m512i classes, sz_u8_t value) {
-    return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes, _mm512_set1_epi8((char)value)));
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_icelake_(__m512i classes_u8x64, sz_u8_t value) {
+    return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)value)));
 }
 
 /** @brief  64-lane mask of lanes whose `(high, low)` 16-bit value lies inside any sorted `[lo, hi]` range (WSegSpace
  *          WB3d and Extended_Pictographic WB3c, which are NOT part of the 4-bit Word_Break model). */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_icelake_( //
-    __m512i high, __m512i low, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
-    __mmask64 hit = _cvtu64_mask64(0);
+    __m512i high_u8x64, __m512i low_u8x64, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
+    __mmask64 hit_m64 = _cvtu64_mask64(0);
     for (int range = 0; range < count; ++range) {
-        __m512i const lo_high = _mm512_set1_epi8((char)(lo_table[range] >> 8));
-        __m512i const lo_low = _mm512_set1_epi8((char)(lo_table[range] & 0xFF));
-        __m512i const hi_high = _mm512_set1_epi8((char)(hi_table[range] >> 8));
-        __m512i const hi_low = _mm512_set1_epi8((char)(hi_table[range] & 0xFF));
-        __mmask64 const at_or_above_low = _kor_mask64(
-            _mm512_cmp_epu8_mask(high, lo_high, _MM_CMPINT_NLE),
-            _kand_mask64(_mm512_cmpeq_epi8_mask(high, lo_high), _mm512_cmp_epu8_mask(low, lo_low, _MM_CMPINT_NLT)));
-        __mmask64 const at_or_below_high = _kor_mask64(
-            _mm512_cmp_epu8_mask(high, hi_high, _MM_CMPINT_LT),
-            _kand_mask64(_mm512_cmpeq_epi8_mask(high, hi_high), _mm512_cmp_epu8_mask(low, hi_low, _MM_CMPINT_LE)));
-        hit = _kor_mask64(hit, _kand_mask64(at_or_above_low, at_or_below_high));
+        __m512i const lo_high_u8x64 = _mm512_set1_epi8((char)(lo_table[range] >> 8));
+        __m512i const lo_low_u8x64 = _mm512_set1_epi8((char)(lo_table[range] & 0xFF));
+        __m512i const hi_high_u8x64 = _mm512_set1_epi8((char)(hi_table[range] >> 8));
+        __m512i const hi_low_u8x64 = _mm512_set1_epi8((char)(hi_table[range] & 0xFF));
+        __mmask64 const at_or_above_low_m64 = _kor_mask64(
+            _mm512_cmp_epu8_mask(high_u8x64, lo_high_u8x64, _MM_CMPINT_NLE),
+            _kand_mask64(_mm512_cmpeq_epi8_mask(high_u8x64, lo_high_u8x64),
+                         _mm512_cmp_epu8_mask(low_u8x64, lo_low_u8x64, _MM_CMPINT_NLT)));
+        __mmask64 const at_or_below_high_m64 = _kor_mask64(
+            _mm512_cmp_epu8_mask(high_u8x64, hi_high_u8x64, _MM_CMPINT_LT),
+            _kand_mask64(_mm512_cmpeq_epi8_mask(high_u8x64, hi_high_u8x64),
+                         _mm512_cmp_epu8_mask(low_u8x64, hi_low_u8x64, _MM_CMPINT_LE)));
+        hit_m64 = _kor_mask64(hit_m64, _kand_mask64(at_or_above_low_m64, at_or_below_high_m64));
     }
-    return _cvtmask64_u64(hit);
+    return _cvtmask64_u64(hit_m64);
 }
 
 /** @brief  Look up one cp < 0x800 page over @ref sz_utf8_word_break_flat_lut_0800_ via an in-register `vpermi2b`
  *          network (cheaper than the flat gather for the dense 2-byte scripts). */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high, __m512i low) {
-    __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-    __m512i const low_high_bit = sz_utf8_srl8_icelake_(low, 7, 0x01);
-    __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
-                                         low_high_bit);
-    __m512i segment[32];
+SZ_HELPER_AUTO __m512i sz_utf8_word_break_small_page_icelake_(__m512i high_u8x64, __m512i low_u8x64) {
+    __m512i const in_seven_u8x64 = _mm512_and_si512(low_u8x64, _mm512_set1_epi8(0x7F));
+    __m512i const low_high_bit_u8x64 = sz_utf8_srl8_icelake_(low_u8x64, 7, 0x01);
+    __m512i const page_u8x64 = _mm512_or_si512(
+        _mm512_slli_epi16(_mm512_and_si512(high_u8x64, _mm512_set1_epi8(0x07)), 1), low_high_bit_u8x64);
+    __m512i segment_u8x64[32];
     for (int segment_index = 0; segment_index < 32; ++segment_index)
-        segment[segment_index] = _mm512_loadu_si512(sz_utf8_word_break_flat_lut_0800_ + segment_index * 64);
-    __m512i candidate[16];
+        segment_u8x64[segment_index] = _mm512_loadu_si512(sz_utf8_word_break_flat_lut_0800_ + segment_index * 64);
+    __m512i candidate_u8x64[16];
     for (int pair = 0; pair < 16; ++pair)
-        candidate[pair] = _mm512_permutex2var_epi8(segment[2 * pair], in_seven, segment[2 * pair + 1]);
-    __mmask64 const page_bit0 = _mm512_test_epi8_mask(page, _mm512_set1_epi8(0x01));
+        candidate_u8x64[pair] = _mm512_permutex2var_epi8(segment_u8x64[2 * pair], in_seven_u8x64,
+                                                         segment_u8x64[2 * pair + 1]);
+    __mmask64 const page_bit0_m64 = _mm512_test_epi8_mask(page_u8x64, _mm512_set1_epi8(0x01));
     for (int pair = 0; pair < 8; ++pair)
-        candidate[pair] = _mm512_mask_blend_epi8(page_bit0, candidate[2 * pair], candidate[2 * pair + 1]);
-    __mmask64 const page_bit1 = _mm512_test_epi8_mask(page, _mm512_set1_epi8(0x02));
+        candidate_u8x64[pair] = _mm512_mask_blend_epi8(page_bit0_m64, candidate_u8x64[2 * pair],
+                                                       candidate_u8x64[2 * pair + 1]);
+    __mmask64 const page_bit1_m64 = _mm512_test_epi8_mask(page_u8x64, _mm512_set1_epi8(0x02));
     for (int pair = 0; pair < 4; ++pair)
-        candidate[pair] = _mm512_mask_blend_epi8(page_bit1, candidate[2 * pair], candidate[2 * pair + 1]);
-    __mmask64 const page_bit2 = _mm512_test_epi8_mask(page, _mm512_set1_epi8(0x04));
+        candidate_u8x64[pair] = _mm512_mask_blend_epi8(page_bit1_m64, candidate_u8x64[2 * pair],
+                                                       candidate_u8x64[2 * pair + 1]);
+    __mmask64 const page_bit2_m64 = _mm512_test_epi8_mask(page_u8x64, _mm512_set1_epi8(0x04));
     for (int pair = 0; pair < 2; ++pair)
-        candidate[pair] = _mm512_mask_blend_epi8(page_bit2, candidate[2 * pair], candidate[2 * pair + 1]);
-    __mmask64 const page_bit3 = _mm512_test_epi8_mask(page, _mm512_set1_epi8(0x08));
-    return _mm512_mask_blend_epi8(page_bit3, candidate[0], candidate[1]);
+        candidate_u8x64[pair] = _mm512_mask_blend_epi8(page_bit2_m64, candidate_u8x64[2 * pair],
+                                                       candidate_u8x64[2 * pair + 1]);
+    __mmask64 const page_bit3_m64 = _mm512_test_epi8_mask(page_u8x64, _mm512_set1_epi8(0x08));
+    return _mm512_mask_blend_epi8(page_bit3_m64, candidate_u8x64[0], candidate_u8x64[1]);
 }
 
 /** @brief  Classify the 4-byte (astral) lanes of a window via the aligned `.rodata` astral trie. Four 16-lane chunks
  *          reconstruct the 21-bit codepoint and walk the 4-stage trie; the caller blends the result onto `is_four_byte`
  *          lanes. Bit-exact with `sz_rune_word_break_property` over the astral planes. */
-SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window, __m512i next1, __m512i next2,
-                                                                      __m512i next3) {
-    __m512i const byte0 = _mm512_and_si512(window, _mm512_set1_epi8(0x07));
-    __m512i const byte1 = _mm512_and_si512(next1, _mm512_set1_epi8(0x3F));
-    __m512i const byte2 = _mm512_and_si512(next2, _mm512_set1_epi8(0x3F));
-    __m512i const byte3 = _mm512_and_si512(next3, _mm512_set1_epi8(0x3F));
-    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
-    __m512i astral_class = _mm512_set1_epi8((char)sz_utf8_word_break_other_k);
+SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
+                                                                      __m512i next2_u8x64, __m512i next3_u8x64) {
+    __m512i const byte0_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07));
+    __m512i const byte1_u8x64 = _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F));
+    __m512i const byte2_u8x64 = _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F));
+    __m512i const byte3_u8x64 = _mm512_and_si512(next3_u8x64, _mm512_set1_epi8(0x3F));
+    __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
+    __m512i astral_class_u8x64 = _mm512_set1_epi8((char)sz_utf8_word_break_other_k);
     for (int chunk = 0; chunk < 4; ++chunk) {
-        __m512i const select = _mm512_add_epi8(lane_identity, _mm512_set1_epi8((char)(chunk * 16)));
-        __m512i const lead_bits = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, byte0)));
-        __m512i const continuation1 = _mm512_cvtepu8_epi32(
-            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select, byte1)));
-        __m512i const continuation2 = _mm512_cvtepu8_epi32(
-            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select, byte2)));
-        __m512i const continuation3 = _mm512_cvtepu8_epi32(
-            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select, byte3)));
-        __m512i const codepoint = _mm512_or_si512(
-            _mm512_or_si512(_mm512_slli_epi32(lead_bits, 18), _mm512_slli_epi32(continuation1, 12)),
-            _mm512_or_si512(_mm512_slli_epi32(continuation2, 6), continuation3));
-        __m512i const chunk_class = sz_utf8_word_break_classify_astral16_icelake_(codepoint);
-        __m128i const class_bytes = _mm512_cvtepi32_epi8(chunk_class);
-        __m512i const class_broadcast = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
-                                                                 _mm512_castsi128_si512(class_bytes));
-        astral_class = _mm512_mask_mov_epi8(astral_class, _cvtu64_mask64((sz_u64_t)0xFFFFull << (chunk * 16)),
-                                            class_broadcast);
+        __m512i const select_u8x64 = _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8((char)(chunk * 16)));
+        __m512i const lead_bits_u32x16 = _mm512_cvtepu8_epi32(
+            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, byte0_u8x64)));
+        __m512i const continuation1_u32x16 = _mm512_cvtepu8_epi32(
+            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, byte1_u8x64)));
+        __m512i const continuation2_u32x16 = _mm512_cvtepu8_epi32(
+            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, byte2_u8x64)));
+        __m512i const continuation3_u32x16 = _mm512_cvtepu8_epi32(
+            _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, byte3_u8x64)));
+        __m512i const codepoint_u32x16 = _mm512_or_si512(
+            _mm512_or_si512(_mm512_slli_epi32(lead_bits_u32x16, 18), _mm512_slli_epi32(continuation1_u32x16, 12)),
+            _mm512_or_si512(_mm512_slli_epi32(continuation2_u32x16, 6), continuation3_u32x16));
+        __m512i const chunk_class_u32x16 = sz_utf8_word_break_classify_astral16_icelake_(codepoint_u32x16);
+        __m128i const class_bytes_u8x16 = _mm512_cvtepi32_epi8(chunk_class_u32x16);
+        __m512i const class_broadcast_u8x64 = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
+                                                                       _mm512_castsi128_si512(class_bytes_u8x16));
+        astral_class_u8x64 = _mm512_mask_mov_epi8(
+            astral_class_u8x64, _cvtu64_mask64((sz_u64_t)0xFFFFull << (chunk * 16)), class_broadcast_u8x64);
     }
-    return astral_class;
+    return astral_class_u8x64;
 }
 
 /** @brief  Start-compacting flat-lookup classify for the COLD `0x800..0xFFFF` residue (Devanagari, Bengali, Thai,
@@ -226,9 +235,9 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_four_byte_icelake_(__m512i wi
  *          reads only start lanes) and keep their prior value. */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
-    __mmask64 const cold_start_mask = _cvtu64_mask64(cold_starts);
-    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, high_bytes_u8x64);
-    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, low_bytes_u8x64);
+    __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
+    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
+    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, low_bytes_u8x64);
 
     //  Unused (zeroed) compacted lanes decode to codepoint 0, a safe in-bounds flat index whose class is discarded.
     __m512i const codepoints_first_u32x16 = _mm512_or_si512(
@@ -246,7 +255,7 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
             sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, codepoints_second_u32x16));
         classes_packed_u8x64 = _mm512_inserti32x4(classes_packed_u8x64, classes_second_u8x16, 1);
     }
-    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask, classes_packed_u8x64);
+    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask_m64, classes_packed_u8x64);
 }
 
 /**
@@ -256,43 +265,51 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_cold_compact_icelake_( //
  *          rare-class gated.
  */
 SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
-    __m512i window, __m512i high, __m512i low, __mmask64 is_four_byte, __m512i next1, __m512i next2, __m512i next3) {
-    __mmask64 const is_ascii = ~_mm512_movepi8_mask(window);
-    __mmask64 const high_eq_01 = _mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8(0x01));
-    __mmask64 const high_eq_02 = _mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8(0x02));
-    __mmask64 const low_le_4f = _mm512_cmp_epu8_mask(low, _mm512_set1_epi8(0x4F), _MM_CMPINT_LE);
-    __mmask64 const latin = high_eq_01 | (high_eq_02 & low_le_4f);
-    __mmask64 const hangul = (_mm512_cmp_epu8_mask(high, _mm512_set1_epi8((char)0xAC), _MM_CMPINT_NLT) &
-                              _mm512_cmp_epu8_mask(high, _mm512_set1_epi8((char)0xD7), _MM_CMPINT_LE)) &
-                             ~(_mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8((char)0xD7)) &
-                               _mm512_cmp_epu8_mask(low, _mm512_set1_epi8((char)0xA3), _MM_CMPINT_NLE));
-    __mmask64 const cjk_combined = (_mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x34), _MM_CMPINT_NLT) &
-                                    _mm512_cmp_epu8_mask(high, _mm512_set1_epi8((char)0x9F), _MM_CMPINT_LE)) &
-                                   ~(_mm512_cmpeq_epi8_mask(high, _mm512_set1_epi8(0x4D)) &
-                                     _mm512_cmp_epu8_mask(low, _mm512_set1_epi8((char)0xBF), _MM_CMPINT_NLE));
-    __mmask64 const fast_aletter = latin | hangul;
+    __m512i window_u8x64, __m512i high_u8x64, __m512i low_u8x64, __mmask64 is_four_byte_m64, __m512i next1_u8x64,
+    __m512i next2_u8x64, __m512i next3_u8x64) {
+    __mmask64 const is_ascii_m64 = ~_mm512_movepi8_mask(window_u8x64);
+    __mmask64 const high_eq_01_m64 = _mm512_cmpeq_epi8_mask(high_u8x64, _mm512_set1_epi8(0x01));
+    __mmask64 const high_eq_02_m64 = _mm512_cmpeq_epi8_mask(high_u8x64, _mm512_set1_epi8(0x02));
+    __mmask64 const low_le_4f_m64 = _mm512_cmp_epu8_mask(low_u8x64, _mm512_set1_epi8(0x4F), _MM_CMPINT_LE);
+    __mmask64 const latin_m64 = high_eq_01_m64 | (high_eq_02_m64 & low_le_4f_m64);
+    __mmask64 const hangul_m64 = (_mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8((char)0xAC), _MM_CMPINT_NLT) &
+                                  _mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8((char)0xD7), _MM_CMPINT_LE)) &
+                                 ~(_mm512_cmpeq_epi8_mask(high_u8x64, _mm512_set1_epi8((char)0xD7)) &
+                                   _mm512_cmp_epu8_mask(low_u8x64, _mm512_set1_epi8((char)0xA3), _MM_CMPINT_NLE));
+    __mmask64 const cjk_combined_m64 = (_mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8(0x34), _MM_CMPINT_NLT) &
+                                        _mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8((char)0x9F), _MM_CMPINT_LE)) &
+                                       ~(_mm512_cmpeq_epi8_mask(high_u8x64, _mm512_set1_epi8(0x4D)) &
+                                         _mm512_cmp_epu8_mask(low_u8x64, _mm512_set1_epi8((char)0xBF), _MM_CMPINT_NLE));
+    __mmask64 const fast_aletter_m64 = latin_m64 | hangul_m64;
 
-    __m512i classes = _mm512_setzero_si512();
-    classes = _mm512_mask_blend_epi8(cjk_combined, classes, _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
-    classes = _mm512_mask_blend_epi8(fast_aletter, classes, _mm512_set1_epi8((char)sz_utf8_word_break_aletter_k));
-    if (is_four_byte)
-        classes = _mm512_mask_mov_epi8(classes, is_four_byte,
-                                       sz_utf8_word_break_classify_four_byte_icelake_(window, next1, next2, next3));
-    if (is_ascii)
-        classes = _mm512_mask_blend_epi8(is_ascii, classes, sz_utf8_word_break_classify_ascii_icelake_(window));
+    __m512i classes_u8x64 = _mm512_setzero_si512();
+    classes_u8x64 = _mm512_mask_blend_epi8(cjk_combined_m64, classes_u8x64,
+                                           _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
+    classes_u8x64 = _mm512_mask_blend_epi8(fast_aletter_m64, classes_u8x64,
+                                           _mm512_set1_epi8((char)sz_utf8_word_break_aletter_k));
+    if (is_four_byte_m64)
+        classes_u8x64 = _mm512_mask_mov_epi8(
+            classes_u8x64, is_four_byte_m64,
+            sz_utf8_word_break_classify_four_byte_icelake_(window_u8x64, next1_u8x64, next2_u8x64, next3_u8x64));
+    if (is_ascii_m64)
+        classes_u8x64 = _mm512_mask_blend_epi8(is_ascii_m64, classes_u8x64,
+                                               sz_utf8_word_break_classify_ascii_icelake_(window_u8x64));
 
-    __mmask64 const is_small = _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_LT) & ~is_ascii &
-                               ~is_four_byte;
-    if (is_small) classes = _mm512_mask_mov_epi8(classes, is_small, sz_utf8_word_break_small_page_icelake_(high, low));
+    __mmask64 const is_small_m64 = _mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8(0x08), _MM_CMPINT_LT) &
+                                   ~is_ascii_m64 & ~is_four_byte_m64;
+    if (is_small_m64)
+        classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, is_small_m64,
+                                             sz_utf8_word_break_small_page_icelake_(high_u8x64, low_u8x64));
 
-    __mmask64 const is_bmp_three = _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
-    __mmask64 const cold = is_bmp_three & ~(cjk_combined | fast_aletter | is_four_byte);
-    if (cold) {
-        __mmask64 const continuation = _mm512_cmpeq_epi8_mask(_mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)),
-                                                              _mm512_set1_epi8((char)0x80));
-        classes = sz_utf8_word_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold & ~continuation));
+    __mmask64 const is_bmp_three_m64 = _mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
+    __mmask64 const cold_m64 = is_bmp_three_m64 & ~(cjk_combined_m64 | fast_aletter_m64 | is_four_byte_m64);
+    if (cold_m64) {
+        __mmask64 const continuation_m64 = _mm512_cmpeq_epi8_mask(
+            _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xC0)), _mm512_set1_epi8((char)0x80));
+        classes_u8x64 = sz_utf8_word_break_cold_compact_icelake_(classes_u8x64, high_u8x64, low_u8x64,
+                                                                 _cvtmask64_u64(cold_m64 & ~continuation_m64));
     }
-    return classes;
+    return classes_u8x64;
 }
 
 #pragma endregion Word_Break Classifier
@@ -307,33 +324,41 @@ SZ_HELPER_AUTO __m512i sz_utf8_word_break_classify_window_icelake_( //
  *          straddle (the next window completes it) from a true end-of-text truncation.
  */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icelake_( //
-    __m512i window, __m512i next1, sz_u64_t valid, int at_end_of_text) {
+    __m512i window_u8x64, __m512i next1_u8x64, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const real_continuation = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(
-                                           _mm512_and_si512(window, _mm512_set1_epi8((char)0xC0)),
+                                           _mm512_and_si512(window_u8x64, _mm512_set1_epi8((char)0xC0)),
                                            _mm512_set1_epi8((char)0x80))) &
                                        valid;
     // Declared length keyed purely on the HIGH NIBBLE (serial `codepoint_length_`): 0xC/0xD → 2, 0xE → 3, 0xF → 4.
-    __m512i const high_nibble = sz_utf8_srl8_icelake_(window, 4, 0x0F);
-    sz_u64_t const length_two = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0C)) |
-                                               _mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0D))) &
+    __m512i const high_nibble_u8x64 = sz_utf8_srl8_icelake_(window_u8x64, 4, 0x0F);
+    sz_u64_t const length_two = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble_u8x64, _mm512_set1_epi8(0x0C)) |
+                                               _mm512_cmpeq_epi8_mask(high_nibble_u8x64, _mm512_set1_epi8(0x0D))) &
                                 valid;
-    sz_u64_t const length_three = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0E))) & valid;
-    sz_u64_t const length_four = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble, _mm512_set1_epi8(0x0F))) & valid;
+    sz_u64_t const length_three = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble_u8x64, _mm512_set1_epi8(0x0E))) &
+                                  valid;
+    sz_u64_t const length_four = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(high_nibble_u8x64, _mm512_set1_epi8(0x0F))) &
+                                 valid;
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     // Overlong / surrogate / out-of-range leads (rare); detect them only when a multi-byte lead exists.
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
-        sz_u64_t const next1_at_least_a0 = _cvtmask64_u64(_mm512_cmpge_epu8_mask(next1, _mm512_set1_epi8((char)0xA0)));
-        sz_u64_t const next1_at_least_90 = _cvtmask64_u64(_mm512_cmpge_epu8_mask(next1, _mm512_set1_epi8((char)0x90)));
-        sz_u64_t const lead_c0_c1 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xC0)) |
-                                                   _mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xC1))) &
+        sz_u64_t const next1_at_least_a0 = _cvtmask64_u64(
+            _mm512_cmpge_epu8_mask(next1_u8x64, _mm512_set1_epi8((char)0xA0)));
+        sz_u64_t const next1_at_least_90 = _cvtmask64_u64(
+            _mm512_cmpge_epu8_mask(next1_u8x64, _mm512_set1_epi8((char)0x90)));
+        sz_u64_t const lead_c0_c1 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xC0)) |
+                                                   _mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xC1))) &
                                     valid;
-        sz_u64_t const lead_e0 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xE0))) & valid;
-        sz_u64_t const lead_ed = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xED))) & valid;
-        sz_u64_t const lead_f0 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xF0))) & valid;
-        sz_u64_t const lead_f4 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8((char)0xF4))) & valid;
-        sz_u64_t const lead_f5_or_more = _cvtmask64_u64(_mm512_cmpge_epu8_mask(window, _mm512_set1_epi8((char)0xF5))) &
-                                         valid;
+        sz_u64_t const lead_e0 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xE0))) &
+                                 valid;
+        sz_u64_t const lead_ed = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xED))) &
+                                 valid;
+        sz_u64_t const lead_f0 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xF0))) &
+                                 valid;
+        sz_u64_t const lead_f4 = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8((char)0xF4))) &
+                                 valid;
+        sz_u64_t const lead_f5_or_more =
+            _cvtmask64_u64(_mm512_cmpge_epu8_mask(window_u8x64, _mm512_set1_epi8((char)0xF5))) & valid;
         bad_second_byte = lead_c0_c1 | (lead_e0 & ~next1_at_least_a0) | (lead_ed & next1_at_least_a0) |
                           (lead_f0 & ~next1_at_least_90) | (lead_f4 & next1_at_least_90) | lead_f5_or_more;
     }
@@ -352,9 +377,9 @@ SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_icela
  *          the per-lane class byte array the carry edge reads.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icelake_( //
-    __m512i window, __m512i high, __m512i low, __mmask64 four_byte_starts, __m512i next1, __m512i next2, __m512i next3,
-    __m512i classes, sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
-    sz_size_t loaded, int want_pictographic) {
+    __m512i window_u8x64, __m512i high_u8x64, __m512i low_u8x64, __mmask64 four_byte_starts_m64, __m512i next1_u8x64,
+    __m512i next2_u8x64, __m512i next3_u8x64, __m512i classes_u8x64, sz_u64_t start_bytes_all, sz_u64_t length_two,
+    sz_u64_t length_three, sz_u64_t length_four, sz_size_t loaded, int want_pictographic) {
 
     sz_u64_t const valid = sz_u64_mask_until_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
@@ -370,39 +395,40 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icela
                                     (lead_four & ~sz_u64_mask_until_(loaded > 3 ? loaded - 3 : 0))) &
                                    valid;
     if (truncated_raw)
-        classes = _mm512_mask_mov_epi8(classes, _cvtu64_mask64(truncated_raw),
-                                       _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
+        classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, _cvtu64_mask64(truncated_raw),
+                                             _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
 
     sz_utf8_word_break_frame_t frame;
-    frame.class_aletter = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_aletter_k);
-    frame.class_hebrew = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_hebrew_letter_k);
-    frame.class_numeric = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_numeric_k);
-    frame.class_katakana = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_katakana_k);
-    frame.class_extendnumlet = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_extendnumlet_k);
-    frame.class_extend = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_extend_k);
-    frame.class_zwj = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_zwj_k);
-    frame.class_format = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_format_k);
-    frame.class_midletter = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_midletter_k);
-    frame.class_midnum = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_midnum_k);
-    frame.class_mid_quotes = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_mid_quotes_k);
-    frame.class_cr = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_cr_k);
-    frame.class_lf = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_lf_k);
-    frame.class_newline = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_newline_k);
-    frame.class_regional = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_regional_ind_k);
+    frame.class_aletter = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_aletter_k);
+    frame.class_hebrew = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_hebrew_letter_k);
+    frame.class_numeric = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_numeric_k);
+    frame.class_katakana = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_katakana_k);
+    frame.class_extendnumlet = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_extendnumlet_k);
+    frame.class_extend = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_extend_k);
+    frame.class_zwj = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_zwj_k);
+    frame.class_format = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_format_k);
+    frame.class_midletter = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_midletter_k);
+    frame.class_midnum = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_midnum_k);
+    frame.class_mid_quotes = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_mid_quotes_k);
+    frame.class_cr = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_cr_k);
+    frame.class_lf = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_lf_k);
+    frame.class_newline = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_newline_k);
+    frame.class_regional = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_regional_ind_k);
 
-    sz_u64_t const non_ascii_lanes = _cvtmask64_u64(_mm512_movepi8_mask(window)) & valid;
+    sz_u64_t const non_ascii_lanes = _cvtmask64_u64(_mm512_movepi8_mask(window_u8x64)) & valid;
     frame.non_ascii_lanes = non_ascii_lanes;
-    frame.double_quote_byte = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8(0x22))) & valid;
-    frame.single_quote_byte = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8(0x27))) & valid;
+    frame.double_quote_byte = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8(0x22))) & valid;
+    frame.single_quote_byte = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8(0x27))) & valid;
 
     // WB3d WSegSpace raw membership (the ASCII U+0020 byte compare OR the multibyte (high,low) range scan).
     sz_u64_t wseg_multibyte = 0ull;
     if (non_ascii_lanes)
-        wseg_multibyte = sz_utf8_word_break_range16_mask_icelake_(high, low, sz_utf8_word_break_wseg_lo_,
+        wseg_multibyte = sz_utf8_word_break_range16_mask_icelake_(high_u8x64, low_u8x64, sz_utf8_word_break_wseg_lo_,
                                                                   sz_utf8_word_break_wseg_hi_,
                                                                   sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
-    frame.wseg = (wseg_multibyte | (_cvtmask64_u64(_mm512_cmpeq_epi8_mask(window, _mm512_set1_epi8(0x20))) & valid));
+    frame.wseg = (wseg_multibyte |
+                  (_cvtmask64_u64(_mm512_cmpeq_epi8_mask(window_u8x64, _mm512_set1_epi8(0x20))) & valid));
 
     // WB3c Extended_Pictographic raw membership (BMP range scan on non-4-byte lanes, SMP range scan on plane-one
     // 4-byte lanes). Rare-class gated: the engine reads `pictographic` only when a ZWJ is present in-window or carried,
@@ -410,25 +436,28 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icela
     // scan is skipped entirely on the overwhelmingly common no-ZWJ window. The engine applies the final gating.
     frame.pictographic = 0ull;
     if (want_pictographic) {
-        sz_u64_t const four_byte = _cvtmask64_u64(four_byte_starts) & valid;
-        __m512i const plane = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x07)), 2),
-                                              sz_utf8_srl8_icelake_(next1, 4, 0x03));
-        sz_u64_t const plane_one = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(plane, _mm512_set1_epi8(0x01)));
+        sz_u64_t const four_byte = _cvtmask64_u64(four_byte_starts_m64) & valid;
+        __m512i const plane_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07)), 2),
+            sz_utf8_srl8_icelake_(next1_u8x64, 4, 0x03));
+        sz_u64_t const plane_one = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(plane_u8x64, _mm512_set1_epi8(0x01)));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_icelake_( //
-            high, low, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
+            high_u8x64, low_u8x64, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
             sz_utf8_word_break_pict_bmp_count_k);
-        __m512i const smp_mid = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4),
-                                                sz_utf8_srl8_icelake_(next2, 2, 0x0F));
-        __m512i const smp_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6),
-                                                _mm512_and_si512(next3, _mm512_set1_epi8(0x3F)));
+        __m512i const smp_mid_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_icelake_(next2_u8x64, 2, 0x0F));
+        __m512i const smp_low_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x03)), 6),
+            _mm512_and_si512(next3_u8x64, _mm512_set1_epi8(0x3F)));
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_icelake_( //
-            smp_mid, smp_low, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
+            smp_mid_u8x64, smp_low_u8x64, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
             sz_utf8_word_break_pict_smp_count_k);
         frame.pictographic = (pictographic_bmp & non_ascii_lanes & ~four_byte) |
                              (pictographic_smp & four_byte & plane_one);
     }
 
-    _mm512_storeu_si512(frame.classes_byte, classes);
+    _mm512_storeu_si512(frame.classes_byte, classes_u8x64);
     return frame;
 }
 
@@ -437,15 +466,16 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_icela
  *          WB1-WB16 decision to the portable @ref sz_utf8_word_break_decide_window_. Bit-exact with the serial reference.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_block_breaks_icelake_( //
-    __m512i window, __m512i high, __m512i low, __mmask64 four_byte_starts, __m512i next1, __m512i next2, __m512i next3,
-    __m512i classes, sz_u64_t start_bytes_all, sz_u64_t continuation_all, sz_u64_t forced_other, sz_u64_t length_two,
-    sz_u64_t length_three, sz_u64_t length_four, sz_size_t loaded, sz_utf8_word_break_carry_t *carry,
-    sz_bool_t more_text) {
-    int const want_pictographic = sz_utf8_word_break_class_mask_icelake_(classes, sz_utf8_word_break_zwj_k) != 0 ||
+    __m512i window_u8x64, __m512i high_u8x64, __m512i low_u8x64, __mmask64 four_byte_starts_m64, __m512i next1_u8x64,
+    __m512i next2_u8x64, __m512i next3_u8x64, __m512i classes_u8x64, sz_u64_t start_bytes_all,
+    sz_u64_t continuation_all, sz_u64_t forced_other, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
+    sz_size_t loaded, sz_utf8_word_break_carry_t *carry, sz_bool_t more_text) {
+    int const want_pictographic = sz_utf8_word_break_class_mask_icelake_(classes_u8x64, sz_utf8_word_break_zwj_k) !=
+                                      0 ||
                                   carry->prev_ends_in_zwj;
     sz_utf8_word_break_frame_t const frame = sz_utf8_word_break_build_frame_icelake_(
-        window, high, low, four_byte_starts, next1, next2, next3, classes, start_bytes_all, length_two, length_three,
-        length_four, loaded, want_pictographic);
+        window_u8x64, high_u8x64, low_u8x64, four_byte_starts_m64, next1_u8x64, next2_u8x64, next3_u8x64, classes_u8x64,
+        start_bytes_all, length_two, length_three, length_four, loaded, want_pictographic);
     return sz_utf8_word_break_decide_window_(&frame, start_bytes_all, continuation_all, forced_other, length_two,
                                              length_three, length_four, loaded, carry, more_text);
 }
@@ -472,7 +502,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
         return 0;
     }
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
-    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
+    __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
 
     sz_size_t words = 0;         // words written to the output
     sz_size_t word_start = 0;    // start byte of the currently open (unfinished) word
@@ -483,24 +513,27 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
 
     while (position < length) {
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,
-                                                                                  lane_identity);
+                                                                                  lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __m512i const window = decoded.window;
+        __m512i const window_u8x64 = decoded.window;
         sz_u64_t const valid = sz_u64_mask_until_(loaded);
-        __m512i const high = decoded.high;
-        __m512i const low = decoded.low;
-        __m512i const next1 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)), window);
-        __m512i const next2 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)), window);
-        __m512i const next3 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)), window);
-        __m512i classes = sz_utf8_word_break_classify_window_icelake_(window, high, low, decoded.four_byte_starts,
-                                                                      next1, next2, next3);
+        __m512i const high_u8x64 = decoded.high;
+        __m512i const low_u8x64 = decoded.low;
+        __m512i const next1_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)),
+                                                            window_u8x64);
+        __m512i const next2_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)),
+                                                            window_u8x64);
+        __m512i const next3_u8x64 = _mm512_permutexvar_epi8(_mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(3)),
+                                                            window_u8x64);
+        __m512i classes_u8x64 = sz_utf8_word_break_classify_window_icelake_(
+            window_u8x64, high_u8x64, low_u8x64, decoded.four_byte_starts, next1_u8x64, next2_u8x64, next3_u8x64);
 
         // Canonical maximal-subpart partition (the serial reference's exact model after its malformed-UTF-8 fix):
         // a multi-byte lead claims continuation bytes only up to the first non-continuation OR its declared length,
         // and every unclaimed byte is its own 1-byte U+FFFD start. On well-formed UTF-8 this equals the decoder's
         // continuation-bit partition, so the no-break ALGEBRA (which reads the per-codepoint classes) is unchanged.
         sz_utf8_word_break_partition_t const partition = sz_utf8_word_break_partition_icelake_(
-            window, next1, valid, position + loaded >= length);
+            window_u8x64, next1_u8x64, valid, position + loaded >= length);
         sz_u64_t const start_bytes_all = partition.start_bytes;
         sz_u64_t const continuation_all = partition.continuation;
         sz_u64_t const forced_other = partition.forced_other;
@@ -508,8 +541,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
         sz_u64_t const length_three = partition.length_three;
         sz_u64_t const length_four = partition.length_four;
         if (forced_other)
-            classes = _mm512_mask_mov_epi8(classes, _cvtu64_mask64(forced_other),
-                                           _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
+            classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, _cvtu64_mask64(forced_other),
+                                                 _mm512_set1_epi8((char)sz_utf8_word_break_other_k));
 
         sz_bool_t const more_text = (position + loaded < length) ? sz_true_k : sz_false_k;
 
@@ -548,9 +581,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
         // Resolve over the complete region; `carry_full` is the exact run-state at the complete edge.
         sz_utf8_word_break_carry_t carry_full = carry;
         sz_utf8_word_break_window_t const win = sz_utf8_word_break_block_breaks_icelake_(
-            window, high, low, decoded.four_byte_starts, next1, next2, next3, classes, start_bytes_all,
-            continuation_all, forced_other, length_two, length_three, length_four, complete_limit, &carry_full,
-            more_text);
+            window_u8x64, high_u8x64, low_u8x64, decoded.four_byte_starts, next1_u8x64, next2_u8x64, next3_u8x64,
+            classes_u8x64, start_bytes_all, continuation_all, forced_other, length_two, length_three, length_four,
+            complete_limit, &carry_full, more_text);
 
         sz_size_t const adv = win.resolved;
         sz_u64_t boundary_lanes = win.breaks & sz_u64_mask_until_(adv);
@@ -565,8 +598,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
             word_start = bridge_anchor;
         }
 
-        words = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity, word_starts, word_lengths, words,
-                                            words_capacity, &word_start);
+        words = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity_u8x64, word_starts, word_lengths,
+                                            words, words_capacity, &word_start);
         if (words == words_capacity) {
             if (bytes_consumed) *bytes_consumed = word_start;
             return words;
@@ -576,9 +609,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake( //
             // Bridge-shadow clamp strictly before the complete edge: rebuild the carry to the clamp byte so the next
             // window's left context + open-shadow run-state are exact (break bits discarded; carry side-effect only).
             sz_utf8_word_break_carry_t carry_to_edge = carry;
-            sz_utf8_word_break_block_breaks_icelake_(
-                window, high, low, decoded.four_byte_starts, next1, next2, next3, classes, start_bytes_all,
-                continuation_all, forced_other, length_two, length_three, length_four, adv, &carry_to_edge, sz_true_k);
+            sz_utf8_word_break_block_breaks_icelake_(window_u8x64, high_u8x64, low_u8x64, decoded.four_byte_starts,
+                                                     next1_u8x64, next2_u8x64, next3_u8x64, classes_u8x64,
+                                                     start_bytes_all, continuation_all, forced_other, length_two,
+                                                     length_three, length_four, adv, &carry_to_edge, sz_true_k);
             carry = carry_to_edge;
             position += adv;
         }

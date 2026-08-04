@@ -23,7 +23,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
     // A continuation byte satisfies `(byte & 0xC0) == 0x80`, i.e. it lies in `[0x80, 0xBF]`, which as a
     // SIGNED int8 is `[-128, -65]` — exactly the values strictly less than `0xC0` (= -64). So a single
     // signed compare `byte < 0xC0` flags continuation bytes, replacing the `and` + `eq` pair.
-    v128_t continuation_threshold_vec = wasm_i8x16_splat((sz_i8_t)0xC0);
+    v128_t continuation_threshold_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0);
 
     // The UTF-8 code-point count equals (#bytes - #continuation bytes). Instead of a per-block
     // `bitmask` + `popcount` horizontal reduction, we keep a per-lane counter in a vector register:
@@ -40,16 +40,17 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length) {
         if (blocks > 255) blocks = 255;
         length -= blocks * 16;
         for (sz_size_t i = 0; i < blocks; ++i, text_u8 += 16) {
-            v128_t text_vec = wasm_v128_load(text_u8);
-            v128_t continuation_vec = wasm_i8x16_lt(text_vec, continuation_threshold_vec);
-            // `continuation_vec` lane is 0xFF (-1) on a match; subtract to increment the counter.
-            cont8_vec.v128 = wasm_i8x16_sub(cont8_vec.v128, continuation_vec);
+            v128_t text_u8x16 = wasm_v128_load(text_u8);
+            v128_t continuation_u8x16 = wasm_i8x16_lt(text_u8x16, continuation_threshold_u8x16);
+            // `continuation_u8x16` lane is 0xFF (-1) on a match; subtract to increment the counter.
+            cont8_vec.v128 = wasm_i8x16_sub(cont8_vec.v128, continuation_u8x16);
         }
         // Flush: sum the 16x u8 counters into 2x u64 lanes via two pairwise widenings.
-        v128_t cont16 = wasm_u16x8_extadd_pairwise_u8x16(cont8_vec.v128);
-        v128_t cont32 = wasm_u32x4_extadd_pairwise_u16x8(cont16);
+        v128_t cont16_u16x8 = wasm_u16x8_extadd_pairwise_u8x16(cont8_vec.v128);
+        v128_t cont32_u32x4 = wasm_u32x4_extadd_pairwise_u16x8(cont16_u16x8);
         cont64_vec.v128 = wasm_i64x2_add( //
-            cont64_vec.v128, wasm_i64x2_add(wasm_u64x2_extend_low_u32x4(cont32), wasm_u64x2_extend_high_u32x4(cont32)));
+            cont64_vec.v128,
+            wasm_i64x2_add(wasm_u64x2_extend_low_u32x4(cont32_u32x4), wasm_u64x2_extend_high_u32x4(cont32_u32x4)));
         cont8_vec.v128 = wasm_u64x2_splat(0);
     }
 
@@ -64,12 +65,12 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     // A continuation byte is exactly a value `< 0xC0` as a signed int8 (see `sz_utf8_count_v128`), so a single
     // signed compare flags continuation lanes; the code-point starts are the complement.
-    v128_t const continuation_threshold_vec = wasm_i8x16_splat((sz_i8_t)0xC0);
+    v128_t const continuation_threshold_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0);
 
     while (length >= 16) {
-        v128_t const window = wasm_v128_load(text_u8);
-        v128_t const continuation = wasm_i8x16_lt(window, continuation_threshold_vec);
-        sz_u32_t const start_bits = ~(sz_u32_t)wasm_i8x16_bitmask(continuation) & 0xFFFFu;
+        v128_t const window_u8x16 = wasm_v128_load(text_u8);
+        v128_t const continuation_u8x16 = wasm_i8x16_lt(window_u8x16, continuation_threshold_u8x16);
+        sz_u32_t const start_bits = ~(sz_u32_t)wasm_i8x16_bitmask(continuation_u8x16) & 0xFFFFu;
         sz_size_t const start_count = (sz_size_t)sz_u32_popcount(start_bits);
         if (n >= start_count) {
             n -= start_count, text_u8 += 16, length -= 16;
@@ -134,22 +135,22 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_v128_( //
 
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero. A zero-initialized vector union
  *          stages the partial tail so we never read past `text + loaded`. Mirrors @ref sz_utf8_load_window_neon_. */
-SZ_HELPER_AUTO void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_t loaded, v128_t *out) {
+SZ_HELPER_AUTO void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_t loaded, v128_t *out_u8x16) {
     if (loaded >= 64) {
-        out[0] = wasm_v128_load(text + 0);
-        out[1] = wasm_v128_load(text + 16);
-        out[2] = wasm_v128_load(text + 32);
-        out[3] = wasm_v128_load(text + 48);
+        out_u8x16[0] = wasm_v128_load(text + 0);
+        out_u8x16[1] = wasm_v128_load(text + 16);
+        out_u8x16[2] = wasm_v128_load(text + 32);
+        out_u8x16[3] = wasm_v128_load(text + 48);
         return;
     }
     sz_u512_vec_t window_vec;
     window_vec.u128s[0].v128 = window_vec.u128s[1].v128 = window_vec.u128s[2].v128 = window_vec.u128s[3].v128 =
         wasm_i8x16_splat(0);
     for (sz_size_t i = 0; i < loaded; ++i) window_vec.u8s[i] = text[i];
-    out[0] = window_vec.u128s[0].v128;
-    out[1] = window_vec.u128s[1].v128;
-    out[2] = window_vec.u128s[2].v128;
-    out[3] = window_vec.u128s[3].v128;
+    out_u8x16[0] = window_vec.u128s[0].v128;
+    out_u8x16[1] = window_vec.u128s[1].v128;
+    out_u8x16[2] = window_vec.u128s[2].v128;
+    out_u8x16[3] = window_vec.u128s[3].v128;
 }
 
 /**
@@ -161,16 +162,16 @@ SZ_HELPER_AUTO void sz_utf8_rune_load_window_v128_(sz_u8_t const *text, sz_size_
  *          `next3` (4-byte sequences).
  */
 SZ_HELPER_AUTO void sz_utf8_forward_neighbours_v128_( //
-    v128_t const *window, v128_t *next1, v128_t *next2, v128_t *next3) {
+    v128_t const *window_u8x16, v128_t *next1_u8x16, v128_t *next2_u8x16, v128_t *next3_u8x16) {
     for (int quarter = 0; quarter < 4; ++quarter) {
-        v128_t const here_u8x16 = window[quarter];
-        v128_t const successor_u8x16 = window[(quarter + 1) & 3];
-        next1[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-                                            15, 16);
-        next2[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                            16, 17);
-        next3[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                                            16, 17, 18);
+        v128_t const here_u8x16 = window_u8x16[quarter];
+        v128_t const successor_u8x16 = window_u8x16[(quarter + 1) & 3];
+        next1_u8x16[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+                                                  13, 14, 15, 16);
+        next2_u8x16[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                                                  14, 15, 16, 17);
+        next3_u8x16[quarter] = wasm_i8x16_shuffle(here_u8x16, successor_u8x16, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                                                  15, 16, 17, 18);
     }
 }
 
@@ -181,17 +182,17 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
     sz_utf8_rune_window_v128_t result;
     result.loaded = available < 64 ? available : 64;
 
-    v128_t window[4];
-    sz_utf8_rune_load_window_v128_(text, result.loaded, window);
-    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window[quarter];
+    v128_t window_u8x16[4];
+    sz_utf8_rune_load_window_v128_(text, result.loaded, window_u8x16);
+    for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
 
-    v128_t next1[4], next2[4], next3[4];
-    sz_utf8_forward_neighbours_v128_(window, next1, next2, next3);
+    v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+    sz_utf8_forward_neighbours_v128_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
 
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(result.loaded);
 
     // Lead-class detection over loaded lanes: (byte & mask) == pattern, AND-clamped to loaded lanes.
-    v128_t continuation_bool[4], two_byte_bool[4], three_byte_bool[4], four_byte_bool[4];
+    v128_t continuation_bool_u8x16[4], two_byte_bool_u8x16[4], three_byte_bool_u8x16[4], four_byte_bool_u8x16[4];
     v128_t const mask_continuation_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0),
                  pattern_continuation_u8x16 = wasm_i8x16_splat((sz_i8_t)0x80);
     v128_t const mask_two_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE0), pattern_two_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0);
@@ -200,25 +201,26 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
     v128_t const mask_four_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF8),
                  pattern_four_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF0);
     for (int quarter = 0; quarter < 4; ++quarter) {
-        v128_t const here_u8x16 = window[quarter];
-        continuation_bool[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_continuation_u8x16),
-                                                   pattern_continuation_u8x16);
-        two_byte_bool[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_two_u8x16), pattern_two_u8x16);
-        three_byte_bool[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_three_u8x16), pattern_three_u8x16);
-        four_byte_bool[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_four_u8x16), pattern_four_u8x16);
+        v128_t const here_u8x16 = window_u8x16[quarter];
+        continuation_bool_u8x16[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_continuation_u8x16),
+                                                         pattern_continuation_u8x16);
+        two_byte_bool_u8x16[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_two_u8x16), pattern_two_u8x16);
+        three_byte_bool_u8x16[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_three_u8x16),
+                                                       pattern_three_u8x16);
+        four_byte_bool_u8x16[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, mask_four_u8x16), pattern_four_u8x16);
     }
-    result.continuation = sz_utf8_mask_combine_v128_(continuation_bool[0], continuation_bool[1], continuation_bool[2],
-                                                     continuation_bool[3]) &
+    result.continuation = sz_utf8_mask_combine_v128_(continuation_bool_u8x16[0], continuation_bool_u8x16[1],
+                                                     continuation_bool_u8x16[2], continuation_bool_u8x16[3]) &
                           loaded_mask;
     result.codepoint_starts = loaded_mask & ~result.continuation;
-    result.two_byte_starts = sz_utf8_mask_combine_v128_(two_byte_bool[0], two_byte_bool[1], two_byte_bool[2],
-                                                        two_byte_bool[3]) &
+    result.two_byte_starts = sz_utf8_mask_combine_v128_(two_byte_bool_u8x16[0], two_byte_bool_u8x16[1],
+                                                        two_byte_bool_u8x16[2], two_byte_bool_u8x16[3]) &
                              loaded_mask;
-    result.three_byte_starts = sz_utf8_mask_combine_v128_(three_byte_bool[0], three_byte_bool[1], three_byte_bool[2],
-                                                          three_byte_bool[3]) &
+    result.three_byte_starts = sz_utf8_mask_combine_v128_(three_byte_bool_u8x16[0], three_byte_bool_u8x16[1],
+                                                          three_byte_bool_u8x16[2], three_byte_bool_u8x16[3]) &
                                loaded_mask;
-    result.four_byte_starts = sz_utf8_mask_combine_v128_(four_byte_bool[0], four_byte_bool[1], four_byte_bool[2],
-                                                         four_byte_bool[3]) &
+    result.four_byte_starts = sz_utf8_mask_combine_v128_(four_byte_bool_u8x16[0], four_byte_bool_u8x16[1],
+                                                         four_byte_bool_u8x16[2], four_byte_bool_u8x16[3]) &
                               loaded_mask;
 
     v128_t const low_five_bits_u8x16 = wasm_i8x16_splat(0x1F);
@@ -227,9 +229,9 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
     v128_t const low_four_bits_u8x16 = wasm_i8x16_splat(0x0F);
 
     for (int quarter = 0; quarter < 4; ++quarter) {
-        v128_t const here_u8x16 = window[quarter];
-        v128_t const next_byte_u8x16 = next1[quarter];
-        v128_t const next_byte2_u8x16 = next2[quarter];
+        v128_t const here_u8x16 = window_u8x16[quarter];
+        v128_t const next_byte_u8x16 = next1_u8x16[quarter];
+        v128_t const next_byte2_u8x16 = next2_u8x16[quarter];
 
         // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF.
         v128_t const high_two_u8x16 = sz_utf8_srl8_v128_(wasm_v128_and(here_u8x16, low_five_bits_u8x16), 2, 0x07);
@@ -244,7 +246,7 @@ SZ_HELPER_AUTO sz_utf8_rune_window_v128_t sz_utf8_rune_decode_window_v128_( //
             wasm_v128_and(next_byte2_u8x16, low_six_bits_u8x16));
 
         // Blend 2-byte vs 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
-        v128_t const three_select_u8x16 = three_byte_bool[quarter];
+        v128_t const three_select_u8x16 = three_byte_bool_u8x16[quarter];
         result.high[quarter] = wasm_v128_bitselect(high_three_u8x16, high_two_u8x16, three_select_u8x16);
         result.low[quarter] = wasm_v128_bitselect(low_three_u8x16, low_two_u8x16, three_select_u8x16);
     }
@@ -324,19 +326,19 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_v128_( //
 
 #pragma region Vectorized rune decode
 
-/** @brief  Gather 16 bytes from the 64-byte window held in @p regs at the per-lane byte offsets @p index (in [0,64)),
- *          gather-free. `wasm_i8x16_swizzle` reaches only one 16-byte register (index >= 16 -> 0), so each quarter is
- *          swizzled by `index - 16*q` and the four disjoint results OR-ed: for any lane exactly one quarter holds the
- *          offset in range, the others contribute 0. Offsets past the window (>= 64) read as 0 (discarded downstream).
- *          The v128 twin of @ref sz_utf8_gather16_powervsx_. */
-SZ_HELPER_INLINE v128_t sz_utf8_rune_gather16_v128_(v128_t const *regs, v128_t index_u8x16) {
-    v128_t gathered_u8x16 = wasm_i8x16_swizzle(regs[0], index_u8x16);
+/** @brief  Gather 16 bytes from the 64-byte window held in @p regs_u8x16 at the per-lane byte offsets @p index (in
+ *          [0,64)), gather-free. `wasm_i8x16_swizzle` reaches only one 16-byte register (index >= 16 -> 0), so each
+ *          quarter is swizzled by `index - 16*q` and the four disjoint results OR-ed: for any lane exactly one
+ *          quarter holds the offset in range, the others contribute 0. Offsets past the window (>= 64) read as 0
+ *          (discarded downstream). The v128 twin of @ref sz_utf8_gather16_powervsx_. */
+SZ_HELPER_INLINE v128_t sz_utf8_rune_gather16_v128_(v128_t const *regs_u8x16, v128_t index_u8x16) {
+    v128_t gathered_u8x16 = wasm_i8x16_swizzle(regs_u8x16[0], index_u8x16);
     gathered_u8x16 = wasm_v128_or(gathered_u8x16,
-                                  wasm_i8x16_swizzle(regs[1], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(16))));
+                                  wasm_i8x16_swizzle(regs_u8x16[1], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(16))));
     gathered_u8x16 = wasm_v128_or(gathered_u8x16,
-                                  wasm_i8x16_swizzle(regs[2], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(32))));
+                                  wasm_i8x16_swizzle(regs_u8x16[2], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(32))));
     gathered_u8x16 = wasm_v128_or(gathered_u8x16,
-                                  wasm_i8x16_swizzle(regs[3], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(48))));
+                                  wasm_i8x16_swizzle(regs_u8x16[3], wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(48))));
     return gathered_u8x16;
 }
 
@@ -350,18 +352,18 @@ SZ_HELPER_INLINE v128_t sz_utf8_rune_widen4_v128_(v128_t bytes_u8x16, int quarte
 
 /**
  *  @brief  Decode the emitted start lanes @p emit_starts of a classified 64-byte window (held in the four 16-byte
- *          @p regs) into sequential UTF-32 runes, the v128 sibling of @ref sz_utf8_rune_drain_powervsx_. The start
- *          byte-offsets are left-packed by one first-set (`63 - clz(mask & -mask)`) bit walk — no `ctz` / `popcount`
- *          builtin — then a 16-lane-block loop gathers the lead + up to three trailing bytes with
+ *          @p regs_u8x16) into sequential UTF-32 runes, the v128 sibling of @ref sz_utf8_rune_drain_powervsx_. The
+ *          start byte-offsets are left-packed by one first-set (`63 - clz(mask & -mask)`) bit walk — no `ctz` /
+ *          `popcount` builtin — then a 16-lane-block loop gathers the lead + up to three trailing bytes with
  *          @ref sz_utf8_rune_gather16_v128_ and width-blends each codepoint in `u32x4` lanes; the wider 3rd/4th bytes
- *          are gathered and blended CONDITIONALLY (@p has_three / @p has_four sibling `if`s). Every @p ill_formed start
- *          (its maximal ill-formed subpart) is overwritten with U+FFFD, and the resume cursor reads the last emitted
- *          start's offset + its compacted @p consumed_length, so an ill-formed trailing lane never skips bytes owed
- *          their own next U+FFFD.
+ *          are gathered and blended CONDITIONALLY (@p has_three / @p has_four sibling `if`s). Every @p ill_formed
+ *          start (its maximal ill-formed subpart) is overwritten with U+FFFD, and the resume cursor reads the last
+ *          emitted start's offset + its compacted @p consumed_length, so an ill-formed trailing lane never skips
+ *          bytes owed their own next U+FFFD.
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the resume cursor delta).
  */
 SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_v128_( //
-    v128_t const *regs, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length, int has_three,
+    v128_t const *regs_u8x16, sz_u64_t emit_starts, sz_u64_t ill_formed, sz_u8_t const *consumed_length, int has_three,
     int has_four, sz_size_t capacity, sz_rune_t *runes, sz_size_t *consumed_bytes) {
 
     // Left-pack the emitted start byte-offsets (ascending) by isolating each set bit with `mask & -mask` and reading
@@ -388,15 +390,17 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_v128_( //
             index_vec.u8s[lane] = source < want ? packed_offsets[source] : (sz_u8_t)0xFF;
         }
         v128_t const index_u8x16 = index_vec.v128;
-        v128_t const lead_byte_u8x16 = sz_utf8_rune_gather16_v128_(regs, index_u8x16);
+        v128_t const lead_byte_u8x16 = sz_utf8_rune_gather16_v128_(regs_u8x16, index_u8x16);
         v128_t const continuation_byte_1_u8x16 = sz_utf8_rune_gather16_v128_(
-            regs, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(1)));
-        v128_t const continuation_byte_2_u8x16 = has_three ? sz_utf8_rune_gather16_v128_(
-                                                                 regs, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(2)))
-                                                           : wasm_i8x16_splat(0);
-        v128_t const continuation_byte_3_u8x16 = has_four ? sz_utf8_rune_gather16_v128_(
-                                                                regs, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(3)))
-                                                          : wasm_i8x16_splat(0);
+            regs_u8x16, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(1)));
+        v128_t const continuation_byte_2_u8x16 = has_three
+                                                     ? sz_utf8_rune_gather16_v128_(
+                                                           regs_u8x16, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(2)))
+                                                     : wasm_i8x16_splat(0);
+        v128_t const continuation_byte_3_u8x16 = has_four
+                                                     ? sz_utf8_rune_gather16_v128_(
+                                                           regs_u8x16, wasm_i8x16_add(index_u8x16, wasm_i8x16_splat(3)))
+                                                     : wasm_i8x16_splat(0);
 
         for (int quarter = 0; quarter < 4; ++quarter) {
             sz_size_t const out_base = block_start + (sz_size_t)quarter * 4;
@@ -479,16 +483,16 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_v128_( //
     sz_size_t const chunk = length < 64 ? length : 64;
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(chunk);
 
-    v128_t regs[4];
-    sz_utf8_rune_load_window_v128_((sz_u8_t const *)text, chunk, regs);
+    v128_t regs_u8x16[4];
+    sz_utf8_rune_load_window_v128_((sz_u8_t const *)text, chunk, regs_u8x16);
 
     // ASCII fast lane: a window with no high bit set widens directly (the bulk-ASCII case is peeled by the caller, so
     // this only fires for a short all-ASCII residue and can store scalar). `wasm_i8x16_bitmask` flags high-bit lanes.
-    v128_t nonascii_bool[4];
+    v128_t nonascii_bool_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter)
-        nonascii_bool[quarter] = wasm_u8x16_lt(wasm_i8x16_splat((sz_i8_t)0x7F), regs[quarter]);
-    sz_u64_t const nonascii = sz_utf8_mask_combine_v128_(nonascii_bool[0], nonascii_bool[1], nonascii_bool[2],
-                                                         nonascii_bool[3]) &
+        nonascii_bool_u8x16[quarter] = wasm_u8x16_lt(wasm_i8x16_splat((sz_i8_t)0x7F), regs_u8x16[quarter]);
+    sz_u64_t const nonascii = sz_utf8_mask_combine_v128_(nonascii_bool_u8x16[0], nonascii_bool_u8x16[1],
+                                                         nonascii_bool_u8x16[2], nonascii_bool_u8x16[3]) &
                               loaded_mask;
     if (nonascii == 0) {
         sz_size_t const want = chunk < runes_capacity ? chunk : runes_capacity;
@@ -500,77 +504,82 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_v128_( //
     // Single-source classification via the high-nibble length LUT (the SAME table the serial reference uses), so a
     // lead and its declared length can never disagree - crucially, a stray lead such as 0xF8 maps to length 4 and is
     // rejected by the bad-lead gate rather than mistaken for a 1-byte start. Per-quarter neighbours feed the range gate.
-    v128_t next1[4], next2[4], next3[4];
-    sz_utf8_forward_neighbours_v128_(regs, next1, next2, next3);
+    v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+    sz_utf8_forward_neighbours_v128_(regs_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
     v128_t const length_lut_u8x16 = wasm_i8x16_make(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4);
     v128_t const iota_u8x16 = wasm_i8x16_make(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
     v128_t const chunk_u8x16 = wasm_i8x16_splat((sz_i8_t)chunk);
 
-    v128_t continuation_bool[4], length_2_bool[4], length_3_bool[4], length_4_bool[4];
-    v128_t overrun_bool[4], bad_lead_bool[4], range_bad_bool[4];
+    v128_t continuation_bool_u8x16[4], length_2_bool_u8x16[4], length_3_bool_u8x16[4], length_4_bool_u8x16[4];
+    v128_t overrun_bool_u8x16[4], bad_lead_bool_u8x16[4], range_bad_bool_u8x16[4];
     for (int quarter = 0; quarter < 4; ++quarter) {
-        v128_t const here_u8x16 = regs[quarter];
-        v128_t const next_u8x16 = next1[quarter];
+        v128_t const here_u8x16 = regs_u8x16[quarter];
+        v128_t const next_u8x16 = next1_u8x16[quarter];
         v128_t const high_nibble_u8x16 = wasm_v128_and(wasm_u8x16_shr(here_u8x16, 4), wasm_i8x16_splat(0x0F));
         v128_t const length_u8x16 = wasm_i8x16_swizzle(length_lut_u8x16, high_nibble_u8x16);
 
-        continuation_bool[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                                   wasm_i8x16_splat((sz_i8_t)0x80));
-        v128_t const is_len2 = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(2));
-        v128_t const is_len4 = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(4));
-        length_2_bool[quarter] = is_len2;
-        length_3_bool[quarter] = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(3));
-        length_4_bool[quarter] = is_len4;
+        continuation_bool_u8x16[quarter] = wasm_i8x16_eq(wasm_v128_and(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                         wasm_i8x16_splat((sz_i8_t)0x80));
+        v128_t const is_len2_u8x16 = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(2));
+        v128_t const is_len4_u8x16 = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(4));
+        length_2_bool_u8x16[quarter] = is_len2_u8x16;
+        length_3_bool_u8x16[quarter] = wasm_i8x16_eq(length_u8x16, wasm_i8x16_splat(3));
+        length_4_bool_u8x16[quarter] = is_len4_u8x16;
 
         // Overrun: global lane offset + declared length past `chunk` (unsigned byte compare).
         v128_t const global_offset_u8x16 = wasm_i8x16_add(iota_u8x16, wasm_i8x16_splat((sz_i8_t)(quarter * 16)));
         v128_t const sequence_end_u8x16 = wasm_i8x16_add(global_offset_u8x16, length_u8x16);
-        overrun_bool[quarter] = wasm_u8x16_gt(sequence_end_u8x16, chunk_u8x16);
+        overrun_bool_u8x16[quarter] = wasm_u8x16_gt(sequence_end_u8x16, chunk_u8x16);
 
         // Bad lead: 0xC0/0xC1 (overlong 2-byte by the LUT) or 0xF5..0xFF (out of range, length-4 by the LUT).
-        v128_t const lead_lt_c2 = wasm_u8x16_lt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2));
-        v128_t const lead_gt_f4 = wasm_u8x16_gt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4));
-        bad_lead_bool[quarter] = wasm_v128_or(wasm_v128_and(is_len2, lead_lt_c2), wasm_v128_and(is_len4, lead_gt_f4));
+        v128_t const lead_lt_c2_u8x16 = wasm_u8x16_lt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2));
+        v128_t const lead_gt_f4_u8x16 = wasm_u8x16_gt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4));
+        bad_lead_bool_u8x16[quarter] = wasm_v128_or(wasm_v128_and(is_len2_u8x16, lead_lt_c2_u8x16),
+                                                    wasm_v128_and(is_len4_u8x16, lead_gt_f4_u8x16));
 
         // First-continuation range violations for E0/ED/F0/F4 (overlong 3/4-byte, surrogate, > U+10FFFF).
-        v128_t const e0_bad = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0)),
-                                            wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
-        v128_t const ed_bad = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xED)),
-                                            wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
-        v128_t const f0_bad = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0)),
-                                            wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
-        v128_t const f4_bad = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4)),
-                                            wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
-        range_bad_bool[quarter] = wasm_v128_or(wasm_v128_or(e0_bad, ed_bad), wasm_v128_or(f0_bad, f4_bad));
+        v128_t const e0_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0)),
+                                                  wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+        v128_t const ed_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xED)),
+                                                  wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+        v128_t const f0_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0)),
+                                                  wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
+        v128_t const f4_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4)),
+                                                  wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
+        range_bad_bool_u8x16[quarter] = wasm_v128_or(wasm_v128_or(e0_bad_u8x16, ed_bad_u8x16),
+                                                     wasm_v128_or(f0_bad_u8x16, f4_bad_u8x16));
     }
 
-    sz_u64_t const continuation_bits = sz_utf8_mask_combine_v128_(continuation_bool[0], continuation_bool[1],
-                                                                  continuation_bool[2], continuation_bool[3]) &
+    sz_u64_t const continuation_bits = sz_utf8_mask_combine_v128_(
+                                           continuation_bool_u8x16[0], continuation_bool_u8x16[1],
+                                           continuation_bool_u8x16[2], continuation_bool_u8x16[3]) &
                                        loaded_mask;
     sz_u64_t const starts_bits = loaded_mask & ~continuation_bits;
-    sz_u64_t const len2_bits = sz_utf8_mask_combine_v128_(length_2_bool[0], length_2_bool[1], length_2_bool[2],
-                                                          length_2_bool[3]);
-    sz_u64_t const len3_bits = sz_utf8_mask_combine_v128_(length_3_bool[0], length_3_bool[1], length_3_bool[2],
-                                                          length_3_bool[3]);
-    sz_u64_t const len4_bits = sz_utf8_mask_combine_v128_(length_4_bool[0], length_4_bool[1], length_4_bool[2],
-                                                          length_4_bool[3]);
+    sz_u64_t const len2_bits = sz_utf8_mask_combine_v128_(length_2_bool_u8x16[0], length_2_bool_u8x16[1],
+                                                          length_2_bool_u8x16[2], length_2_bool_u8x16[3]);
+    sz_u64_t const len3_bits = sz_utf8_mask_combine_v128_(length_3_bool_u8x16[0], length_3_bool_u8x16[1],
+                                                          length_3_bool_u8x16[2], length_3_bool_u8x16[3]);
+    sz_u64_t const len4_bits = sz_utf8_mask_combine_v128_(length_4_bool_u8x16[0], length_4_bool_u8x16[1],
+                                                          length_4_bool_u8x16[2], length_4_bool_u8x16[3]);
     sz_u64_t const length_ge_two_starts = (len2_bits | len3_bits | len4_bits) & starts_bits;
     sz_u64_t const length_ge_three_starts = (len3_bits | len4_bits) & starts_bits;
     sz_u64_t const length_ge_four_starts = len4_bits & starts_bits;
 
     // Branchless overrun defer: the FIRST overrunning start bounds the decodable prefix (well-formed text overruns only
     // at the trailing truncation; a malformed `E0 C0` overruns earlier). First-set via `63 - clz(mask & -mask)`.
-    sz_u64_t const overruns =
-        sz_utf8_mask_combine_v128_(overrun_bool[0], overrun_bool[1], overrun_bool[2], overrun_bool[3]) & starts_bits;
+    sz_u64_t const overruns = sz_utf8_mask_combine_v128_(overrun_bool_u8x16[0], overrun_bool_u8x16[1],
+                                                         overrun_bool_u8x16[2], overrun_bool_u8x16[3]) &
+                              starts_bits;
     sz_size_t const decodable_end = overruns ? (sz_size_t)(63 - sz_u64_clz(overruns & (~overruns + 1ull))) : chunk;
     sz_u64_t const decodable_mask = sz_u64_mask_until_serial_(decodable_end);
 
-    sz_u64_t const bad_lead_bits = sz_utf8_mask_combine_v128_(bad_lead_bool[0], bad_lead_bool[1], bad_lead_bool[2],
-                                                              bad_lead_bool[3]) &
+    sz_u64_t const bad_lead_bits = sz_utf8_mask_combine_v128_(bad_lead_bool_u8x16[0], bad_lead_bool_u8x16[1],
+                                                              bad_lead_bool_u8x16[2], bad_lead_bool_u8x16[3]) &
                                    starts_bits;
-    sz_u64_t const overlong_or_surrogate_or_range_bits =
-        sz_utf8_mask_combine_v128_(range_bad_bool[0], range_bad_bool[1], range_bad_bool[2], range_bad_bool[3]) &
-        starts_bits;
+    sz_u64_t const overlong_or_surrogate_or_range_bits = sz_utf8_mask_combine_v128_(
+                                                             range_bad_bool_u8x16[0], range_bad_bool_u8x16[1],
+                                                             range_bad_bool_u8x16[2], range_bad_bool_u8x16[3]) &
+                                                         starts_bits;
 
     int const has_three = length_ge_three_starts != 0;
     int const has_four = length_ge_four_starts != 0;
@@ -614,7 +623,7 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_v128_( //
     }
 
     sz_size_t consumed = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_v128_(regs, emit_starts, ill_formed, consumed_length_vec.u8s,
+    sz_size_t const produced = sz_utf8_rune_drain_v128_(regs_u8x16, emit_starts, ill_formed, consumed_length_vec.u8s,
                                                         has_three, has_four, runes_capacity, runes, &consumed);
     *runes_unpacked = produced;
     return text + consumed;
@@ -634,12 +643,12 @@ SZ_API_COMPTIME sz_cptr_t sz_utf8_decode_v128(  //
 
     // Vectorized pure-ASCII prefix: 16 single-byte runes per window.
     while (length - (sz_size_t)(text_cursor - (sz_u8_t const *)text) >= 16 && runes_written + 16 <= runes_capacity) {
-        v128_t bytes = wasm_v128_load(text_cursor);
+        v128_t bytes_u8x16 = wasm_v128_load(text_cursor);
         // Any byte >= 0x80 has its sign bit set; if present, hand the window to the general decoder.
-        if (wasm_i8x16_bitmask(bytes) != 0) break;
+        if (wasm_i8x16_bitmask(bytes_u8x16) != 0) break;
         // Widen 16x u8 → 16x u32 and store as runes (zero-extension == the ASCII code point value).
-        v128_t low_u16x8 = wasm_u16x8_extend_low_u8x16(bytes);
-        v128_t high_u16x8 = wasm_u16x8_extend_high_u8x16(bytes);
+        v128_t low_u16x8 = wasm_u16x8_extend_low_u8x16(bytes_u8x16);
+        v128_t high_u16x8 = wasm_u16x8_extend_high_u8x16(bytes_u8x16);
         wasm_v128_store(runes + runes_written + 0, wasm_u32x4_extend_low_u16x8(low_u16x8));
         wasm_v128_store(runes + runes_written + 4, wasm_u32x4_extend_high_u16x8(low_u16x8));
         wasm_v128_store(runes + runes_written + 8, wasm_u32x4_extend_low_u16x8(high_u16x8));

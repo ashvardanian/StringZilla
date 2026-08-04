@@ -47,41 +47,42 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_powervsx_(sz_cptr_t text, sz_
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
     sz_u8_t previous_canonical_combining_class = 0;
 
-    __vector unsigned char const table_low_0_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 0);   // entries [0,15]
-    __vector unsigned char const table_low_1_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 16);  // entries [16,31]
-    __vector unsigned char const table_high_0_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 32); // entries [32,47]
-    __vector unsigned char const table_high_1_vec = vec_xl(0, sz_utf8_norm_lead_lut_ + 48); // entries [48,63]
-    __vector unsigned char const high_bit_vec = vec_splats((unsigned char)0x80);
-    __vector unsigned char const continuation_mask_vec = vec_splats((unsigned char)0xC0);
-    __vector unsigned char const continuation_pattern_vec = vec_splats((unsigned char)0x80);
-    __vector unsigned char const low_six_bits_vec = vec_splats((unsigned char)0x3F);
-    __vector unsigned char const quadrant_select_vec = vec_splats((unsigned char)32);
-    __vector unsigned char const form_flag_vec = vec_splats((unsigned char)form_flag);
-    __vector unsigned char const zero_vec = vec_splats((unsigned char)0);
+    __vector unsigned char const table_low_0_u8x16 = vec_xl(0, sz_utf8_norm_lead_lut_ + 0);   // entries [0,15]
+    __vector unsigned char const table_low_1_u8x16 = vec_xl(0, sz_utf8_norm_lead_lut_ + 16);  // entries [16,31]
+    __vector unsigned char const table_high_0_u8x16 = vec_xl(0, sz_utf8_norm_lead_lut_ + 32); // entries [32,47]
+    __vector unsigned char const table_high_1_u8x16 = vec_xl(0, sz_utf8_norm_lead_lut_ + 48); // entries [48,63]
+    __vector unsigned char const high_bit_u8x16 = vec_splats((unsigned char)0x80);
+    __vector unsigned char const continuation_mask_u8x16 = vec_splats((unsigned char)0xC0);
+    __vector unsigned char const continuation_pattern_u8x16 = vec_splats((unsigned char)0x80);
+    __vector unsigned char const low_six_bits_u8x16 = vec_splats((unsigned char)0x3F);
+    __vector unsigned char const quadrant_select_u8x16 = vec_splats((unsigned char)32);
+    __vector unsigned char const form_flag_u8x16 = vec_splats((unsigned char)form_flag);
+    __vector unsigned char const zero_u8x16 = vec_splats((unsigned char)0);
 
     while (position + 16 <= end) {
-        __vector unsigned char bytes_vec = vec_xl(0, position);
+        __vector unsigned char bytes_u8x16 = vec_xl(0, position);
         // All-ASCII gate: one horizontal reduction per 16B for the (overwhelmingly common) inert case.
-        if (!vec_any_ge(bytes_vec, high_bit_vec)) {
+        if (!vec_any_ge(bytes_u8x16, high_bit_u8x16)) {
             position += 16, previous_canonical_combining_class = 0;
             continue;
         }
         // Lead bytes only (non-ASCII and not a 10xxxxxx continuation), classified via the 64-entry LUT.
-        __vector unsigned char non_ascii_vec = (__vector unsigned char)vec_cmpge(bytes_vec, high_bit_vec);
-        __vector unsigned char continuation_vec = (__vector unsigned char)vec_cmpeq(
-            vec_and(bytes_vec, continuation_mask_vec), continuation_pattern_vec);
-        __vector unsigned char is_lead_vec = vec_andc(non_ascii_vec, continuation_vec);
+        __vector unsigned char non_ascii_u8x16 = (__vector unsigned char)vec_cmpge(bytes_u8x16, high_bit_u8x16);
+        __vector unsigned char continuation_u8x16 = (__vector unsigned char)vec_cmpeq(
+            vec_and(bytes_u8x16, continuation_mask_u8x16), continuation_pattern_u8x16);
+        __vector unsigned char is_lead_u8x16 = vec_andc(non_ascii_u8x16, continuation_u8x16);
         // 64-entry lookup: `vec_perm` selects from the 32-byte concatenation of its two table operands by the
         // low 5 bits of each index, so cover [0,31] and [32,63] with two `vec_perm` over adjacent 16-entry
         // quarters and merge on the index's bit 5 (>= 32) via `vec_sel`.
-        __vector unsigned char index_vec = vec_and(bytes_vec, low_six_bits_vec);
-        __vector unsigned char families_low_vec = vec_perm(table_low_0_vec, table_low_1_vec, index_vec);
-        __vector unsigned char families_high_vec = vec_perm(table_high_0_vec, table_high_1_vec, index_vec);
-        __vector unsigned char select_high_vec = (__vector unsigned char)vec_cmpge(index_vec, quadrant_select_vec);
-        __vector unsigned char families_vec = vec_sel(families_low_vec, families_high_vec, select_high_vec);
-        __vector unsigned char flagged_vec = vec_and(
-            is_lead_vec, (__vector unsigned char)vec_cmpgt(vec_and(families_vec, form_flag_vec), zero_vec));
-        if (!vec_any_ne(flagged_vec, zero_vec)) { // 16 bytes inert for the form
+        __vector unsigned char index_u8x16 = vec_and(bytes_u8x16, low_six_bits_u8x16);
+        __vector unsigned char families_low_u8x16 = vec_perm(table_low_0_u8x16, table_low_1_u8x16, index_u8x16);
+        __vector unsigned char families_high_u8x16 = vec_perm(table_high_0_u8x16, table_high_1_u8x16, index_u8x16);
+        __vector unsigned char select_high_u8x16 = (__vector unsigned char)vec_cmpge(index_u8x16,
+                                                                                     quadrant_select_u8x16);
+        __vector unsigned char families_u8x16 = vec_sel(families_low_u8x16, families_high_u8x16, select_high_u8x16);
+        __vector unsigned char flagged_u8x16 = vec_and(
+            is_lead_u8x16, (__vector unsigned char)vec_cmpgt(vec_and(families_u8x16, form_flag_u8x16), zero_u8x16));
+        if (!vec_any_ne(flagged_u8x16, zero_u8x16)) { // 16 bytes inert for the form
             position += 16, previous_canonical_combining_class = 0;
             // Realign onto a codepoint boundary: a 16-byte step can land mid-sequence, and the straddling
             // codepoint's lead was already classified inert in the chunk we are leaving.

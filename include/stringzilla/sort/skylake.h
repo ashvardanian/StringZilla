@@ -69,7 +69,7 @@ SZ_HELPER_AUTO void sz_sequence_argsort_skylake_3way_partition_(                
     // we know exactly, how many elements are smaller or greater than the pivot.
     sz_size_t count_smaller = 0, count_greater = 0;
     sz_size_t const tail_count = count & 7u;
-    __mmask8 const tail_mask = sz_u8_mask_until_(tail_count);
+    __mmask8 const tail_mask_m8 = sz_u8_mask_until_(tail_count);
 
     sz_u512_vec_t pgrams_vec, order_vec;
     for (sz_size_t block_index = start_in_sequence; block_index + pgrams_per_register <= end_in_sequence;
@@ -79,9 +79,9 @@ SZ_HELPER_AUTO void sz_sequence_argsort_skylake_3way_partition_(                
         count_greater += _mm_popcnt_u32(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
     }
     if (tail_count) {
-        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_mask, initial_pgrams + end_in_sequence - tail_count);
-        count_smaller += _mm_popcnt_u32(_mm512_mask_cmplt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
-        count_greater += _mm_popcnt_u32(_mm512_mask_cmpgt_epu64_mask(tail_mask, pgrams_vec.zmm, pivot_vec.zmm));
+        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_mask_m8, initial_pgrams + end_in_sequence - tail_count);
+        count_smaller += _mm_popcnt_u32(_mm512_mask_cmplt_epu64_mask(tail_mask_m8, pgrams_vec.zmm, pivot_vec.zmm));
+        count_greater += _mm_popcnt_u32(_mm512_mask_cmpgt_epu64_mask(tail_mask_m8, pgrams_vec.zmm, pivot_vec.zmm));
     }
 
     // Now all we need to do is to loop through the collection and export them into the temporary buffer
@@ -95,28 +95,28 @@ SZ_HELPER_AUTO void sz_sequence_argsort_skylake_3way_partition_(                
 
     // The naive algorithm - unzip the elements into 3 separate buffers.
     for (sz_size_t block_index = start_in_sequence; block_index < end_in_sequence; block_index += pgrams_per_register) {
-        __mmask8 const load_mask = block_index + pgrams_per_register <= end_in_sequence ? 0xFF : tail_mask;
-        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_pgrams + block_index);
-        order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask, initial_order + block_index);
+        __mmask8 const load_mask_m8 = block_index + pgrams_per_register <= end_in_sequence ? 0xFF : tail_mask_m8;
+        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(load_mask_m8, initial_pgrams + block_index);
+        order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask_m8, initial_order + block_index);
 
-        __mmask8 const smaller_mask = _mm512_mask_cmplt_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
-        __mmask8 const greater_mask = _mm512_mask_cmpgt_epu64_mask(load_mask, pgrams_vec.zmm, pivot_vec.zmm);
+        __mmask8 const smaller_mask_m8 = _mm512_mask_cmplt_epu64_mask(load_mask_m8, pgrams_vec.zmm, pivot_vec.zmm);
+        __mmask8 const greater_mask_m8 = _mm512_mask_cmpgt_epu64_mask(load_mask_m8, pgrams_vec.zmm, pivot_vec.zmm);
         // The equal lanes are the active lanes that are neither smaller nor greater, so a NOR within the
         // load mask derives them without a third masked compare.
-        __mmask8 const equal_mask = (__mmask8)(load_mask & ~(smaller_mask | greater_mask));
+        __mmask8 const equal_mask_m8 = (__mmask8)(load_mask_m8 & ~(smaller_mask_m8 | greater_mask_m8));
 
         // Compress the elements into the temporary buffer.
-        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + smaller_offset, smaller_mask, pgrams_vec.zmm);
-        _mm512_mask_compressstoreu_epi64(partitioned_order + smaller_offset, smaller_mask, order_vec.zmm);
-        smaller_offset += _mm_popcnt_u32(smaller_mask);
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + smaller_offset, smaller_mask_m8, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + smaller_offset, smaller_mask_m8, order_vec.zmm);
+        smaller_offset += _mm_popcnt_u32(smaller_mask_m8);
 
-        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + equal_offset, equal_mask, pgrams_vec.zmm);
-        _mm512_mask_compressstoreu_epi64(partitioned_order + equal_offset, equal_mask, order_vec.zmm);
-        equal_offset += _mm_popcnt_u32(equal_mask);
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + equal_offset, equal_mask_m8, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + equal_offset, equal_mask_m8, order_vec.zmm);
+        equal_offset += _mm_popcnt_u32(equal_mask_m8);
 
-        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + greater_offset, greater_mask, pgrams_vec.zmm);
-        _mm512_mask_compressstoreu_epi64(partitioned_order + greater_offset, greater_mask, order_vec.zmm);
-        greater_offset += _mm_popcnt_u32(greater_mask);
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + greater_offset, greater_mask_m8, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + greater_offset, greater_mask_m8, order_vec.zmm);
+        greater_offset += _mm_popcnt_u32(greater_mask_m8);
     }
 
     // Copy back.

@@ -29,8 +29,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
     // Count bytes that are NOT continuation bytes: (byte & 0xC0) != 0x80
     for (sz_size_t offset = 0; offset < length; offset += step) {
         svbool_t pg_b8x = svwhilelt_b8((sz_u64_t)offset, (sz_u64_t)length);
-        svuint8_t text_vec_u8x = svld1_u8(pg_b8x, text_u8 + offset);
-        svbool_t is_start_b8x = svcmpne_n_u8(pg_b8x, svand_n_u8_x(pg_b8x, text_vec_u8x, 0xC0), 0x80);
+        svuint8_t bytes_u8x = svld1_u8(pg_b8x, text_u8 + offset);
+        svbool_t is_start_b8x = svcmpne_n_u8(pg_b8x, svand_n_u8_x(pg_b8x, bytes_u8x, 0xC0), 0x80);
         char_count += svcntp_b8(pg_b8x, is_start_b8x);
     }
     return char_count;
@@ -92,23 +92,23 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_b8x) {
 /** @brief  Raise a `sz_u64_t` lane mask back to a byte predicate: each lane picks its mask byte with `svtbl` over
  *          the broadcast word and tests its bit. The inverse of @ref sz_utf8_rune_pred_to_u64_sve2_; for a chunked
  *          window pass the mask pre-shifted so bit 0 is the chunk's first lane. */
-SZ_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_t lane_iota) {
+SZ_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_t lane_iota_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const mask_bytes_u8x = svtbl_u8(svreinterpret_u8_u64(svdup_n_u64(mask)),
-                                              svlsr_n_u8_x(all_b8x, lane_iota, 3));
-    svuint8_t const bit_select_u8x = svlsl_u8_x(all_b8x, svdup_n_u8(1), svand_n_u8_x(all_b8x, lane_iota, 7));
+                                              svlsr_n_u8_x(all_b8x, lane_iota_u8x, 3));
+    svuint8_t const bit_select_u8x = svlsl_u8_x(all_b8x, svdup_n_u8(1), svand_n_u8_x(all_b8x, lane_iota_u8x, 7));
     return svcmpne_n_u8(all_b8x, svand_u8_x(all_b8x, mask_bytes_u8x, bit_select_u8x), 0);
 }
 
 /** @brief  Left-shift a per-byte-lane value vector by @p amount lanes (toward higher indices) across a chunk
- *          boundary: low lanes fill from the top of @p carry (the previous chunk), the SVE2 value-domain twin of
+ *          boundary: low lanes fill from the top of @p carry_u8x (the previous chunk), the SVE2 value-domain twin of
  *          the icelake `mask << amount` with a cross-window carry. Out-of-range `svtbl` indices resolve to 0, so
  *          each lane reads exactly one of the two sources. */
-SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry, svuint8_t value, sz_u8_t amount,
-                                                             svuint8_t lane_iota, sz_u8_t chunk_lanes) {
+SZ_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry_u8x, svuint8_t value_u8x, sz_u8_t amount,
+                                                             svuint8_t lane_iota_u8x, sz_u8_t chunk_lanes) {
     svbool_t const all_b8x = svptrue_b8();
-    return svorr_u8_x(all_b8x, svtbl_u8(value, svsub_n_u8_x(all_b8x, lane_iota, amount)),
-                      svtbl_u8(carry, svadd_n_u8_x(all_b8x, lane_iota, (sz_u8_t)(chunk_lanes - amount))));
+    return svorr_u8_x(all_b8x, svtbl_u8(value_u8x, svsub_n_u8_x(all_b8x, lane_iota_u8x, amount)),
+                      svtbl_u8(carry_u8x, svadd_n_u8_x(all_b8x, lane_iota_u8x, (sz_u8_t)(chunk_lanes - amount))));
 }
 
 /**

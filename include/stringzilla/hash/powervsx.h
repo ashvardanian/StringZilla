@@ -25,7 +25,7 @@ extern "C" {
 
 SZ_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
-    __vector unsigned char const ones_vec = vec_splats((unsigned char)1);
+    __vector unsigned char const ones_u8x16 = vec_splats((unsigned char)1);
 
     // `vec_msum(v, ones, acc)` is the in-lane accumulator: each step adds at most 4*255 = 1020 to any
     // 32-bit lane. A lane can therefore absorb `UINT_MAX / 1020 ≈ 4.21M` iterations before it could
@@ -37,13 +37,13 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
     while (length >= 16) {
         sz_size_t windows = length / 16;
         if (windows > block_windows) windows = block_windows;
-        __vector unsigned int accumulator_vec = vec_splats((unsigned int)0);
+        __vector unsigned int accumulator_u32x4 = vec_splats((unsigned int)0);
         for (sz_size_t window_index = 0; window_index < windows; ++window_index, text += 16) {
-            __vector unsigned char bytes_vec = vec_xl(0, (unsigned char const *)text);
-            accumulator_vec = vec_msum(bytes_vec, ones_vec,
-                                       accumulator_vec); // Lane-wise sum of each group of 4 unsigned bytes.
+            __vector unsigned char bytes_u8x16 = vec_xl(0, (unsigned char const *)text);
+            accumulator_u32x4 = vec_msum(bytes_u8x16, ones_u8x16,
+                                         accumulator_u32x4); // Lane-wise sum of each group of 4 unsigned bytes.
         }
-        sum += (sz_u64_t)accumulator_vec[0] + accumulator_vec[1] + accumulator_vec[2] + accumulator_vec[3];
+        sum += (sz_u64_t)accumulator_u32x4[0] + accumulator_u32x4[1] + accumulator_u32x4[2] + accumulator_u32x4[3];
         length -= windows * 16;
     }
 
@@ -81,8 +81,8 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
 
 /** @brief Byte-reverse permutation selector for a 16-byte VSX register. */
 SZ_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void) {
-    __vector unsigned char const mask = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
-    return mask;
+    __vector unsigned char const mask_u8x16 = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
+    return mask_u8x16;
 }
 
 /**
@@ -90,10 +90,10 @@ SZ_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void)
  *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to the serial reference.
  */
 SZ_HELPER_AUTO sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
-    __vector unsigned char const rev = sz_aes_byte_reverse_mask_powervsx_();
-    __vector unsigned char state_u8 = state_vec.vsx_u8;
-    __vector unsigned char reversed = vec_perm(state_u8, state_u8, rev);
-    __vector unsigned char zero = vec_splats((unsigned char)0);
+    __vector unsigned char const rev_u8x16 = sz_aes_byte_reverse_mask_powervsx_();
+    __vector unsigned char state_u8x16 = state_vec.vsx_u8;
+    __vector unsigned char reversed_u8x16 = vec_perm(state_u8x16, state_u8x16, rev_u8x16);
+    __vector unsigned char zero_u8x16 = vec_splats((unsigned char)0);
     // `__builtin_crypto_vcipher` is not in the AltiVec ABI, so the compilers typed it differently: Clang over
     // `vector unsigned char`, GCC over `vector unsigned long long`. The blessed `vec_cipher_be` is NOT a substitute -
     // its byte-order contract differs from the x86 `aesenc` emulation this reversal implements.
@@ -102,42 +102,43 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u12
 #else
     typedef __vector unsigned long long sz_vcipher_operand_t;
 #endif
-    __vector unsigned char ciphered = (__vector unsigned char)__builtin_crypto_vcipher((sz_vcipher_operand_t)reversed,
-                                                                                       (sz_vcipher_operand_t)zero);
-    __vector unsigned char restored = vec_perm(ciphered, ciphered, rev);
-    sz_u128_vec_t result;
-    result.vsx_u8 = restored;
-    result.u64s[0] ^= round_key_vec.u64s[0];
-    result.u64s[1] ^= round_key_vec.u64s[1];
-    return result;
+    __vector unsigned char ciphered_u8x16 = (__vector unsigned char)__builtin_crypto_vcipher(
+        (sz_vcipher_operand_t)reversed_u8x16, (sz_vcipher_operand_t)zero_u8x16);
+    __vector unsigned char restored_u8x16 = vec_perm(ciphered_u8x16, ciphered_u8x16, rev_u8x16);
+    sz_u128_vec_t result_vec;
+    result_vec.vsx_u8 = restored_u8x16;
+    result_vec.u64s[0] ^= round_key_vec.u64s[0];
+    result_vec.u64s[1] ^= round_key_vec.u64s[1];
+    return result_vec;
 }
 
 /** @brief Bit-exact VSX equivalent of `sz_emulate_shuffle_epi8_serial_` via `vec_perm`. */
 SZ_HELPER_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t state_vec,
                                                          sz_u8_t const order[sz_at_least_(16)]) {
-    __vector unsigned char order_u8 = vec_xl(0, (unsigned char const *)order);
-    sz_u128_vec_t result;
-    result.vsx_u8 = vec_perm(state_vec.vsx_u8, state_vec.vsx_u8, order_u8);
-    return result;
+    __vector unsigned char order_u8x16 = vec_xl(0, (unsigned char const *)order);
+    sz_u128_vec_t result_vec;
+    result_vec.vsx_u8 = vec_perm(state_vec.vsx_u8, state_vec.vsx_u8, order_u8x16);
+    return result_vec;
 }
 
 #pragma region Minimal state for short inputs
 
 SZ_HELPER_AUTO void sz_hash_state_short_update_powervsx_(sz_hash_state_aligned_for_short_t *state,
-                                                         sz_u128_vec_t block) {
+                                                         sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
-    state->aes = sz_aesenc_powervsx_(state->aes, block);
+    state->aes = sz_aesenc_powervsx_(state->aes, block_vec);
     state->sum = sz_shuffle_epi8_powervsx_(state->sum, shuffle);
-    state->sum.u64s[0] += block.u64s[0], state->sum.u64s[1] += block.u64s[1];
+    state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_powervsx_(sz_hash_state_aligned_for_short_t const *state,
                                                                sz_size_t length) {
-    sz_u128_vec_t key_with_length = state->key;
-    key_with_length.u64s[0] += length;
-    sz_u128_vec_t mixed = sz_aesenc_powervsx_(state->sum, state->aes);
-    sz_u128_vec_t mixed_in_register = sz_aesenc_powervsx_(sz_aesenc_powervsx_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t key_with_length_vec = state->key;
+    key_with_length_vec.u64s[0] += length;
+    sz_u128_vec_t mixed_vec = sz_aesenc_powervsx_(state->sum, state->aes);
+    sz_u128_vec_t mixed_in_register_vec = sz_aesenc_powervsx_(sz_aesenc_powervsx_(mixed_vec, key_with_length_vec),
+                                                              mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
 #pragma endregion
@@ -200,37 +201,38 @@ SZ_HELPER_AUTO void sz_hash_state_update_powervsx_(sz_hash_state_aligned_t *stat
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
-    sz_u128_vec_t key_with_length;
-    key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
-    key_with_length.u64s[1] = state.key.u64s[1];
+    sz_u128_vec_t key_with_length_vec;
+    key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
+    key_with_length_vec.u64s[1] = state.key.u64s[1];
 
     // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
     // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
     // digest defer it and share this single finalization.
-    sz_u128_vec_t aes0 = sz_aesenc_powervsx_(state.aes.u128s[0], state.ins.u128s[0]);
-    sz_u128_vec_t aes1 = sz_aesenc_powervsx_(state.aes.u128s[1], state.ins.u128s[1]);
-    sz_u128_vec_t aes2 = sz_aesenc_powervsx_(state.aes.u128s[2], state.ins.u128s[2]);
-    sz_u128_vec_t aes3 = sz_aesenc_powervsx_(state.aes.u128s[3], state.ins.u128s[3]);
-    sz_u128_vec_t sum0 = sz_shuffle_epi8_powervsx_(state.sum.u128s[0], shuffle);
-    sz_u128_vec_t sum1 = sz_shuffle_epi8_powervsx_(state.sum.u128s[1], shuffle);
-    sz_u128_vec_t sum2 = sz_shuffle_epi8_powervsx_(state.sum.u128s[2], shuffle);
-    sz_u128_vec_t sum3 = sz_shuffle_epi8_powervsx_(state.sum.u128s[3], shuffle);
-    sum0.u64s[0] += state.ins.u128s[0].u64s[0], sum0.u64s[1] += state.ins.u128s[0].u64s[1];
-    sum1.u64s[0] += state.ins.u128s[1].u64s[0], sum1.u64s[1] += state.ins.u128s[1].u64s[1];
-    sum2.u64s[0] += state.ins.u128s[2].u64s[0], sum2.u64s[1] += state.ins.u128s[2].u64s[1];
-    sum3.u64s[0] += state.ins.u128s[3].u64s[0], sum3.u64s[1] += state.ins.u128s[3].u64s[1];
+    sz_u128_vec_t aes0_vec = sz_aesenc_powervsx_(state.aes.u128s[0], state.ins.u128s[0]);
+    sz_u128_vec_t aes1_vec = sz_aesenc_powervsx_(state.aes.u128s[1], state.ins.u128s[1]);
+    sz_u128_vec_t aes2_vec = sz_aesenc_powervsx_(state.aes.u128s[2], state.ins.u128s[2]);
+    sz_u128_vec_t aes3_vec = sz_aesenc_powervsx_(state.aes.u128s[3], state.ins.u128s[3]);
+    sz_u128_vec_t sum0_vec = sz_shuffle_epi8_powervsx_(state.sum.u128s[0], shuffle);
+    sz_u128_vec_t sum1_vec = sz_shuffle_epi8_powervsx_(state.sum.u128s[1], shuffle);
+    sz_u128_vec_t sum2_vec = sz_shuffle_epi8_powervsx_(state.sum.u128s[2], shuffle);
+    sz_u128_vec_t sum3_vec = sz_shuffle_epi8_powervsx_(state.sum.u128s[3], shuffle);
+    sum0_vec.u64s[0] += state.ins.u128s[0].u64s[0], sum0_vec.u64s[1] += state.ins.u128s[0].u64s[1];
+    sum1_vec.u64s[0] += state.ins.u128s[1].u64s[0], sum1_vec.u64s[1] += state.ins.u128s[1].u64s[1];
+    sum2_vec.u64s[0] += state.ins.u128s[2].u64s[0], sum2_vec.u64s[1] += state.ins.u128s[2].u64s[1];
+    sum3_vec.u64s[0] += state.ins.u128s[3].u64s[0], sum3_vec.u64s[1] += state.ins.u128s[3].u64s[1];
 
-    sz_u128_vec_t mixed0 = sz_aesenc_powervsx_(sum0, aes0);
-    sz_u128_vec_t mixed1 = sz_aesenc_powervsx_(sum1, aes1);
-    sz_u128_vec_t mixed2 = sz_aesenc_powervsx_(sum2, aes2);
-    sz_u128_vec_t mixed3 = sz_aesenc_powervsx_(sum3, aes3);
+    sz_u128_vec_t mixed0_vec = sz_aesenc_powervsx_(sum0_vec, aes0_vec);
+    sz_u128_vec_t mixed1_vec = sz_aesenc_powervsx_(sum1_vec, aes1_vec);
+    sz_u128_vec_t mixed2_vec = sz_aesenc_powervsx_(sum2_vec, aes2_vec);
+    sz_u128_vec_t mixed3_vec = sz_aesenc_powervsx_(sum3_vec, aes3_vec);
 
-    sz_u128_vec_t mixed01 = sz_aesenc_powervsx_(mixed0, mixed1);
-    sz_u128_vec_t mixed23 = sz_aesenc_powervsx_(mixed2, mixed3);
-    sz_u128_vec_t mixed = sz_aesenc_powervsx_(mixed01, mixed23);
+    sz_u128_vec_t mixed01_vec = sz_aesenc_powervsx_(mixed0_vec, mixed1_vec);
+    sz_u128_vec_t mixed23_vec = sz_aesenc_powervsx_(mixed2_vec, mixed3_vec);
+    sz_u128_vec_t mixed_vec = sz_aesenc_powervsx_(mixed01_vec, mixed23_vec);
 
-    sz_u128_vec_t mixed_in_register = sz_aesenc_powervsx_(sz_aesenc_powervsx_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t mixed_in_register_vec = sz_aesenc_powervsx_(sz_aesenc_powervsx_(mixed_vec, key_with_length_vec),
+                                                              mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
 #pragma endregion

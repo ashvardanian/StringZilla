@@ -41,12 +41,14 @@ extern "C" {
  *  shuffle port to the decode. Gathers pay off on multi-KB tables in general - see less_slow.cpp v0.3.0 "Gather and
  *  Scatter": https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0 */
 
-/** @brief Flat-palette index for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the `bmp_page_lut_` page
- *         LUT selects one of the 67 distinct 256-byte pages, then `flat_bmp_[page * 256 + low]` is fetched by four
- *         `vpgatherdd`. The leaf byte indexes `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette.
+/** @brief Flat-palette index for thirty-two BMP codepoints (per-lane `high_u8x32` = cp>>8, `low_u8x32` = cp&0xFF):
+ *         the `bmp_page_lut_` page LUT selects one of the 67 distinct 256-byte pages, then
+ *         `flat_bmp_[page * 256 + low]` is fetched by four `vpgatherdd`. The leaf byte indexes
+ *         `sz_utf8_line_break_flat_palette_`, NOT the 62-entry cascade palette.
  *         Bit-exact with `sz_rune_line_break_property` over the whole BMP. */
-SZ_HELPER_AUTO __m256i sz_line_break_bmp_index_haswell_(__m256i high, __m256i low) {
-    return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_, high, low);
+SZ_HELPER_AUTO __m256i sz_line_break_bmp_index_haswell_(__m256i high_u8x32, __m256i low_u8x32) {
+    return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_, high_u8x32,
+                                             low_u8x32);
 }
 
 /** @brief All-ones lane mask where the single bit @p bit is set in @p bytes (@p bit must have exactly one bit set). */
@@ -142,86 +144,100 @@ SZ_HELPER_AUTO void sz_line_break_flat_palette_unpack_haswell_(__m256i palette_i
 }
 
 /** @brief Palette index for thirty-two ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble cascade),
- *         the AVX2 twin of `sz_line_break_classify_astral16_icelake_`. Per-lane bytes: @p plane = (offset>>16)&0xFF
- *         (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF. Bit-exact. */
-SZ_HELPER_AUTO __m256i sz_line_break_classify_astral_haswell_(__m256i plane, __m256i high, __m256i low) {
-    __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
-    __m256i const n4 = _mm256_and_si256(plane, low_nibble_mask);
-    __m256i const n3 = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
-    __m256i const stage1_index = _mm256_or_si256(_mm256_slli_epi16(n4, 4), n3);
-    __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_haswell_astral_stage1_, stage1_index);
-    __m256i const n2 = _mm256_and_si256(high, low_nibble_mask);
-    __m256i const leaf2_lo = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_line_break_haswell_astral_stage2_lo_, sz_utf8_line_break_haswell_astral_stage2_lo_count_k / 16, page,
-        n2);
-    __m256i const n1 = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(
+ *         the AVX2 twin of `sz_line_break_classify_astral16_icelake_`. Per-lane bytes: @p plane_u8x32 =
+ *         (offset>>16)&0xFF (low nibble meaningful), @p high_u8x32 = (offset>>8)&0xFF, @p low_u8x32 = offset&0xFF.
+ *         Bit-exact. */
+SZ_HELPER_AUTO __m256i sz_line_break_classify_astral_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                              __m256i low_u8x32) {
+    __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
+    __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
+    __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
+    __m256i const stage1_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(n4_u8x32, 4), n3_u8x32);
+    __m256i const page_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_haswell_astral_stage1_,
+                                                            stage1_index_u8x32);
+    __m256i const n2_u8x32 = _mm256_and_si256(high_u8x32, low_nibble_mask_u8x32);
+    __m256i const leaf2_lo_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
+        sz_utf8_line_break_haswell_astral_stage2_lo_, sz_utf8_line_break_haswell_astral_stage2_lo_count_k / 16,
+        page_u8x32, n2_u8x32);
+    __m256i const n1_u8x32 = _mm256_and_si256(_mm256_srli_epi16(low_u8x32, 4), low_nibble_mask_u8x32);
+    __m256i const leaf_lo_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
         sz_utf8_line_break_haswell_astral_stage3_lo_, sz_utf8_line_break_haswell_astral_stage3_lo_count_k / 16,
-        leaf2_lo, n1);
-    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(
+        leaf2_lo_u8x32, n1_u8x32);
+    __m256i const leaf_hi_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
         sz_utf8_line_break_haswell_astral_stage3_hi_, sz_utf8_line_break_haswell_astral_stage3_hi_count_k / 16,
-        leaf2_lo, n1);
-    __m256i const n0 = _mm256_and_si256(low, low_nibble_mask);
-    __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
-                                               _mm256_slli_epi16(leaf_hi, 4));
-    __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
-    __m256i const stage4_lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), n0);
-    __m256i result = _mm256_setzero_si256();
+        leaf2_lo_u8x32, n1_u8x32);
+    __m256i const n0_u8x32 = _mm256_and_si256(low_u8x32, low_nibble_mask_u8x32);
+    __m256i const leaf_group_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi16(leaf_lo_u8x32, 4), low_nibble_mask_u8x32),
+        _mm256_slli_epi16(leaf_hi_u8x32, 4));
+    __m256i const leaf_low_nibble_u8x32 = _mm256_and_si256(leaf_lo_u8x32, low_nibble_mask_u8x32);
+    __m256i const stage4_lut_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble_u8x32, 4), n0_u8x32);
+    __m256i result_u8x32 = _mm256_setzero_si256();
     for (int group = 0; group < (int)sz_utf8_line_break_haswell_astral_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_rune_lut256_haswell_(
-            sz_utf8_line_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
-        __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
-        result = _mm256_blendv_epi8(result, value, here);
+        __m256i const value_u8x32 = sz_utf8_rune_lut256_haswell_(
+            sz_utf8_line_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x32);
+        __m256i const here_u8x32 = _mm256_cmpeq_epi8(leaf_group_u8x32, _mm256_set1_epi8((char)group));
+        result_u8x32 = _mm256_blendv_epi8(result_u8x32, value_u8x32, here_u8x32);
     }
-    return result;
+    return result_u8x32;
 }
 
-/** @brief Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
-SZ_HELPER_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
-    return _mm256_cmpeq_epi8(_mm256_max_epu8(value, bound), value);
+/** @brief Per-half unsigned `value_u8x32 >= bound_u8x32` mask (AVX2 has no unsigned compare):
+ *         `max_epu8(value_u8x32,bound_u8x32)==value_u8x32`. */
+SZ_HELPER_INLINE __m256i sz_line_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
-/** @brief Per-half unsigned `value < bound` mask: the complement of `value >= bound` (`min_epu8` form keeps it
- *         branch- and bias-free): `min_epu8(value,bound)==value && value!=bound` is awkward, so use the >= negation
- *         via `min_epu8(value, bound-1)==value` is fragile at bound==0; instead AND-NOT the >= mask against ones. */
-SZ_HELPER_INLINE __m256i sz_line_break_cmplt_epu8_haswell_(__m256i value, __m256i bound) {
-    return _mm256_andnot_si256(sz_line_break_cmpge_epu8_haswell_(value, bound), _mm256_set1_epi8((char)0xFF));
+/** @brief Per-half unsigned `value_u8x32 < bound_u8x32` mask: the complement of `value_u8x32 >= bound_u8x32`
+ *         (`min_epu8` form keeps it branch- and bias-free): `min_epu8(value_u8x32,bound_u8x32)==value_u8x32 &&
+ *         value_u8x32!=bound_u8x32` is awkward, so use the >= negation via
+ *         `min_epu8(value_u8x32, bound_u8x32-1)==value_u8x32` is fragile at bound_u8x32==0; instead AND-NOT the >=
+ *         mask against ones. */
+SZ_HELPER_INLINE __m256i sz_line_break_cmplt_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+    return _mm256_andnot_si256(sz_line_break_cmpge_epu8_haswell_(value_u8x32, bound_u8x32),
+                               _mm256_set1_epi8((char)0xFF));
 }
 
 /** @brief A 64-bit "(byte & mask) == pattern" lane mask over both window halves (two `vpand`+`vpcmpeqb`). */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_match_haswell_(__m256i low_half, __m256i high_half, sz_u8_t mask,
-                                                            sz_u8_t pattern) {
-    __m256i const m = _mm256_set1_epi8((char)mask), p = _mm256_set1_epi8((char)pattern);
-    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(_mm256_and_si256(low_half, m), p),
-                                         _mm256_cmpeq_epi8(_mm256_and_si256(high_half, m), p));
+SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_match_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                            sz_u8_t mask, sz_u8_t pattern) {
+    __m256i const mask_byte_u8x32 = _mm256_set1_epi8((char)mask), pattern_byte_u8x32 = _mm256_set1_epi8((char)pattern);
+    return sz_utf8_mask_combine_haswell_(
+        _mm256_cmpeq_epi8(_mm256_and_si256(low_half_u8x32, mask_byte_u8x32), pattern_byte_u8x32),
+        _mm256_cmpeq_epi8(_mm256_and_si256(high_half_u8x32, mask_byte_u8x32), pattern_byte_u8x32));
 }
 
 /** @brief A 64-bit "byte == value" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_haswell_(__m256i low_half, __m256i high_half, sz_u8_t value) {
-    __m256i const v = _mm256_set1_epi8((char)value);
-    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half, v), _mm256_cmpeq_epi8(high_half, v));
+SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                            sz_u8_t value) {
+    __m256i const value_byte_u8x32 = _mm256_set1_epi8((char)value);
+    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half_u8x32, value_byte_u8x32),
+                                         _mm256_cmpeq_epi8(high_half_u8x32, value_byte_u8x32));
 }
 
 /** @brief A 64-bit "byte >= bound" (unsigned) lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_haswell_(__m256i low_half, __m256i high_half, sz_u8_t bound) {
-    __m256i const bound_vec = _mm256_set1_epi8((char)bound);
-    return sz_utf8_mask_combine_haswell_(sz_line_break_cmpge_epu8_haswell_(low_half, bound_vec),
-                                         sz_line_break_cmpge_epu8_haswell_(high_half, bound_vec));
+SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                         sz_u8_t bound) {
+    __m256i const bound_u8x32 = _mm256_set1_epi8((char)bound);
+    return sz_utf8_mask_combine_haswell_(sz_line_break_cmpge_epu8_haswell_(low_half_u8x32, bound_u8x32),
+                                         sz_line_break_cmpge_epu8_haswell_(high_half_u8x32, bound_u8x32));
 }
 
 /** @brief A 64-bit "byte < bound" (unsigned) lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_haswell_(__m256i low_half, __m256i high_half, sz_u8_t bound) {
-    __m256i const bound_vec = _mm256_set1_epi8((char)bound);
-    return sz_utf8_mask_combine_haswell_(sz_line_break_cmplt_epu8_haswell_(low_half, bound_vec),
-                                         sz_line_break_cmplt_epu8_haswell_(high_half, bound_vec));
+SZ_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                         sz_u8_t bound) {
+    __m256i const bound_u8x32 = _mm256_set1_epi8((char)bound);
+    return sz_utf8_mask_combine_haswell_(sz_line_break_cmplt_epu8_haswell_(low_half_u8x32, bound_u8x32),
+                                         sz_line_break_cmplt_epu8_haswell_(high_half_u8x32, bound_u8x32));
 }
 
 /** @brief The class/side byte held at byte-lane @p lane, extracted in-register (no scalar window store). */
-SZ_HELPER_INLINE sz_u8_t sz_line_break_byte_at_haswell_(__m256i lanes_lo, __m256i lanes_hi, sz_size_t lane) {
-    __m256i const source = lane < 32 ? lanes_lo : lanes_hi;
+SZ_HELPER_INLINE sz_u8_t sz_line_break_byte_at_haswell_(__m256i lanes_lo_u8x32, __m256i lanes_hi_u8x32,
+                                                        sz_size_t lane) {
+    __m256i const source_u8x32 = lane < 32 ? lanes_lo_u8x32 : lanes_hi_u8x32;
     sz_size_t const within = lane < 32 ? lane : lane - 32;
     sz_u8_t bytes[32];
-    _mm256_storeu_si256((__m256i *)bytes, source);
+    _mm256_storeu_si256((__m256i *)bytes, source_u8x32);
     return bytes[within];
 }
 
@@ -242,22 +258,22 @@ typedef struct sz_line_break_classified_haswell_t {
 /** @brief Compute the third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the
  *         AVX2 twin of icelake's `_mm512_permutexvar_epi8(lane_identity+3)`. Same idiom as the substrate
  *         `forward_neighbours_haswell_` (permute2x128 to bring the successor 128-bit block in, alignr by 3). */
-SZ_HELPER_INLINE void sz_line_break_next3_haswell_(__m256i window_lo, __m256i window_hi, __m256i *next3_lo,
-                                                   __m256i *next3_hi) {
-    __m256i const low_successor = _mm256_permute2x128_si256(window_lo, window_hi, 0x21);
-    *next3_lo = _mm256_alignr_epi8(low_successor, window_lo, 3);
-    __m256i const high_successor = _mm256_permute2x128_si256(window_hi, window_lo, 0x21);
-    *next3_hi = _mm256_alignr_epi8(high_successor, window_hi, 3);
+SZ_HELPER_INLINE void sz_line_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
+                                                   __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
+    __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
+    *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
+    __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(window_hi_u8x32, window_lo_u8x32, 0x21);
+    *next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, window_hi_u8x32, 3);
 }
 
 /** @brief Resolve the per-lane palette index (one half) to class / side / dotted bytes through the precomputed
- *         62-entry palette tables. `lut256_haswell_` reads each 64-entry table by `index` (index < 64 so only the
- *         low four rows are selected); bit-identical to the icelake `vpermb` palette permute. */
-SZ_HELPER_INLINE void sz_line_break_palette_unpack_haswell_(__m256i index, __m256i *classes, __m256i *side,
-                                                            __m256i *dotted) {
-    *classes = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_class_, index);
-    *side = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_side_, index);
-    *dotted = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_dotted_, index);
+ *         62-entry palette tables. `lut256_haswell_` reads each 64-entry table by `index_u8x32` (index_u8x32 < 64
+ *         so only the low four rows are selected); bit-identical to the icelake `vpermb` palette permute. */
+SZ_HELPER_INLINE void sz_line_break_palette_unpack_haswell_(__m256i index_u8x32, __m256i *classes_u8x32,
+                                                            __m256i *side_u8x32, __m256i *dotted_u8x32) {
+    *classes_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_class_, index_u8x32);
+    *side_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_side_, index_u8x32);
+    *dotted_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_line_break_palette_dotted_, index_u8x32);
 }
 
 /**
@@ -273,12 +289,13 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
     sz_u64_t const two_byte = window.two_byte_starts;
     sz_u64_t const three_byte = window.three_byte_starts;
     sz_u64_t const four_byte = window.four_byte_starts;
-    __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
 
     //  Forward neighbours (mod-64 wrap, matching icelake's `_mm512_permutexvar_epi8`).
-    __m256i next1_lo, next1_hi, next2_lo, next2_hi, next3_lo, next3_hi;
-    sz_utf8_forward_neighbours_haswell_(raw_lo, raw_hi, &next1_lo, &next1_hi, &next2_lo, &next2_hi);
-    sz_line_break_next3_haswell_(raw_lo, raw_hi, &next3_lo, &next3_hi);
+    __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32, next3_hi_u8x32;
+    sz_utf8_forward_neighbours_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next1_lo_u8x32, &next1_hi_u8x32, &next2_lo_u8x32,
+                                        &next2_hi_u8x32);
+    sz_line_break_next3_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next3_lo_u8x32, &next3_hi_u8x32);
 
     sz_u64_t const next1_continuation = continuation >> 1, next2_continuation = continuation >> 2,
                    next3_continuation = continuation >> 3;
@@ -286,12 +303,12 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
     //  Ill-formed-lead gate (LEVER B), bit-identical to icelake: only C0/C1, E0, ED, F0, F4/>=F5 leads can be
     //  overlong / surrogate / out-of-range; detect their presence with raw-only tests and, when absent, take the
     //  cheap "lead + enough continuations" validity path.
-    sz_u64_t const lead_c0_c1 = sz_line_break_byte_ge_haswell_(raw_lo, raw_hi, 0xC0) &
-                                sz_line_break_byte_lt_haswell_(raw_lo, raw_hi, 0xC2);
-    sz_u64_t const lead_e0 = sz_line_break_byte_equal_haswell_(raw_lo, raw_hi, 0xE0);
-    sz_u64_t const lead_ed = sz_line_break_byte_equal_haswell_(raw_lo, raw_hi, 0xED);
-    sz_u64_t const lead_f0 = sz_line_break_byte_equal_haswell_(raw_lo, raw_hi, 0xF0);
-    sz_u64_t const lead_f4_or_above = sz_line_break_byte_ge_haswell_(raw_lo, raw_hi, 0xF4);
+    sz_u64_t const lead_c0_c1 = sz_line_break_byte_ge_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xC0) &
+                                sz_line_break_byte_lt_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xC2);
+    sz_u64_t const lead_e0 = sz_line_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xE0);
+    sz_u64_t const lead_ed = sz_line_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xED);
+    sz_u64_t const lead_f0 = sz_line_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF0);
+    sz_u64_t const lead_f4_or_above = sz_line_break_byte_ge_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF4);
     sz_u64_t const danger_leads = (lead_c0_c1 | lead_e0 | lead_ed | lead_f0 | lead_f4_or_above) & loaded_mask;
 
     sz_u64_t valid2, valid3, valid4;
@@ -302,15 +319,15 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
     }
     else {
         //  Exact prior algebra: per-lane value-bit predicates for overlong / surrogate / out-of-range detection.
-        sz_u64_t const lead_not_overlong2 = ~sz_line_break_byte_match_haswell_(raw_lo, raw_hi, 0x1E,
+        sz_u64_t const lead_not_overlong2 = ~sz_line_break_byte_match_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x1E,
                                                                                0x00); // (raw & 0x1E) != 0
         sz_u64_t const b0_e0 = lead_e0, b0_ed = lead_ed, b0_f0 = lead_f0;
-        sz_u64_t const b0_f4 = sz_line_break_byte_equal_haswell_(raw_lo, raw_hi, 0xF4);
-        sz_u64_t const b0_above_f4 = sz_line_break_byte_ge_haswell_(raw_lo, raw_hi, 0xF5);
-        sz_u64_t const b1_lt_a0 = sz_line_break_byte_lt_haswell_(next1_lo, next1_hi, 0xA0);
-        sz_u64_t const b1_ge_a0 = sz_line_break_byte_ge_haswell_(next1_lo, next1_hi, 0xA0);
-        sz_u64_t const b1_lt_90 = sz_line_break_byte_lt_haswell_(next1_lo, next1_hi, 0x90);
-        sz_u64_t const b1_ge_90 = sz_line_break_byte_ge_haswell_(next1_lo, next1_hi, 0x90);
+        sz_u64_t const b0_f4 = sz_line_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF4);
+        sz_u64_t const b0_above_f4 = sz_line_break_byte_ge_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF5);
+        sz_u64_t const b1_lt_a0 = sz_line_break_byte_lt_haswell_(next1_lo_u8x32, next1_hi_u8x32, 0xA0);
+        sz_u64_t const b1_ge_a0 = sz_line_break_byte_ge_haswell_(next1_lo_u8x32, next1_hi_u8x32, 0xA0);
+        sz_u64_t const b1_lt_90 = sz_line_break_byte_lt_haswell_(next1_lo_u8x32, next1_hi_u8x32, 0x90);
+        sz_u64_t const b1_ge_90 = sz_line_break_byte_ge_haswell_(next1_lo_u8x32, next1_hi_u8x32, 0x90);
 
         sz_u64_t const overlong3 = three_byte & b0_e0 & b1_lt_a0;
         sz_u64_t const surrogate3 = three_byte & b0_ed & b1_ge_a0;
@@ -320,42 +337,43 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
         valid3 = three_byte & next1_continuation & next2_continuation & ~overlong3 & ~surrogate3;
         valid4 = four_byte & next1_continuation & next2_continuation & next3_continuation & ~overlong4 & ~above4;
     }
-    sz_u64_t const true_ascii = sz_line_break_byte_lt_haswell_(raw_lo, raw_hi, 0x80) & loaded_mask & ~continuation;
+    sz_u64_t const true_ascii = sz_line_break_byte_lt_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x80) & loaded_mask &
+                                ~continuation;
 
     //  Rebuild high/low per lead length so cp = (plane<<16)|(high<<8)|low is exact (decode_window_ uses the
     //  2/3-byte formula only). Replacement lanes are overridden downstream, so their garbage never reaches the
     //  palette. low4/high4 mirror the icelake 4-byte reconstruction.
-    __m256i const low_four_lo = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo, _mm256_set1_epi8(0x03)), 6),
+    __m256i const low_four_lo_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo_u8x32, _mm256_set1_epi8(0x03)), 6),
                          _mm256_set1_epi8((char)0xC0)),
-        _mm256_and_si256(next3_lo, _mm256_set1_epi8(0x3F)));
-    __m256i const low_four_hi = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi, _mm256_set1_epi8(0x03)), 6),
+        _mm256_and_si256(next3_lo_u8x32, _mm256_set1_epi8(0x3F)));
+    __m256i const low_four_hi_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi_u8x32, _mm256_set1_epi8(0x03)), 6),
                          _mm256_set1_epi8((char)0xC0)),
-        _mm256_and_si256(next3_hi, _mm256_set1_epi8(0x3F)));
-    __m256i const high_four_lo = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo, _mm256_set1_epi8(0x0F)), 4),
+        _mm256_and_si256(next3_hi_u8x32, _mm256_set1_epi8(0x3F)));
+    __m256i const high_four_lo_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo_u8x32, _mm256_set1_epi8(0x0F)), 4),
                          _mm256_set1_epi8((char)0xF0)),
-        sz_utf8_srl8_haswell_(next2_lo, 2, 0x0F));
-    __m256i const high_four_hi = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi, _mm256_set1_epi8(0x0F)), 4),
+        sz_utf8_srl8_haswell_(next2_lo_u8x32, 2, 0x0F));
+    __m256i const high_four_hi_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi_u8x32, _mm256_set1_epi8(0x0F)), 4),
                          _mm256_set1_epi8((char)0xF0)),
-        sz_utf8_srl8_haswell_(next2_hi, 2, 0x0F));
+        sz_utf8_srl8_haswell_(next2_hi_u8x32, 2, 0x0F));
 
-    __m256i const ascii_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)true_ascii);
-    __m256i const ascii_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(true_ascii >> 32));
-    __m256i const four_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)four_byte);
-    __m256i const four_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(four_byte >> 32));
+    __m256i const ascii_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)true_ascii);
+    __m256i const ascii_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(true_ascii >> 32));
+    __m256i const four_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)four_byte);
+    __m256i const four_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(four_byte >> 32));
 
-    __m256i low_lo = _mm256_blendv_epi8(window.low_lo, raw_lo, ascii_select_lo);
-    __m256i low_hi = _mm256_blendv_epi8(window.low_hi, raw_hi, ascii_select_hi);
-    low_lo = _mm256_blendv_epi8(low_lo, low_four_lo, four_select_lo);
-    low_hi = _mm256_blendv_epi8(low_hi, low_four_hi, four_select_hi);
+    __m256i low_lo_u8x32 = _mm256_blendv_epi8(window.low_lo, raw_lo_u8x32, ascii_select_lo_u8x32);
+    __m256i low_hi_u8x32 = _mm256_blendv_epi8(window.low_hi, raw_hi_u8x32, ascii_select_hi_u8x32);
+    low_lo_u8x32 = _mm256_blendv_epi8(low_lo_u8x32, low_four_lo_u8x32, four_select_lo_u8x32);
+    low_hi_u8x32 = _mm256_blendv_epi8(low_hi_u8x32, low_four_hi_u8x32, four_select_hi_u8x32);
     //  high is zeroed on ASCII lanes (cp == raw byte, high == 0), then 4-byte high reconstructed.
-    __m256i high_lo = _mm256_andnot_si256(ascii_select_lo, window.high_lo);
-    __m256i high_hi = _mm256_andnot_si256(ascii_select_hi, window.high_hi);
-    high_lo = _mm256_blendv_epi8(high_lo, high_four_lo, four_select_lo);
-    high_hi = _mm256_blendv_epi8(high_hi, high_four_hi, four_select_hi);
+    __m256i high_lo_u8x32 = _mm256_andnot_si256(ascii_select_lo_u8x32, window.high_lo);
+    __m256i high_hi_u8x32 = _mm256_andnot_si256(ascii_select_hi_u8x32, window.high_hi);
+    high_lo_u8x32 = _mm256_blendv_epi8(high_lo_u8x32, high_four_lo_u8x32, four_select_lo_u8x32);
+    high_hi_u8x32 = _mm256_blendv_epi8(high_hi_u8x32, high_four_hi_u8x32, four_select_hi_u8x32);
 
     sz_u64_t const valid_start = true_ascii | valid2 | valid3 | valid4;
     sz_u64_t const consumed = (((valid2 | valid3 | valid4) << 1) | ((valid3 | valid4) << 2) | (valid4 << 3)) &
@@ -364,16 +382,16 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
     sz_u64_t const replacement = starts & ~valid_start;
 
     //  4-byte plane bits (bits 16..20 of the codepoint); zero on every non-4-byte lane.
-    __m256i const plane_lo = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo, _mm256_set1_epi8(0x07)), 2),
+    __m256i const plane_lo_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo_u8x32, _mm256_set1_epi8(0x07)), 2),
                          _mm256_set1_epi8(0x1C)),
-        sz_utf8_srl8_haswell_(next1_lo, 4, 0x03));
-    __m256i const plane_hi = _mm256_or_si256(
-        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi, _mm256_set1_epi8(0x07)), 2),
+        sz_utf8_srl8_haswell_(next1_lo_u8x32, 4, 0x03));
+    __m256i const plane_hi_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi_u8x32, _mm256_set1_epi8(0x07)), 2),
                          _mm256_set1_epi8(0x1C)),
-        sz_utf8_srl8_haswell_(next1_hi, 4, 0x03));
-    __m256i const plane_masked_lo = _mm256_and_si256(four_select_lo, plane_lo);
-    __m256i const plane_masked_hi = _mm256_and_si256(four_select_hi, plane_hi);
+        sz_utf8_srl8_haswell_(next1_hi_u8x32, 4, 0x03));
+    __m256i const plane_masked_lo_u8x32 = _mm256_and_si256(four_select_lo_u8x32, plane_lo_u8x32);
+    __m256i const plane_masked_hi_u8x32 = _mm256_and_si256(four_select_hi_u8x32, plane_hi_u8x32);
 
     //  Flat-palette index per byte-lane, in one pass. BMP (cp < 0x10000) through the page-compressed flat leaf;
     //  replacement lanes forced to U+FFFD's index (U+FFFD is itself BMP, so it shares this index space). Astral lanes
@@ -382,8 +400,8 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
     //  an invalid 4-byte lead is a replacement lane whose U+FFFD resolution must survive it, so `valid4`, not
     //  `four_byte`, gates the blend.
     sz_u64_t const is_astral = valid4 & loaded_mask;
-    __m256i palette_indices_low_u8x32 = sz_line_break_bmp_index_haswell_(high_lo, low_lo);
-    __m256i palette_indices_high_u8x32 = sz_line_break_bmp_index_haswell_(high_hi, low_hi);
+    __m256i palette_indices_low_u8x32 = sz_line_break_bmp_index_haswell_(high_lo_u8x32, low_lo_u8x32);
+    __m256i palette_indices_high_u8x32 = sz_line_break_bmp_index_haswell_(high_hi_u8x32, low_hi_u8x32);
     if (replacement) {
         __m256i const replacement_indices_u8x32 = sz_line_break_bmp_index_haswell_(_mm256_set1_epi8((char)0xFF),
                                                                                    _mm256_set1_epi8((char)0xFD));
@@ -408,27 +426,29 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
         //  by subtracting 0x10000, so `high`/`low` feed the cascade directly. Its 62-entry palette's byte tables carry
         //  the very same LB1 resolution the flat descriptor unpack applies (verified entry by entry), so blending the
         //  RESOLVED bytes matches blending indices in a single shared space, which the two palettes do not form.
-        __m256i const astral_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)is_astral);
-        __m256i const astral_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(is_astral >> 32));
-        __m256i const plane_off_lo = _mm256_sub_epi8(plane_masked_lo, _mm256_set1_epi8(1));
-        __m256i const plane_off_hi = _mm256_sub_epi8(plane_masked_hi, _mm256_set1_epi8(1));
-        __m256i const astral_indices_low_u8x32 = sz_line_break_classify_astral_haswell_(plane_off_lo, high_lo, low_lo);
-        __m256i const astral_indices_high_u8x32 = sz_line_break_classify_astral_haswell_(plane_off_hi, high_hi, low_hi);
+        __m256i const astral_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)is_astral);
+        __m256i const astral_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(is_astral >> 32));
+        __m256i const plane_off_lo_u8x32 = _mm256_sub_epi8(plane_masked_lo_u8x32, _mm256_set1_epi8(1));
+        __m256i const plane_off_hi_u8x32 = _mm256_sub_epi8(plane_masked_hi_u8x32, _mm256_set1_epi8(1));
+        __m256i const astral_indices_low_u8x32 = sz_line_break_classify_astral_haswell_(plane_off_lo_u8x32,
+                                                                                        high_lo_u8x32, low_lo_u8x32);
+        __m256i const astral_indices_high_u8x32 = sz_line_break_classify_astral_haswell_(plane_off_hi_u8x32,
+                                                                                         high_hi_u8x32, low_hi_u8x32);
         __m256i astral_classes_u8x32, astral_side_u8x32, astral_dotted_bytes_u8x32;
         sz_line_break_palette_unpack_haswell_(astral_indices_low_u8x32, &astral_classes_u8x32, &astral_side_u8x32,
                                               &astral_dotted_bytes_u8x32);
-        result.classes_lo = _mm256_blendv_epi8(result.classes_lo, astral_classes_u8x32, astral_select_lo);
-        result.side_lo = _mm256_blendv_epi8(result.side_lo, astral_side_u8x32, astral_select_lo);
+        result.classes_lo = _mm256_blendv_epi8(result.classes_lo, astral_classes_u8x32, astral_select_lo_u8x32);
+        result.side_lo = _mm256_blendv_epi8(result.side_lo, astral_side_u8x32, astral_select_lo_u8x32);
         dotted_select_low_u8x32 = _mm256_blendv_epi8(
             dotted_select_low_u8x32, _mm256_cmpgt_epi8(astral_dotted_bytes_u8x32, _mm256_setzero_si256()),
-            astral_select_lo);
+            astral_select_lo_u8x32);
         sz_line_break_palette_unpack_haswell_(astral_indices_high_u8x32, &astral_classes_u8x32, &astral_side_u8x32,
                                               &astral_dotted_bytes_u8x32);
-        result.classes_hi = _mm256_blendv_epi8(result.classes_hi, astral_classes_u8x32, astral_select_hi);
-        result.side_hi = _mm256_blendv_epi8(result.side_hi, astral_side_u8x32, astral_select_hi);
+        result.classes_hi = _mm256_blendv_epi8(result.classes_hi, astral_classes_u8x32, astral_select_hi_u8x32);
+        result.side_hi = _mm256_blendv_epi8(result.side_hi, astral_side_u8x32, astral_select_hi_u8x32);
         dotted_select_high_u8x32 = _mm256_blendv_epi8(
             dotted_select_high_u8x32, _mm256_cmpgt_epi8(astral_dotted_bytes_u8x32, _mm256_setzero_si256()),
-            astral_select_hi);
+            astral_select_hi_u8x32);
     }
     sz_u64_t const dotted = sz_utf8_mask_combine_haswell_(dotted_select_low_u8x32, dotted_select_high_u8x32);
     result.dotted = dotted & starts;
@@ -444,17 +464,20 @@ SZ_HELPER_AUTO sz_line_break_classified_haswell_t sz_line_break_classify_window_
 #pragma region Mask algebra rule engine
 
 /** @brief Build a 64-bit "lane class == @p cls" mask over both class halves (two `vpcmpeqb` -> mask_combine). */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_class_mask_haswell_(__m256i classes_lo, __m256i classes_hi, sz_u8_t cls) {
-    return sz_line_break_byte_equal_haswell_(classes_lo, classes_hi, cls);
+SZ_HELPER_INLINE sz_u64_t sz_line_break_class_mask_haswell_(__m256i classes_lo_u8x32, __m256i classes_hi_u8x32,
+                                                            sz_u8_t cls) {
+    return sz_line_break_byte_equal_haswell_(classes_lo_u8x32, classes_hi_u8x32, cls);
 }
 
 /** @brief Build a 64-bit "lane (side & @p bit) != 0" mask over both side halves. */
-SZ_HELPER_INLINE sz_u64_t sz_line_break_side_mask_haswell_(__m256i side_lo, __m256i side_hi, sz_u8_t bit) {
-    __m256i const m = _mm256_set1_epi8((char)bit);
-    __m256i const masked_lo = _mm256_and_si256(side_lo, m), masked_hi = _mm256_and_si256(side_hi, m);
-    return sz_utf8_mask_combine_haswell_(
-        _mm256_or_si256(_mm256_cmpgt_epi8(masked_lo, _mm256_setzero_si256()), _mm256_cmpeq_epi8(masked_lo, m)),
-        _mm256_or_si256(_mm256_cmpgt_epi8(masked_hi, _mm256_setzero_si256()), _mm256_cmpeq_epi8(masked_hi, m)));
+SZ_HELPER_INLINE sz_u64_t sz_line_break_side_mask_haswell_(__m256i side_lo_u8x32, __m256i side_hi_u8x32, sz_u8_t bit) {
+    __m256i const bit_u8x32 = _mm256_set1_epi8((char)bit);
+    __m256i const masked_lo_u8x32 = _mm256_and_si256(side_lo_u8x32, bit_u8x32),
+                  masked_hi_u8x32 = _mm256_and_si256(side_hi_u8x32, bit_u8x32);
+    return sz_utf8_mask_combine_haswell_(_mm256_or_si256(_mm256_cmpgt_epi8(masked_lo_u8x32, _mm256_setzero_si256()),
+                                                         _mm256_cmpeq_epi8(masked_lo_u8x32, bit_u8x32)),
+                                         _mm256_or_si256(_mm256_cmpgt_epi8(masked_hi_u8x32, _mm256_setzero_si256()),
+                                                         _mm256_cmpeq_epi8(masked_hi_u8x32, bit_u8x32)));
 }
 
 /** @brief Byte-lane gate/base derivation (LB9/LB10) — the AVX2 twin of @ref sz_line_break_byte_frame_icelake_. */
@@ -470,17 +493,19 @@ typedef struct sz_line_break_byte_frame_haswell_t {
 SZ_HELPER_INLINE sz_line_break_byte_frame_haswell_t sz_line_break_byte_frame_haswell_(
     sz_line_break_classified_haswell_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
-    __m256i const classes_lo = classified.classes_lo, classes_hi = classified.classes_hi;
-    sz_u64_t const mark_start = (sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_cm_k) |
-                                 sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_zwj_k)) &
-                                starts;
-    sz_u64_t const excluded = (sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_bk_k) |
-                               sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_cr_k) |
-                               sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_lf_k) |
-                               sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_nl_k) |
-                               sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_sp_k) |
-                               sz_line_break_class_mask_haswell_(classes_lo, classes_hi, sz_line_break_zw_k)) &
-                              starts;
+    __m256i const classes_lo_u8x32 = classified.classes_lo, classes_hi_u8x32 = classified.classes_hi;
+    sz_u64_t const mark_start =
+        (sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_cm_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_zwj_k)) &
+        starts;
+    sz_u64_t const excluded =
+        (sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_bk_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_cr_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_lf_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_nl_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_sp_k) |
+         sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32, sz_line_break_zw_k)) &
+        starts;
     sz_u64_t const good_base = starts & ~excluded & ~mark_start;
     sz_u64_t const mark_bytes = sz_u64_fill_right_(mark_start, non_start) | mark_start;
     sz_u64_t const flood = sz_u64_fill_right_(good_base, non_start | mark_bytes);
@@ -489,11 +514,11 @@ SZ_HELPER_INLINE sz_line_break_byte_frame_haswell_t sz_line_break_byte_frame_has
 
     sz_line_break_byte_frame_haswell_t frame;
     //  Reclassify lone marks to AL in both halves (LB10).
-    __m256i const al = _mm256_set1_epi8((char)sz_line_break_al_k);
-    __m256i const lone_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)lone_mark);
-    __m256i const lone_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(lone_mark >> 32));
-    frame.classes_lo = _mm256_blendv_epi8(classes_lo, al, lone_select_lo);
-    frame.classes_hi = _mm256_blendv_epi8(classes_hi, al, lone_select_hi);
+    __m256i const al_u8x32 = _mm256_set1_epi8((char)sz_line_break_al_k);
+    __m256i const lone_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)lone_mark);
+    __m256i const lone_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(lone_mark >> 32));
+    frame.classes_lo = _mm256_blendv_epi8(classes_lo_u8x32, al_u8x32, lone_select_lo_u8x32);
+    frame.classes_hi = _mm256_blendv_epi8(classes_hi_u8x32, al_u8x32, lone_select_hi_u8x32);
     frame.base = starts & ~attached;
     frame.gate = non_start | attached;
     frame.attached = attached;
@@ -511,13 +536,13 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_haswell_(sz_lin
                                                                           sz_u8_t *effective_class_byte_out,
                                                                           sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_haswell_t const byte_frame = sz_line_break_byte_frame_haswell_(classified);
-    __m256i const classes_lo = byte_frame.classes_lo, classes_hi = byte_frame.classes_hi;
+    __m256i const classes_lo_u8x32 = byte_frame.classes_lo, classes_hi_u8x32 = byte_frame.classes_hi;
     //  LB10 reclassify carries the side bits with it: zero the side byte on lone-mark lanes (serial zeros the
     //  descriptor). `andnot(lone_select, side)` clears those lanes.
-    __m256i const lone_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)byte_frame.lone_mark);
-    __m256i const lone_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(byte_frame.lone_mark >> 32));
-    __m256i const side_lo = _mm256_andnot_si256(lone_select_lo, classified.side_lo);
-    __m256i const side_hi = _mm256_andnot_si256(lone_select_hi, classified.side_hi);
+    __m256i const lone_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)byte_frame.lone_mark);
+    __m256i const lone_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(byte_frame.lone_mark >> 32));
+    __m256i const side_lo_u8x32 = _mm256_andnot_si256(lone_select_lo_u8x32, classified.side_lo);
+    __m256i const side_hi_u8x32 = _mm256_andnot_si256(lone_select_hi_u8x32, classified.side_hi);
 
     sz_line_break_frame_t frame;
     frame.base = byte_frame.base;
@@ -536,18 +561,19 @@ SZ_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_haswell_(sz_lin
 #pragma GCC unroll 64
 #endif
     for (sz_size_t cls = 0; cls < sz_line_break_class_count_k; ++cls)
-        frame.effective_class[cls] = sz_line_break_class_mask_haswell_(classes_lo, classes_hi, (sz_u8_t)cls);
+        frame.effective_class[cls] = sz_line_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                       (sz_u8_t)cls);
     frame.raw_zwj = sz_line_break_class_mask_haswell_(classified.classes_lo, classified.classes_hi,
                                                       sz_line_break_zwj_k);
-    frame.side_pi = sz_line_break_side_mask_haswell_(side_lo, side_hi, sz_line_break_side_pi_k);
-    frame.side_pf = sz_line_break_side_mask_haswell_(side_lo, side_hi, sz_line_break_side_pf_k);
-    frame.side_eaw = sz_line_break_side_mask_haswell_(side_lo, side_hi, sz_line_break_side_eaw_k);
-    frame.side_cn = sz_line_break_side_mask_haswell_(side_lo, side_hi, sz_line_break_side_cn_k);
-    frame.side_ext = sz_line_break_side_mask_haswell_(side_lo, side_hi, sz_line_break_side_ext_k);
-    _mm256_storeu_si256((__m256i *)(effective_class_byte_out + 0), classes_lo);
-    _mm256_storeu_si256((__m256i *)(effective_class_byte_out + 32), classes_hi);
-    _mm256_storeu_si256((__m256i *)(side_byte_out + 0), side_lo);
-    _mm256_storeu_si256((__m256i *)(side_byte_out + 32), side_hi);
+    frame.side_pi = sz_line_break_side_mask_haswell_(side_lo_u8x32, side_hi_u8x32, sz_line_break_side_pi_k);
+    frame.side_pf = sz_line_break_side_mask_haswell_(side_lo_u8x32, side_hi_u8x32, sz_line_break_side_pf_k);
+    frame.side_eaw = sz_line_break_side_mask_haswell_(side_lo_u8x32, side_hi_u8x32, sz_line_break_side_eaw_k);
+    frame.side_cn = sz_line_break_side_mask_haswell_(side_lo_u8x32, side_hi_u8x32, sz_line_break_side_cn_k);
+    frame.side_ext = sz_line_break_side_mask_haswell_(side_lo_u8x32, side_hi_u8x32, sz_line_break_side_ext_k);
+    _mm256_storeu_si256((__m256i *)(effective_class_byte_out + 0), classes_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)(effective_class_byte_out + 32), classes_hi_u8x32);
+    _mm256_storeu_si256((__m256i *)(side_byte_out + 0), side_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)(side_byte_out + 32), side_hi_u8x32);
     return frame;
 }
 

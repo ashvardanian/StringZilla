@@ -41,9 +41,9 @@ extern "C" {
  *          lane keeps its prior value. */
 SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
-    __mmask64 const cold_start_mask = _cvtu64_mask64(cold_starts);
-    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, high_bytes_u8x64);
-    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask, low_bytes_u8x64);
+    __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
+    __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
+    __m512i const low_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, low_bytes_u8x64);
 
     //  Unused (zeroed) compacted lanes decode to codepoint 0, a safe in-bounds flat index whose class is discarded.
     __m512i const codepoints_first_u32x16 = _mm512_or_si512(
@@ -61,12 +61,13 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
             sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_, codepoints_second_u32x16));
         classes_packed_u8x64 = _mm512_inserti32x4(classes_packed_u8x64, classes_second_u8x16, 1);
     }
-    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask, classes_packed_u8x64);
+    return _mm512_mask_expand_epi8(classes_u8x64, cold_start_mask_m64, classes_packed_u8x64);
 }
 
 /**
- *  @brief  Classify up to 64 codepoints (held one-per-lane in the decoded @p high / @p low byte halves) into
- *          per-lane Sentence_Break properties. The dominant `cp < 0x800` region (Latin/Greek/Cyrillic/Arabic/Hebrew)
+ *  @brief  Classify up to 64 codepoints (held one-per-lane in the decoded @p high_u8x64 / @p low_u8x64 byte halves)
+ *          into per-lane Sentence_Break properties. The dominant `cp < 0x800` region
+ *          (Latin/Greek/Cyrillic/Arabic/Hebrew)
  *          is resolved by an in-register `vpermi2b` page network over `sz_utf8_sentence_break_flat_lut_0800_`; the big
  *          homogeneous OLetter blocks (CJK/Hangul/...) by arithmetic range compares (zero data); the cold 3-byte-BMP
  *          residue by a page-compressed flat table read with one `vpgatherdd` per sixteen lanes (see
@@ -74,17 +75,18 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
  *          (4-byte) lanes are reconstructed to full 21-bit codepoints in register (four 16-lane chunks) and resolved
  *          through the canonical sorted astral range list with arithmetic compares, all 64 lanes uniformly.
  *
- *  @param  raw_window         The raw 64 input bytes (codepoint lead/continuation bytes, one lane each here).
- *  @param  raw_next1          Byte at lane+1 (first continuation), @p raw_next2 lane+2, @p raw_next3 lane+3.
- *  @param  high               Per-lane high byte of the reconstructed codepoint (`cp >> 8`, BMP) from the driver.
- *  @param  low                Per-lane low byte of the reconstructed codepoint (`cp & 0xFF`) from the driver.
- *  @param  four_byte_starts   Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
- *  @param  codepoint_starts   Lanes that begin any codepoint (non-continuation, in range).
+ *  @param  raw_window_u8x64   The raw 64 input bytes (codepoint lead/continuation bytes, one lane each here).
+ *  @param  raw_next1_u8x64    Byte at lane+1 (first continuation), @p raw_next2_u8x64 lane+2,
+ *                             @p raw_next3_u8x64 lane+3.
+ *  @param  high_u8x64         Per-lane high byte of the reconstructed codepoint (`cp >> 8`, BMP) from the driver.
+ *  @param  low_u8x64          Per-lane low byte of the reconstructed codepoint (`cp & 0xFF`) from the driver.
+ *  @param  four_byte_starts_m64  Lanes that begin a 4-byte UTF-8 sequence (gates the >= 0x10000 astral test).
+ *  @param  codepoint_starts_m64  Lanes that begin any codepoint (non-continuation, in range).
  */
-SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(          //
-    __m512i raw_window, __m512i raw_next1, __m512i raw_next2, __m512i raw_next3, //
-    __m512i high, __m512i low,                                                   //
-    __mmask64 four_byte_starts, __mmask64 codepoint_starts) {
+SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(                                  //
+    __m512i raw_window_u8x64, __m512i raw_next1_u8x64, __m512i raw_next2_u8x64, __m512i raw_next3_u8x64, //
+    __m512i high_u8x64, __m512i low_u8x64,                                                               //
+    __mmask64 four_byte_starts_m64, __mmask64 codepoint_starts_m64) {
 
     // Partition the lanes FIRST so the expensive classify paths only run for lanes that need them.
     // Dispatch by codepoint VALUE, not byte-length, so overlong / malformed sequences classify exactly like the
@@ -93,84 +95,96 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
     // every other lead is a BMP lane routed to the page LUT (high < 0x08) or the flat table gather (high >= 0x08).
     // For well-formed UTF-8 the value split is identical to the byte-length split, so this leaves conformance
     // untouched.
-    __mmask64 const is_astral = four_byte_starts & (_mm512_test_epi8_mask(raw_window, _mm512_set1_epi8(0x07)) |
-                                                    _mm512_test_epi8_mask(raw_next1, _mm512_set1_epi8(0x30)));
-    __mmask64 const bmp_starts = codepoint_starts & ~is_astral;
-    __mmask64 const small_lanes = bmp_starts & _mm512_cmplt_epu8_mask(high, _mm512_set1_epi8(0x08));
-    __mmask64 const cold_lanes = bmp_starts & _mm512_cmp_epu8_mask(high, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
+    __mmask64 const is_astral_m64 = four_byte_starts_m64 &
+                                    (_mm512_test_epi8_mask(raw_window_u8x64, _mm512_set1_epi8(0x07)) |
+                                     _mm512_test_epi8_mask(raw_next1_u8x64, _mm512_set1_epi8(0x30)));
+    __mmask64 const bmp_starts_m64 = codepoint_starts_m64 & ~is_astral_m64;
+    __mmask64 const small_lanes_m64 = bmp_starts_m64 & _mm512_cmplt_epu8_mask(high_u8x64, _mm512_set1_epi8(0x08));
+    __mmask64 const cold_lanes_m64 = bmp_starts_m64 &
+                                     _mm512_cmp_epu8_mask(high_u8x64, _mm512_set1_epi8(0x08), _MM_CMPINT_NLT);
 
     // Big homogeneous OLetter ranges (CJK, Kana, ...) as arithmetic compares (zero data) over the per-lane
     // (high<<8|low). These resolve the vast majority of CJK / Kana with zero table reads, so a pure-CJK window
     // skips the flat-table gather entirely below.
-    __mmask64 oletter = 0;
+    __mmask64 oletter_m64 = 0;
     for (int range = 0; range < sz_utf8_sentence_break_big_oletter_count_k; ++range) {
         sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
         sz_u32_t const hi = sz_utf8_sentence_break_big_oletter_hi_[range];
         if (lo >= 0x10000u) continue; // astral OLetter handled by the astral sweep below
-        __m512i const lo_hi = _mm512_set1_epi8((char)(sz_u8_t)(lo >> 8));
-        __m512i const lo_lo = _mm512_set1_epi8((char)(sz_u8_t)lo);
-        __m512i const hi_hi = _mm512_set1_epi8((char)(sz_u8_t)(hi >> 8));
-        __m512i const hi_lo = _mm512_set1_epi8((char)(sz_u8_t)hi);
-        __mmask64 const ge = _mm512_cmpgt_epu8_mask(high, lo_hi) |
-                             (_mm512_cmpeq_epi8_mask(high, lo_hi) & _mm512_cmp_epu8_mask(low, lo_lo, _MM_CMPINT_NLT));
-        __mmask64 const le = _mm512_cmplt_epu8_mask(high, hi_hi) |
-                             (_mm512_cmpeq_epi8_mask(high, hi_hi) & _mm512_cmp_epu8_mask(low, hi_lo, _MM_CMPINT_LE));
-        oletter |= ge & le;
+        __m512i const lo_hi_u8x64 = _mm512_set1_epi8((char)(sz_u8_t)(lo >> 8));
+        __m512i const lo_lo_u8x64 = _mm512_set1_epi8((char)(sz_u8_t)lo);
+        __m512i const hi_hi_u8x64 = _mm512_set1_epi8((char)(sz_u8_t)(hi >> 8));
+        __m512i const hi_lo_u8x64 = _mm512_set1_epi8((char)(sz_u8_t)hi);
+        __mmask64 const ge_m64 = _mm512_cmpgt_epu8_mask(high_u8x64, lo_hi_u8x64) |
+                                 (_mm512_cmpeq_epi8_mask(high_u8x64, lo_hi_u8x64) &
+                                  _mm512_cmp_epu8_mask(low_u8x64, lo_lo_u8x64, _MM_CMPINT_NLT));
+        __mmask64 const le_m64 = _mm512_cmplt_epu8_mask(high_u8x64, hi_hi_u8x64) |
+                                 (_mm512_cmpeq_epi8_mask(high_u8x64, hi_hi_u8x64) &
+                                  _mm512_cmp_epu8_mask(low_u8x64, hi_lo_u8x64, _MM_CMPINT_LE));
+        oletter_m64 |= ge_m64 & le_m64;
     }
-    oletter &= bmp_starts;
+    oletter_m64 &= bmp_starts_m64;
 
-    __m512i classes = _mm512_set1_epi8((char)sz_sentence_break_other_k);
+    __m512i classes_u8x64 = _mm512_set1_epi8((char)sz_sentence_break_other_k);
 
     // Page LUT for codepoint < 0x800 (`high[2:0]:low[7:0]` via a `vpermi2b` segment-pair cascade), gated on a small
     // lane being present so a pure-3-byte (CJK) window pays nothing here.
-    if (small_lanes) {
-        __m512i const in_seven = _mm512_and_si512(low, _mm512_set1_epi8(0x7F));
-        __m512i const low_high_bit = sz_utf8_srl8_icelake_(low, 7, 0x01);
-        __m512i const page = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(high, _mm512_set1_epi8(0x07)), 1),
-                                             low_high_bit);
-        __m512i small_class = _mm512_setzero_si512();
+    if (small_lanes_m64) {
+        __m512i const in_seven_u8x64 = _mm512_and_si512(low_u8x64, _mm512_set1_epi8(0x7F));
+        __m512i const low_high_bit_u8x64 = sz_utf8_srl8_icelake_(low_u8x64, 7, 0x01);
+        __m512i const page_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(high_u8x64, _mm512_set1_epi8(0x07)), 1), low_high_bit_u8x64);
+        __m512i small_class_u8x64 = _mm512_setzero_si512();
         for (int pair = 0; pair < 16; ++pair) {
-            __m512i const seg_lo = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair) * 64);
-            __m512i const seg_hi = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair + 1) * 64);
-            __m512i const permuted = _mm512_permutex2var_epi8(seg_lo, in_seven, seg_hi);
-            __mmask64 const hit = _mm512_cmpeq_epi8_mask(page, _mm512_set1_epi8((char)pair));
-            small_class = _mm512_mask_mov_epi8(small_class, hit, permuted);
+            __m512i const seg_lo_u8x64 = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ + (2 * pair) * 64);
+            __m512i const seg_hi_u8x64 = _mm512_loadu_si512(sz_utf8_sentence_break_flat_lut_0800_ +
+                                                            (2 * pair + 1) * 64);
+            __m512i const permuted_u8x64 = _mm512_permutex2var_epi8(seg_lo_u8x64, in_seven_u8x64, seg_hi_u8x64);
+            __mmask64 const hit_m64 = _mm512_cmpeq_epi8_mask(page_u8x64, _mm512_set1_epi8((char)pair));
+            small_class_u8x64 = _mm512_mask_mov_epi8(small_class_u8x64, hit_m64, permuted_u8x64);
         }
-        classes = _mm512_mask_mov_epi8(classes, small_lanes, small_class);
+        classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, small_lanes_m64, small_class_u8x64);
     }
 
     // Flat page-LUT + gather lookup for the 0x800..0xFFFF residue, gated on a 3-byte lane the OLetter ranges did NOT
     // already resolve, so CJK / Kana windows skip it entirely. When every 3-byte lane is OLetter the lookup's output
     // would be overwritten by the OLetter overlay anyway, so skipping it is byte-identical.
-    __mmask64 const cold_residual = cold_lanes & ~oletter;
-    if (cold_residual)
-        classes = sz_utf8_sentence_break_cold_compact_icelake_(classes, high, low, _cvtmask64_u64(cold_residual));
+    __mmask64 const cold_residual_m64 = cold_lanes_m64 & ~oletter_m64;
+    if (cold_residual_m64)
+        classes_u8x64 = sz_utf8_sentence_break_cold_compact_icelake_(classes_u8x64, high_u8x64, low_u8x64,
+                                                                     _cvtmask64_u64(cold_residual_m64));
 
-    classes = _mm512_mask_mov_epi8(classes, oletter, _mm512_set1_epi8((char)sz_sentence_break_oletter_k));
+    classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, oletter_m64,
+                                         _mm512_set1_epi8((char)sz_sentence_break_oletter_k));
 
     // Astral (4-byte) lanes: reconstruct the full 21-bit codepoint per lane and resolve through the sorted astral
     // range list with arithmetic compares (no table lookup at all). cp = ((b0&7)<<18)|((b1&0x3F)<<12)|((b2&0x3F)<<6)|(b3&0x3F).
     // The 21-bit value exceeds a byte lane, so we widen to 32-bit lanes in four 16-lane chunks and compare each
     // chunk against every astral range, blending the matching class back. The whole block only fires when a
     // 4-byte lead is present (corpus astral residue < 0.1%), keeping the common path branch-free.
-    if (is_astral) {
-        __m512i const b0 = _mm512_and_si512(raw_window, _mm512_set1_epi8(0x07));
-        __m512i const b1 = _mm512_and_si512(raw_next1, _mm512_set1_epi8(0x3F));
-        __m512i const b2 = _mm512_and_si512(raw_next2, _mm512_set1_epi8(0x3F));
-        __m512i const b3 = _mm512_and_si512(raw_next3, _mm512_set1_epi8(0x3F));
-        __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
+    if (is_astral_m64) {
+        __m512i const b0_u8x64 = _mm512_and_si512(raw_window_u8x64, _mm512_set1_epi8(0x07));
+        __m512i const b1_u8x64 = _mm512_and_si512(raw_next1_u8x64, _mm512_set1_epi8(0x3F));
+        __m512i const b2_u8x64 = _mm512_and_si512(raw_next2_u8x64, _mm512_set1_epi8(0x3F));
+        __m512i const b3_u8x64 = _mm512_and_si512(raw_next3_u8x64, _mm512_set1_epi8(0x3F));
+        __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
         for (int chunk = 0; chunk < 4; ++chunk) {
             // Bring this chunk's 16 bytes to the low 16 lanes via a runtime permute, then widen to 32-bit lanes.
-            __m512i const select = _mm512_add_epi8(lane_identity, _mm512_set1_epi8((char)(chunk * 16)));
-            __m512i const w0 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b0)));
-            __m512i const w1 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b1)));
-            __m512i const w2 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b2)));
-            __m512i const w3 = _mm512_cvtepu8_epi32(_mm512_castsi512_si128(_mm512_permutexvar_epi8(select, b3)));
-            __m512i const cp = _mm512_or_si512(_mm512_or_si512(_mm512_slli_epi32(w0, 18), _mm512_slli_epi32(w1, 12)),
-                                               _mm512_or_si512(_mm512_slli_epi32(w2, 6), w3));
-            __mmask16 const lane_is_four = (__mmask16)((is_astral >> (chunk * 16)) & 0xFFFFu);
-            __m512i astral_class = _mm512_setzero_si512();
-            __mmask16 matched = 0;
+            __m512i const select_u8x64 = _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8((char)(chunk * 16)));
+            __m512i const w0_u32x16 = _mm512_cvtepu8_epi32(
+                _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, b0_u8x64)));
+            __m512i const w1_u32x16 = _mm512_cvtepu8_epi32(
+                _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, b1_u8x64)));
+            __m512i const w2_u32x16 = _mm512_cvtepu8_epi32(
+                _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, b2_u8x64)));
+            __m512i const w3_u32x16 = _mm512_cvtepu8_epi32(
+                _mm512_castsi512_si128(_mm512_permutexvar_epi8(select_u8x64, b3_u8x64)));
+            __m512i const cp_u32x16 = _mm512_or_si512(
+                _mm512_or_si512(_mm512_slli_epi32(w0_u32x16, 18), _mm512_slli_epi32(w1_u32x16, 12)),
+                _mm512_or_si512(_mm512_slli_epi32(w2_u32x16, 6), w3_u32x16));
+            __mmask16 const lane_is_four_m16 = (__mmask16)((is_astral_m64 >> (chunk * 16)) & 0xFFFFu);
+            __m512i astral_class_u32x16 = _mm512_setzero_si512();
+            __mmask16 matched_m16 = 0;
             // Big homogeneous OLetter blocks that live above the BMP (CJK Extension B+, astral Hangul/Kana, ...) are
             // skipped by the BMP OLetter loop above and are NOT duplicated in the astral range list; the serial
             // reference resolves them from `big_oletter` FIRST, so check them here before the astral list with the
@@ -179,34 +193,35 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
                 sz_u32_t const lo = sz_utf8_sentence_break_big_oletter_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_big_oletter_hi_[range];
                 if (lo < 0x10000u) continue; // BMP OLetter blocks are resolved by the page LUT / flat gather path
-                __mmask16 const in_range = _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
-                                           _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four &
-                                           ~matched;
-                astral_class = _mm512_mask_mov_epi32(astral_class, in_range,
-                                                     _mm512_set1_epi32((int)sz_sentence_break_oletter_k));
-                matched |= in_range;
+                __mmask16 const in_range_m16 = _mm512_cmpge_epu32_mask(cp_u32x16, _mm512_set1_epi32((int)lo)) &
+                                               _mm512_cmple_epu32_mask(cp_u32x16, _mm512_set1_epi32((int)hi)) &
+                                               lane_is_four_m16 & ~matched_m16;
+                astral_class_u32x16 = _mm512_mask_mov_epi32(astral_class_u32x16, in_range_m16,
+                                                            _mm512_set1_epi32((int)sz_sentence_break_oletter_k));
+                matched_m16 |= in_range_m16;
             }
             for (int range = 0; range < sz_utf8_sentence_break_astral_count_k; ++range) {
                 sz_u32_t const lo = sz_utf8_sentence_break_astral_lo_[range];
                 sz_u32_t const hi = sz_utf8_sentence_break_astral_hi_[range];
                 if (hi < 0x10000u) continue; // BMP ranges are already resolved by the page LUT / flat gather / OLetter
-                __mmask16 const in_range = _mm512_cmpge_epu32_mask(cp, _mm512_set1_epi32((int)lo)) &
-                                           _mm512_cmple_epu32_mask(cp, _mm512_set1_epi32((int)hi)) & lane_is_four &
-                                           ~matched;
-                astral_class = _mm512_mask_mov_epi32(astral_class, in_range,
-                                                     _mm512_set1_epi32((int)sz_utf8_sentence_break_astral_cls_[range]));
-                matched |= in_range;
+                __mmask16 const in_range_m16 = _mm512_cmpge_epu32_mask(cp_u32x16, _mm512_set1_epi32((int)lo)) &
+                                               _mm512_cmple_epu32_mask(cp_u32x16, _mm512_set1_epi32((int)hi)) &
+                                               lane_is_four_m16 & ~matched_m16;
+                astral_class_u32x16 = _mm512_mask_mov_epi32(
+                    astral_class_u32x16, in_range_m16,
+                    _mm512_set1_epi32((int)sz_utf8_sentence_break_astral_cls_[range]));
+                matched_m16 |= in_range_m16;
             }
             // Narrow the 16 32-bit astral classes to 16 bytes (`vpmovdb`), broadcast them back to this chunk's byte
             // lanes via `vpexpandb`, and blend - fully vectorized, no scalar per-lane writeback.
-            __m128i const astral_bytes = _mm512_cvtepi32_epi8(astral_class);
-            __m512i const astral_broadcast = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
-                                                                      _mm512_castsi128_si512(astral_bytes));
-            classes = _mm512_mask_mov_epi8(classes, _cvtu64_mask64((sz_u64_t)matched << (chunk * 16)),
-                                           astral_broadcast);
+            __m128i const astral_bytes_u8x16 = _mm512_cvtepi32_epi8(astral_class_u32x16);
+            __m512i const astral_broadcast_u8x64 = _mm512_maskz_expand_epi8(_cvtu64_mask64(0xFFFFull << (chunk * 16)),
+                                                                            _mm512_castsi128_si512(astral_bytes_u8x16));
+            classes_u8x64 = _mm512_mask_mov_epi8(classes_u8x64, _cvtu64_mask64((sz_u64_t)matched_m16 << (chunk * 16)),
+                                                 astral_broadcast_u8x64);
         }
     }
-    return classes;
+    return classes_u8x64;
 }
 
 #pragma endregion Sentence_Break classifier
@@ -222,13 +237,14 @@ SZ_HELPER_AUTO __m512i sz_utf8_sentence_break_classify_window_icelake_(         
  *          in registers instead of spilling through an `sret`.
  */
 SZ_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
-    __m512i classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
+    __m512i classes_u8x64, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t frame;
     for (int cls = 0; cls < 15; ++cls)
-        frame.by_class[cls] = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes, _mm512_set1_epi8((char)cls))) & valid;
+        frame.by_class[cls] = _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)cls))) &
+                              valid;
     sz_u8_t dense_classes[64];
-    _mm512_storeu_si512((void *)dense_classes, classes);
+    _mm512_storeu_si512((void *)dense_classes, classes_u8x64);
     return sz_utf8_sentence_break_decide_block_(&frame, dense_classes, count, carry, more_text);
 }
 
@@ -250,7 +266,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t sentence_start = 0;
     sz_size_t position = 0;
-    __m512i const lane_identity = sz_utf8_lane_identity_icelake_();
+    __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
 
     sz_utf8_sentence_break_carry_t carry;
     carry.have_prev = 0;
@@ -263,46 +279,51 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
 
     while (position < length) {
         sz_utf8_rune_window_t const decoded = sz_utf8_rune_decode_window_icelake_(text_u8 + position, length - position,
-                                                                                  lane_identity);
+                                                                                  lane_identity_u8x64);
         sz_size_t const loaded = decoded.loaded;
-        __mmask64 const lead_continuation = (position == 0) ? (__mmask64)1 : (__mmask64)0;
-        __mmask64 const codepoint_starts = decoded.codepoint_starts | lead_continuation;
-        sz_u64_t const start_bytes = _cvtmask64_u64(codepoint_starts);
+        __mmask64 const lead_continuation_m64 = (position == 0) ? (__mmask64)1 : (__mmask64)0;
+        __mmask64 const codepoint_starts_m64 = decoded.codepoint_starts | lead_continuation_m64;
+        sz_u64_t const start_bytes = _cvtmask64_u64(codepoint_starts_m64);
 
-        __m512i const window = decoded.window;
-        __mmask64 const keep1 = sz_u64_mask_until_(loaded >= 1 ? loaded - 1 : 0);
-        __mmask64 const keep2 = sz_u64_mask_until_(loaded >= 2 ? loaded - 2 : 0);
-        __mmask64 const keep3 = sz_u64_mask_until_(loaded >= 3 ? loaded - 3 : 0);
-        __m512i const next1 = _mm512_maskz_permutexvar_epi8(keep1, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(1)),
-                                                            window);
-        __m512i const next2 = _mm512_maskz_permutexvar_epi8(keep2, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(2)),
-                                                            window);
-        __m512i const next3 = _mm512_maskz_permutexvar_epi8(keep3, _mm512_add_epi8(lane_identity, _mm512_set1_epi8(3)),
-                                                            window);
+        __m512i const window_u8x64 = decoded.window;
+        __mmask64 const keep1_m64 = sz_u64_mask_until_(loaded >= 1 ? loaded - 1 : 0);
+        __mmask64 const keep2_m64 = sz_u64_mask_until_(loaded >= 2 ? loaded - 2 : 0);
+        __mmask64 const keep3_m64 = sz_u64_mask_until_(loaded >= 3 ? loaded - 3 : 0);
+        __m512i const next1_u8x64 = _mm512_maskz_permutexvar_epi8(
+            keep1_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(1)), window_u8x64);
+        __m512i const next2_u8x64 = _mm512_maskz_permutexvar_epi8(
+            keep2_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(2)), window_u8x64);
+        __m512i const next3_u8x64 = _mm512_maskz_permutexvar_epi8(
+            keep3_m64, _mm512_add_epi8(lane_identity_u8x64, _mm512_set1_epi8(3)), window_u8x64);
 
-        __m512i const two_high = sz_utf8_srl8_icelake_(_mm512_and_si512(window, _mm512_set1_epi8(0x1F)), 2, 0x07);
-        __m512i const two_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x03)), 6),
-                                                _mm512_and_si512(next1, _mm512_set1_epi8(0x3F)));
-        __m512i const three_high = _mm512_or_si512(
-            _mm512_slli_epi16(_mm512_and_si512(window, _mm512_set1_epi8(0x0F)), 4),
-            sz_utf8_srl8_icelake_(next1, 2, 0x0F));
-        __m512i const three_low = _mm512_or_si512(_mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x03)), 6),
-                                                  _mm512_and_si512(next2, _mm512_set1_epi8(0x3F)));
-        __m512i const four_low = _mm512_or_si512(_mm512_and_si512(next3, _mm512_set1_epi8(0x3F)),
-                                                 _mm512_slli_epi16(_mm512_and_si512(next2, _mm512_set1_epi8(0x03)), 6));
-        __m512i const four_high = _mm512_or_si512(
-            sz_utf8_srl8_icelake_(next2, 2, 0x0F),
-            _mm512_slli_epi16(_mm512_and_si512(next1, _mm512_set1_epi8(0x0F)), 4));
-        __m512i high = _mm512_setzero_si512();
-        high = _mm512_mask_mov_epi8(high, decoded.two_byte_starts, two_high);
-        high = _mm512_mask_mov_epi8(high, decoded.three_byte_starts, three_high);
-        high = _mm512_mask_mov_epi8(high, decoded.four_byte_starts, four_high);
-        __m512i low = window;
-        low = _mm512_mask_mov_epi8(low, decoded.two_byte_starts, two_low);
-        low = _mm512_mask_mov_epi8(low, decoded.three_byte_starts, three_low);
-        low = _mm512_mask_mov_epi8(low, decoded.four_byte_starts, four_low);
-        __m512i const classes = sz_utf8_sentence_break_classify_window_icelake_(
-            window, next1, next2, next3, high, low, decoded.four_byte_starts, codepoint_starts);
+        __m512i const two_high_u8x64 = sz_utf8_srl8_icelake_(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x1F)), 2,
+                                                             0x07);
+        __m512i const two_low_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x03)), 6),
+            _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F)));
+        __m512i const three_high_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_icelake_(next1_u8x64, 2, 0x0F));
+        __m512i const three_low_u8x64 = _mm512_or_si512(
+            _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x03)), 6),
+            _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F)));
+        __m512i const four_low_u8x64 = _mm512_or_si512(
+            _mm512_and_si512(next3_u8x64, _mm512_set1_epi8(0x3F)),
+            _mm512_slli_epi16(_mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x03)), 6));
+        __m512i const four_high_u8x64 = _mm512_or_si512(
+            sz_utf8_srl8_icelake_(next2_u8x64, 2, 0x0F),
+            _mm512_slli_epi16(_mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x0F)), 4));
+        __m512i high_u8x64 = _mm512_setzero_si512();
+        high_u8x64 = _mm512_mask_mov_epi8(high_u8x64, decoded.two_byte_starts, two_high_u8x64);
+        high_u8x64 = _mm512_mask_mov_epi8(high_u8x64, decoded.three_byte_starts, three_high_u8x64);
+        high_u8x64 = _mm512_mask_mov_epi8(high_u8x64, decoded.four_byte_starts, four_high_u8x64);
+        __m512i low_u8x64 = window_u8x64;
+        low_u8x64 = _mm512_mask_mov_epi8(low_u8x64, decoded.two_byte_starts, two_low_u8x64);
+        low_u8x64 = _mm512_mask_mov_epi8(low_u8x64, decoded.three_byte_starts, three_low_u8x64);
+        low_u8x64 = _mm512_mask_mov_epi8(low_u8x64, decoded.four_byte_starts, four_low_u8x64);
+        __m512i const classes_u8x64 = sz_utf8_sentence_break_classify_window_icelake_(
+            window_u8x64, next1_u8x64, next2_u8x64, next3_u8x64, high_u8x64, low_u8x64, decoded.four_byte_starts,
+            codepoint_starts_m64);
 
         sz_bool_t const more_text = (position + loaded < length) ? sz_true_k : sz_false_k;
 
@@ -331,11 +352,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
         sz_u64_t const complete_mask = sz_u64_mask_until_(complete_limit);
         sz_u64_t const dense_start_lanes = start_bytes & complete_mask;
         sz_size_t const dense_count = (sz_size_t)_mm_popcnt_u64(dense_start_lanes);
-        __m512i const dense_classes = _mm512_maskz_compress_epi8(_cvtu64_mask64(dense_start_lanes), classes);
+        __m512i const dense_classes_u8x64 = _mm512_maskz_compress_epi8(_cvtu64_mask64(dense_start_lanes),
+                                                                       classes_u8x64);
 
         sz_utf8_sentence_break_carry_t carry_full = carry;
-        sz_utf8_sentence_break_window_t const win = sz_utf8_sentence_break_block_breaks_(dense_classes, dense_count,
-                                                                                         &carry_full, more_text);
+        sz_utf8_sentence_break_window_t const win = sz_utf8_sentence_break_block_breaks_(
+            dense_classes_u8x64, dense_count, &carry_full, more_text);
 
         // Resolve a previously deferred SB8 boundary before any of this window's boundaries.
         if (sb8_pending_active && win.sb8_resolution != 0) {
@@ -370,7 +392,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
             byte_adv = (sz_size_t)sz_u64_ctz(upto);
         }
 
-        sentences = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity, sentence_starts,
+        sentences = sz_utf8_rune_drain_forward_(boundary_lanes, position, lane_identity_u8x64, sentence_starts,
                                                 sentence_lengths, sentences, sentences_capacity, &sentence_start);
         if (sentences == sentences_capacity) {
             if (bytes_consumed) *bytes_consumed = sentence_start;
@@ -384,7 +406,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_sentences_icelake(         //
         else if (dense_adv > 0) {
             // SB8 clamp strictly before the dense edge: rebuild the carry to the clamp point.
             sz_utf8_sentence_break_carry_t carry_to_edge = carry;
-            sz_utf8_sentence_break_block_breaks_(dense_classes, dense_adv, &carry_to_edge, sz_true_k);
+            sz_utf8_sentence_break_block_breaks_(dense_classes_u8x64, dense_adv, &carry_to_edge, sz_true_k);
             carry = carry_to_edge;
             position += byte_adv;
         }

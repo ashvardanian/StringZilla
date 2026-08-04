@@ -50,8 +50,8 @@ SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cpt
     // for the body.
     sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
     sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
-    __mmask64 head_mask = sz_u64_mask_until_(head_length);
-    __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
+    __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+    __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
 
     // We use VPERMI2B (`_mm512_permutex2var_epi8`) to perform 256-entry lookups efficiently.
     // VPERMI2B uses bit 6 of each index to select between two 64-byte tables, allowing us to
@@ -66,19 +66,19 @@ SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cpt
     lut_128_to_191_vec.zmm = _mm512_loadu_si512((lut + 128));
     lut_192_to_255_vec.zmm = _mm512_loadu_si512((lut + 192));
 
-    __mmask64 high_bit_mask;
+    __mmask64 high_bit_mask_m64;
     sz_u512_vec_t source_vec, low_half_vec, high_half_vec, result_vec;
 
     // Handling the head.
     if (head_length) {
-        source_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, source);
+        source_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, source);
         // VPERMI2B: bit 6 selects between the two tables, bits 0-5 index within each
         low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
         high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
         // VPMOVB2M: extract bit 7 (sign bit) of each byte directly to mask - uses port 0, not port 5
-        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
-        _mm512_mask_storeu_epi8(target, head_mask, result_vec.zmm);
+        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
+        _mm512_mask_storeu_epi8(target, head_mask_m64, result_vec.zmm);
         source += head_length, target += head_length, length -= head_length;
     }
 
@@ -87,20 +87,20 @@ SZ_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cpt
         source_vec.zmm = _mm512_loadu_si512(source);
         low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
         high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
-        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
+        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
         _mm512_store_si512(target, result_vec.zmm); //! Aligned store, our main weapon!
         source += 64, target += 64, length -= 64;
     }
 
     // Handling the tail.
     if (tail_length) {
-        source_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, source);
+        source_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_m64, source);
         low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
         high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
-        high_bit_mask = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask, low_half_vec.zmm, high_half_vec.zmm);
-        _mm512_mask_storeu_epi8(target, tail_mask, result_vec.zmm);
+        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
+        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
+        _mm512_mask_storeu_epi8(target, tail_mask_m64, result_vec.zmm);
         source += tail_length, target += tail_length, length -= tail_length;
     }
 }

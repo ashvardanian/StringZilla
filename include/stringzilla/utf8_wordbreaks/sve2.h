@@ -226,8 +226,10 @@ SZ_HELPER_AUTO void sz_utf8_word_classify_window_sve2_(                //
 
 /** @brief Full-width SVE2 rule engine; the portable `sz_u64_t` engine's `<<k` / `>>1` lane algebra is realized on
  *         per-lane 0/1 vectors via `svext`-based lane shifts (so it scales beyond a 64-bit movemask). */
-SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a) { return svinsr_n_u8(a, 0); }
-SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a) { return svext_u8(a, svdup_n_u8(0), 1); }
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a_u8x) { return svinsr_n_u8(a_u8x, 0); }
+SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) {
+    return svext_u8(a_u8x, svdup_n_u8(0), 1);
+}
 // The `svext` lane-shift amount must be an integer-constant expression, so the variable-`k` helpers are
 // function-like macros rather than functions: the literal `k` at each call site reaches the intrinsic
 // unchanged. Macros also keep this header a single code path for C99 and C++ — this file is compiled into
@@ -236,9 +238,9 @@ SZ_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a) { retu
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed, svuint8_t gate) {
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
-    svuint8_t bits_u8x = seed, reach_u8x = gate;
+    svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 1), reach_u8x));
     reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 1));
@@ -258,9 +260,9 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed, svu
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed, svuint8_t gate) {
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
-    svuint8_t bits_u8x = seed, reach_u8x = gate;
+    svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 1), reach_u8x));
     reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_dn_sve2_(reach_u8x, 1));
@@ -280,16 +282,17 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed, svui
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits, svuint8_t reach) {
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits_u8x, svuint8_t reach_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     for (int s = 0; s < sz_utf8_word_break_smear_steps_k; ++s)
-        bits = svorr_u8_x(pg_b8x, bits, svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up1_sve2_(bits), reach));
-    return bits;
+        bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
+                              svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up1_sve2_(bits_u8x), reach_u8x));
+    return bits_u8x;
 }
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri, svuint8_t run_gate, int inbound_parity,
-                                                          svuint8_t *inclusive_out) {
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri_u8x, svuint8_t run_gate_u8x, int inbound_parity,
+                                                          svuint8_t *inclusive_out_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
-    svuint8_t bits_u8x = ri, reach_u8x = run_gate;
+    svuint8_t bits_u8x = ri_u8x, reach_u8x = run_gate_u8x;
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 1), reach_u8x));
     reach_u8x = svand_u8_x(pg_b8x, reach_u8x, sz_utf8_word_break_lane_up_sve2_(reach_u8x, 1));
@@ -309,33 +312,36 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri, svuint8_
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     if (inbound_parity) {
         svuint8_t const lane0_u8x = svdup_u8_z(svwhilelt_b8_u64(0, 1), 1);
-        bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
-                              sz_utf8_word_break_fill_right_sve2_(svand_u8_x(pg_b8x, run_gate, lane0_u8x), run_gate));
+        bits_u8x = sveor_u8_x(
+            pg_b8x, bits_u8x,
+            sz_utf8_word_break_fill_right_sve2_(svand_u8_x(pg_b8x, run_gate_u8x, lane0_u8x), run_gate_u8x));
     }
-    *inclusive_out = bits_u8x;
-    return svand_u8_x(pg_b8x, ri, sveor_u8_x(pg_b8x, bits_u8x, ri));
+    *inclusive_out_u8x = bits_u8x;
+    return svand_u8_x(pg_b8x, ri_u8x, sveor_u8_x(pg_b8x, bits_u8x, ri_u8x));
 }
-SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m, svuint8_t v) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
-    svbool_t const p_b8x = svcmpne_n_u8(pg_b8x, m, 0);
+    svbool_t const p_b8x = svcmpne_n_u8(pg_b8x, m_u8x, 0);
     svbool_t const first_b8x = svand_b_z(svptrue_b8(), p_b8x, svbrka_b_z(svptrue_b8(), p_b8x));
-    return svlastb_u8(first_b8x, v);
+    return svlastb_u8(first_b8x, v_u8x);
 }
-SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m, svuint8_t v) {
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
-    return svlastb_u8(svcmpne_n_u8(pg_b8x, m, 0), v);
+    return svlastb_u8(svcmpne_n_u8(pg_b8x, m_u8x, 0), v_u8x);
 }
-SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v) { return svlasta_u8(svpfalse_b(), v); }
+SZ_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v_u8x) { return svlasta_u8(svpfalse_b(), v_u8x); }
 
-SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                                                    //
-    svuint8_t class_aletter_in, svuint8_t class_hebrew_in, svuint8_t class_numeric_in, svuint8_t class_katakana_in, //
-    svuint8_t class_extendnumlet_in, svuint8_t class_extend_in, svuint8_t class_zwj_in, svuint8_t class_format_in,  //
-    svuint8_t class_midletter_in, svuint8_t class_midnum_in, svuint8_t class_mid_quotes_in, svuint8_t class_cr_in,  //
-    svuint8_t class_lf_in, svuint8_t class_newline_in, svuint8_t class_regional_in,                                 //
-    svuint8_t wseg_in, svuint8_t pictographic_in, svuint8_t double_quote_byte_in, svuint8_t single_quote_byte_in,   //
-    svuint8_t start_bytes_all_u8x, svuint8_t continuation_all_u8x, svuint8_t forced_other_u8x,                      //
-    svuint8_t length_two_u8x, svuint8_t length_three_u8x, svuint8_t length_four_u8x, svuint8_t classes_u8x,         //
-    sz_size_t loaded, sz_utf8_word_break_carry_t *carry, sz_bool_t more_text, svbool_t *breaks_out,
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                                            //
+    svuint8_t class_aletter_in_u8x, svuint8_t class_hebrew_in_u8x, svuint8_t class_numeric_in_u8x,          //
+    svuint8_t class_katakana_in_u8x, svuint8_t class_extendnumlet_in_u8x, svuint8_t class_extend_in_u8x,    //
+    svuint8_t class_zwj_in_u8x, svuint8_t class_format_in_u8x, svuint8_t class_midletter_in_u8x,            //
+    svuint8_t class_midnum_in_u8x, svuint8_t class_mid_quotes_in_u8x, svuint8_t class_cr_in_u8x,            //
+    svuint8_t class_lf_in_u8x, svuint8_t class_newline_in_u8x, svuint8_t class_regional_in_u8x,             //
+    svuint8_t wseg_in_u8x, svuint8_t pictographic_in_u8x, svuint8_t double_quote_byte_in_u8x,               //
+    svuint8_t single_quote_byte_in_u8x,                                                                     //
+    svuint8_t start_bytes_all_u8x, svuint8_t continuation_all_u8x, svuint8_t forced_other_u8x,              //
+    svuint8_t length_two_u8x, svuint8_t length_three_u8x, svuint8_t length_four_u8x, svuint8_t classes_u8x, //
+    sz_size_t loaded, sz_utf8_word_break_carry_t *carry, sz_bool_t more_text, svbool_t *breaks_out_b8x,
     sz_u8_t *deferred_break_out) {
     svbool_t const pg_b8x = svptrue_b8();
 
@@ -371,31 +377,32 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
 
     sz_u8_t left_property = carry->left_property;
 
-    svuint8_t const class_aletter_u8x = svand_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_aletter_in, class_hebrew_in),
-                                                   start_bytes_u8x);
-    svuint8_t const class_hebrew_u8x = svand_u8_x(pg_b8x, class_hebrew_in, start_bytes_u8x);
-    svuint8_t const class_numeric_u8x = svand_u8_x(pg_b8x, class_numeric_in, start_bytes_u8x);
-    svuint8_t const class_katakana_u8x = svand_u8_x(pg_b8x, class_katakana_in, start_bytes_u8x);
-    svuint8_t const class_extendnumlet_u8x = svand_u8_x(pg_b8x, class_extendnumlet_in, start_bytes_u8x);
+    svuint8_t const class_aletter_u8x = svand_u8_x(
+        pg_b8x, svorr_u8_x(pg_b8x, class_aletter_in_u8x, class_hebrew_in_u8x), start_bytes_u8x);
+    svuint8_t const class_hebrew_u8x = svand_u8_x(pg_b8x, class_hebrew_in_u8x, start_bytes_u8x);
+    svuint8_t const class_numeric_u8x = svand_u8_x(pg_b8x, class_numeric_in_u8x, start_bytes_u8x);
+    svuint8_t const class_katakana_u8x = svand_u8_x(pg_b8x, class_katakana_in_u8x, start_bytes_u8x);
+    svuint8_t const class_extendnumlet_u8x = svand_u8_x(pg_b8x, class_extendnumlet_in_u8x, start_bytes_u8x);
     svuint8_t const lead_ignorable_u8x = svand_u8_x(
-        pg_b8x, svorr_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_extend_in, class_zwj_in), class_format_in),
+        pg_b8x, svorr_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_extend_in_u8x, class_zwj_in_u8x), class_format_in_u8x),
         start_bytes_u8x);
 
     svuint8_t const mid_letter_or_quotes_u8x = svand_u8_x(
-        pg_b8x, svorr_u8_x(pg_b8x, class_midletter_in, class_mid_quotes_in), start_bytes_u8x);
-    svuint8_t const mid_num_or_quotes_u8x = svand_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_midnum_in, class_mid_quotes_in),
-                                                       start_bytes_u8x);
-    svuint8_t const mid_quotes_u8x = svand_u8_x(pg_b8x, class_mid_quotes_in, start_bytes_u8x);
+        pg_b8x, svorr_u8_x(pg_b8x, class_midletter_in_u8x, class_mid_quotes_in_u8x), start_bytes_u8x);
+    svuint8_t const mid_num_or_quotes_u8x = svand_u8_x(
+        pg_b8x, svorr_u8_x(pg_b8x, class_midnum_in_u8x, class_mid_quotes_in_u8x), start_bytes_u8x);
+    svuint8_t const mid_quotes_u8x = svand_u8_x(pg_b8x, class_mid_quotes_in_u8x, start_bytes_u8x);
     svuint8_t const mid_any_u8x = svand_u8_x(
-        pg_b8x, svorr_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_midletter_in, class_midnum_in), class_mid_quotes_in),
+        pg_b8x,
+        svorr_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_midletter_in_u8x, class_midnum_in_u8x), class_mid_quotes_in_u8x),
         start_bytes_u8x);
-    svuint8_t const class_cr_u8x = svand_u8_x(pg_b8x, class_cr_in, start_bytes_u8x);
-    svuint8_t const class_lf_u8x = svand_u8_x(pg_b8x, class_lf_in, start_bytes_u8x);
+    svuint8_t const class_cr_u8x = svand_u8_x(pg_b8x, class_cr_in_u8x, start_bytes_u8x);
+    svuint8_t const class_lf_u8x = svand_u8_x(pg_b8x, class_lf_in_u8x, start_bytes_u8x);
     svuint8_t const class_newline_u8x = svorr_u8_x(pg_b8x, svorr_u8_x(pg_b8x, class_cr_u8x, class_lf_u8x),
-                                                   svand_u8_x(pg_b8x, class_newline_in, start_bytes_u8x));
-    svuint8_t const class_zwj_u8x = svand_u8_x(pg_b8x, class_zwj_in, start_bytes_u8x);
-    svuint8_t const class_regional_u8x = svand_u8_x(pg_b8x, class_regional_in, start_bytes_u8x);
-    svuint8_t const wseg_u8x = svand_u8_x(pg_b8x, svand_u8_x(pg_b8x, wseg_in, start_bytes_u8x),
+                                                   svand_u8_x(pg_b8x, class_newline_in_u8x, start_bytes_u8x));
+    svuint8_t const class_zwj_u8x = svand_u8_x(pg_b8x, class_zwj_in_u8x, start_bytes_u8x);
+    svuint8_t const class_regional_u8x = svand_u8_x(pg_b8x, class_regional_in_u8x, start_bytes_u8x);
+    svuint8_t const wseg_u8x = svand_u8_x(pg_b8x, svand_u8_x(pg_b8x, wseg_in_u8x, start_bytes_u8x),
                                           sveor_n_u8_x(pg_b8x, truncated_u8x, 1));
 
     svuint8_t const flow_ignorable_u8x = svorr_u8_x(pg_b8x, continuation_u8x, lead_ignorable_u8x);
@@ -438,7 +445,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
     svuint8_t const seed_numeric_pre_u8x = left_is_numeric ? edge_region_u8x : zeros_u8x;
     svuint8_t const seed_hebrew_pre_u8x = left_is_hebrew ? edge_region_u8x : zeros_u8x;
 
-    svuint8_t const double_quote_u8x = svand_u8_x(pg_b8x, mid_quotes_u8x, double_quote_byte_in);
+    svuint8_t const double_quote_u8x = svand_u8_x(pg_b8x, mid_quotes_u8x, double_quote_byte_in_u8x);
     svuint8_t const mid_letter_quotes_no_double_u8x = svand_u8_x(pg_b8x, mid_letter_or_quotes_u8x,
                                                                  sveor_n_u8_x(pg_b8x, double_quote_u8x, 1));
     svuint8_t const mid_num_quotes_no_double_u8x = svand_u8_x(pg_b8x, mid_num_or_quotes_u8x,
@@ -548,7 +555,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
     join_u8x = svorr_u8_x(pg_b8x, join_u8x, svand_u8_x(pg_b8x, previous_cr_u8x, class_lf_u8x));
 
     if (svptest_any(svptrue_b8(), svcmpne_n_u8(pg_b8x, class_zwj_u8x, 0)) || carry->prev_ends_in_zwj) {
-        svuint8_t const pictographic_u8x = svand_u8_x(pg_b8x, svand_u8_x(pg_b8x, pictographic_in, start_bytes_u8x),
+        svuint8_t const pictographic_u8x = svand_u8_x(pg_b8x, svand_u8_x(pg_b8x, pictographic_in_u8x, start_bytes_u8x),
                                                       sveor_n_u8_x(pg_b8x, truncated_u8x, 1));
         join_u8x = svorr_u8_x(pg_b8x, join_u8x, svand_u8_x(pg_b8x, previous_zwj_u8x, pictographic_u8x));
     }
@@ -581,7 +588,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
     svuint8_t const start_bytes_no_bridge_u8x = svand_u8_x(pg_b8x, start_bytes_u8x,
                                                            sveor_n_u8_x(pg_b8x, bridge_u8x, 1));
     svuint8_t boundary_u8x = svand_u8_x(pg_b8x, sveor_n_u8_x(pg_b8x, join_u8x, 1), start_bytes_no_bridge_u8x);
-    svuint8_t const single_quote_u8x = svand_u8_x(pg_b8x, mid_quotes_u8x, single_quote_byte_in);
+    svuint8_t const single_quote_u8x = svand_u8_x(pg_b8x, mid_quotes_u8x, single_quote_byte_in_u8x);
     boundary_u8x = svand_u8_x(pg_b8x, boundary_u8x,
                               sveor_n_u8_x(pg_b8x, svand_u8_x(pg_b8x, single_quote_u8x, previous_hebrew_u8x), 1));
     boundary_u8x = svand_u8_x(pg_b8x, boundary_u8x, sveor_n_u8_x(pg_b8x, lead_ignorable_u8x, 1));
@@ -674,7 +681,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
     }
 
     *deferred_break_out = deferred_break;
-    *breaks_out = svcmpne_n_u8(pg_b8x, boundary_u8x, 0);
+    *breaks_out_b8x = svcmpne_n_u8(pg_b8x, boundary_u8x, 0);
     return resolved;
 }
 
@@ -682,7 +689,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_decide_window_sve2_(                
  *          `sz_utf8_word_break_range16_one_neon_` (not-below: high greater, or equal-high with low at least lo;
  *          symmetric for not-above). Used by the WSegSpace / Extended_Pictographic scans inside @ref
  *          sz_utf8_word_break_resolve_window_sve2_. */
-SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high, svuint8_t low, sz_u16_t const *lo_t,
+SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t const *lo_t,
                                                           sz_u16_t const *hi_t, int count) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t acc_b8x = svpfalse_b();
@@ -690,11 +697,11 @@ SZ_HELPER_AUTO svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high, svuint
         sz_u8_t const lh = (sz_u8_t)(lo_t[i] >> 8), ll = (sz_u8_t)(lo_t[i] & 0xFF);
         sz_u8_t const hh = (sz_u8_t)(hi_t[i] >> 8), hl = (sz_u8_t)(hi_t[i] & 0xFF);
         svbool_t const ge_b8x = svorr_b_z(
-            pg_b8x, svcmpgt_n_u8(pg_b8x, high, lh),
-            svand_b_z(pg_b8x, svcmpeq_n_u8(pg_b8x, high, lh), svcmpge_n_u8(pg_b8x, low, ll)));
+            pg_b8x, svcmpgt_n_u8(pg_b8x, high_u8x, lh),
+            svand_b_z(pg_b8x, svcmpeq_n_u8(pg_b8x, high_u8x, lh), svcmpge_n_u8(pg_b8x, low_u8x, ll)));
         svbool_t const le_b8x = svorr_b_z(
-            pg_b8x, svcmplt_n_u8(pg_b8x, high, hh),
-            svand_b_z(pg_b8x, svcmpeq_n_u8(pg_b8x, high, hh), svcmple_n_u8(pg_b8x, low, hl)));
+            pg_b8x, svcmplt_n_u8(pg_b8x, high_u8x, hh),
+            svand_b_z(pg_b8x, svcmpeq_n_u8(pg_b8x, high_u8x, hh), svcmple_n_u8(pg_b8x, low_u8x, hl)));
         acc_b8x = svorr_b_z(pg_b8x, acc_b8x, svand_b_z(pg_b8x, ge_b8x, le_b8x));
     }
     return svdup_u8_z(acc_b8x, 1);
@@ -709,7 +716,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(               
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,                    //
     sz_u64_t continuation_all, sz_u64_t forced_other, sz_u64_t four_byte_starts,                                   //
     sz_size_t loaded, sz_size_t complete_limit, sz_bool_t more_text, int want_pictographic,                        //
-    sz_utf8_word_break_carry_t *carry, svbool_t *breaks_out, sz_u8_t *deferred_break_out) {
+    sz_utf8_word_break_carry_t *carry, svbool_t *breaks_out_b8x, sz_u8_t *deferred_break_out) {
 
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)loaded);
@@ -830,7 +837,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(               
         class_cr_u8x, class_lf_u8x, class_newline_u8x, class_regional_u8x, wseg_u8x, pictographic_u8x,
         double_quote_byte_u8x, single_quote_byte_u8x, start_bytes_u8x, continuation_u8x, forced_other_u8x,
         length_two_u8x, length_three_u8x, length_four_u8x, classes_u8x, complete_limit, &carry_full, more_text,
-        breaks_out, deferred_break_out);
+        breaks_out_b8x, deferred_break_out);
     if (adv > 0 && adv < complete_limit) {
         sz_utf8_word_break_carry_t carry_to_edge = *carry;
         svbool_t tmp_b8x;
@@ -848,17 +855,17 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_word_break_resolve_window_sve2_(               
     return adv;
 }
 
-/** @brief In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of @p boundary_b8 is
+/** @brief In-register boundary drain over a full byte-vector of lanes: each 32-bit quarter of @p boundary_b8x is
  *         compacted, widened to absolute 64-bit positions, and chained through the carried open `word_start` with an
  *         `svinsr` shift-in, so consecutive boundaries become (start, length) pairs without a stack round-trip. */
-SZ_HELPER_AUTO sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8, sz_size_t base, sz_size_t *starts,
+SZ_HELPER_AUTO sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
                                                   sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
                                                   sz_size_t *word_start_io) {
     svbool_t const pg_b32x = svptrue_b32();
     svbool_t const pg_b64x = svptrue_b64();
     sz_size_t const quarter_lanes = svcntw();
     sz_size_t const half_lanes = svcntd();
-    svuint8_t const flags_u8x = svdup_u8_z(boundary_b8, 1);
+    svuint8_t const flags_u8x = svdup_u8_z(boundary_b8x, 1);
     svuint16_t const half_lo_u16x = svunpklo_u16(flags_u8x);
     svuint16_t const half_hi_u16x = svunpkhi_u16(flags_u8x);
     sz_size_t word_start = *word_start_io;

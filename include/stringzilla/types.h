@@ -1698,14 +1698,15 @@ SZ_HELPER_AUTO __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
  *  @brief Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
-SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
-    sz_u64_vec_t vec;
-    vec.u64 = ~(a.u64 ^ b.u64);
+SZ_HELPER_AUTO sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a_vec, sz_u64_vec_t b_vec) {
+    sz_u64_vec_t result_vec;
+    result_vec.u64 = ~(a_vec.u64 ^ b_vec.u64);
     // The match is valid, if every bit within each byte is set.
     // For that take the bottom 7 bits of each byte, add one to them,
     // and if this sets the top bit to one, then all the 7 bits are ones as well.
-    vec.u64 = ((vec.u64 & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) & ((vec.u64 & 0x8080808080808080ull));
-    return vec;
+    result_vec.u64 = ((result_vec.u64 & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) &
+                     ((result_vec.u64 & 0x8080808080808080ull));
+    return result_vec;
 }
 
 /**
@@ -1808,10 +1809,10 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
  */
 SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u16_vec_t result;
-    result.u8s[0] = ptr[0];
-    result.u8s[1] = ptr[1];
-    return result;
+    sz_u16_vec_t result_vec;
+    result_vec.u8s[0] = ptr[0];
+    result_vec.u8s[1] = ptr[1];
+    return result_vec;
 #elif defined(_MSC_VER) && !defined(__clang__)
 #if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u16_vec_t *)ptr);
@@ -1819,8 +1820,8 @@ SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u16_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u16_vec_t const *result = (sz_u16_vec_t const *)ptr;
-    return *result;
+    __attribute__((aligned(1))) sz_u16_vec_t const *result_vec = (sz_u16_vec_t const *)ptr;
+    return *result_vec;
 #endif
 }
 
@@ -1828,12 +1829,12 @@ SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
  */
 SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u32_vec_t result;
-    result.u8s[0] = ptr[0];
-    result.u8s[1] = ptr[1];
-    result.u8s[2] = ptr[2];
-    result.u8s[3] = ptr[3];
-    return result;
+    sz_u32_vec_t result_vec;
+    result_vec.u8s[0] = ptr[0];
+    result_vec.u8s[1] = ptr[1];
+    result_vec.u8s[2] = ptr[2];
+    result_vec.u8s[3] = ptr[3];
+    return result_vec;
 #elif defined(_MSC_VER) && !defined(__clang__)
 #if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u32_vec_t *)ptr);
@@ -1841,8 +1842,8 @@ SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u32_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u32_vec_t const *result = (sz_u32_vec_t const *)ptr;
-    return *result;
+    __attribute__((aligned(1))) sz_u32_vec_t const *result_vec = (sz_u32_vec_t const *)ptr;
+    return *result_vec;
 #endif
 }
 
@@ -1850,16 +1851,16 @@ SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
  */
 SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u64_vec_t result;
-    result.u8s[0] = ptr[0];
-    result.u8s[1] = ptr[1];
-    result.u8s[2] = ptr[2];
-    result.u8s[3] = ptr[3];
-    result.u8s[4] = ptr[4];
-    result.u8s[5] = ptr[5];
-    result.u8s[6] = ptr[6];
-    result.u8s[7] = ptr[7];
-    return result;
+    sz_u64_vec_t result_vec;
+    result_vec.u8s[0] = ptr[0];
+    result_vec.u8s[1] = ptr[1];
+    result_vec.u8s[2] = ptr[2];
+    result_vec.u8s[3] = ptr[3];
+    result_vec.u8s[4] = ptr[4];
+    result_vec.u8s[5] = ptr[5];
+    result_vec.u8s[6] = ptr[6];
+    result_vec.u8s[7] = ptr[7];
+    return result_vec;
 #elif defined(_MSC_VER) && !defined(__clang__)
 #if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u64_vec_t *)ptr);
@@ -1867,8 +1868,8 @@ SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u64_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u64_vec_t const *result = (sz_u64_vec_t const *)ptr;
-    return *result;
+    __attribute__((aligned(1))) sz_u64_vec_t const *result_vec = (sz_u64_vec_t const *)ptr;
+    return *result_vec;
 #endif
 }
 
@@ -1886,8 +1887,8 @@ SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
     ((__unaligned sz_u16_vec_t *)ptr)->u16 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u16_vec_t *result = (sz_u16_vec_t *)ptr;
-    result->u16 = value;
+    __attribute__((aligned(1))) sz_u16_vec_t *result_vec = (sz_u16_vec_t *)ptr;
+    result_vec->u16 = value;
 #endif
 }
 
@@ -1907,8 +1908,8 @@ SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
     ((__unaligned sz_u32_vec_t *)ptr)->u32 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u32_vec_t *result = (sz_u32_vec_t *)ptr;
-    result->u32 = value;
+    __attribute__((aligned(1))) sz_u32_vec_t *result_vec = (sz_u32_vec_t *)ptr;
+    result_vec->u32 = value;
 #endif
 }
 
@@ -1932,8 +1933,8 @@ SZ_HELPER_AUTO void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
     ((__unaligned sz_u64_vec_t *)ptr)->u64 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u64_vec_t *result = (sz_u64_vec_t *)ptr;
-    result->u64 = value;
+    __attribute__((aligned(1))) sz_u64_vec_t *result_vec = (sz_u64_vec_t *)ptr;
+    result_vec->u64 = value;
 #endif
 }
 

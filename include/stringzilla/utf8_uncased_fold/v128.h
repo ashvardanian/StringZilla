@@ -48,46 +48,51 @@ static sz_align_(16) sz_u8_t const sz_utf8_fold_latin_c6_deltas_v128_[64] = {
     0,    0x80, 0x80, 1,    0,    1, 0,    0x80, 1, 0,    0,    0, 1,    0,    0,    0};
 
 /** @brief Fold 16 ASCII bytes: lowercase `A`..`Z` by +0x20, identical to `sz_ascii_fold_`. */
-SZ_HELPER_INLINE v128_t sz_ascii_fold_v128_(v128_t bytes) {
+SZ_HELPER_INLINE v128_t sz_ascii_fold_v128_(v128_t bytes_u8x16) {
     // `(c - 'A') <= 25` (unsigned) == `c >= 'A' && c <= 'Z'`; add 0x20 there, nowhere else.
-    v128_t is_upper = wasm_u8x16_le(wasm_i8x16_sub(bytes, wasm_i8x16_splat('A')), wasm_i8x16_splat(25));
-    return wasm_i8x16_add(bytes, wasm_v128_and(is_upper, wasm_i8x16_splat(0x20)));
+    v128_t is_upper_u8x16 = wasm_u8x16_le(wasm_i8x16_sub(bytes_u8x16, wasm_i8x16_splat('A')), wasm_i8x16_splat(25));
+    return wasm_i8x16_add(bytes_u8x16, wasm_v128_and(is_upper_u8x16, wasm_i8x16_splat(0x20)));
 }
 
 /** @brief `result[0] = 0`, `result[i] = vector[i-1]` — the constant-shuffle twin of RVV `vslide1up(vector, 0)`. */
-SZ_HELPER_INLINE v128_t sz_utf8_slide1up_v128_(v128_t vector) {
-    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+SZ_HELPER_INLINE v128_t sz_utf8_slide1up_v128_(v128_t vector_u8x16) {
+    return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat(0), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 }
 /** @brief `result[i] = vector[i+1]`, `result[15] = carry` — the twin of RVV `vslide1down(vector, carry)`. */
-SZ_HELPER_INLINE v128_t sz_utf8_slide1down_v128_(v128_t vector, sz_u8_t carry) {
-    return wasm_i8x16_shuffle(vector, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
-                              15, 16);
+SZ_HELPER_INLINE v128_t sz_utf8_slide1down_v128_(v128_t vector_u8x16, sz_u8_t carry) {
+    return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+                              14, 15, 16);
 }
 
 /** @brief 0xFF where `(byte - start)` is unsigned-`< length`, i.e. `byte` in `[start, start+length)`. */
-SZ_HELPER_INLINE v128_t sz_utf8_in_range_v128_(v128_t bytes, sz_u8_t start, sz_u8_t length) {
-    return wasm_u8x16_lt(wasm_i8x16_sub(bytes, wasm_i8x16_splat((sz_i8_t)start)), wasm_i8x16_splat((sz_i8_t)length));
+SZ_HELPER_INLINE v128_t sz_utf8_in_range_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
+    return wasm_u8x16_lt(wasm_i8x16_sub(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)start)),
+                         wasm_i8x16_splat((sz_i8_t)length));
 }
 
 /** @brief Add `value` to the lanes flagged by `mask` (0xFF), leave the rest — twin of RVV `vadd_vx_m`. */
-SZ_HELPER_INLINE v128_t sz_utf8_masked_add_v128_(v128_t bytes, v128_t mask, sz_u8_t value) {
-    return wasm_i8x16_add(bytes, wasm_v128_and(mask, wasm_i8x16_splat((sz_i8_t)value)));
+SZ_HELPER_INLINE v128_t sz_utf8_masked_add_v128_(v128_t bytes_u8x16, v128_t mask_u8x16, sz_u8_t value) {
+    return wasm_i8x16_add(bytes_u8x16, wasm_v128_and(mask_u8x16, wasm_i8x16_splat((sz_i8_t)value)));
 }
 
 /** @brief 64-entry table lookup via four 16-entry swizzles selected by the index's high two bits. */
-SZ_HELPER_AUTO v128_t sz_utf8_gather64_v128_(v128_t lut0, v128_t lut1, v128_t lut2, v128_t lut3, v128_t index) {
-    v128_t local = wasm_v128_and(index, wasm_i8x16_splat(0x0F));
-    v128_t sub = wasm_u8x16_shr(index, 4); // index in [0, 63] -> sub in [0, 3]
-    v128_t result = wasm_i8x16_swizzle(lut0, local);
-    result = wasm_v128_bitselect(wasm_i8x16_swizzle(lut1, local), result, wasm_i8x16_eq(sub, wasm_i8x16_splat(1)));
-    result = wasm_v128_bitselect(wasm_i8x16_swizzle(lut2, local), result, wasm_i8x16_eq(sub, wasm_i8x16_splat(2)));
-    result = wasm_v128_bitselect(wasm_i8x16_swizzle(lut3, local), result, wasm_i8x16_eq(sub, wasm_i8x16_splat(3)));
-    return result;
+SZ_HELPER_AUTO v128_t sz_utf8_gather64_v128_(v128_t lut0_u8x16, v128_t lut1_u8x16, v128_t lut2_u8x16, v128_t lut3_u8x16,
+                                             v128_t index_u8x16) {
+    v128_t local_u8x16 = wasm_v128_and(index_u8x16, wasm_i8x16_splat(0x0F));
+    v128_t sub_u8x16 = wasm_u8x16_shr(index_u8x16, 4); // index in [0, 63] -> sub in [0, 3]
+    v128_t result_u8x16 = wasm_i8x16_swizzle(lut0_u8x16, local_u8x16);
+    result_u8x16 = wasm_v128_bitselect(wasm_i8x16_swizzle(lut1_u8x16, local_u8x16), result_u8x16,
+                                       wasm_i8x16_eq(sub_u8x16, wasm_i8x16_splat(1)));
+    result_u8x16 = wasm_v128_bitselect(wasm_i8x16_swizzle(lut2_u8x16, local_u8x16), result_u8x16,
+                                       wasm_i8x16_eq(sub_u8x16, wasm_i8x16_splat(2)));
+    result_u8x16 = wasm_v128_bitselect(wasm_i8x16_swizzle(lut3_u8x16, local_u8x16), result_u8x16,
+                                       wasm_i8x16_eq(sub_u8x16, wasm_i8x16_splat(3)));
+    return result_u8x16;
 }
 
 /** @brief Index of the first set lane in `mask` among the low `valid` lanes, or -1 — twin of RVV `vfirst_m`. */
-SZ_HELPER_INLINE int sz_utf8_first_set_v128_(v128_t mask, sz_size_t vector_length) {
-    sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(mask);
+SZ_HELPER_INLINE int sz_utf8_first_set_v128_(v128_t mask_u8x16, sz_size_t vector_length) {
+    sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(mask_u8x16);
     if (vector_length < 16) bits &= ((sz_u32_t)1 << vector_length) - 1;
     return bits ? (int)sz_u32_ctz(bits) : -1;
 }
@@ -102,39 +107,43 @@ SZ_HELPER_INLINE v128_t sz_utf8_load_window_v128_(sz_u8_t const *source_ptr, sz_
  *  A lead is well-formed iff its declared continuations follow AND it escapes the bad-special set: C0/C1,
  *  F5..FF (no width bit, auto-excluded), E0 with 2nd < 0xA0 (overlong), ED with 2nd >= 0xA0 (surrogate),
  *  F0 with 2nd < 0x90 (overlong), F4 with 2nd >= 0x90 (> U+10FFFF). The continuation-status of the bytes
- *  at +1/+2/+3 comes from sliding @p is_continuation down (carry 0): at the window boundary the slide reads
+ *  at +1/+2/+3 comes from sliding @p is_continuation_u8x16 down (carry 0): at the window boundary the slide reads
  *  zeros past the last lane, so a multi-byte lead whose continuations spill into the next window reads as
  *  malformed - coinciding with the incomplete-sequence trim, leaving valid output unchanged. The family
  *  handlers OR this into their stop mask so overlong, surrogate, truncated, and out-of-range leads are
  *  treated as foreign and resync one byte at a time, byte-for-byte with the serial reference. */
-SZ_HELPER_AUTO v128_t sz_utf8_malformed_lead_v128_(v128_t source, v128_t next, v128_t is_continuation, v128_t is_lead) {
-    v128_t continuation_plus1 = sz_utf8_slide1down_v128_(is_continuation, 0);
-    v128_t continuation_plus2 = sz_utf8_slide1down_v128_(continuation_plus1, 0);
-    v128_t continuation_plus3 = sz_utf8_slide1down_v128_(continuation_plus2, 0);
+SZ_HELPER_AUTO v128_t sz_utf8_malformed_lead_v128_(v128_t source_u8x16, v128_t next_u8x16, v128_t is_continuation_u8x16,
+                                                   v128_t is_lead_u8x16) {
+    v128_t continuation_plus1_u8x16 = sz_utf8_slide1down_v128_(is_continuation_u8x16, 0);
+    v128_t continuation_plus2_u8x16 = sz_utf8_slide1down_v128_(continuation_plus1_u8x16, 0);
+    v128_t continuation_plus3_u8x16 = sz_utf8_slide1down_v128_(continuation_plus2_u8x16, 0);
 
-    v128_t is_two_byte_lead = sz_utf8_in_range_v128_(source, 0xC2, 0x1E);   // C2..DF
-    v128_t is_three_byte_lead = sz_utf8_in_range_v128_(source, 0xE0, 0x10); // E0..EF
-    v128_t is_four_byte_lead = sz_utf8_in_range_v128_(source, 0xF0, 0x05);  // F0..F4
+    v128_t is_two_byte_lead_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xC2, 0x1E);   // C2..DF
+    v128_t is_three_byte_lead_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xE0, 0x10); // E0..EF
+    v128_t is_four_byte_lead_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xF0, 0x05);  // F0..F4
 
-    v128_t two_byte_complete = wasm_v128_and(is_two_byte_lead, continuation_plus1);
-    v128_t three_byte_complete = wasm_v128_and(is_three_byte_lead,
-                                               wasm_v128_and(continuation_plus1, continuation_plus2));
-    v128_t four_byte_complete = wasm_v128_and(
-        is_four_byte_lead, wasm_v128_and(continuation_plus1, wasm_v128_and(continuation_plus2, continuation_plus3)));
+    v128_t two_byte_complete_u8x16 = wasm_v128_and(is_two_byte_lead_u8x16, continuation_plus1_u8x16);
+    v128_t three_byte_complete_u8x16 = wasm_v128_and(is_three_byte_lead_u8x16,
+                                                     wasm_v128_and(continuation_plus1_u8x16, continuation_plus2_u8x16));
+    v128_t four_byte_complete_u8x16 = wasm_v128_and(
+        is_four_byte_lead_u8x16,
+        wasm_v128_and(continuation_plus1_u8x16, wasm_v128_and(continuation_plus2_u8x16, continuation_plus3_u8x16)));
 
-    v128_t e0_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xE0)),
-                                  wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
-    v128_t ed_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xED)),
-                                  wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
-    v128_t f0_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xF0)),
-                                  wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x90)));
-    v128_t f4_bad = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xF4)),
-                                  wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0x90)));
-    v128_t bad_special = wasm_v128_or(wasm_v128_or(e0_bad, ed_bad), wasm_v128_or(f0_bad, f4_bad));
+    v128_t e0_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0)),
+                                        wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t ed_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xED)),
+                                        wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t f0_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0)),
+                                        wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
+    v128_t f4_bad_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4)),
+                                        wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x90)));
+    v128_t bad_special_u8x16 = wasm_v128_or(wasm_v128_or(e0_bad_u8x16, ed_bad_u8x16),
+                                            wasm_v128_or(f0_bad_u8x16, f4_bad_u8x16));
 
-    v128_t well_formed = wasm_v128_andnot(
-        wasm_v128_or(two_byte_complete, wasm_v128_or(three_byte_complete, four_byte_complete)), bad_special);
-    return wasm_v128_andnot(is_lead, well_formed);
+    v128_t well_formed_u8x16 = wasm_v128_andnot(
+        wasm_v128_or(two_byte_complete_u8x16, wasm_v128_or(three_byte_complete_u8x16, four_byte_complete_u8x16)),
+        bad_special_u8x16);
+    return wasm_v128_andnot(is_lead_u8x16, well_formed_u8x16);
 }
 
 /** @brief Largest prefix of a window that does not split a trailing multi-byte sequence (twin of RVV trim). */
@@ -151,7 +160,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_trim_incomplete_v128_(sz_u8_t const *source_ptr
 
 /** @brief Common tail of every strip handler: resolve `consumed` from the first stop, store, set the flag. */
 SZ_HELPER_AUTO sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, sz_size_t vector_length,
-                                                    sz_size_t remaining, v128_t folded, int first_stop,
+                                                    sz_size_t remaining, v128_t folded_u8x16, int first_stop,
                                                     sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t consumed;
     if (first_stop >= 0) {
@@ -163,7 +172,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, s
         consumed = sz_utf8_trim_incomplete_v128_(source_ptr, vector_length, remaining);
         *needs_serial = 0;
     }
-    if (consumed) sz_store_partial_v128_((sz_ptr_t)destination_ptr, folded, consumed);
+    if (consumed) sz_store_partial_v128_((sz_ptr_t)destination_ptr, folded_u8x16, consumed);
     return consumed;
 }
 
@@ -175,70 +184,76 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_strip_finish_v128_(sz_u8_t const *source_ptr, s
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_latin_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                         sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
-    v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t previous = sz_utf8_slide1up_v128_(source);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t source_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+    v128_t previous_u8x16 = sz_utf8_slide1up_v128_(source_u8x16);
+    v128_t next_u8x16 = sz_utf8_slide1down_v128_(source_u8x16,
+                                                 (vector_length < remaining) ? source_ptr[vector_length] : 0);
 
-    v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                           wasm_i8x16_splat((sz_i8_t)0x80));
-    v128_t after_c2 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC2));
-    v128_t after_c3 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC3));
-    v128_t after_c4 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC4));
-    v128_t after_c5 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC5));
-    v128_t after_c6 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xC6));
+    v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                 wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t after_c2_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2));
+    v128_t after_c3_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3));
+    v128_t after_c4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC4));
+    v128_t after_c5_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC5));
+    v128_t after_c6_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xC6));
 
     // Latin Extended-A/B continuation deltas: pick the LUT of the preceding lead, only on continuation bytes.
-    v128_t low6 = wasm_v128_and(source, wasm_i8x16_splat(0x3F));
-    v128_t c4 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[48]), low6);
-    v128_t c5 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[48]), low6);
-    v128_t c6 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[0]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[16]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[32]),
-                                       wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[48]), low6);
-    v128_t delta = wasm_i8x16_splat(0);
-    delta = wasm_v128_bitselect(c4, delta, after_c4);
-    delta = wasm_v128_bitselect(c5, delta, after_c5);
-    delta = wasm_v128_bitselect(c6, delta, after_c6);
-    delta = wasm_v128_and(delta, is_continuation); // deltas apply only on continuation bytes
-    v128_t is_irregular = wasm_i8x16_ne(wasm_v128_and(delta, wasm_i8x16_splat((sz_i8_t)0x80)), wasm_i8x16_splat(0));
+    v128_t low6_u8x16 = wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x3F));
+    v128_t c4_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[48]), low6_u8x16);
+    v128_t c5_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c5_deltas_v128_[48]), low6_u8x16);
+    v128_t c6_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[0]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[16]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[32]),
+                                             wasm_v128_load(&sz_utf8_fold_latin_c6_deltas_v128_[48]), low6_u8x16);
+    v128_t delta_u8x16 = wasm_i8x16_splat(0);
+    delta_u8x16 = wasm_v128_bitselect(c4_u8x16, delta_u8x16, after_c4_u8x16);
+    delta_u8x16 = wasm_v128_bitselect(c5_u8x16, delta_u8x16, after_c5_u8x16);
+    delta_u8x16 = wasm_v128_bitselect(c6_u8x16, delta_u8x16, after_c6_u8x16);
+    delta_u8x16 = wasm_v128_and(delta_u8x16, is_continuation_u8x16); // deltas apply only on continuation bytes
+    v128_t is_irregular_u8x16 = wasm_i8x16_ne(wasm_v128_and(delta_u8x16, wasm_i8x16_splat((sz_i8_t)0x80)),
+                                              wasm_i8x16_splat(0));
 
     // Build the folded window: ASCII A-Z, Latin-1 upper +0x20, ß/µ replacements, then the Extended delta.
-    v128_t folded = sz_ascii_fold_v128_(source);
+    v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
     // Latin-1 Supplement 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20.
-    v128_t latin1_range = sz_utf8_in_range_v128_(source, 0x80, 0x1F);
-    v128_t is_latin1_upper = wasm_v128_andnot(wasm_v128_and(after_c3, latin1_range),
-                                              wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x97)));
-    folded = sz_utf8_masked_add_v128_(folded, is_latin1_upper, 0x20);
+    v128_t latin1_range_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x1F);
+    v128_t is_latin1_upper_u8x16 = wasm_v128_andnot(wasm_v128_and(after_c3_u8x16, latin1_range_u8x16),
+                                                    wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x97)));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_latin1_upper_u8x16, 0x20);
     // ß (C3 9F) -> "ss": both bytes become 's'.
-    v128_t eszett_lead = wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xC3)),
-                                       wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x9F)));
-    v128_t eszett_second = wasm_v128_and(after_c3, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x9F)));
-    folded = wasm_v128_bitselect(wasm_i8x16_splat('s'), folded, wasm_v128_or(eszett_lead, eszett_second));
+    v128_t eszett_lead_u8x16 = wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC3)),
+                                             wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x9F)));
+    v128_t eszett_second_u8x16 = wasm_v128_and(after_c3_u8x16,
+                                               wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x9F)));
+    folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat('s'), folded_u8x16,
+                                       wasm_v128_or(eszett_lead_u8x16, eszett_second_u8x16));
     // µ (C2 B5) -> μ (CE BC): lead byte becomes 0xCE, continuation 0xBC.
-    folded = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xCE), folded,
-                                 wasm_v128_and(wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xC2)),
-                                               wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB5))));
-    folded = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xBC), folded,
-                                 wasm_v128_and(after_c2, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xB5))));
+    folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xCE), folded_u8x16,
+                                       wasm_v128_and(wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2)),
+                                                     wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB5))));
+    folded_u8x16 = wasm_v128_bitselect(
+        wasm_i8x16_splat((sz_i8_t)0xBC), folded_u8x16,
+        wasm_v128_and(after_c2_u8x16, wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xB5))));
     // Latin Extended +1 parity delta (0x80 irregulars corrupt their lane but are trimmed off below).
-    folded = wasm_i8x16_add(folded, delta);
+    folded_u8x16 = wasm_i8x16_add(folded_u8x16, delta_u8x16);
 
     // Stops: any lead outside the C2-C6 family, or an irregular continuation.
-    v128_t is_non_ascii = wasm_u8x16_gt(source, wasm_i8x16_splat((sz_i8_t)0x7F));
-    v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
-    v128_t is_family_lead = sz_utf8_in_range_v128_(source, 0xC2, 5);
-    v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_family_lead);
-    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
-    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_irregular), malformed);
+    v128_t is_non_ascii_u8x16 = wasm_u8x16_gt(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x7F));
+    v128_t is_lead_u8x16 = wasm_v128_andnot(is_non_ascii_u8x16, is_continuation_u8x16);
+    v128_t is_family_lead_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xC2, 5);
+    v128_t is_foreign_lead_u8x16 = wasm_v128_andnot(is_lead_u8x16, is_family_lead_u8x16);
+    v128_t malformed_u8x16 = sz_utf8_malformed_lead_v128_(source_u8x16, next_u8x16, is_continuation_u8x16,
+                                                          is_lead_u8x16);
+    v128_t stop_u8x16 = wasm_v128_or(wasm_v128_or(is_foreign_lead_u8x16, is_irregular_u8x16), malformed_u8x16);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
-    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+    int first_stop = sz_utf8_first_set_v128_(stop_u8x16, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded_u8x16, first_stop, destination_ptr,
                                       needs_serial);
 }
 
@@ -248,37 +263,39 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source
     static
         sz_align_(16) sz_u8_t const second_byte_offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
-    v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
-    v128_t previous = sz_utf8_slide1up_v128_(source);
+    v128_t source_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+    v128_t next_u8x16 = sz_utf8_slide1down_v128_(source_u8x16,
+                                                 (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t previous_u8x16 = sz_utf8_slide1up_v128_(source_u8x16);
 
-    v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                           wasm_i8x16_splat((sz_i8_t)0x80));
-    v128_t is_d0 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD0));
-    v128_t is_d1 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD1));
-    v128_t after_d0 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD0));
-    v128_t is_non_ascii = wasm_u8x16_gt(source, wasm_i8x16_splat((sz_i8_t)0x7F));
-    v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
-    v128_t is_foreign_lead = wasm_v128_andnot(is_lead, wasm_v128_or(is_d0, is_d1));
+    v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                 wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t is_d0_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
+    v128_t is_d1_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD1));
+    v128_t after_d0_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD0));
+    v128_t is_non_ascii_u8x16 = wasm_u8x16_gt(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x7F));
+    v128_t is_lead_u8x16 = wasm_v128_andnot(is_non_ascii_u8x16, is_continuation_u8x16);
+    v128_t is_foreign_lead_u8x16 = wasm_v128_andnot(is_lead_u8x16, wasm_v128_or(is_d0_u8x16, is_d1_u8x16));
     // Cyrillic Extended-A (D1 A0+) folds by parity across blocks — leave it to serial.
-    v128_t is_extended = wasm_v128_and(is_d1, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xA0)));
-    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
-    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_extended), malformed);
+    v128_t is_extended_u8x16 = wasm_v128_and(is_d1_u8x16, wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t malformed_u8x16 = sz_utf8_malformed_lead_v128_(source_u8x16, next_u8x16, is_continuation_u8x16,
+                                                          is_lead_u8x16);
+    v128_t stop_u8x16 = wasm_v128_or(wasm_v128_or(is_foreign_lead_u8x16, is_extended_u8x16), malformed_u8x16);
 
     // Second-byte offset by high nibble, applied only after a D0 lead.
-    v128_t offsets_lut = wasm_v128_load(second_byte_offsets);
-    v128_t offset = wasm_i8x16_swizzle(offsets_lut, wasm_u8x16_shr(source, 4));
-    offset = wasm_v128_and(offset, after_d0);
-    v128_t folded = sz_ascii_fold_v128_(source);
-    folded = wasm_i8x16_add(folded, offset);
+    v128_t offsets_lut_u8x16 = wasm_v128_load(second_byte_offsets);
+    v128_t offset_u8x16 = wasm_i8x16_swizzle(offsets_lut_u8x16, wasm_u8x16_shr(source_u8x16, 4));
+    offset_u8x16 = wasm_v128_and(offset_u8x16, after_d0_u8x16);
+    v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+    folded_u8x16 = wasm_i8x16_add(folded_u8x16, offset_u8x16);
     // Lead rewrite D0 -> D1 (+1) where the next byte is 80-8F or A0-AF.
-    v128_t next_80_8f = sz_utf8_in_range_v128_(next, 0x80, 0x10);
-    v128_t next_a0_af = sz_utf8_in_range_v128_(next, 0xA0, 0x10);
-    v128_t needs_d1 = wasm_v128_and(is_d0, wasm_v128_or(next_80_8f, next_a0_af));
-    folded = sz_utf8_masked_add_v128_(folded, needs_d1, 1);
+    v128_t next_80_8f_u8x16 = sz_utf8_in_range_v128_(next_u8x16, 0x80, 0x10);
+    v128_t next_a0_af_u8x16 = sz_utf8_in_range_v128_(next_u8x16, 0xA0, 0x10);
+    v128_t needs_d1_u8x16 = wasm_v128_and(is_d0_u8x16, wasm_v128_or(next_80_8f_u8x16, next_a0_af_u8x16));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, needs_d1_u8x16, 1);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
-    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+    int first_stop = sz_utf8_first_set_v128_(stop_u8x16, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded_u8x16, first_stop, destination_ptr,
                                       needs_serial);
 }
 
@@ -286,44 +303,50 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_cyrillic_strip_v128_(sz_u8_t const *source
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                         sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
-    v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
-    v128_t previous = sz_utf8_slide1up_v128_(source);
+    v128_t source_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+    v128_t next_u8x16 = sz_utf8_slide1down_v128_(source_u8x16,
+                                                 (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t previous_u8x16 = sz_utf8_slide1up_v128_(source_u8x16);
 
-    v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                           wasm_i8x16_splat((sz_i8_t)0x80));
-    v128_t is_ce = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xCE));
-    v128_t is_cf = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xCF));
-    v128_t after_ce = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xCE));
-    v128_t after_cf = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xCF));
-    v128_t is_non_ascii = wasm_u8x16_gt(source, wasm_i8x16_splat((sz_i8_t)0x7F));
-    v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
-    v128_t is_foreign_lead = wasm_v128_andnot(is_lead, wasm_v128_or(is_ce, is_cf));
+    v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                 wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t is_ce_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xCE));
+    v128_t is_cf_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xCF));
+    v128_t after_ce_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xCE));
+    v128_t after_cf_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xCF));
+    v128_t is_non_ascii_u8x16 = wasm_u8x16_gt(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x7F));
+    v128_t is_lead_u8x16 = wasm_v128_andnot(is_non_ascii_u8x16, is_continuation_u8x16);
+    v128_t is_foreign_lead_u8x16 = wasm_v128_andnot(is_lead_u8x16, wasm_v128_or(is_ce_u8x16, is_cf_u8x16));
     // CE excluded: next < 0x91 (accented uppercase) or next == 0xB0 ('ΰ' expands). CF excluded: next >= 0x8F.
-    v128_t ce_excluded = wasm_v128_and(is_ce, wasm_v128_or(wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0x91)),
-                                                           wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0xB0))));
-    v128_t cf_excluded = wasm_v128_and(is_cf, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0x8F)));
-    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
-    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, wasm_v128_or(ce_excluded, cf_excluded)), malformed);
+    v128_t ce_excluded_u8x16 = wasm_v128_and(is_ce_u8x16,
+                                             wasm_v128_or(wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x91)),
+                                                          wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB0))));
+    v128_t cf_excluded_u8x16 = wasm_v128_and(is_cf_u8x16, wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x8F)));
+    v128_t malformed_u8x16 = sz_utf8_malformed_lead_v128_(source_u8x16, next_u8x16, is_continuation_u8x16,
+                                                          is_lead_u8x16);
+    v128_t stop_u8x16 = wasm_v128_or(
+        wasm_v128_or(is_foreign_lead_u8x16, wasm_v128_or(ce_excluded_u8x16, cf_excluded_u8x16)), malformed_u8x16);
 
     // Promoting ranges (second byte A0-A1 or A3-AB), used both for the second-byte -0x20 and the lead +1.
-    v128_t in_promote_a0 = sz_utf8_in_range_v128_(source, 0xA0, 0x02);
-    v128_t in_promote_a3 = sz_utf8_in_range_v128_(source, 0xA3, 0x09);
-    v128_t next_promote_a0 = sz_utf8_in_range_v128_(next, 0xA0, 0x02);
-    v128_t next_promote_a3 = sz_utf8_in_range_v128_(next, 0xA3, 0x09);
+    v128_t in_promote_a0_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xA0, 0x02);
+    v128_t in_promote_a3_u8x16 = sz_utf8_in_range_v128_(source_u8x16, 0xA3, 0x09);
+    v128_t next_promote_a0_u8x16 = sz_utf8_in_range_v128_(next_u8x16, 0xA0, 0x02);
+    v128_t next_promote_a3_u8x16 = sz_utf8_in_range_v128_(next_u8x16, 0xA3, 0x09);
 
-    v128_t folded = sz_ascii_fold_v128_(source);
-    v128_t basic_upper = wasm_v128_and(after_ce, sz_utf8_in_range_v128_(source, 0x91, 0x0F));
-    folded = sz_utf8_masked_add_v128_(folded, basic_upper, 0x20);
-    v128_t promoting_upper = wasm_v128_and(after_ce, wasm_v128_or(in_promote_a0, in_promote_a3));
-    folded = sz_utf8_masked_add_v128_(folded, promoting_upper, 0xE0); // -0x20
-    v128_t final_sigma = wasm_v128_and(after_cf, wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0x82)));
-    folded = sz_utf8_masked_add_v128_(folded, final_sigma, 0x01);
-    v128_t promotes_lead = wasm_v128_and(is_ce, wasm_v128_or(next_promote_a0, next_promote_a3));
-    folded = sz_utf8_masked_add_v128_(folded, promotes_lead, 0x01); // CE -> CF
+    v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+    v128_t basic_upper_u8x16 = wasm_v128_and(after_ce_u8x16, sz_utf8_in_range_v128_(source_u8x16, 0x91, 0x0F));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, basic_upper_u8x16, 0x20);
+    v128_t promoting_upper_u8x16 = wasm_v128_and(after_ce_u8x16,
+                                                 wasm_v128_or(in_promote_a0_u8x16, in_promote_a3_u8x16));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, promoting_upper_u8x16, 0xE0); // -0x20
+    v128_t final_sigma_u8x16 = wasm_v128_and(after_cf_u8x16,
+                                             wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x82)));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, final_sigma_u8x16, 0x01);
+    v128_t promotes_lead_u8x16 = wasm_v128_and(is_ce_u8x16, wasm_v128_or(next_promote_a0_u8x16, next_promote_a3_u8x16));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, promotes_lead_u8x16, 0x01); // CE -> CF
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
-    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+    int first_stop = sz_utf8_first_set_v128_(stop_u8x16, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded_u8x16, first_stop, destination_ptr,
                                       needs_serial);
 }
 
@@ -331,40 +354,45 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_greek_strip_v128_(sz_u8_t const *source_pt
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                            sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
-    v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
-    v128_t previous = sz_utf8_slide1up_v128_(source);
+    v128_t source_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+    v128_t next_u8x16 = sz_utf8_slide1down_v128_(source_u8x16,
+                                                 (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t previous_u8x16 = sz_utf8_slide1up_v128_(source_u8x16);
 
-    v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                           wasm_i8x16_splat((sz_i8_t)0x80));
-    v128_t is_d4 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD4));
-    v128_t is_d5 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD5));
-    v128_t is_d6 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xD6));
-    v128_t after_d4 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD4));
-    v128_t after_d5 = wasm_i8x16_eq(previous, wasm_i8x16_splat((sz_i8_t)0xD5));
-    v128_t is_non_ascii = wasm_u8x16_gt(source, wasm_i8x16_splat((sz_i8_t)0x7F));
-    v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
-    v128_t is_family = wasm_v128_or(wasm_v128_or(is_d4, is_d5), is_d6);
-    v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_family);
-    v128_t d4_stop = wasm_v128_and(is_d4, wasm_u8x16_lt(next, wasm_i8x16_splat((sz_i8_t)0xB1)));
-    v128_t ligature_stop = wasm_v128_and(is_d6, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x87)));
-    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
-    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, wasm_v128_or(d4_stop, ligature_stop)), malformed);
+    v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                 wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t is_d4_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
+    v128_t is_d5_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD5));
+    v128_t is_d6_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xD6));
+    v128_t after_d4_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD4));
+    v128_t after_d5_u8x16 = wasm_i8x16_eq(previous_u8x16, wasm_i8x16_splat((sz_i8_t)0xD5));
+    v128_t is_non_ascii_u8x16 = wasm_u8x16_gt(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x7F));
+    v128_t is_lead_u8x16 = wasm_v128_andnot(is_non_ascii_u8x16, is_continuation_u8x16);
+    v128_t is_family_u8x16 = wasm_v128_or(wasm_v128_or(is_d4_u8x16, is_d5_u8x16), is_d6_u8x16);
+    v128_t is_foreign_lead_u8x16 = wasm_v128_andnot(is_lead_u8x16, is_family_u8x16);
+    v128_t d4_stop_u8x16 = wasm_v128_and(is_d4_u8x16, wasm_u8x16_lt(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB1)));
+    v128_t ligature_stop_u8x16 = wasm_v128_and(is_d6_u8x16, wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x87)));
+    v128_t malformed_u8x16 = sz_utf8_malformed_lead_v128_(source_u8x16, next_u8x16, is_continuation_u8x16,
+                                                          is_lead_u8x16);
+    v128_t stop_u8x16 = wasm_v128_or(
+        wasm_v128_or(is_foreign_lead_u8x16, wasm_v128_or(d4_stop_u8x16, ligature_stop_u8x16)), malformed_u8x16);
 
-    v128_t folded = sz_ascii_fold_v128_(source);
+    v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
     // Second-byte offsets (disjoint lanes).
-    v128_t d4_second = wasm_v128_and(after_d4, wasm_u8x16_ge(source, wasm_i8x16_splat((sz_i8_t)0xB1)));
-    v128_t d5_plus30 = wasm_v128_and(after_d5, sz_utf8_in_range_v128_(source, 0x80, 0x10));
-    v128_t d5_minus10 = wasm_v128_and(after_d5, sz_utf8_in_range_v128_(source, 0x90, 0x07));
-    folded = sz_utf8_masked_add_v128_(folded, wasm_v128_or(d4_second, d5_minus10), 0xF0); // -0x10
-    folded = sz_utf8_masked_add_v128_(folded, d5_plus30, 0x30);
+    v128_t d4_second_u8x16 = wasm_v128_and(after_d4_u8x16,
+                                           wasm_u8x16_ge(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xB1)));
+    v128_t d5_plus30_u8x16 = wasm_v128_and(after_d5_u8x16, sz_utf8_in_range_v128_(source_u8x16, 0x80, 0x10));
+    v128_t d5_minus10_u8x16 = wasm_v128_and(after_d5_u8x16, sz_utf8_in_range_v128_(source_u8x16, 0x90, 0x07));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, wasm_v128_or(d4_second_u8x16, d5_minus10_u8x16),
+                                            0xF0); // -0x10
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, d5_plus30_u8x16, 0x30);
     // Lead +1 rewrites D4->D5 and D5->D6.
-    v128_t promotes_d4 = wasm_v128_and(is_d4, wasm_u8x16_ge(next, wasm_i8x16_splat((sz_i8_t)0xB1)));
-    v128_t promotes_d5 = wasm_v128_and(is_d5, sz_utf8_in_range_v128_(next, 0x90, 0x07));
-    folded = sz_utf8_masked_add_v128_(folded, wasm_v128_or(promotes_d4, promotes_d5), 0x01);
+    v128_t promotes_d4_u8x16 = wasm_v128_and(is_d4_u8x16, wasm_u8x16_ge(next_u8x16, wasm_i8x16_splat((sz_i8_t)0xB1)));
+    v128_t promotes_d5_u8x16 = wasm_v128_and(is_d5_u8x16, sz_utf8_in_range_v128_(next_u8x16, 0x90, 0x07));
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, wasm_v128_or(promotes_d4_u8x16, promotes_d5_u8x16), 0x01);
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
-    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+    int first_stop = sz_utf8_first_set_v128_(stop_u8x16, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded_u8x16, first_stop, destination_ptr,
                                       needs_serial);
 }
 
@@ -372,51 +400,58 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_fold_armenian_strip_v128_(sz_u8_t const *source
 SZ_HELPER_AUTO sz_size_t sz_utf8_fold_georgian_strip_v128_(sz_u8_t const *source_ptr, sz_size_t remaining,
                                                            sz_u8_t *destination_ptr, int *needs_serial) {
     sz_size_t vector_length = remaining < 16 ? remaining : 16;
-    v128_t source = sz_utf8_load_window_v128_(source_ptr, remaining);
-    v128_t next = sz_utf8_slide1down_v128_(source, (vector_length < remaining) ? source_ptr[vector_length] : 0);
-    v128_t next_next = sz_utf8_slide1down_v128_(next,
-                                                (vector_length + 1 < remaining) ? source_ptr[vector_length + 1] : 0);
+    v128_t source_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+    v128_t next_u8x16 = sz_utf8_slide1down_v128_(source_u8x16,
+                                                 (vector_length < remaining) ? source_ptr[vector_length] : 0);
+    v128_t next_next_u8x16 = sz_utf8_slide1down_v128_(
+        next_u8x16, (vector_length + 1 < remaining) ? source_ptr[vector_length + 1] : 0);
 
-    v128_t is_continuation = wasm_i8x16_eq(wasm_v128_and(source, wasm_i8x16_splat((sz_i8_t)0xC0)),
-                                           wasm_i8x16_splat((sz_i8_t)0x80));
-    v128_t is_e1 = wasm_i8x16_eq(source, wasm_i8x16_splat((sz_i8_t)0xE1));
-    v128_t is_non_ascii = wasm_u8x16_gt(source, wasm_i8x16_splat((sz_i8_t)0x7F));
-    v128_t is_lead = wasm_v128_andnot(is_non_ascii, is_continuation);
-    v128_t is_foreign_lead = wasm_v128_andnot(is_lead, is_e1);
-    v128_t is_82_lead = wasm_v128_and(is_e1, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x82)));
-    v128_t is_83_lead = wasm_v128_and(is_e1, wasm_i8x16_eq(next, wasm_i8x16_splat((sz_i8_t)0x83)));
-    v128_t is_foreign_e1 = wasm_v128_andnot(is_e1, wasm_v128_or(is_82_lead, is_83_lead));
-    v128_t malformed = sz_utf8_malformed_lead_v128_(source, next, is_continuation, is_lead);
-    v128_t stop = wasm_v128_or(wasm_v128_or(is_foreign_lead, is_foreign_e1), malformed);
+    v128_t is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                 wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t is_e1_u8x16 = wasm_i8x16_eq(source_u8x16, wasm_i8x16_splat((sz_i8_t)0xE1));
+    v128_t is_non_ascii_u8x16 = wasm_u8x16_gt(source_u8x16, wasm_i8x16_splat((sz_i8_t)0x7F));
+    v128_t is_lead_u8x16 = wasm_v128_andnot(is_non_ascii_u8x16, is_continuation_u8x16);
+    v128_t is_foreign_lead_u8x16 = wasm_v128_andnot(is_lead_u8x16, is_e1_u8x16);
+    v128_t is_82_lead_u8x16 = wasm_v128_and(is_e1_u8x16, wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x82)));
+    v128_t is_83_lead_u8x16 = wasm_v128_and(is_e1_u8x16, wasm_i8x16_eq(next_u8x16, wasm_i8x16_splat((sz_i8_t)0x83)));
+    v128_t is_foreign_e1_u8x16 = wasm_v128_andnot(is_e1_u8x16, wasm_v128_or(is_82_lead_u8x16, is_83_lead_u8x16));
+    v128_t malformed_u8x16 = sz_utf8_malformed_lead_v128_(source_u8x16, next_u8x16, is_continuation_u8x16,
+                                                          is_lead_u8x16);
+    v128_t stop_u8x16 = wasm_v128_or(wasm_v128_or(is_foreign_lead_u8x16, is_foreign_e1_u8x16), malformed_u8x16);
 
     // Uppercase keyed by the third byte: E1 82 third >= A0; E1 83 third in 80-85, or 87, or 8D.
-    v128_t is_82_upper_lead = wasm_v128_and(is_82_lead, wasm_u8x16_ge(next_next, wasm_i8x16_splat((sz_i8_t)0xA0)));
-    v128_t third_83_range = sz_utf8_in_range_v128_(next_next, 0x80, 0x06);
-    v128_t third_83_extra = wasm_v128_or(wasm_i8x16_eq(next_next, wasm_i8x16_splat((sz_i8_t)0x87)),
-                                         wasm_i8x16_eq(next_next, wasm_i8x16_splat((sz_i8_t)0x8D)));
-    v128_t is_83_upper_lead = wasm_v128_and(is_83_lead, wasm_v128_or(third_83_range, third_83_extra));
+    v128_t is_82_upper_lead_u8x16 = wasm_v128_and(is_82_lead_u8x16,
+                                                  wasm_u8x16_ge(next_next_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0)));
+    v128_t third_83_range_u8x16 = sz_utf8_in_range_v128_(next_next_u8x16, 0x80, 0x06);
+    v128_t third_83_extra_u8x16 = wasm_v128_or(wasm_i8x16_eq(next_next_u8x16, wasm_i8x16_splat((sz_i8_t)0x87)),
+                                               wasm_i8x16_eq(next_next_u8x16, wasm_i8x16_splat((sz_i8_t)0x8D)));
+    v128_t is_83_upper_lead_u8x16 = wasm_v128_and(is_83_lead_u8x16,
+                                                  wasm_v128_or(third_83_range_u8x16, third_83_extra_u8x16));
 
     // Carry the per-window uppercase flag forward: lane +1 (second) and lane +2 (third).
-    v128_t flag82_lead = wasm_v128_and(is_82_upper_lead, wasm_i8x16_splat(1));
-    v128_t flag83_lead = wasm_v128_and(is_83_upper_lead, wasm_i8x16_splat(1));
-    v128_t flag82_second = sz_utf8_slide1up_v128_(flag82_lead);
-    v128_t flag83_second = sz_utf8_slide1up_v128_(flag83_lead);
-    v128_t flag82_third = sz_utf8_slide1up_v128_(flag82_second);
-    v128_t flag83_third = sz_utf8_slide1up_v128_(flag83_second);
+    v128_t flag82_lead_u8x16 = wasm_v128_and(is_82_upper_lead_u8x16, wasm_i8x16_splat(1));
+    v128_t flag83_lead_u8x16 = wasm_v128_and(is_83_upper_lead_u8x16, wasm_i8x16_splat(1));
+    v128_t flag82_second_u8x16 = sz_utf8_slide1up_v128_(flag82_lead_u8x16);
+    v128_t flag83_second_u8x16 = sz_utf8_slide1up_v128_(flag83_lead_u8x16);
+    v128_t flag82_third_u8x16 = sz_utf8_slide1up_v128_(flag82_second_u8x16);
+    v128_t flag83_third_u8x16 = sz_utf8_slide1up_v128_(flag83_second_u8x16);
 
-    v128_t is_upper_lead = wasm_v128_or(is_82_upper_lead, is_83_upper_lead);
-    v128_t is_upper_second = wasm_i8x16_ne(wasm_v128_or(flag82_second, flag83_second), wasm_i8x16_splat(0));
-    v128_t is_82_upper_third = wasm_i8x16_ne(flag82_third, wasm_i8x16_splat(0));
-    v128_t is_83_upper_third = wasm_i8x16_ne(flag83_third, wasm_i8x16_splat(0));
+    v128_t is_upper_lead_u8x16 = wasm_v128_or(is_82_upper_lead_u8x16, is_83_upper_lead_u8x16);
+    v128_t is_upper_second_u8x16 = wasm_i8x16_ne(wasm_v128_or(flag82_second_u8x16, flag83_second_u8x16),
+                                                 wasm_i8x16_splat(0));
+    v128_t is_82_upper_third_u8x16 = wasm_i8x16_ne(flag82_third_u8x16, wasm_i8x16_splat(0));
+    v128_t is_83_upper_third_u8x16 = wasm_i8x16_ne(flag83_third_u8x16, wasm_i8x16_splat(0));
 
-    v128_t folded = sz_ascii_fold_v128_(source);
-    folded = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xE2), folded, is_upper_lead);   // lead E1 -> E2
-    folded = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xB4), folded, is_upper_second); // second 82/83 -> B4
-    folded = sz_utf8_masked_add_v128_(folded, is_82_upper_third, 0xE0);                     // third -0x20
-    folded = sz_utf8_masked_add_v128_(folded, is_83_upper_third, 0x20);                     // third +0x20
+    v128_t folded_u8x16 = sz_ascii_fold_v128_(source_u8x16);
+    folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xE2), folded_u8x16,
+                                       is_upper_lead_u8x16); // lead E1 -> E2
+    folded_u8x16 = wasm_v128_bitselect(wasm_i8x16_splat((sz_i8_t)0xB4), folded_u8x16,
+                                       is_upper_second_u8x16);                            // second 82/83 -> B4
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_82_upper_third_u8x16, 0xE0); // third -0x20
+    folded_u8x16 = sz_utf8_masked_add_v128_(folded_u8x16, is_83_upper_third_u8x16, 0x20); // third +0x20
 
-    int first_stop = sz_utf8_first_set_v128_(stop, vector_length);
-    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded, first_stop, destination_ptr,
+    int first_stop = sz_utf8_first_set_v128_(stop_u8x16, vector_length);
+    return sz_utf8_strip_finish_v128_(source_ptr, vector_length, remaining, folded_u8x16, first_stop, destination_ptr,
                                       needs_serial);
 }
 
@@ -433,11 +468,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_t 
         // Fold a maximal ASCII run, 16 bytes per window, stopping at the first non-ASCII byte.
         sz_size_t remaining = (sz_size_t)(source_end - source_ptr);
         sz_size_t window = remaining < 16 ? remaining : 16;
-        v128_t loaded = sz_utf8_load_window_v128_(source_ptr, remaining);
-        int first_non_ascii = sz_utf8_first_set_v128_(loaded, window);
+        v128_t loaded_u8x16 = sz_utf8_load_window_v128_(source_ptr, remaining);
+        int first_non_ascii = sz_utf8_first_set_v128_(loaded_u8x16, window);
         sz_size_t ascii_run = first_non_ascii < 0 ? window : (sz_size_t)first_non_ascii;
         if (ascii_run) {
-            sz_store_partial_v128_((sz_ptr_t)destination_ptr, sz_ascii_fold_v128_(loaded), ascii_run);
+            sz_store_partial_v128_((sz_ptr_t)destination_ptr, sz_ascii_fold_v128_(loaded_u8x16), ascii_run);
             source_ptr += ascii_run, destination_ptr += ascii_run;
         }
         if (source_ptr >= source_end) break;

@@ -21,10 +21,11 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-SZ_HELPER_INLINE sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec_u8x16) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
-    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec_u8x16), 4)), 0) &
+           0x8888888888888888ull;
 }
 
 #pragma region Multistep newline and whitespace iteration
@@ -116,12 +117,12 @@ typedef struct sz_utf8_rune_window_neon_t {
 /** @brief  Per-byte logical right shift by @p shift keeping the low @p keep bits — the NEON twin of `srl8_`.
  *          `vshrq_n_u8` needs an immediate shift; the shift amounts used by the segmentation classifiers (2 for the
  *          decode 3-byte high reconstruction, 4 for the line-break 4-byte plane reconstruction) are spelled out. */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u8_t keep) {
+SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value_u8x16, int shift, sz_u8_t keep) {
     uint8x16_t shifted_u8x16;
     switch (shift) {
-    case 2: shifted_u8x16 = vshrq_n_u8(value, 2); break;
-    case 4: shifted_u8x16 = vshrq_n_u8(value, 4); break;
-    default: shifted_u8x16 = value; break;
+    case 2: shifted_u8x16 = vshrq_n_u8(value_u8x16, 2); break;
+    case 4: shifted_u8x16 = vshrq_n_u8(value_u8x16, 4); break;
+    default: shifted_u8x16 = value_u8x16; break;
     }
     return vandq_u8(shifted_u8x16, vdupq_n_u8(keep));
 }
@@ -135,10 +136,10 @@ SZ_HELPER_INLINE uint8x16_t sz_utf8_srl8_neon_(uint8x16_t value, int shift, sz_u
  *  half), then `vaddv` each half to collapse the eight in-position bits into one byte: the low half becomes mask bits
  *  [0,8), the high half bits [8,16). No multiply, no `vshrn`; two `vaddv_u8` horizontal adds.
  */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes_u8x16) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const bit_position_u8x16 = vld1q_u8(bit_position_lanes);
-    uint8x16_t const isolated_u8x16 = vandq_u8(boolean_lanes, bit_position_u8x16);
+    uint8x16_t const isolated_u8x16 = vandq_u8(boolean_lanes_u8x16, bit_position_u8x16);
     sz_u64_t const low_bits = (sz_u64_t)vaddv_u8(vget_low_u8(isolated_u8x16));
     sz_u64_t const high_bits = (sz_u64_t)vaddv_u8(vget_high_u8(isolated_u8x16));
     return low_bits | (high_bits << 8);
@@ -147,49 +148,50 @@ SZ_HELPER_INLINE sz_u64_t sz_utf8_movemask16_neon_(uint8x16_t boolean_lanes) {
 /** @brief  Combine the four per-quarter NEON movemasks into one 64-bit lane mask: quarter `q` -> bits [16*q, 16*q+16).
  *          The NEON twin of @ref sz_utf8_mask_combine_haswell_ (which OR-combines two 32-bit halves). */
 SZ_HELPER_INLINE sz_u64_t sz_utf8_mask_combine_neon_( //
-    uint8x16_t quarter0, uint8x16_t quarter1, uint8x16_t quarter2, uint8x16_t quarter3) {
-    sz_u64_t mask = sz_utf8_movemask16_neon_(quarter0);
-    mask |= sz_utf8_movemask16_neon_(quarter1) << 16;
-    mask |= sz_utf8_movemask16_neon_(quarter2) << 32;
-    mask |= sz_utf8_movemask16_neon_(quarter3) << 48;
+    uint8x16_t quarter0_u8x16, uint8x16_t quarter1_u8x16, uint8x16_t quarter2_u8x16, uint8x16_t quarter3_u8x16) {
+    sz_u64_t mask = sz_utf8_movemask16_neon_(quarter0_u8x16);
+    mask |= sz_utf8_movemask16_neon_(quarter1_u8x16) << 16;
+    mask |= sz_utf8_movemask16_neon_(quarter2_u8x16) << 32;
+    mask |= sz_utf8_movemask16_neon_(quarter3_u8x16) << 48;
     return mask;
 }
 
 /** @brief  Masked 64-byte load into four quarters; bytes [loaded, 64) read as zero (the NEON stand-in for
  *          `_mm512_maskz_loadu_epi8`). A zero-initialized vector union stages the partial tail so we never read past
  *          `text + loaded`. Mirrors @ref sz_utf8_load_window_haswell_. */
-SZ_HELPER_AUTO void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out) {
+SZ_HELPER_AUTO void sz_utf8_load_window_neon_(sz_u8_t const *text, sz_size_t loaded, uint8x16_t *out_u8x16) {
     if (loaded >= 64) {
-        out[0] = vld1q_u8(text + 0);
-        out[1] = vld1q_u8(text + 16);
-        out[2] = vld1q_u8(text + 32);
-        out[3] = vld1q_u8(text + 48);
+        out_u8x16[0] = vld1q_u8(text + 0);
+        out_u8x16[1] = vld1q_u8(text + 16);
+        out_u8x16[2] = vld1q_u8(text + 32);
+        out_u8x16[3] = vld1q_u8(text + 48);
         return;
     }
     sz_u512_vec_t window_vec;
     window_vec.u8x16s[0] = window_vec.u8x16s[1] = window_vec.u8x16s[2] = window_vec.u8x16s[3] = vdupq_n_u8(0);
     for (sz_size_t i = 0; i < loaded; ++i) window_vec.u8s[i] = text[i];
-    out[0] = window_vec.u8x16s[0];
-    out[1] = window_vec.u8x16s[1];
-    out[2] = window_vec.u8x16s[2];
-    out[3] = window_vec.u8x16s[3];
+    out_u8x16[0] = window_vec.u8x16s[0];
+    out_u8x16[1] = window_vec.u8x16s[1];
+    out_u8x16[2] = window_vec.u8x16s[2];
+    out_u8x16[3] = window_vec.u8x16s[3];
 }
 
 /**
- *  @brief  Forward neighbours `next1[i] = window[i+1]`, `next2[i] = window[i+2]`, `next3[i] = window[i+3]` over all 64
- *          lanes, with the lanes past the window WRAPPING modulo 64 to match Ice Lake's `_mm512_permutexvar_epi8`
- *          (so `next1[63]==window[0]`, etc.). NEON `vextq_u8` concatenates two adjacent quarters and extracts the
- *          shifted span; the successor of the last quarter wraps to quarter 0 (byte 64 aliases byte 0). The three
- *          neighbour distances are provided because the family classifiers need up to `next3` (4-byte sequences).
+ *  @brief  Forward neighbours `next1_u8x16[i] = window_u8x16[i+1]`, `next2_u8x16[i] = window_u8x16[i+2]`,
+ *          `next3_u8x16[i] = window_u8x16[i+3]` over all 64 lanes, with the lanes past the window WRAPPING modulo 64
+ *          to match Ice Lake's `_mm512_permutexvar_epi8` (so `next1_u8x16[63]==window_u8x16[0]`, etc.). NEON
+ *          `vextq_u8` concatenates two adjacent quarters and extracts the shifted span; the successor of the last
+ *          quarter wraps to quarter 0 (byte 64 aliases byte 0). The three neighbour distances are provided because
+ *          the family classifiers need up to `next3_u8x16` (4-byte sequences).
  */
 SZ_HELPER_AUTO void sz_utf8_forward_neighbours_neon_( //
-    uint8x16_t const *window, uint8x16_t *next1, uint8x16_t *next2, uint8x16_t *next3) {
+    uint8x16_t const *window_u8x16, uint8x16_t *next1_u8x16, uint8x16_t *next2_u8x16, uint8x16_t *next3_u8x16) {
     for (int quarter = 0; quarter < 4; ++quarter) {
-        uint8x16_t const here_u8x16 = window[quarter];
-        uint8x16_t const successor_u8x16 = window[(quarter + 1) & 3];
-        next1[quarter] = vextq_u8(here_u8x16, successor_u8x16, 1);
-        next2[quarter] = vextq_u8(here_u8x16, successor_u8x16, 2);
-        next3[quarter] = vextq_u8(here_u8x16, successor_u8x16, 3);
+        uint8x16_t const here_u8x16 = window_u8x16[quarter];
+        uint8x16_t const successor_u8x16 = window_u8x16[(quarter + 1) & 3];
+        next1_u8x16[quarter] = vextq_u8(here_u8x16, successor_u8x16, 1);
+        next2_u8x16[quarter] = vextq_u8(here_u8x16, successor_u8x16, 2);
+        next3_u8x16[quarter] = vextq_u8(here_u8x16, successor_u8x16, 3);
     }
 }
 
@@ -204,8 +206,8 @@ SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
     sz_utf8_load_window_neon_(text, result.loaded, window_u8x16);
     for (int quarter = 0; quarter < 4; ++quarter) result.window[quarter] = window_u8x16[quarter];
 
-    uint8x16_t next1[4], next2[4], next3[4];
-    sz_utf8_forward_neighbours_neon_(window_u8x16, next1, next2, next3);
+    uint8x16_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+    sz_utf8_forward_neighbours_neon_(window_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
 
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(result.loaded);
 
@@ -244,8 +246,8 @@ SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 
     for (int quarter = 0; quarter < 4; ++quarter) {
         uint8x16_t const here_u8x16 = window_u8x16[quarter];
-        uint8x16_t const next_byte_u8x16 = next1[quarter];
-        uint8x16_t const next_byte2_u8x16 = next2[quarter];
+        uint8x16_t const next_byte_u8x16 = next1_u8x16[quarter];
+        uint8x16_t const next_byte2_u8x16 = next2_u8x16[quarter];
 
         // 2-byte: codepoint = ((b0 & 0x1F) << 6) | (b1 & 0x3F); high = codepoint >> 8, low = codepoint & 0xFF.
         uint8x16_t const high_two_u8x16 = sz_utf8_srl8_neon_(vandq_u8(here_u8x16, low_five_bits_u8x16), 2, 0x07);
@@ -267,13 +269,13 @@ SZ_HELPER_AUTO sz_utf8_rune_window_neon_t sz_utf8_rune_decode_window_neon_( //
 }
 
 /** @brief  One nibble-cascade stage with a sub-256 selector: `result[lane] = table[selector[lane]*16 + within[lane]]`.
- *          Each of @p tile_count 16-byte rows is one selector value; @p within is the addressing nibble (caller-masked
- *          to `[0,16)`). The NEON twin of the AVX2 cascade and VBMI `vpermi2b`: each resident row is loaded into a
- *          `uint8x16_t` and shuffled by @p within via `vqtbl1q_u8`, then blended in for the lanes whose @p selector
- *          picks that row. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`. @p within / @p selector address one
- *          quarter; the caller iterates the four quarters. */
+ *          Each of @p tile_count 16-byte rows is one selector value; @p within_u8x16 is the addressing nibble
+ *          (caller-masked to `[0,16)`). The NEON twin of the AVX2 cascade and VBMI `vpermi2b`: each resident row is
+ *          loaded into a `uint8x16_t` and shuffled by @p within_u8x16 via `vqtbl1q_u8`, then blended in for the lanes
+ *          whose @p selector_u8x16 picks that row. Gather-free — only `vld1q`/`vqtbl1q`/`vceqq`/`vbslq`.
+ *          @p within_u8x16 / @p selector_u8x16 address one quarter; the caller iterates the four quarters. */
 SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
-    sz_u8_t const *table, int tile_count, uint8x16_t selector, uint8x16_t within) {
+    sz_u8_t const *table, int tile_count, uint8x16_t selector_u8x16, uint8x16_t within_u8x16) {
     // Each lane reads table[selector[lane] * 16 + within[lane]] when selector < tile_count, else 0 (no tile matched).
     // The original linear scan accumulates through a `tile_count`-deep `vbslq` chain over 16-byte rows, which is a
     // throughput trap at the 52-84 tile counts these UAX trie stages use. Since exactly one tile matches per lane,
@@ -281,30 +283,30 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_cascade_stage_neon_( //
     // cyc/call (3.2x) on an M5 Pro for the 54-tile grapheme stage 2. The `< tile_count` mask reproduces the old
     // all-zero result for selectors past the table, keeping it bit-exact. `within` is a nibble by construction.
     sz_align_(16) sz_u8_t selector_lanes[16], within_lanes[16], gathered_lanes[16];
-    vst1q_u8(selector_lanes, selector);
-    vst1q_u8(within_lanes, within);
+    vst1q_u8(selector_lanes, selector_u8x16);
+    vst1q_u8(within_lanes, within_u8x16);
     for (int lane = 0; lane < 16; ++lane) {
         int const tile = selector_lanes[lane];
         int const safe_tile = tile < tile_count ? tile : 0;
         gathered_lanes[lane] = table[safe_tile * 16 + (within_lanes[lane] & 0x0F)];
     }
-    uint8x16_t const in_range = vcltq_u8(selector, vdupq_n_u8((sz_u8_t)tile_count));
-    return vandq_u8(vld1q_u8(gathered_lanes), in_range);
+    uint8x16_t const in_range_u8x16 = vcltq_u8(selector_u8x16, vdupq_n_u8((sz_u8_t)tile_count));
+    return vandq_u8(vld1q_u8(gathered_lanes), in_range_u8x16);
 }
 
 /** @brief  256-entry byte LUT addressed by a per-lane byte index in `[0,256)`: `result[lane] = group_base[index[lane]]`.
  *          Four `vqtbl4q_u8` reads over the four resident 64-byte quads; `vqtbl4q_u8` returns zero for indices >= 64,
  *          so subtracting 64/128/192 routes each lane to exactly one quad and the four results OR together. The NEON
- *          twin of the substrate `lut256` leaf. @p index addresses one quarter. */
-SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index) {
+ *          twin of the substrate `lut256` leaf. @p index_u8x16 addresses one quarter. */
+SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
     uint8x16x4_t const quad0_u8x16x4 = vld1q_u8_x4(group_base + 0 * 64);
     uint8x16x4_t const quad1_u8x16x4 = vld1q_u8_x4(group_base + 1 * 64);
     uint8x16x4_t const quad2_u8x16x4 = vld1q_u8_x4(group_base + 2 * 64);
     uint8x16x4_t const quad3_u8x16x4 = vld1q_u8_x4(group_base + 3 * 64);
-    uint8x16_t const within0_u8x16 = index;
-    uint8x16_t const within1_u8x16 = vsubq_u8(index, vdupq_n_u8(64));
-    uint8x16_t const within2_u8x16 = vsubq_u8(index, vdupq_n_u8(128));
-    uint8x16_t const within3_u8x16 = vsubq_u8(index, vdupq_n_u8(192));
+    uint8x16_t const within0_u8x16 = index_u8x16;
+    uint8x16_t const within1_u8x16 = vsubq_u8(index_u8x16, vdupq_n_u8(64));
+    uint8x16_t const within2_u8x16 = vsubq_u8(index_u8x16, vdupq_n_u8(128));
+    uint8x16_t const within3_u8x16 = vsubq_u8(index_u8x16, vdupq_n_u8(192));
     uint8x16_t result_u8x16 = vqtbl4q_u8(quad0_u8x16x4, within0_u8x16);
     result_u8x16 = vorrq_u8(result_u8x16, vqtbl4q_u8(quad1_u8x16x4, within1_u8x16));
     result_u8x16 = vorrq_u8(result_u8x16, vqtbl4q_u8(quad2_u8x16x4, within2_u8x16));
@@ -316,8 +318,8 @@ SZ_HELPER_AUTO uint8x16_t sz_utf8_rune_lut256_neon_(sz_u8_t const *group_base, u
  *          table (zero for indices >= 64). The bounded twin of @ref sz_utf8_rune_lut256_neon_ for callers whose
  *          table is only one quad wide - e.g. a 128-entry property table read as two 64-byte halves - so the load
  *          never over-reads past the array. @p group_base must point to at least 64 valid bytes. */
-SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index) {
-    return vqtbl4q_u8(vld1q_u8_x4(group_base), index);
+SZ_HELPER_INLINE uint8x16_t sz_utf8_rune_lut64_neon_(sz_u8_t const *group_base, uint8x16_t index_u8x16) {
+    return vqtbl4q_u8(vld1q_u8_x4(group_base), index_u8x16);
 }
 
 /** @brief  Class byte per lane from a page-compressed flat table: `page_lut[high]` selects one 256-byte page, then
@@ -707,7 +709,7 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *          runes — the NEON twin of @ref sz_utf8_rune_drain_icelake_, bit-for-bit. The start byte-offsets
  *          are left-packed once via the shuffle-LUT compaction (@ref sz_utf8_leftpack_offsets_neon_); three
  *          sibling `vqtbl4q_u8` gathers pull the lead + up to three trailing bytes per codepoint over the 64-byte
- *          @p window (four quarters), and a branchless 1/2/3/4-byte width-blend assembles each value.
+ *          @p window_u8x16 (four quarters), and a branchless 1/2/3/4-byte width-blend assembles each value.
  *
  *  TOTAL decode: @p emit_starts also covers promoted orphan continuation bytes, and @p ill_formed marks every start
  *  lane whose maximal ill-formed subpart collapses to one U+FFFD (Unicode 17.0 §3.9 / W3C). The per-lane ill flag is
@@ -715,9 +717,10 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  register. The resume cursor reads @p consumed_length (per-lane maximal-subpart byte length, in window order) at the
  *  last emitted start, so an ill-formed trailing lane never skips bytes that owe their own next-window U+FFFD.
  *
- *  @param  window           The 64 raw input bytes, as four `uint8x16_t` quarters (lanes [16*q, 16*q+16)).
+ *  @param  window_u8x16     The 64 raw input bytes, as four `uint8x16_t` quarters (lanes [16*q, 16*q+16)).
  *  @param  emit_starts      Bit `i` => lane `i` emits one rune (a codepoint start or a promoted orphan continuation).
- *  @param  ill_byte         Per-lane 0xFF where the emitted start is ill-formed (one U+FFFD), 0 otherwise; four quarters.
+ *  @param  ill_byte_u8x16   Per-lane 0xFF where the emitted start is ill-formed (one U+FFFD), 0 otherwise; four
+ *                           quarters.
  *  @param  has_three        Non-zero if any 3- or 4-byte lead is present; gates the 3rd-byte gather and 3-byte assembly.
  *  @param  has_four         Non-zero if any 4-byte lead is present; gates the 4th-byte gather and 4-byte assembly.
  *  @param  consumed_length  Per-lane maximal-subpart byte length (1..4) at each start; flat 64-byte window order.
@@ -725,17 +728,17 @@ SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_forward_neon_( //
  *  @param  consumed_bytes   Set to the byte span the emitted runes cover (the resume cursor delta).
  *  @return Number of runes emitted (<= min(emit_count, capacity)).
  */
-SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                              //
-    uint8x16_t const *window, sz_u64_t emit_starts, uint8x16_t const *ill_byte, //
-    int has_three, int has_four, sz_u8_t const *consumed_length,                //
+SZ_HELPER_AUTO sz_size_t sz_utf8_rune_drain_neon_(                                          //
+    uint8x16_t const *window_u8x16, sz_u64_t emit_starts, uint8x16_t const *ill_byte_u8x16, //
+    int has_three, int has_four, sz_u8_t const *consumed_length,                            //
     sz_size_t emit_count, sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     // Build the 64-byte tables once: `vqtbl4q_u8` addresses all four quarters as one `uint8x16x4_t`.
     uint8x16x4_t table_u8x16x4, ill_table_u8x16x4;
-    table_u8x16x4.val[0] = window[0], table_u8x16x4.val[1] = window[1];
-    table_u8x16x4.val[2] = window[2], table_u8x16x4.val[3] = window[3];
-    ill_table_u8x16x4.val[0] = ill_byte[0], ill_table_u8x16x4.val[1] = ill_byte[1];
-    ill_table_u8x16x4.val[2] = ill_byte[2], ill_table_u8x16x4.val[3] = ill_byte[3];
+    table_u8x16x4.val[0] = window_u8x16[0], table_u8x16x4.val[1] = window_u8x16[1];
+    table_u8x16x4.val[2] = window_u8x16[2], table_u8x16x4.val[3] = window_u8x16[3];
+    ill_table_u8x16x4.val[0] = ill_byte_u8x16[0], ill_table_u8x16x4.val[1] = ill_byte_u8x16[1];
+    ill_table_u8x16x4.val[2] = ill_byte_u8x16[2], ill_table_u8x16x4.val[3] = ill_byte_u8x16[3];
 
     // Left-pack the emitted start byte-offsets (ascending) into a dense array via the shuffle-LUT compaction.
     sz_u8_t start_offsets[64];
@@ -1053,13 +1056,13 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
                                ((lead3_decodable2 & ~(continuation_bits2 >> 2)) == 0) &&
                                ((cont_decodable2 & ~covered_bits) == 0) && (bounds_bad2 == 0);
             if (clean2 && starts_decodable2) {
-                uint8x16_t ill_quarter2[4];
+                uint8x16_t ill_quarter2_u8x16[4];
                 sz_u8_t consumed_length2[64];
                 uint8x16_t const one_u8x16 = vdupq_n_u8(1), two_u8x16 = vdupq_n_u8(2);
                 sz_size_t emit_count2 = 0;
                 for (int quarter = 0; quarter < 4; ++quarter) {
                     sz_u32_t const shift = (sz_u32_t)quarter * 16;
-                    ill_quarter2[quarter] = vdupq_n_u8(0);
+                    ill_quarter2_u8x16[quarter] = vdupq_n_u8(0);
                     uint8x16_t const lead2_q_u8x16 = sz_utf8_expand16_neon_(
                         (sz_u32_t)((lead2_bits >> shift) & 0xFFFFu));
                     uint8x16_t const lead3_q_u8x16 = sz_utf8_expand16_neon_(
@@ -1073,9 +1076,9 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
                     emit_count2 += (sz_size_t)vaddvq_u8(vandq_u8(start_q_u8x16, one_u8x16));
                 }
                 sz_size_t consumed2 = 0;
-                sz_size_t const produced2 = sz_utf8_rune_drain_neon_(window_u8x16, starts_decodable2, ill_quarter2,
-                                                                     has_three, 0, consumed_length2, emit_count2, runes,
-                                                                     runes_capacity, &consumed2);
+                sz_size_t const produced2 = sz_utf8_rune_drain_neon_(window_u8x16, starts_decodable2,
+                                                                     ill_quarter2_u8x16, has_three, 0, consumed_length2,
+                                                                     emit_count2, runes, runes_capacity, &consumed2);
                 *runes_unpacked = produced2;
                 return text + consumed2;
             }
@@ -1205,11 +1208,11 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
     // Materialize the per-lane ill-formed flag (0xFF/0x00) and the per-lane maximal-subpart length (1..4) as 64-byte
     // window-order vectors so the drain gathers both with the SAME packed start indices. `expand16` inverts the
     // movemask per quarter (gather-free); the length is `1 + step2 + step3 + step4` per lane via the expanded bits.
-    uint8x16_t ill_quarter[4];
+    uint8x16_t ill_quarter_u8x16[4];
     sz_u8_t consumed_length[64];
     for (int quarter = 0; quarter < 4; ++quarter) {
         sz_u32_t const shift = (sz_u32_t)quarter * 16;
-        ill_quarter[quarter] = sz_utf8_expand16_neon_((sz_u32_t)((ill_formed >> shift) & 0xFFFFu));
+        ill_quarter_u8x16[quarter] = sz_utf8_expand16_neon_((sz_u32_t)((ill_formed >> shift) & 0xFFFFu));
         uint8x16_t const one_u8x16 = vdupq_n_u8(1);
         uint8x16_t length_q_u8x16 = one_u8x16;
         length_q_u8x16 = vaddq_u8(length_q_u8x16,
@@ -1222,8 +1225,9 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_decode_once_neon_( //
     }
 
     sz_size_t consumed = 0;
-    sz_size_t const produced = sz_utf8_rune_drain_neon_(window_u8x16, emit_starts, ill_quarter, has_three, has_four,
-                                                        consumed_length, emit_count, runes, runes_capacity, &consumed);
+    sz_size_t const produced = sz_utf8_rune_drain_neon_(window_u8x16, emit_starts, ill_quarter_u8x16, has_three,
+                                                        has_four, consumed_length, emit_count, runes, runes_capacity,
+                                                        &consumed);
     *runes_unpacked = produced;
     return text + consumed;
 }

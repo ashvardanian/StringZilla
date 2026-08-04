@@ -43,9 +43,9 @@ SZ_API_COMPTIME sz_u64_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(want);
         vuint8m8_t text_u8m8 = __riscv_vle8_v_u8m8(text_u8, vector_length);
         // Seed the reduction accumulator with zero; widen u8 lanes and reduce into one u16 lane.
-        vuint16m1_t zero = __riscv_vmv_v_x_u16m1(0, __riscv_vsetvl_e16m1(1));
-        vuint16m1_t partial = __riscv_vwredsumu_vs_u8m8_u16m1(text_u8m8, zero, vector_length);
-        bytesum += (sz_u64_t)__riscv_vmv_x_s_u16m1_u16(partial);
+        vuint16m1_t zero_u16m1 = __riscv_vmv_v_x_u16m1(0, __riscv_vsetvl_e16m1(1));
+        vuint16m1_t partial_u16m1 = __riscv_vwredsumu_vs_u8m8_u16m1(text_u8m8, zero_u16m1, vector_length);
+        bytesum += (sz_u64_t)__riscv_vmv_x_s_u16m1_u16(partial_u16m1);
         text_u8 += vector_length, length -= vector_length;
     }
     return bytesum;
@@ -120,16 +120,16 @@ SZ_HELPER_INLINE sz_u8_t const *sz_aes_rot1_rvv_(void) {
  *  for the `0 * x` and `x * 0` cases. */
 SZ_HELPER_AUTO vuint8m1_t sz_gf16_mul_rvv_(vuint8m1_t a_u8m1, vuint8m1_t b_u8m1, vuint8m1_t log_table_u8m1,
                                            vuint8m1_t antilog_table_u8m1, sz_size_t vector_length) {
-    vuint8m1_t log_a_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vector_length);
-    vuint8m1_t log_b_vec = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vector_length);
-    vuint8m1_t log_sum_vec = __riscv_vadd_vv_u8m1(log_a_vec, log_b_vec, vector_length);
-    vbool8_t overflow_mask = __riscv_vmsgeu_vx_u8m1_b8(log_sum_vec, 15, vector_length);
-    log_sum_vec = __riscv_vmerge_vvm_u8m1(log_sum_vec, __riscv_vsub_vx_u8m1(log_sum_vec, 15, vector_length),
-                                          overflow_mask, vector_length);
-    vuint8m1_t product_vec = __riscv_vrgather_vv_u8m1(antilog_table_u8m1, log_sum_vec, vector_length);
-    vbool8_t zero_mask = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a_u8m1, 0, vector_length),
-                                            __riscv_vmseq_vx_u8m1_b8(b_u8m1, 0, vector_length), vector_length);
-    return __riscv_vmerge_vvm_u8m1(product_vec, __riscv_vmv_v_x_u8m1(0, vector_length), zero_mask, vector_length);
+    vuint8m1_t log_a_u8m1 = __riscv_vrgather_vv_u8m1(log_table_u8m1, a_u8m1, vector_length);
+    vuint8m1_t log_b_u8m1 = __riscv_vrgather_vv_u8m1(log_table_u8m1, b_u8m1, vector_length);
+    vuint8m1_t log_sum_u8m1 = __riscv_vadd_vv_u8m1(log_a_u8m1, log_b_u8m1, vector_length);
+    vbool8_t overflow_b8 = __riscv_vmsgeu_vx_u8m1_b8(log_sum_u8m1, 15, vector_length);
+    log_sum_u8m1 = __riscv_vmerge_vvm_u8m1(log_sum_u8m1, __riscv_vsub_vx_u8m1(log_sum_u8m1, 15, vector_length),
+                                           overflow_b8, vector_length);
+    vuint8m1_t product_u8m1 = __riscv_vrgather_vv_u8m1(antilog_table_u8m1, log_sum_u8m1, vector_length);
+    vbool8_t zero_b8 = __riscv_vmor_mm_b8(__riscv_vmseq_vx_u8m1_b8(a_u8m1, 0, vector_length),
+                                          __riscv_vmseq_vx_u8m1_b8(b_u8m1, 0, vector_length), vector_length);
+    return __riscv_vmerge_vvm_u8m1(product_u8m1, __riscv_vmv_v_x_u8m1(0, vector_length), zero_b8, vector_length);
 }
 
 /**
@@ -142,89 +142,90 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(sz_u128_vec_t)); // the AES state is exactly one 128-bit block
     sz_u8_t const *tables = sz_aes_tables_rvv_();
 
-    vuint8m1_t state_bytes_vec = __riscv_vle8_v_u8m1(state_vec.u8s, vector_length);
-    vuint8m1_t key_vec = __riscv_vle8_v_u8m1(round_key_vec.u8s, vector_length);
-    vuint8m1_t mlow_vec = __riscv_vle8_v_u8m1(tables + 16 * 0, vector_length);
-    vuint8m1_t mhigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 1, vector_length);
-    vuint8m1_t glow_vec = __riscv_vle8_v_u8m1(tables + 16 * 2, vector_length);
-    vuint8m1_t ghigh_vec = __riscv_vle8_v_u8m1(tables + 16 * 3, vector_length);
-    vuint8m1_t square_vec = __riscv_vle8_v_u8m1(tables + 16 * 4, vector_length);
-    vuint8m1_t inverse4_vec = __riscv_vle8_v_u8m1(tables + 16 * 5, vector_length);
-    vuint8m1_t log_vec = __riscv_vle8_v_u8m1(tables + 16 * 6, vector_length);
-    vuint8m1_t antilog_vec = __riscv_vle8_v_u8m1(tables + 16 * 7, vector_length);
-    vuint8m1_t mul_a_vec = __riscv_vle8_v_u8m1(tables + 16 * 8, vector_length);
-    vuint8m1_t mul_b_vec = __riscv_vle8_v_u8m1(tables + 16 * 9, vector_length);
+    vuint8m1_t state_bytes_u8m1 = __riscv_vle8_v_u8m1(state_vec.u8s, vector_length);
+    vuint8m1_t key_u8m1 = __riscv_vle8_v_u8m1(round_key_vec.u8s, vector_length);
+    vuint8m1_t mlow_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 0, vector_length);
+    vuint8m1_t mhigh_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 1, vector_length);
+    vuint8m1_t glow_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 2, vector_length);
+    vuint8m1_t ghigh_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 3, vector_length);
+    vuint8m1_t square_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 4, vector_length);
+    vuint8m1_t inverse4_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 5, vector_length);
+    vuint8m1_t log_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 6, vector_length);
+    vuint8m1_t antilog_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 7, vector_length);
+    vuint8m1_t mul_a_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 8, vector_length);
+    vuint8m1_t mul_b_u8m1 = __riscv_vle8_v_u8m1(tables + 16 * 9, vector_length);
 
     // SubBytes via tower-field inversion + affine.
     // Map each byte into GF((2^4)^2) as a packed nibble pair (hi << 4 | lo).
-    vuint8m1_t low_nibble_vec = __riscv_vand_vx_u8m1(state_bytes_vec, 0x0f, vector_length);
-    vuint8m1_t high_nibble_vec = __riscv_vsrl_vx_u8m1(state_bytes_vec, 4, vector_length);
-    vuint8m1_t tower_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(mlow_vec, low_nibble_vec, vector_length),
-                                                __riscv_vrgather_vv_u8m1(mhigh_vec, high_nibble_vec, vector_length),
-                                                vector_length);
-    vuint8m1_t tower_high_vec = __riscv_vsrl_vx_u8m1(tower_vec, 4, vector_length);
-    vuint8m1_t tower_low_vec = __riscv_vand_vx_u8m1(tower_vec, 0x0f, vector_length);
+    vuint8m1_t low_nibble_u8m1 = __riscv_vand_vx_u8m1(state_bytes_u8m1, 0x0f, vector_length);
+    vuint8m1_t high_nibble_u8m1 = __riscv_vsrl_vx_u8m1(state_bytes_u8m1, 4, vector_length);
+    vuint8m1_t tower_u8m1 = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(mlow_u8m1, low_nibble_u8m1, vector_length),
+                                                 __riscv_vrgather_vv_u8m1(mhigh_u8m1, high_nibble_u8m1, vector_length),
+                                                 vector_length);
+    vuint8m1_t tower_high_u8m1 = __riscv_vsrl_vx_u8m1(tower_u8m1, 4, vector_length);
+    vuint8m1_t tower_low_u8m1 = __riscv_vand_vx_u8m1(tower_u8m1, 0x0f, vector_length);
 
     // Norm: norm = lo^2 + lo*hi*A + hi^2*B  (all in GF(2^4)).
-    vuint8m1_t low_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_low_vec, vector_length);
-    vuint8m1_t high_squared_vec = __riscv_vrgather_vv_u8m1(square_vec, tower_high_vec, vector_length);
-    vuint8m1_t low_high_vec = sz_gf16_mul_rvv_(tower_low_vec, tower_high_vec, log_vec, antilog_vec, vector_length);
-    vuint8m1_t low_high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, low_high_vec, vector_length);
-    vuint8m1_t high_squared_b_vec = __riscv_vrgather_vv_u8m1(mul_b_vec, high_squared_vec, vector_length);
-    vuint8m1_t norm_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_vec, low_high_a_vec, vector_length),
-                                               high_squared_b_vec, vector_length);
-    vuint8m1_t norm_inverse_vec = __riscv_vrgather_vv_u8m1(inverse4_vec, norm_vec, vector_length);
+    vuint8m1_t low_squared_u8m1 = __riscv_vrgather_vv_u8m1(square_u8m1, tower_low_u8m1, vector_length);
+    vuint8m1_t high_squared_u8m1 = __riscv_vrgather_vv_u8m1(square_u8m1, tower_high_u8m1, vector_length);
+    vuint8m1_t low_high_u8m1 = sz_gf16_mul_rvv_(tower_low_u8m1, tower_high_u8m1, log_u8m1, antilog_u8m1, vector_length);
+    vuint8m1_t low_high_a_u8m1 = __riscv_vrgather_vv_u8m1(mul_a_u8m1, low_high_u8m1, vector_length);
+    vuint8m1_t high_squared_b_u8m1 = __riscv_vrgather_vv_u8m1(mul_b_u8m1, high_squared_u8m1, vector_length);
+    vuint8m1_t norm_u8m1 = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(low_squared_u8m1, low_high_a_u8m1, vector_length),
+                                                high_squared_b_u8m1, vector_length);
+    vuint8m1_t norm_inverse_u8m1 = __riscv_vrgather_vv_u8m1(inverse4_u8m1, norm_u8m1, vector_length);
 
     // Inverse in the tower: new_high = hi*norm_inverse, new_low = (lo + hi*A) * norm_inverse.
-    vuint8m1_t new_high_vec = sz_gf16_mul_rvv_(tower_high_vec, norm_inverse_vec, log_vec, antilog_vec, vector_length);
-    vuint8m1_t high_a_vec = __riscv_vrgather_vv_u8m1(mul_a_vec, tower_high_vec, vector_length);
-    vuint8m1_t low_xor_high_a_vec = __riscv_vxor_vv_u8m1(tower_low_vec, high_a_vec, vector_length);
-    vuint8m1_t new_low_vec = sz_gf16_mul_rvv_(low_xor_high_a_vec, norm_inverse_vec, log_vec, antilog_vec,
-                                              vector_length);
+    vuint8m1_t new_high_u8m1 = sz_gf16_mul_rvv_(tower_high_u8m1, norm_inverse_u8m1, log_u8m1, antilog_u8m1,
+                                                vector_length);
+    vuint8m1_t high_a_u8m1 = __riscv_vrgather_vv_u8m1(mul_a_u8m1, tower_high_u8m1, vector_length);
+    vuint8m1_t low_xor_high_a_u8m1 = __riscv_vxor_vv_u8m1(tower_low_u8m1, high_a_u8m1, vector_length);
+    vuint8m1_t new_low_u8m1 = sz_gf16_mul_rvv_(low_xor_high_a_u8m1, norm_inverse_u8m1, log_u8m1, antilog_u8m1,
+                                               vector_length);
 
     // Map back out of the tower and apply the AES affine transform (linear part + 0x63).
-    vuint8m1_t packed_inverse_vec = __riscv_vor_vv_u8m1(__riscv_vsll_vx_u8m1(new_high_vec, 4, vector_length),
-                                                        new_low_vec, vector_length);
-    vuint8m1_t packed_low_vec = __riscv_vand_vx_u8m1(packed_inverse_vec, 0x0f, vector_length);
-    vuint8m1_t packed_high_vec = __riscv_vsrl_vx_u8m1(packed_inverse_vec, 4, vector_length);
-    vuint8m1_t sbox_vec = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(glow_vec, packed_low_vec, vector_length),
-                                               __riscv_vrgather_vv_u8m1(ghigh_vec, packed_high_vec, vector_length),
-                                               vector_length);
-    sbox_vec = __riscv_vxor_vx_u8m1(sbox_vec, 0x63, vector_length);
+    vuint8m1_t packed_inverse_u8m1 = __riscv_vor_vv_u8m1(__riscv_vsll_vx_u8m1(new_high_u8m1, 4, vector_length),
+                                                         new_low_u8m1, vector_length);
+    vuint8m1_t packed_low_u8m1 = __riscv_vand_vx_u8m1(packed_inverse_u8m1, 0x0f, vector_length);
+    vuint8m1_t packed_high_u8m1 = __riscv_vsrl_vx_u8m1(packed_inverse_u8m1, 4, vector_length);
+    vuint8m1_t sbox_u8m1 = __riscv_vxor_vv_u8m1(__riscv_vrgather_vv_u8m1(glow_u8m1, packed_low_u8m1, vector_length),
+                                                __riscv_vrgather_vv_u8m1(ghigh_u8m1, packed_high_u8m1, vector_length),
+                                                vector_length);
+    sbox_u8m1 = __riscv_vxor_vx_u8m1(sbox_u8m1, 0x63, vector_length);
 
     // ShiftRows (combined ordering): premix[j] = sbox[shiftrows[j]].
-    vuint8m1_t shiftrows_index_vec = __riscv_vle8_v_u8m1(sz_aes_shiftrows_rvv_(), vector_length);
-    vuint8m1_t premix_vec = __riscv_vrgather_vv_u8m1(sbox_vec, shiftrows_index_vec, vector_length);
+    vuint8m1_t shiftrows_index_u8m1 = __riscv_vle8_v_u8m1(sz_aes_shiftrows_rvv_(), vector_length);
+    vuint8m1_t premix_u8m1 = __riscv_vrgather_vv_u8m1(sbox_u8m1, shiftrows_index_u8m1, vector_length);
 
     // MixColumns over groups of 4: out[j] = premix[j] ^ group_xor ^ xtime(premix[j] ^ premix[(j+1)%4]).
-    vuint8m1_t rot1_index_vec = __riscv_vle8_v_u8m1(sz_aes_rot1_rvv_(), vector_length);
-    vuint8m1_t premix_next_vec = __riscv_vrgather_vv_u8m1(premix_vec, rot1_index_vec, vector_length);
-    vuint8m1_t diff_vec = __riscv_vxor_vv_u8m1(premix_vec, premix_next_vec, vector_length);
-    vuint8m1_t shifted_vec = __riscv_vsll_vx_u8m1(diff_vec, 1, vector_length);
-    vbool8_t high_bit_mask = __riscv_vmsne_vx_u8m1_b8(__riscv_vand_vx_u8m1(diff_vec, 0x80, vector_length), 0,
-                                                      vector_length);
-    vuint8m1_t shifted_reduced_vec = __riscv_vxor_vx_u8m1(shifted_vec, 0x1b, vector_length);
-    vuint8m1_t xtime_vec = __riscv_vmerge_vvm_u8m1(shifted_vec, shifted_reduced_vec, high_bit_mask, vector_length);
+    vuint8m1_t rot1_index_u8m1 = __riscv_vle8_v_u8m1(sz_aes_rot1_rvv_(), vector_length);
+    vuint8m1_t premix_next_u8m1 = __riscv_vrgather_vv_u8m1(premix_u8m1, rot1_index_u8m1, vector_length);
+    vuint8m1_t diff_u8m1 = __riscv_vxor_vv_u8m1(premix_u8m1, premix_next_u8m1, vector_length);
+    vuint8m1_t shifted_u8m1 = __riscv_vsll_vx_u8m1(diff_u8m1, 1, vector_length);
+    vbool8_t high_bit_b8 = __riscv_vmsne_vx_u8m1_b8(__riscv_vand_vx_u8m1(diff_u8m1, 0x80, vector_length), 0,
+                                                    vector_length);
+    vuint8m1_t shifted_reduced_u8m1 = __riscv_vxor_vx_u8m1(shifted_u8m1, 0x1b, vector_length);
+    vuint8m1_t xtime_u8m1 = __riscv_vmerge_vvm_u8m1(shifted_u8m1, shifted_reduced_u8m1, high_bit_b8, vector_length);
 
     // group_xor = xor of the 4 lanes in each group, broadcast across the group via successive rotations.
-    vuint8m1_t group_xor_vec = premix_vec;
-    group_xor_vec = __riscv_vxor_vv_u8m1(group_xor_vec, premix_next_vec, vector_length);
-    vuint8m1_t rot2_index_vec = __riscv_vrgather_vv_u8m1(rot1_index_vec, rot1_index_vec, vector_length);
-    group_xor_vec = __riscv_vxor_vv_u8m1(
-        group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot2_index_vec, vector_length), vector_length);
-    vuint8m1_t rot3_index_vec = __riscv_vrgather_vv_u8m1(rot2_index_vec, rot1_index_vec, vector_length);
-    group_xor_vec = __riscv_vxor_vv_u8m1(
-        group_xor_vec, __riscv_vrgather_vv_u8m1(premix_vec, rot3_index_vec, vector_length), vector_length);
+    vuint8m1_t group_xor_u8m1 = premix_u8m1;
+    group_xor_u8m1 = __riscv_vxor_vv_u8m1(group_xor_u8m1, premix_next_u8m1, vector_length);
+    vuint8m1_t rot2_index_u8m1 = __riscv_vrgather_vv_u8m1(rot1_index_u8m1, rot1_index_u8m1, vector_length);
+    group_xor_u8m1 = __riscv_vxor_vv_u8m1(
+        group_xor_u8m1, __riscv_vrgather_vv_u8m1(premix_u8m1, rot2_index_u8m1, vector_length), vector_length);
+    vuint8m1_t rot3_index_u8m1 = __riscv_vrgather_vv_u8m1(rot2_index_u8m1, rot1_index_u8m1, vector_length);
+    group_xor_u8m1 = __riscv_vxor_vv_u8m1(
+        group_xor_u8m1, __riscv_vrgather_vv_u8m1(premix_u8m1, rot3_index_u8m1, vector_length), vector_length);
 
-    vuint8m1_t out_vec = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(premix_vec, group_xor_vec, vector_length), xtime_vec,
-                                              vector_length);
+    vuint8m1_t out_u8m1 = __riscv_vxor_vv_u8m1(__riscv_vxor_vv_u8m1(premix_u8m1, group_xor_u8m1, vector_length),
+                                               xtime_u8m1, vector_length);
 
     // AddRoundKey.
-    out_vec = __riscv_vxor_vv_u8m1(out_vec, key_vec, vector_length);
+    out_u8m1 = __riscv_vxor_vv_u8m1(out_u8m1, key_u8m1, vector_length);
 
-    sz_u128_vec_t result;
-    __riscv_vse8_v_u8m1(result.u8s, out_vec, vector_length);
-    return result;
+    sz_u128_vec_t result_vec;
+    __riscv_vse8_v_u8m1(result_vec.u8s, out_u8m1, vector_length);
+    return result_vec;
 }
 
 #pragma endregion // RVV AES Round
@@ -235,34 +236,35 @@ SZ_HELPER_AUTO sz_u128_vec_t sz_emulate_aesenc_rvv_(sz_u128_vec_t state_vec, sz_
  *  serial AES round. Every non-AES step (the additive `sum` shuffle, length folding, block layout)
  *  reuses the shared serial helpers, so the digests are guaranteed value-identical. */
 
-SZ_HELPER_AUTO void sz_hash_state_short_update_rvv_(sz_hash_state_aligned_for_short_t *state, sz_u128_vec_t block) {
+SZ_HELPER_AUTO void sz_hash_state_short_update_rvv_(sz_hash_state_aligned_for_short_t *state, sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
-    state->aes = sz_emulate_aesenc_rvv_(state->aes, block);
+    state->aes = sz_emulate_aesenc_rvv_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
-    state->sum.u64s[0] += block.u64s[0], state->sum.u64s[1] += block.u64s[1];
+    state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_short_finalize_rvv_(sz_hash_state_aligned_for_short_t const *state,
                                                           sz_size_t length) {
-    sz_u128_vec_t key_with_length = state->key;
-    key_with_length.u64s[0] += length;
-    sz_u128_vec_t mixed = sz_emulate_aesenc_rvv_(state->sum, state->aes);
-    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_rvv_(sz_emulate_aesenc_rvv_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t key_with_length_vec = state->key;
+    key_with_length_vec.u64s[0] += length;
+    sz_u128_vec_t mixed_vec = sz_emulate_aesenc_rvv_(state->sum, state->aes);
+    sz_u128_vec_t mixed_in_register_vec = sz_emulate_aesenc_rvv_(sz_emulate_aesenc_rvv_(mixed_vec, key_with_length_vec),
+                                                                 mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target->u8s`,
+/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` into `target_vec->u8s`,
  *          replacing a scalar byte loop. `source` must have a full block of readable bytes. */
-SZ_HELPER_INLINE void sz_hash_load_block_rvv_(sz_u128_vec_t *target, sz_cptr_t source) {
-    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target->u8s));
-    __riscv_vse8_v_u8m1(target->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
+SZ_HELPER_INLINE void sz_hash_load_block_rvv_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
+    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
+    __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
 
-/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source` to `target`, the store
+/** @brief  Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from `source_vec` to `target`, the store
  *          counterpart of `sz_hash_load_block_rvv_`. `target` must have a full block of writable bytes. */
-SZ_HELPER_INLINE void sz_hash_store_block_rvv_(sz_ptr_t target, sz_u128_vec_t source) {
-    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(source.u8s));
-    __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(source.u8s, vector_length), vector_length);
+SZ_HELPER_INLINE void sz_hash_store_block_rvv_(sz_ptr_t target, sz_u128_vec_t source_vec) {
+    sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(source_vec.u8s));
+    __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(source_vec.u8s, vector_length), vector_length);
 }
 
 /**
@@ -306,37 +308,38 @@ SZ_HELPER_AUTO void sz_hash_state_update_rvv_(sz_hash_state_aligned_t *state) {
 
 SZ_HELPER_AUTO sz_u64_t sz_hash_state_finalize_rvv_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
-    sz_u128_vec_t key_with_length;
-    key_with_length.u64s[0] = state.key.u64s[0] + state.ins_length;
-    key_with_length.u64s[1] = state.key.u64s[1];
+    sz_u128_vec_t key_with_length_vec;
+    key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
+    key_with_length_vec.u64s[1] = state.key.u64s[1];
 
     // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
     // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
     // digest defer it and share this single finalization.
-    sz_u128_vec_t aes0 = sz_emulate_aesenc_rvv_(state.aes.u128s[0], state.ins.u128s[0]);
-    sz_u128_vec_t aes1 = sz_emulate_aesenc_rvv_(state.aes.u128s[1], state.ins.u128s[1]);
-    sz_u128_vec_t aes2 = sz_emulate_aesenc_rvv_(state.aes.u128s[2], state.ins.u128s[2]);
-    sz_u128_vec_t aes3 = sz_emulate_aesenc_rvv_(state.aes.u128s[3], state.ins.u128s[3]);
-    sz_u128_vec_t sum0 = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[0], shuffle);
-    sz_u128_vec_t sum1 = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[1], shuffle);
-    sz_u128_vec_t sum2 = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[2], shuffle);
-    sz_u128_vec_t sum3 = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[3], shuffle);
-    sum0.u64s[0] += state.ins.u128s[0].u64s[0], sum0.u64s[1] += state.ins.u128s[0].u64s[1];
-    sum1.u64s[0] += state.ins.u128s[1].u64s[0], sum1.u64s[1] += state.ins.u128s[1].u64s[1];
-    sum2.u64s[0] += state.ins.u128s[2].u64s[0], sum2.u64s[1] += state.ins.u128s[2].u64s[1];
-    sum3.u64s[0] += state.ins.u128s[3].u64s[0], sum3.u64s[1] += state.ins.u128s[3].u64s[1];
+    sz_u128_vec_t aes0_vec = sz_emulate_aesenc_rvv_(state.aes.u128s[0], state.ins.u128s[0]);
+    sz_u128_vec_t aes1_vec = sz_emulate_aesenc_rvv_(state.aes.u128s[1], state.ins.u128s[1]);
+    sz_u128_vec_t aes2_vec = sz_emulate_aesenc_rvv_(state.aes.u128s[2], state.ins.u128s[2]);
+    sz_u128_vec_t aes3_vec = sz_emulate_aesenc_rvv_(state.aes.u128s[3], state.ins.u128s[3]);
+    sz_u128_vec_t sum0_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[0], shuffle);
+    sz_u128_vec_t sum1_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[1], shuffle);
+    sz_u128_vec_t sum2_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[2], shuffle);
+    sz_u128_vec_t sum3_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[3], shuffle);
+    sum0_vec.u64s[0] += state.ins.u128s[0].u64s[0], sum0_vec.u64s[1] += state.ins.u128s[0].u64s[1];
+    sum1_vec.u64s[0] += state.ins.u128s[1].u64s[0], sum1_vec.u64s[1] += state.ins.u128s[1].u64s[1];
+    sum2_vec.u64s[0] += state.ins.u128s[2].u64s[0], sum2_vec.u64s[1] += state.ins.u128s[2].u64s[1];
+    sum3_vec.u64s[0] += state.ins.u128s[3].u64s[0], sum3_vec.u64s[1] += state.ins.u128s[3].u64s[1];
 
-    sz_u128_vec_t mixed0 = sz_emulate_aesenc_rvv_(sum0, aes0);
-    sz_u128_vec_t mixed1 = sz_emulate_aesenc_rvv_(sum1, aes1);
-    sz_u128_vec_t mixed2 = sz_emulate_aesenc_rvv_(sum2, aes2);
-    sz_u128_vec_t mixed3 = sz_emulate_aesenc_rvv_(sum3, aes3);
+    sz_u128_vec_t mixed0_vec = sz_emulate_aesenc_rvv_(sum0_vec, aes0_vec);
+    sz_u128_vec_t mixed1_vec = sz_emulate_aesenc_rvv_(sum1_vec, aes1_vec);
+    sz_u128_vec_t mixed2_vec = sz_emulate_aesenc_rvv_(sum2_vec, aes2_vec);
+    sz_u128_vec_t mixed3_vec = sz_emulate_aesenc_rvv_(sum3_vec, aes3_vec);
 
-    sz_u128_vec_t mixed01 = sz_emulate_aesenc_rvv_(mixed0, mixed1);
-    sz_u128_vec_t mixed23 = sz_emulate_aesenc_rvv_(mixed2, mixed3);
-    sz_u128_vec_t mixed = sz_emulate_aesenc_rvv_(mixed01, mixed23);
+    sz_u128_vec_t mixed01_vec = sz_emulate_aesenc_rvv_(mixed0_vec, mixed1_vec);
+    sz_u128_vec_t mixed23_vec = sz_emulate_aesenc_rvv_(mixed2_vec, mixed3_vec);
+    sz_u128_vec_t mixed_vec = sz_emulate_aesenc_rvv_(mixed01_vec, mixed23_vec);
 
-    sz_u128_vec_t mixed_in_register = sz_emulate_aesenc_rvv_(sz_emulate_aesenc_rvv_(mixed, key_with_length), mixed);
-    return mixed_in_register.u64s[0];
+    sz_u128_vec_t mixed_in_register_vec = sz_emulate_aesenc_rvv_(sz_emulate_aesenc_rvv_(mixed_vec, key_with_length_vec),
+                                                                 mixed_vec);
+    return mixed_in_register_vec.u64s[0];
 }
 
 SZ_API_COMPTIME SZ_NO_STACK_PROTECTOR sz_u64_t sz_hash_rvv(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {

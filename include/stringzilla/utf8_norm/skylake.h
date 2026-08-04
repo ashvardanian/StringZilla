@@ -43,26 +43,26 @@ typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t)(__m512i, __mmask64, sz_
  *  @brief 64-entry lead lookup without AVX-512 VBMI: four per-128-lane `vpshufb` over the broadcast LUT
  *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
  */
-SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes, __mmask64 is_lead,
+SZ_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
                                                                          sz_u8_t form_flag) {
-    __m512i index = _mm512_and_si512(bytes, _mm512_set1_epi8(0x3F));
-    __m512i low_nibble = _mm512_and_si512(index, _mm512_set1_epi8(0x0F));
+    __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
+    __m512i low_nibble_u8x64 = _mm512_and_si512(index_u8x64, _mm512_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
     // two bits live in bits 0..1, and masking with 0x03 recovers `index >> 4` per byte.
-    __m512i quadrant = _mm512_and_si512(_mm512_srli_epi16(index, 4), _mm512_set1_epi8(0x03));
-    __m512i table0 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 0)));
-    __m512i table1 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 16)));
-    __m512i table2 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 32)));
-    __m512i table3 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 48)));
-    __m512i families = _mm512_shuffle_epi8(table0, low_nibble);
-    families = _mm512_mask_mov_epi8(families, _mm512_cmpeq_epi8_mask(quadrant, _mm512_set1_epi8(1)),
-                                    _mm512_shuffle_epi8(table1, low_nibble));
-    families = _mm512_mask_mov_epi8(families, _mm512_cmpeq_epi8_mask(quadrant, _mm512_set1_epi8(2)),
-                                    _mm512_shuffle_epi8(table2, low_nibble));
-    families = _mm512_mask_mov_epi8(families, _mm512_cmpeq_epi8_mask(quadrant, _mm512_set1_epi8(3)),
-                                    _mm512_shuffle_epi8(table3, low_nibble));
-    __mmask64 has_flag = _mm512_test_epi8_mask(families, _mm512_set1_epi8((char)form_flag));
-    return is_lead & has_flag;
+    __m512i quadrant_u8x64 = _mm512_and_si512(_mm512_srli_epi16(index_u8x64, 4), _mm512_set1_epi8(0x03));
+    __m512i table0_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 0)));
+    __m512i table1_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 16)));
+    __m512i table2_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 32)));
+    __m512i table3_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 48)));
+    __m512i families_u8x64 = _mm512_shuffle_epi8(table0_u8x64, low_nibble_u8x64);
+    families_u8x64 = _mm512_mask_mov_epi8(families_u8x64, _mm512_cmpeq_epi8_mask(quadrant_u8x64, _mm512_set1_epi8(1)),
+                                          _mm512_shuffle_epi8(table1_u8x64, low_nibble_u8x64));
+    families_u8x64 = _mm512_mask_mov_epi8(families_u8x64, _mm512_cmpeq_epi8_mask(quadrant_u8x64, _mm512_set1_epi8(2)),
+                                          _mm512_shuffle_epi8(table2_u8x64, low_nibble_u8x64));
+    families_u8x64 = _mm512_mask_mov_epi8(families_u8x64, _mm512_cmpeq_epi8_mask(quadrant_u8x64, _mm512_set1_epi8(3)),
+                                          _mm512_shuffle_epi8(table3_u8x64, low_nibble_u8x64));
+    __mmask64 has_flag_m64 = _mm512_test_epi8_mask(families_u8x64, _mm512_set1_epi8((char)form_flag));
+    return is_lead_m64 & has_flag_m64;
 }
 
 /**
@@ -77,17 +77,17 @@ SZ_HELPER_AUTO sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t
     sz_u8_t previous_canonical_combining_class = 0;
 
     while (position + 64 <= end) {
-        __m512i bytes = _mm512_loadu_si512((void const *)position);
-        __mmask64 non_ascii = _mm512_movepi8_mask(bytes);
-        if (non_ascii == 0) { // all 64 bytes ASCII: inert
+        __m512i bytes_u8x64 = _mm512_loadu_si512((void const *)position);
+        __mmask64 non_ascii_m64 = _mm512_movepi8_mask(bytes_u8x64);
+        if (non_ascii_m64 == 0) { // all 64 bytes ASCII: inert
             position += 64, previous_canonical_combining_class = 0;
             continue;
         }
-        __mmask64 continuation = _mm512_cmpeq_epi8_mask(_mm512_and_si512(bytes, _mm512_set1_epi8((char)0xC0)),
-                                                        _mm512_set1_epi8((char)0x80));
-        __mmask64 is_lead = non_ascii & ~continuation;
-        __mmask64 flagged = classify(bytes, is_lead, form_flag);
-        if (flagged == 0) { // 64 bytes inert for the form: skip, then realign onto a codepoint boundary
+        __mmask64 continuation_m64 = _mm512_cmpeq_epi8_mask(_mm512_and_si512(bytes_u8x64, _mm512_set1_epi8((char)0xC0)),
+                                                            _mm512_set1_epi8((char)0x80));
+        __mmask64 is_lead_m64 = non_ascii_m64 & ~continuation_m64;
+        __mmask64 flagged_m64 = classify(bytes_u8x64, is_lead_m64, form_flag);
+        if (flagged_m64 == 0) { // 64 bytes inert for the form: skip, then realign onto a codepoint boundary
             position += 64, previous_canonical_combining_class = 0;
             while (position < end && (*position & 0xC0) == 0x80) ++position;
             continue;

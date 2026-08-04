@@ -54,49 +54,56 @@ SZ_HELPER_AUTO __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_
 
 /** @brief  Word_Break class byte for thirty-two ASTRAL codepoints over the 20-bit offset = cp - 0x10000 (5-nibble
  *          cascade), the AVX2 twin of `sz_utf8_word_break_classify_astral16_icelake_`. Per-lane bytes:
- *          @p plane_off = (offset>>16)&0xFF (low nibble meaningful), @p high = (offset>>8)&0xFF, @p low = offset&0xFF.
+ *          @p plane_off_u8x32 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x32 = (offset>>8)&0xFF,
+ *          @p low_u8x32 = offset&0xFF.
  *          Bit-exact with `sz_rune_word_break_property` over the Supplementary Planes. */
-SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off, __m256i high, __m256i low) {
-    __m256i const low_nibble_mask = _mm256_set1_epi8(0x0F);
-    __m256i const n4 = _mm256_and_si256(plane_off, low_nibble_mask);
-    __m256i const n3 = _mm256_and_si256(_mm256_srli_epi16(high, 4), low_nibble_mask);
-    __m256i const stage1_index = _mm256_or_si256(_mm256_slli_epi16(n4, 4), n3);
-    __m256i const page = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_astral_stage1_, stage1_index);
-    __m256i const n2 = _mm256_and_si256(high, low_nibble_mask);
-    __m256i const leaf2 = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_word_break_haswell_astral_stage2_lo_,
-                                                              sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
-                                                              page, n2);
-    __m256i const n1 = _mm256_and_si256(_mm256_srli_epi16(low, 4), low_nibble_mask);
-    __m256i const leaf_lo = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16, leaf2,
-        n1);
-    __m256i const leaf_hi = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16, leaf2,
-        n1);
-    __m256i const n0 = _mm256_and_si256(low, low_nibble_mask);
-    __m256i const leaf_group = _mm256_or_si256(_mm256_and_si256(_mm256_srli_epi16(leaf_lo, 4), low_nibble_mask),
-                                               _mm256_slli_epi16(leaf_hi, 4));
-    __m256i const leaf_low_nibble = _mm256_and_si256(leaf_lo, low_nibble_mask);
-    __m256i const stage4_lut_index = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble, 4), n0);
-    __m256i result = _mm256_setzero_si256();
+SZ_HELPER_AUTO __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
+                                                                __m256i low_u8x32) {
+    __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
+    __m256i const n4_u8x32 = _mm256_and_si256(plane_off_u8x32, low_nibble_mask_u8x32);
+    __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
+    __m256i const stage1_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(n4_u8x32, 4), n3_u8x32);
+    __m256i const page_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_astral_stage1_,
+                                                            stage1_index_u8x32);
+    __m256i const n2_u8x32 = _mm256_and_si256(high_u8x32, low_nibble_mask_u8x32);
+    __m256i const leaf2_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
+        sz_utf8_word_break_haswell_astral_stage2_lo_, sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
+        page_u8x32, n2_u8x32);
+    __m256i const n1_u8x32 = _mm256_and_si256(_mm256_srli_epi16(low_u8x32, 4), low_nibble_mask_u8x32);
+    __m256i const leaf_lo_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
+        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16,
+        leaf2_u8x32, n1_u8x32);
+    __m256i const leaf_hi_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
+        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16,
+        leaf2_u8x32, n1_u8x32);
+    __m256i const n0_u8x32 = _mm256_and_si256(low_u8x32, low_nibble_mask_u8x32);
+    __m256i const leaf_group_u8x32 = _mm256_or_si256(
+        _mm256_and_si256(_mm256_srli_epi16(leaf_lo_u8x32, 4), low_nibble_mask_u8x32),
+        _mm256_slli_epi16(leaf_hi_u8x32, 4));
+    __m256i const leaf_low_nibble_u8x32 = _mm256_and_si256(leaf_lo_u8x32, low_nibble_mask_u8x32);
+    __m256i const stage4_lut_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble_u8x32, 4), n0_u8x32);
+    __m256i result_u8x32 = _mm256_setzero_si256();
     for (int group = 0; group < (int)sz_utf8_word_break_haswell_astral_leaf_groups_k; ++group) {
-        __m256i const value = sz_utf8_rune_lut256_haswell_(
-            sz_utf8_word_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index);
-        __m256i const here = _mm256_cmpeq_epi8(leaf_group, _mm256_set1_epi8((char)group));
-        result = _mm256_blendv_epi8(result, value, here);
+        __m256i const value_u8x32 = sz_utf8_rune_lut256_haswell_(
+            sz_utf8_word_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x32);
+        __m256i const here_u8x32 = _mm256_cmpeq_epi8(leaf_group_u8x32, _mm256_set1_epi8((char)group));
+        result_u8x32 = _mm256_blendv_epi8(result_u8x32, value_u8x32, here_u8x32);
     }
-    return result;
+    return result_u8x32;
 }
 
 /** @brief  Word_Break class byte for thirty-two ASCII codepoints (cp < 0x80) via the existing 128-entry property
  *          table, read in-register by two `lut64` halves (low six bits) blended on bit 6, the AVX2 twin of the
  *          icelake ASCII permute. The window byte equals the codepoint on ASCII lanes. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) {
-    __m256i const index_low6 = _mm256_and_si256(bytes, _mm256_set1_epi8(0x3F));
-    __m256i const low_half = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 0, index_low6);
-    __m256i const high_half = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 64, index_low6);
-    __m256i const high_bit = _mm256_cmpeq_epi8(_mm256_and_si256(bytes, _mm256_set1_epi8(0x40)), _mm256_set1_epi8(0x40));
-    return _mm256_blendv_epi8(low_half, high_half, high_bit);
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes_u8x32) {
+    __m256i const index_low6_u8x32 = _mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(0x3F));
+    __m256i const low_half_u8x32 = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 0,
+                                                               index_low6_u8x32);
+    __m256i const high_half_u8x32 = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 64,
+                                                                index_low6_u8x32);
+    __m256i const high_bit_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(0x40)),
+                                                     _mm256_set1_epi8(0x40));
+    return _mm256_blendv_epi8(low_half_u8x32, high_half_u8x32, high_bit_u8x32);
 }
 
 /** @brief  Start-compacting BMP classify: the BMP flat-table lookup is bit-exact but its output is consumed only on
@@ -109,13 +116,13 @@ SZ_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes) 
  *          @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start lane; every other lane is a
  *          don't-care left at its incoming value. */
 SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
-    sz_u64_t bmp_starts, __m256i high_lo, __m256i high_hi, __m256i low_lo, __m256i low_hi, __m256i *out_lo,
-    __m256i *out_hi) {
+    sz_u64_t bmp_starts, __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32,
+    __m256i *out_lo_u8x32, __m256i *out_hi_u8x32) {
     sz_u8_t high_bytes[64], low_bytes[64];
-    _mm256_storeu_si256((__m256i *)(high_bytes + 0), high_lo);
-    _mm256_storeu_si256((__m256i *)(high_bytes + 32), high_hi);
-    _mm256_storeu_si256((__m256i *)(low_bytes + 0), low_lo);
-    _mm256_storeu_si256((__m256i *)(low_bytes + 32), low_hi);
+    _mm256_storeu_si256((__m256i *)(high_bytes + 0), high_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)(high_bytes + 32), high_hi_u8x32);
+    _mm256_storeu_si256((__m256i *)(low_bytes + 0), low_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)(low_bytes + 32), low_hi_u8x32);
 
     sz_u8_t dense_high[32] = {0}, dense_low[32] = {0};
     sz_u64_t remaining = bmp_starts;
@@ -128,14 +135,14 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
         ++dense_index;
     }
 
-    __m256i const dense_class = sz_utf8_word_break_bmp_class_haswell_(_mm256_loadu_si256((__m256i const *)dense_high),
-                                                                      _mm256_loadu_si256((__m256i const *)dense_low));
+    __m256i const dense_class_u8x32 = sz_utf8_word_break_bmp_class_haswell_(
+        _mm256_loadu_si256((__m256i const *)dense_high), _mm256_loadu_si256((__m256i const *)dense_low));
     sz_u8_t class_bytes[32];
-    _mm256_storeu_si256((__m256i *)class_bytes, dense_class);
+    _mm256_storeu_si256((__m256i *)class_bytes, dense_class_u8x32);
 
     sz_u8_t scatter_lo[32], scatter_hi[32];
-    _mm256_storeu_si256((__m256i *)scatter_lo, *out_lo);
-    _mm256_storeu_si256((__m256i *)scatter_hi, *out_hi);
+    _mm256_storeu_si256((__m256i *)scatter_lo, *out_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)scatter_hi, *out_hi_u8x32);
     remaining = bmp_starts;
     dense_index = 0;
     while (remaining) {
@@ -145,8 +152,8 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
         if (lane < 32) scatter_lo[lane] = value;
         else scatter_hi[lane - 32] = value;
     }
-    *out_lo = _mm256_loadu_si256((__m256i const *)scatter_lo);
-    *out_hi = _mm256_loadu_si256((__m256i const *)scatter_hi);
+    *out_lo_u8x32 = _mm256_loadu_si256((__m256i const *)scatter_lo);
+    *out_hi_u8x32 = _mm256_loadu_si256((__m256i const *)scatter_hi);
 }
 
 /** @brief  Per-window byte-lane classification (AVX2): the Word_Break class byte per lane as two `__m256i` halves,
@@ -155,70 +162,76 @@ SZ_HELPER_AUTO void sz_utf8_word_break_bmp_compact_haswell_( //
  *          property table, BMP through the nibble cascade, 4-byte leads through the astral cascade with the codepoint
  *          high/low/plane reconstructed from the forward neighbours. */
 SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_haswell_( //
-    sz_utf8_rune_window_haswell_t window, __m256i *classes_lo, __m256i *classes_hi) {
-    __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
+    sz_utf8_rune_window_haswell_t window, __m256i *classes_lo_u8x32, __m256i *classes_hi_u8x32) {
+    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
-    __m256i const four_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)window.four_byte_starts);
-    __m256i const four_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(window.four_byte_starts >> 32));
-    __m256i const ascii_select_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)ascii_starts);
-    __m256i const ascii_select_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(ascii_starts >> 32));
+    __m256i const four_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)window.four_byte_starts);
+    __m256i const four_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_(
+        (sz_u32_t)(window.four_byte_starts >> 32));
+    __m256i const ascii_select_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)ascii_starts);
+    __m256i const ascii_select_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(ascii_starts >> 32));
 
     // BMP class via the cascade over the decoder's reconstructed (high, low), run once over the compacted 2-/3-byte
     // START lanes. ASCII / 4-byte / continuation lanes are don't-cares here (overwritten or unread below).
-    __m256i out_lo = _mm256_setzero_si256();
-    __m256i out_hi = _mm256_setzero_si256();
+    __m256i out_lo_u8x32 = _mm256_setzero_si256();
+    __m256i out_hi_u8x32 = _mm256_setzero_si256();
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
     if (bmp_starts)
         sz_utf8_word_break_bmp_compact_haswell_(bmp_starts, window.high_lo, window.high_hi, window.low_lo,
-                                                window.low_hi, &out_lo, &out_hi);
+                                                window.low_hi, &out_lo_u8x32, &out_hi_u8x32);
 
     // ASCII lanes: read the 128-entry property table directly off the raw byte.
-    out_lo = _mm256_blendv_epi8(out_lo, sz_utf8_word_break_ascii_class_haswell_(raw_lo), ascii_select_lo);
-    out_hi = _mm256_blendv_epi8(out_hi, sz_utf8_word_break_ascii_class_haswell_(raw_hi), ascii_select_hi);
+    out_lo_u8x32 = _mm256_blendv_epi8(out_lo_u8x32, sz_utf8_word_break_ascii_class_haswell_(raw_lo_u8x32),
+                                      ascii_select_lo_u8x32);
+    out_hi_u8x32 = _mm256_blendv_epi8(out_hi_u8x32, sz_utf8_word_break_ascii_class_haswell_(raw_hi_u8x32),
+                                      ascii_select_hi_u8x32);
 
     // 4-byte (astral) lanes: reconstruct the codepoint from the lead + three forward neighbours, then the astral
     // cascade addressed by offset = codepoint - 0x10000 (the offset's plane nibble is `plane - 1`).
     if (window.four_byte_starts) {
-        __m256i next1_lo, next1_hi, next2_lo, next2_hi, next3_lo, next3_hi;
-        sz_utf8_forward_neighbours_haswell_(raw_lo, raw_hi, &next1_lo, &next1_hi, &next2_lo, &next2_hi);
-        __m256i const low_successor = _mm256_permute2x128_si256(raw_lo, raw_hi, 0x21);
-        next3_lo = _mm256_alignr_epi8(low_successor, raw_lo, 3);
-        __m256i const high_successor = _mm256_permute2x128_si256(raw_hi, raw_lo, 0x21);
-        next3_hi = _mm256_alignr_epi8(high_successor, raw_hi, 3);
-        __m256i const plane_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo, _mm256_set1_epi8(0x07)), 2),
+        __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32, next3_hi_u8x32;
+        sz_utf8_forward_neighbours_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next1_lo_u8x32, &next1_hi_u8x32,
+                                            &next2_lo_u8x32, &next2_hi_u8x32);
+        __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(raw_lo_u8x32, raw_hi_u8x32, 0x21);
+        next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, raw_lo_u8x32, 3);
+        __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(raw_hi_u8x32, raw_lo_u8x32, 0x21);
+        next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, raw_hi_u8x32, 3);
+        __m256i const plane_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo_u8x32, _mm256_set1_epi8(0x07)), 2),
                              _mm256_set1_epi8(0x1C)),
-            sz_utf8_srl8_haswell_(next1_lo, 4, 0x03));
-        __m256i const plane_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi, _mm256_set1_epi8(0x07)), 2),
+            sz_utf8_srl8_haswell_(next1_lo_u8x32, 4, 0x03));
+        __m256i const plane_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi_u8x32, _mm256_set1_epi8(0x07)), 2),
                              _mm256_set1_epi8(0x1C)),
-            sz_utf8_srl8_haswell_(next1_hi, 4, 0x03));
-        __m256i const high_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo, _mm256_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_haswell_(next1_hi_u8x32, 4, 0x03));
+        __m256i const high_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo_u8x32, _mm256_set1_epi8(0x0F)), 4),
                              _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_srl8_haswell_(next2_lo, 2, 0x0F));
-        __m256i const high_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi, _mm256_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_haswell_(next2_lo_u8x32, 2, 0x0F));
+        __m256i const high_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi_u8x32, _mm256_set1_epi8(0x0F)), 4),
                              _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_srl8_haswell_(next2_hi, 2, 0x0F));
-        __m256i const low_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo, _mm256_set1_epi8(0x03)), 6),
+            sz_utf8_srl8_haswell_(next2_hi_u8x32, 2, 0x0F));
+        __m256i const low_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo_u8x32, _mm256_set1_epi8(0x03)), 6),
                              _mm256_set1_epi8((char)0xC0)),
-            _mm256_and_si256(next3_lo, _mm256_set1_epi8(0x3F)));
-        __m256i const low_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi, _mm256_set1_epi8(0x03)), 6),
+            _mm256_and_si256(next3_lo_u8x32, _mm256_set1_epi8(0x3F)));
+        __m256i const low_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi_u8x32, _mm256_set1_epi8(0x03)), 6),
                              _mm256_set1_epi8((char)0xC0)),
-            _mm256_and_si256(next3_hi, _mm256_set1_epi8(0x3F)));
-        __m256i const plane_off_lo = _mm256_sub_epi8(plane_lo, _mm256_set1_epi8(1));
-        __m256i const plane_off_hi = _mm256_sub_epi8(plane_hi, _mm256_set1_epi8(1));
-        out_lo = _mm256_blendv_epi8(out_lo, sz_utf8_word_break_astral_class_haswell_(plane_off_lo, high_lo, low_lo),
-                                    four_select_lo);
-        out_hi = _mm256_blendv_epi8(out_hi, sz_utf8_word_break_astral_class_haswell_(plane_off_hi, high_hi, low_hi),
-                                    four_select_hi);
+            _mm256_and_si256(next3_hi_u8x32, _mm256_set1_epi8(0x3F)));
+        __m256i const plane_off_lo_u8x32 = _mm256_sub_epi8(plane_lo_u8x32, _mm256_set1_epi8(1));
+        __m256i const plane_off_hi_u8x32 = _mm256_sub_epi8(plane_hi_u8x32, _mm256_set1_epi8(1));
+        out_lo_u8x32 = _mm256_blendv_epi8(
+            out_lo_u8x32, sz_utf8_word_break_astral_class_haswell_(plane_off_lo_u8x32, high_lo_u8x32, low_lo_u8x32),
+            four_select_lo_u8x32);
+        out_hi_u8x32 = _mm256_blendv_epi8(
+            out_hi_u8x32, sz_utf8_word_break_astral_class_haswell_(plane_off_hi_u8x32, high_hi_u8x32, low_hi_u8x32),
+            four_select_hi_u8x32);
     }
-    *classes_lo = out_lo;
-    *classes_hi = out_hi;
+    *classes_lo_u8x32 = out_lo_u8x32;
+    *classes_hi_u8x32 = out_hi_u8x32;
 }
 
 #pragma endregion In register vectorized classifier
@@ -226,53 +239,61 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_haswell_( //
 #pragma region Mask algebra extractor
 
 /** @brief  A 64-bit "class byte == @p value" lane mask over both class halves (two `vpcmpeqb` -> mask_combine). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo, __m256i classes_hi,
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo_u8x32, __m256i classes_hi_u8x32,
                                                                  sz_u8_t value) {
-    __m256i const v = _mm256_set1_epi8((char)value);
-    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(classes_lo, v), _mm256_cmpeq_epi8(classes_hi, v));
+    __m256i const v_u8x32 = _mm256_set1_epi8((char)value);
+    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(classes_lo_u8x32, v_u8x32),
+                                         _mm256_cmpeq_epi8(classes_hi_u8x32, v_u8x32));
 }
 
 /** @brief  A 64-bit "raw window byte == @p value" lane mask over both window halves. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half, __m256i high_half, sz_u8_t value) {
-    __m256i const v = _mm256_set1_epi8((char)value);
-    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half, v), _mm256_cmpeq_epi8(high_half, v));
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                 sz_u8_t value) {
+    __m256i const v_u8x32 = _mm256_set1_epi8((char)value);
+    return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half_u8x32, v_u8x32),
+                                         _mm256_cmpeq_epi8(high_half_u8x32, v_u8x32));
 }
 
 /** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
-    return _mm256_cmpeq_epi8(_mm256_max_epu8(value, bound), value);
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
 /** @brief  Per-half "(high,low) 16-bit value in `[lo, hi]`" membership for one range (the AVX2 unsigned 16-bit
  *          window-compare building block of @ref sz_utf8_word_break_range16_mask_haswell_). */
-SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high, __m256i low, sz_u16_t lo, sz_u16_t hi) {
-    __m256i const lo_high = _mm256_set1_epi8((char)(lo >> 8)), lo_low = _mm256_set1_epi8((char)(lo & 0xFF));
-    __m256i const hi_high = _mm256_set1_epi8((char)(hi >> 8)), hi_low = _mm256_set1_epi8((char)(hi & 0xFF));
-    __m256i const ones = _mm256_set1_epi8((char)0xFF);
-    __m256i const eq_lo = _mm256_cmpeq_epi8(high, lo_high);
-    __m256i const not_below = _mm256_or_si256(
-        _mm256_andnot_si256(eq_lo, sz_utf8_word_break_cmpge_epu8_haswell_(high, lo_high)),
-        _mm256_and_si256(eq_lo, sz_utf8_word_break_cmpge_epu8_haswell_(low, lo_low)));
-    __m256i const high_below_hi = _mm256_andnot_si256(sz_utf8_word_break_cmpge_epu8_haswell_(high, hi_high), ones);
-    __m256i const eq_hi = _mm256_cmpeq_epi8(high, hi_high);
-    __m256i const not_above = _mm256_or_si256(
-        high_below_hi, _mm256_and_si256(eq_hi, sz_utf8_word_break_cmpge_epu8_haswell_(hi_low, low)));
-    return _mm256_and_si256(not_below, not_above);
+SZ_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_u8x32, __m256i low_u8x32, sz_u16_t lo,
+                                                                 sz_u16_t hi) {
+    __m256i const lo_high_u8x32 = _mm256_set1_epi8((char)(lo >> 8)), lo_low_u8x32 = _mm256_set1_epi8((char)(lo & 0xFF));
+    __m256i const hi_high_u8x32 = _mm256_set1_epi8((char)(hi >> 8)), hi_low_u8x32 = _mm256_set1_epi8((char)(hi & 0xFF));
+    __m256i const ones_u8x32 = _mm256_set1_epi8((char)0xFF);
+    __m256i const eq_lo_u8x32 = _mm256_cmpeq_epi8(high_u8x32, lo_high_u8x32);
+    __m256i const not_below_u8x32 = _mm256_or_si256(
+        _mm256_andnot_si256(eq_lo_u8x32, sz_utf8_word_break_cmpge_epu8_haswell_(high_u8x32, lo_high_u8x32)),
+        _mm256_and_si256(eq_lo_u8x32, sz_utf8_word_break_cmpge_epu8_haswell_(low_u8x32, lo_low_u8x32)));
+    __m256i const high_below_hi_u8x32 = _mm256_andnot_si256(
+        sz_utf8_word_break_cmpge_epu8_haswell_(high_u8x32, hi_high_u8x32), ones_u8x32);
+    __m256i const eq_hi_u8x32 = _mm256_cmpeq_epi8(high_u8x32, hi_high_u8x32);
+    __m256i const not_above_u8x32 = _mm256_or_si256(
+        high_below_hi_u8x32,
+        _mm256_and_si256(eq_hi_u8x32, sz_utf8_word_break_cmpge_epu8_haswell_(hi_low_u8x32, low_u8x32)));
+    return _mm256_and_si256(not_below_u8x32, not_above_u8x32);
 }
 
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over both window halves, the
  *          AVX2 twin of @ref sz_utf8_word_break_range16_mask_icelake_ (WSegSpace / Extended_Pictographic). */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
-    __m256i high_lo, __m256i high_hi, __m256i low_lo, __m256i low_hi, sz_u16_t const *lo_table,
+    __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
-    __m256i hit_lo = _mm256_setzero_si256(), hit_hi = _mm256_setzero_si256();
+    __m256i hit_lo_u8x32 = _mm256_setzero_si256(), hit_hi_u8x32 = _mm256_setzero_si256();
     for (int range = 0; range < count; ++range) {
-        hit_lo = _mm256_or_si256(
-            hit_lo, sz_utf8_word_break_range16_one_haswell_(high_lo, low_lo, lo_table[range], hi_table[range]));
-        hit_hi = _mm256_or_si256(
-            hit_hi, sz_utf8_word_break_range16_one_haswell_(high_hi, low_hi, lo_table[range], hi_table[range]));
+        hit_lo_u8x32 = _mm256_or_si256(
+            hit_lo_u8x32,
+            sz_utf8_word_break_range16_one_haswell_(high_lo_u8x32, low_lo_u8x32, lo_table[range], hi_table[range]));
+        hit_hi_u8x32 = _mm256_or_si256(
+            hit_hi_u8x32,
+            sz_utf8_word_break_range16_one_haswell_(high_hi_u8x32, low_hi_u8x32, lo_table[range], hi_table[range]));
     }
-    return sz_utf8_mask_combine_haswell_(hit_lo, hit_hi);
+    return sz_utf8_mask_combine_haswell_(hit_lo_u8x32, hit_hi_u8x32);
 }
 
 /**
@@ -282,13 +303,13 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
  *          Extended_Pictographic mask (BMP + SMP range scan), and the per-lane class byte array.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswell_(
-    sz_utf8_rune_window_haswell_t window, __m256i classes_lo, __m256i classes_hi, sz_u64_t start_bytes_all,
+    sz_utf8_rune_window_haswell_t window, __m256i classes_lo_u8x32, __m256i classes_hi_u8x32, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -299,40 +320,49 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
                                     (lead_four & ~sz_u64_mask_until_serial_(loaded > 3 ? loaded - 3 : 0))) &
                                    valid;
     if (truncated_raw) {
-        __m256i const other = _mm256_set1_epi8((char)sz_utf8_word_break_other_k);
-        __m256i const sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)truncated_raw);
-        __m256i const sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(truncated_raw >> 32));
-        classes_lo = _mm256_blendv_epi8(classes_lo, other, sel_lo);
-        classes_hi = _mm256_blendv_epi8(classes_hi, other, sel_hi);
+        __m256i const other_u8x32 = _mm256_set1_epi8((char)sz_utf8_word_break_other_k);
+        __m256i const sel_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)truncated_raw);
+        __m256i const sel_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(truncated_raw >> 32));
+        classes_lo_u8x32 = _mm256_blendv_epi8(classes_lo_u8x32, other_u8x32, sel_lo_u8x32);
+        classes_hi_u8x32 = _mm256_blendv_epi8(classes_hi_u8x32, other_u8x32, sel_hi_u8x32);
     }
 
     sz_utf8_word_break_frame_t frame;
-    frame.class_aletter = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_aletter_k);
-    frame.class_hebrew = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_aletter = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                 sz_utf8_word_break_aletter_k);
+    frame.class_hebrew = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                 sz_utf8_word_break_hebrew_letter_k);
-    frame.class_numeric = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_numeric_k);
-    frame.class_katakana = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_numeric = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                 sz_utf8_word_break_numeric_k);
+    frame.class_katakana = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                   sz_utf8_word_break_katakana_k);
-    frame.class_extendnumlet = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_extendnumlet = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                       sz_utf8_word_break_extendnumlet_k);
-    frame.class_extend = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_extend_k);
-    frame.class_zwj = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_zwj_k);
-    frame.class_format = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_format_k);
-    frame.class_midletter = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_extend = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                sz_utf8_word_break_extend_k);
+    frame.class_zwj = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                             sz_utf8_word_break_zwj_k);
+    frame.class_format = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                sz_utf8_word_break_format_k);
+    frame.class_midletter = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                    sz_utf8_word_break_midletter_k);
-    frame.class_midnum = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_midnum_k);
-    frame.class_mid_quotes = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_midnum = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                sz_utf8_word_break_midnum_k);
+    frame.class_mid_quotes = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                     sz_utf8_word_break_mid_quotes_k);
-    frame.class_cr = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_cr_k);
-    frame.class_lf = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_lf_k);
-    frame.class_newline = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi, sz_utf8_word_break_newline_k);
-    frame.class_regional = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+    frame.class_cr = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                            sz_utf8_word_break_cr_k);
+    frame.class_lf = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                            sz_utf8_word_break_lf_k);
+    frame.class_newline = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
+                                                                 sz_utf8_word_break_newline_k);
+    frame.class_regional = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                   sz_utf8_word_break_regional_ind_k);
 
-    sz_u64_t const non_ascii_lanes = sz_utf8_mask_combine_haswell_(raw_lo, raw_hi) & valid;
+    sz_u64_t const non_ascii_lanes = sz_utf8_mask_combine_haswell_(raw_lo_u8x32, raw_hi_u8x32) & valid;
     frame.non_ascii_lanes = non_ascii_lanes;
-    frame.double_quote_byte = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0x22) & valid;
-    frame.single_quote_byte = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0x27) & valid;
+    frame.double_quote_byte = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x22) & valid;
+    frame.single_quote_byte = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x27) & valid;
 
     // WB3d WSegSpace raw membership: the ASCII U+0020 byte compare OR the multibyte (high,low) range scan.
     sz_u64_t wseg_multibyte = 0ull;
@@ -341,7 +371,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
                              window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_wseg_lo_,
                              sz_utf8_word_break_wseg_hi_, sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
-    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0x20) & valid));
+    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0x20) & valid));
 
     // WB3c Extended_Pictographic raw membership (BMP range scan on non-4-byte lanes, SMP range scan on plane-one
     // 4-byte lanes). Rare-class gated on `want_pictographic` (an in-window ZWJ or the carried `prev_ends_in_zwj`), so
@@ -349,51 +379,52 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
     frame.pictographic = 0ull;
     sz_u64_t const four_byte = window.four_byte_starts & valid;
     if (want_pictographic) {
-        __m256i next1_lo, next1_hi, next2_lo, next2_hi, next3_lo, next3_hi;
-        sz_utf8_forward_neighbours_haswell_(raw_lo, raw_hi, &next1_lo, &next1_hi, &next2_lo, &next2_hi);
-        __m256i const low_successor = _mm256_permute2x128_si256(raw_lo, raw_hi, 0x21);
-        next3_lo = _mm256_alignr_epi8(low_successor, raw_lo, 3);
-        __m256i const high_successor = _mm256_permute2x128_si256(raw_hi, raw_lo, 0x21);
-        next3_hi = _mm256_alignr_epi8(high_successor, raw_hi, 3);
-        __m256i const plane_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo, _mm256_set1_epi8(0x07)), 2),
+        __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32, next3_hi_u8x32;
+        sz_utf8_forward_neighbours_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next1_lo_u8x32, &next1_hi_u8x32,
+                                            &next2_lo_u8x32, &next2_hi_u8x32);
+        __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(raw_lo_u8x32, raw_hi_u8x32, 0x21);
+        next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, raw_lo_u8x32, 3);
+        __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(raw_hi_u8x32, raw_lo_u8x32, 0x21);
+        next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, raw_hi_u8x32, 3);
+        __m256i const plane_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_lo_u8x32, _mm256_set1_epi8(0x07)), 2),
                              _mm256_set1_epi8(0x1C)),
-            sz_utf8_srl8_haswell_(next1_lo, 4, 0x03));
-        __m256i const plane_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi, _mm256_set1_epi8(0x07)), 2),
+            sz_utf8_srl8_haswell_(next1_lo_u8x32, 4, 0x03));
+        __m256i const plane_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(raw_hi_u8x32, _mm256_set1_epi8(0x07)), 2),
                              _mm256_set1_epi8(0x1C)),
-            sz_utf8_srl8_haswell_(next1_hi, 4, 0x03));
-        __m256i const one = _mm256_set1_epi8(1);
-        sz_u64_t const plane_one = sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(plane_lo, one),
-                                                                 _mm256_cmpeq_epi8(plane_hi, one));
-        __m256i const smp_high_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo, _mm256_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_haswell_(next1_hi_u8x32, 4, 0x03));
+        __m256i const one_u8x32 = _mm256_set1_epi8(1);
+        sz_u64_t const plane_one = sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(plane_lo_u8x32, one_u8x32),
+                                                                 _mm256_cmpeq_epi8(plane_hi_u8x32, one_u8x32));
+        __m256i const smp_high_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_lo_u8x32, _mm256_set1_epi8(0x0F)), 4),
                              _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_srl8_haswell_(next2_lo, 2, 0x0F));
-        __m256i const smp_high_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi, _mm256_set1_epi8(0x0F)), 4),
+            sz_utf8_srl8_haswell_(next2_lo_u8x32, 2, 0x0F));
+        __m256i const smp_high_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next1_hi_u8x32, _mm256_set1_epi8(0x0F)), 4),
                              _mm256_set1_epi8((char)0xF0)),
-            sz_utf8_srl8_haswell_(next2_hi, 2, 0x0F));
-        __m256i const smp_low_lo = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo, _mm256_set1_epi8(0x03)), 6),
+            sz_utf8_srl8_haswell_(next2_hi_u8x32, 2, 0x0F));
+        __m256i const smp_low_lo_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_lo_u8x32, _mm256_set1_epi8(0x03)), 6),
                              _mm256_set1_epi8((char)0xC0)),
-            _mm256_and_si256(next3_lo, _mm256_set1_epi8(0x3F)));
-        __m256i const smp_low_hi = _mm256_or_si256(
-            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi, _mm256_set1_epi8(0x03)), 6),
+            _mm256_and_si256(next3_lo_u8x32, _mm256_set1_epi8(0x3F)));
+        __m256i const smp_low_hi_u8x32 = _mm256_or_si256(
+            _mm256_and_si256(_mm256_slli_epi16(_mm256_and_si256(next2_hi_u8x32, _mm256_set1_epi8(0x03)), 6),
                              _mm256_set1_epi8((char)0xC0)),
-            _mm256_and_si256(next3_hi, _mm256_set1_epi8(0x3F)));
+            _mm256_and_si256(next3_hi_u8x32, _mm256_set1_epi8(0x3F)));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_haswell_(
             window.high_lo, window.high_hi, window.low_lo, window.low_hi, sz_utf8_word_break_pict_bmp_lo_,
             sz_utf8_word_break_pict_bmp_hi_, sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_haswell_(
-            smp_high_lo, smp_high_hi, smp_low_lo, smp_low_hi, sz_utf8_word_break_pict_smp_lo_,
+            smp_high_lo_u8x32, smp_high_hi_u8x32, smp_low_lo_u8x32, smp_low_hi_u8x32, sz_utf8_word_break_pict_smp_lo_,
             sz_utf8_word_break_pict_smp_hi_, sz_utf8_word_break_pict_smp_count_k);
         frame.pictographic = (pictographic_bmp & non_ascii_lanes & ~four_byte) |
                              (pictographic_smp & four_byte & plane_one);
     }
 
-    _mm256_storeu_si256((__m256i *)(frame.classes_byte + 0), classes_lo);
-    _mm256_storeu_si256((__m256i *)(frame.classes_byte + 32), classes_hi);
+    _mm256_storeu_si256((__m256i *)(frame.classes_byte + 0), classes_lo_u8x32);
+    _mm256_storeu_si256((__m256i *)(frame.classes_byte + 32), classes_hi_u8x32);
     return frame;
 }
 
@@ -406,46 +437,48 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswe
  *          portable @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
     sz_utf8_rune_window_haswell_t window, sz_u64_t valid, int at_end_of_text) {
-    __m256i const raw_lo = window.window_lo, raw_hi = window.window_hi;
+    __m256i const raw_lo_u8x32 = window.window_lo, raw_hi_u8x32 = window.window_hi;
     sz_u64_t const real_continuation = window.continuation & valid;
-    __m256i const high_nibble_lo = sz_utf8_srl8_haswell_(raw_lo, 4, 0x0F);
-    __m256i const high_nibble_hi = sz_utf8_srl8_haswell_(raw_hi, 4, 0x0F);
+    __m256i const high_nibble_lo_u8x32 = sz_utf8_srl8_haswell_(raw_lo_u8x32, 4, 0x0F);
+    __m256i const high_nibble_hi_u8x32 = sz_utf8_srl8_haswell_(raw_hi_u8x32, 4, 0x0F);
     sz_u64_t const length_two = (sz_utf8_mask_combine_haswell_(
-                                    _mm256_or_si256(_mm256_cmpeq_epi8(high_nibble_lo, _mm256_set1_epi8(0x0C)),
-                                                    _mm256_cmpeq_epi8(high_nibble_lo, _mm256_set1_epi8(0x0D))),
-                                    _mm256_or_si256(_mm256_cmpeq_epi8(high_nibble_hi, _mm256_set1_epi8(0x0C)),
-                                                    _mm256_cmpeq_epi8(high_nibble_hi, _mm256_set1_epi8(0x0D))))) &
+                                    _mm256_or_si256(_mm256_cmpeq_epi8(high_nibble_lo_u8x32, _mm256_set1_epi8(0x0C)),
+                                                    _mm256_cmpeq_epi8(high_nibble_lo_u8x32, _mm256_set1_epi8(0x0D))),
+                                    _mm256_or_si256(_mm256_cmpeq_epi8(high_nibble_hi_u8x32, _mm256_set1_epi8(0x0C)),
+                                                    _mm256_cmpeq_epi8(high_nibble_hi_u8x32, _mm256_set1_epi8(0x0D))))) &
                                 valid;
     sz_u64_t const length_three = sz_utf8_mask_combine_haswell_(
-                                      _mm256_cmpeq_epi8(high_nibble_lo, _mm256_set1_epi8(0x0E)),
-                                      _mm256_cmpeq_epi8(high_nibble_hi, _mm256_set1_epi8(0x0E))) &
+                                      _mm256_cmpeq_epi8(high_nibble_lo_u8x32, _mm256_set1_epi8(0x0E)),
+                                      _mm256_cmpeq_epi8(high_nibble_hi_u8x32, _mm256_set1_epi8(0x0E))) &
                                   valid;
     sz_u64_t const length_four = sz_utf8_mask_combine_haswell_(
-                                     _mm256_cmpeq_epi8(high_nibble_lo, _mm256_set1_epi8(0x0F)),
-                                     _mm256_cmpeq_epi8(high_nibble_hi, _mm256_set1_epi8(0x0F))) &
+                                     _mm256_cmpeq_epi8(high_nibble_lo_u8x32, _mm256_set1_epi8(0x0F)),
+                                     _mm256_cmpeq_epi8(high_nibble_hi_u8x32, _mm256_set1_epi8(0x0F))) &
                                  valid;
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
-        __m256i next1_lo, next1_hi, next2_lo, next2_hi;
-        sz_utf8_forward_neighbours_haswell_(raw_lo, raw_hi, &next1_lo, &next1_hi, &next2_lo, &next2_hi);
-        __m256i const a0 = _mm256_set1_epi8((char)0xA0), b90 = _mm256_set1_epi8((char)0x90);
+        __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32;
+        sz_utf8_forward_neighbours_haswell_(raw_lo_u8x32, raw_hi_u8x32, &next1_lo_u8x32, &next1_hi_u8x32,
+                                            &next2_lo_u8x32, &next2_hi_u8x32);
+        __m256i const a0_u8x32 = _mm256_set1_epi8((char)0xA0), b90_u8x32 = _mm256_set1_epi8((char)0x90);
         sz_u64_t const next1_at_least_a0 = sz_utf8_mask_combine_haswell_(
-            sz_utf8_word_break_cmpge_epu8_haswell_(next1_lo, a0), sz_utf8_word_break_cmpge_epu8_haswell_(next1_hi, a0));
+            sz_utf8_word_break_cmpge_epu8_haswell_(next1_lo_u8x32, a0_u8x32),
+            sz_utf8_word_break_cmpge_epu8_haswell_(next1_hi_u8x32, a0_u8x32));
         sz_u64_t const next1_at_least_90 = sz_utf8_mask_combine_haswell_(
-            sz_utf8_word_break_cmpge_epu8_haswell_(next1_lo, b90),
-            sz_utf8_word_break_cmpge_epu8_haswell_(next1_hi, b90));
-        sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xC0) |
-                                     sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xC1)) &
+            sz_utf8_word_break_cmpge_epu8_haswell_(next1_lo_u8x32, b90_u8x32),
+            sz_utf8_word_break_cmpge_epu8_haswell_(next1_hi_u8x32, b90_u8x32));
+        sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xC0) |
+                                     sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xC1)) &
                                     valid;
-        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xE0) & valid;
-        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xED) & valid;
-        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xF0) & valid;
-        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_haswell_(raw_lo, raw_hi, 0xF4) & valid;
-        __m256i const f5 = _mm256_set1_epi8((char)0xF5);
+        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xE0) & valid;
+        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xED) & valid;
+        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF0) & valid;
+        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_haswell_(raw_lo_u8x32, raw_hi_u8x32, 0xF4) & valid;
+        __m256i const f5_u8x32 = _mm256_set1_epi8((char)0xF5);
         sz_u64_t const lead_f5_or_more = sz_utf8_mask_combine_haswell_(
-                                             sz_utf8_word_break_cmpge_epu8_haswell_(raw_lo, f5),
-                                             sz_utf8_word_break_cmpge_epu8_haswell_(raw_hi, f5)) &
+                                             sz_utf8_word_break_cmpge_epu8_haswell_(raw_lo_u8x32, f5_u8x32),
+                                             sz_utf8_word_break_cmpge_epu8_haswell_(raw_hi_u8x32, f5_u8x32)) &
                                          valid;
         bad_second_byte = lead_c0_c1 | (lead_e0 & ~next1_at_least_a0) | (lead_ed & next1_at_least_a0) |
                           (lead_f0 & ~next1_at_least_90) | (lead_f4 & next1_at_least_90) | lead_f5_or_more;
@@ -487,8 +520,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
         sz_size_t const loaded = window.loaded;
         sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
 
-        __m256i classes_lo, classes_hi;
-        sz_utf8_word_break_classify_window_haswell_(window, &classes_lo, &classes_hi);
+        __m256i classes_lo_u8x32, classes_hi_u8x32;
+        sz_utf8_word_break_classify_window_haswell_(window, &classes_lo_u8x32, &classes_hi_u8x32);
 
         sz_utf8_word_break_partition_t const partition = sz_utf8_word_break_partition_haswell_(
             window, valid, position + loaded >= length);
@@ -499,11 +532,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
         sz_u64_t const length_three = partition.length_three;
         sz_u64_t const length_four = partition.length_four;
         if (forced_other) {
-            __m256i const other = _mm256_set1_epi8((char)sz_utf8_word_break_other_k);
-            __m256i const sel_lo = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)forced_other);
-            __m256i const sel_hi = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(forced_other >> 32));
-            classes_lo = _mm256_blendv_epi8(classes_lo, other, sel_lo);
-            classes_hi = _mm256_blendv_epi8(classes_hi, other, sel_hi);
+            __m256i const other_u8x32 = _mm256_set1_epi8((char)sz_utf8_word_break_other_k);
+            __m256i const sel_lo_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)forced_other);
+            __m256i const sel_hi_u8x32 = sz_utf8_byte_mask_from_bits_haswell_((sz_u32_t)(forced_other >> 32));
+            classes_lo_u8x32 = _mm256_blendv_epi8(classes_lo_u8x32, other_u8x32, sel_lo_u8x32);
+            classes_hi_u8x32 = _mm256_blendv_epi8(classes_hi_u8x32, other_u8x32, sel_hi_u8x32);
         }
 
         sz_bool_t const more_text = (position + loaded < length) ? sz_true_k : sz_false_k;
@@ -528,11 +561,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
             if (limit > 0) complete_limit = limit;
         }
 
-        int const want_pictographic = sz_utf8_word_break_class_mask_haswell_(classes_lo, classes_hi,
+        int const want_pictographic = sz_utf8_word_break_class_mask_haswell_(classes_lo_u8x32, classes_hi_u8x32,
                                                                              sz_utf8_word_break_zwj_k) != 0 ||
                                       carry.prev_ends_in_zwj;
         sz_utf8_word_break_frame_t const frame = sz_utf8_word_break_build_frame_haswell_(
-            window, classes_lo, classes_hi, start_bytes_all, length_two, length_three, length_four, want_pictographic);
+            window, classes_lo_u8x32, classes_hi_u8x32, start_bytes_all, length_two, length_three, length_four,
+            want_pictographic);
 
         sz_utf8_word_break_carry_t carry_full = carry;
         sz_utf8_word_break_window_t const win = sz_utf8_word_break_decide_window_(

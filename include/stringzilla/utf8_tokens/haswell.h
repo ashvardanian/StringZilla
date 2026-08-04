@@ -26,8 +26,8 @@ extern "C" {
 /**
  *  @brief Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity.
  */
-SZ_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a, __m256i b) {
-    return _mm256_cmpeq_epi8(_mm256_max_epu8(a, b), a);
+SZ_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b_u8x32) {
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(a_u8x32, b_u8x32), a_u8x32);
 }
 
 #pragma region Multistep newline / whitespace iteration
@@ -54,7 +54,7 @@ SZ_HELPER_AUTO void sz_utf8_iterate_peel_haswell_(                             /
         {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
     };
 
-    __m256i const lane_ramp = _mm256_setr_epi64x(0, 1, 2, 3);
+    __m256i const lane_ramp_u64x4 = _mm256_setr_epi64x(0, 1, 2, 3);
     sz_size_t emitted = 0;
     for (sz_size_t sub_block = 0; sub_block < 8 && emitted < emit_count; ++sub_block) {
         sz_u32_t const submask = (start_bits >> (sub_block * 4)) & 0xFu;
@@ -64,23 +64,24 @@ SZ_HELPER_AUTO void sz_utf8_iterate_peel_haswell_(                             /
         // Length per lane: 1, plus 1 on a 2-byte start, plus 2 on a 3-byte start (the masks are disjoint).
         sz_u32_t const two_byte_sub = (two_byte_starts >> base_lane) & 0xFu;
         sz_u32_t const three_byte_sub = (three_byte_starts >> base_lane) & 0xFu;
-        __m256i const two_byte_add = _mm256_setr_epi64x((two_byte_sub >> 0) & 1u, (two_byte_sub >> 1) & 1u,
-                                                        (two_byte_sub >> 2) & 1u, (two_byte_sub >> 3) & 1u);
-        __m256i const three_byte_add = _mm256_setr_epi64x((three_byte_sub >> 0) & 1u, (three_byte_sub >> 1) & 1u,
-                                                          (three_byte_sub >> 2) & 1u, (three_byte_sub >> 3) & 1u);
+        __m256i const two_byte_add_u64x4 = _mm256_setr_epi64x((two_byte_sub >> 0) & 1u, (two_byte_sub >> 1) & 1u,
+                                                              (two_byte_sub >> 2) & 1u, (two_byte_sub >> 3) & 1u);
+        __m256i const three_byte_add_u64x4 = _mm256_setr_epi64x((three_byte_sub >> 0) & 1u, (three_byte_sub >> 1) & 1u,
+                                                                (three_byte_sub >> 2) & 1u, (three_byte_sub >> 3) & 1u);
         __m256i const offsets_u64x4 = _mm256_add_epi64(_mm256_set1_epi64x((long long)(position + base_lane)),
-                                                       lane_ramp);
+                                                       lane_ramp_u64x4);
         __m256i const lengths_u64x4 = _mm256_add_epi64(
-            _mm256_set1_epi64x(1), _mm256_add_epi64(two_byte_add, _mm256_add_epi64(three_byte_add, three_byte_add)));
+            _mm256_set1_epi64x(1),
+            _mm256_add_epi64(two_byte_add_u64x4, _mm256_add_epi64(three_byte_add_u64x4, three_byte_add_u64x4)));
 
-        __m256i const permutation = _mm256_loadu_si256((__m256i const *)compact_lut[submask]);
-        __m256i const packed_offsets = _mm256_permutevar8x32_epi32(offsets_u64x4, permutation);
-        __m256i const packed_lengths = _mm256_permutevar8x32_epi32(lengths_u64x4, permutation);
+        __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)compact_lut[submask]);
+        __m256i const packed_offsets_u64x4 = _mm256_permutevar8x32_epi32(offsets_u64x4, permutation_u32x8);
+        __m256i const packed_lengths_u64x4 = _mm256_permutevar8x32_epi32(lengths_u64x4, permutation_u32x8);
 
         sz_size_t const taken = sz_min_of_two((sz_size_t)_mm_popcnt_u32(submask), emit_count - emitted);
-        __m256i const store_mask = sz_mm256_store_mask_epi64_(taken);
-        _mm256_maskstore_epi64((long long *)(match_offsets + emitted), store_mask, packed_offsets);
-        _mm256_maskstore_epi64((long long *)(match_lengths + emitted), store_mask, packed_lengths);
+        __m256i const store_mask_u64x4 = sz_mm256_store_mask_epi64_(taken);
+        _mm256_maskstore_epi64((long long *)(match_offsets + emitted), store_mask_u64x4, packed_offsets_u64x4);
+        _mm256_maskstore_epi64((long long *)(match_lengths + emitted), store_mask_u64x4, packed_lengths_u64x4);
         emitted += taken;
     }
 }
@@ -100,24 +101,24 @@ SZ_API_COMPTIME sz_size_t sz_utf8_newlines_haswell(     //
             x_a8_u8x32 = _mm256_set1_epi8('\xA8'), x_a9_u8x32 = _mm256_set1_epi8('\xA9');
 
     while (position + 32 <= length && count < matches_capacity) {
-        __m256i window = _mm256_loadu_si256((__m256i const *)(text_u8 + position));
+        __m256i window_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + position));
 
         // 1-byte starts: \n, \v, \f, \r.
-        sz_u32_t newline_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, newline_u8x32));
+        sz_u32_t newline_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, newline_u8x32));
         sz_u32_t carriage_return_mask = (sz_u32_t)_mm256_movemask_epi8(
-            _mm256_cmpeq_epi8(window, carriage_return_u8x32));
+            _mm256_cmpeq_epi8(window_u8x32, carriage_return_u8x32));
         sz_u32_t one_byte_mask = newline_mask |
-                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, vertical_tab_u8x32)) |
-                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, form_feed_u8x32)) |
+                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, vertical_tab_u8x32)) |
+                                 (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, form_feed_u8x32)) |
                                  carriage_return_mask;
 
         // 2-byte NEL (C2 85); 3-byte LS/PS (E2 80 A8/A9) - computed unconditionally (cheaper than a data-dependent gate).
-        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, lead_c2_u8x32));
-        sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_85_u8x32));
-        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, lead_e2_u8x32));
-        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, byte_80_u8x32));
-        sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a8_u8x32));
-        sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a9_u8x32));
+        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_c2_u8x32));
+        sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_85_u8x32));
+        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_e2_u8x32));
+        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, byte_80_u8x32));
+        sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a8_u8x32));
+        sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a9_u8x32));
 
         sz_u32_t nel_mask = lead_c2_mask & (x_85_mask >> 1);
         sz_u32_t lead_e280_mask = lead_e2_mask & (byte_80_mask >> 1);
@@ -172,37 +173,40 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
             x_9f_u8x32 = _mm256_set1_epi8('\x9F');
 
     while (position + 32 <= length && count < matches_capacity) {
-        __m256i window = _mm256_loadu_si256((__m256i const *)(text_u8 + position));
+        __m256i window_u8x32 = _mm256_loadu_si256((__m256i const *)(text_u8 + position));
 
         // 1-byte: space, plus the contiguous range [\t, \r] == [9, 13]. AVX2 has no unsigned compare, so reuse the
         // signed-bound idiom from `find/haswell.h` (these bytes are all < 0x80, so signed is exact).
-        __m256i x_20_cmp = _mm256_cmpeq_epi8(window, x_20_u8x32);
-        __m256i tab_lower_bound_cmp = _mm256_cmpgt_epi8(window, _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
-        __m256i carriage_return_upper_bound_cmp = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E), window); // <= '\r'
-        __m256i one_byte_cmp = _mm256_or_si256(x_20_cmp,
-                                               _mm256_and_si256(tab_lower_bound_cmp, carriage_return_upper_bound_cmp));
-        sz_u32_t one_byte_mask = (sz_u32_t)_mm256_movemask_epi8(one_byte_cmp);
+        __m256i x_20_cmp_u8x32 = _mm256_cmpeq_epi8(window_u8x32, x_20_u8x32);
+        __m256i tab_lower_bound_cmp_u8x32 = _mm256_cmpgt_epi8(window_u8x32,
+                                                              _mm256_set1_epi8((char)0x08)); // >= '\t' (0x09)
+        __m256i carriage_return_upper_bound_cmp_u8x32 = _mm256_cmpgt_epi8(_mm256_set1_epi8((char)0x0E),
+                                                                          window_u8x32); // <= '\r'
+        __m256i one_byte_cmp_u8x32 = _mm256_or_si256(
+            x_20_cmp_u8x32, _mm256_and_si256(tab_lower_bound_cmp_u8x32, carriage_return_upper_bound_cmp_u8x32));
+        sz_u32_t one_byte_mask = (sz_u32_t)_mm256_movemask_epi8(one_byte_cmp_u8x32);
 
         // 2-byte: C2 85 (NEL), C2 A0 (NBSP).
-        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, lead_c2_u8x32));
-        sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_85_u8x32));
-        sz_u32_t x_a0_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a0_u8x32));
+        sz_u32_t lead_c2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_c2_u8x32));
+        sz_u32_t x_85_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_85_u8x32));
+        sz_u32_t x_a0_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a0_u8x32));
         sz_u32_t two_byte_starts = lead_c2_mask & ((x_85_mask | x_a0_mask) >> 1);
 
         // 3-byte: E1 9A 80 (ogham); E2 80 [80-8A]; E2 80 AF; E2 81 9F; E2 80 A8/A9; E3 80 80.
-        sz_u32_t x_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_e1_u8x32));
-        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, lead_e2_u8x32));
-        sz_u32_t x_e3_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_e3_u8x32));
-        sz_u32_t x_9a_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_9a_u8x32));
-        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, byte_80_u8x32));
-        sz_u32_t x_81_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_81_u8x32));
-        __m256i x_80_ge_cmp = sz_mm256_cmpge_epu8_haswell_(window, byte_80_u8x32); // >= 0x80
-        __m256i x_8a_le_cmp = sz_mm256_cmpge_epu8_haswell_(x_8a_u8x32, window);    // <= 0x8A
-        sz_u32_t x_8a_range_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_and_si256(x_80_ge_cmp, x_8a_le_cmp));
-        sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a8_u8x32));
-        sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_a9_u8x32));
-        sz_u32_t x_af_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_af_u8x32));
-        sz_u32_t x_9f_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window, x_9f_u8x32));
+        sz_u32_t x_e1_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_e1_u8x32));
+        sz_u32_t lead_e2_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, lead_e2_u8x32));
+        sz_u32_t x_e3_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_e3_u8x32));
+        sz_u32_t x_9a_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_9a_u8x32));
+        sz_u32_t byte_80_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, byte_80_u8x32));
+        sz_u32_t x_81_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_81_u8x32));
+        __m256i x_80_ge_cmp_u8x32 = sz_mm256_cmpge_epu8_haswell_(window_u8x32, byte_80_u8x32); // >= 0x80
+        __m256i x_8a_le_cmp_u8x32 = sz_mm256_cmpge_epu8_haswell_(x_8a_u8x32, window_u8x32);    // <= 0x8A
+        sz_u32_t x_8a_range_mask = (sz_u32_t)_mm256_movemask_epi8(
+            _mm256_and_si256(x_80_ge_cmp_u8x32, x_8a_le_cmp_u8x32));
+        sz_u32_t x_a8_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a8_u8x32));
+        sz_u32_t x_a9_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_a9_u8x32));
+        sz_u32_t x_af_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_af_u8x32));
+        sz_u32_t x_9f_mask = (sz_u32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(window_u8x32, x_9f_u8x32));
 
         sz_u32_t ogham_mask = x_e1_mask & (x_9a_mask >> 1) & (byte_80_mask >> 2);               // E1 9A 80
         sz_u32_t range_e280_mask = lead_e2_mask & (byte_80_mask >> 1) & (x_8a_range_mask >> 2); // E2 80 [80-8A]
@@ -241,119 +245,126 @@ SZ_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell(  //
 #pragma region Membership
 
 /** @brief  Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare): `max_epu8(value,bound)==value`. */
-SZ_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value, __m256i bound) {
-    return _mm256_cmpeq_epi8(_mm256_max_epu8(value, bound), value);
+SZ_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+    return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
 /** @brief  Per-half "third forward neighbour" `next3[i] = window[i+3]`, wrapping modulo 64 to mirror the substrate
  *          neighbour helper (which only emits next1/next2). Needed for the 4-byte astral codepoint reconstruction. */
 SZ_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
-    __m256i window_lo, __m256i window_hi, __m256i *next3_lo, __m256i *next3_hi) {
-    __m256i const low_successor = _mm256_permute2x128_si256(window_lo, window_hi, 0x21);
-    *next3_lo = _mm256_alignr_epi8(low_successor, window_lo, 3);
-    __m256i const high_successor = _mm256_permute2x128_si256(window_hi, window_lo, 0x21);
-    *next3_hi = _mm256_alignr_epi8(high_successor, window_hi, 3);
+    __m256i window_lo_u8x32, __m256i window_hi_u8x32, __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
+    __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
+    *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
+    __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(window_hi_u8x32, window_lo_u8x32, 0x21);
+    *next3_hi_u8x32 = _mm256_alignr_epi8(high_successor_u8x32, window_hi_u8x32, 3);
 }
 
 /** @brief  Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half, returned as a 0xFF/0x00
  *          byte mask. The bit mask `1 << (low & 7)` is built by a `vpshufb` over the resident power-of-two table. */
-SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte, __m256i low) {
-    __m256i const bit_table = _mm256_setr_epi8(                    //
+SZ_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
+    __m256i const bit_table_u8x32 = _mm256_setr_epi8(              //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0, //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0);
-    __m256i const bit_mask = _mm256_shuffle_epi8(bit_table, _mm256_and_si256(low, _mm256_set1_epi8(0x07)));
-    __m256i const isolated = _mm256_and_si256(bitmap_byte, bit_mask);
-    return _mm256_cmpeq_epi8(isolated, bit_mask);
+    __m256i const bit_mask_u8x32 = _mm256_shuffle_epi8(bit_table_u8x32,
+                                                       _mm256_and_si256(low_u8x32, _mm256_set1_epi8(0x07)));
+    __m256i const isolated_u8x32 = _mm256_and_si256(bitmap_byte_u8x32, bit_mask_u8x32);
+    return _mm256_cmpeq_epi8(isolated_u8x32, bit_mask_u8x32);
 }
 
 /** @brief  Read the bitmap byte `columns[(low>>3)*64 + block_id]` for one 32-lane half in-register: 32 candidate
  *          column reads (each a 64-entry `cascade_stage` over `block_id`) blended by which column `(low >> 3)` selects.
  *          The transposed `..._columns_` layout (column c holds `bitmaps[id*32+c]`) makes each column lut256-addressable
  *          for `block_id < 64` without a page network. */
-SZ_HELPER_AUTO __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id, __m256i low) {
-    __m256i const selector = _mm256_and_si256(_mm256_srli_epi16(block_id, 4),
-                                              _mm256_set1_epi8(0x0F));         // block_id>>4 (0..3)
-    __m256i const within = _mm256_and_si256(block_id, _mm256_set1_epi8(0x0F)); // block_id&15
-    __m256i const column_index = _mm256_and_si256(_mm256_srli_epi16(low, 3),
-                                                  _mm256_set1_epi8(0x1F)); // (low>>3) in [0,32)
-    __m256i result = _mm256_setzero_si256();
+SZ_HELPER_AUTO __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id_u8x32,
+                                                         __m256i low_u8x32) {
+    __m256i const selector_u8x32 = _mm256_and_si256(_mm256_srli_epi16(block_id_u8x32, 4),
+                                                    _mm256_set1_epi8(0x0F));               // block_id>>4 (0..3)
+    __m256i const within_u8x32 = _mm256_and_si256(block_id_u8x32, _mm256_set1_epi8(0x0F)); // block_id&15
+    __m256i const column_index_u8x32 = _mm256_and_si256(_mm256_srli_epi16(low_u8x32, 3),
+                                                        _mm256_set1_epi8(0x1F)); // (low>>3) in [0,32)
+    __m256i result_u8x32 = _mm256_setzero_si256();
     for (int column = 0; column < 32; ++column) {
-        __m256i const candidate = sz_utf8_rune_cascade_stage_haswell_(columns + column * 64, 4, selector, within);
-        __m256i const here = _mm256_cmpeq_epi8(column_index, _mm256_set1_epi8((char)column));
-        result = _mm256_blendv_epi8(result, candidate, here);
+        __m256i const candidate_u8x32 = sz_utf8_rune_cascade_stage_haswell_(columns + column * 64, 4, selector_u8x32,
+                                                                            within_u8x32);
+        __m256i const here_u8x32 = _mm256_cmpeq_epi8(column_index_u8x32, _mm256_set1_epi8((char)column));
+        result_u8x32 = _mm256_blendv_epi8(result_u8x32, candidate_u8x32, here_u8x32);
     }
-    return result;
+    return result_u8x32;
 }
 
 /** @brief  BMP (codepoint < 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. ASCII lanes
  *          (top bit clear) carry their codepoint in the raw byte, so are overridden to (high=0, low=byte). */
-SZ_HELPER_AUTO __m256i sz_delimiter_bmp_membership_haswell_(__m256i window, __m256i high_in, __m256i low_in) {
-    __m256i const ascii = _mm256_cmpeq_epi8(_mm256_and_si256(window, _mm256_set1_epi8((char)0x80)),
-                                            _mm256_setzero_si256());
-    __m256i const high = _mm256_andnot_si256(ascii, high_in);
-    __m256i const low = _mm256_blendv_epi8(low_in, window, ascii);
-    __m256i const block_id = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_bmp_block_, high);
-    __m256i const bitmap_byte = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_bmp_bitmaps_columns_, block_id,
-                                                                  low);
-    return sz_delimiter_test_bit_haswell_(bitmap_byte, low);
+SZ_HELPER_AUTO __m256i sz_delimiter_bmp_membership_haswell_(__m256i window_u8x32, __m256i high_in_u8x32,
+                                                            __m256i low_in_u8x32) {
+    __m256i const ascii_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(window_u8x32, _mm256_set1_epi8((char)0x80)),
+                                                  _mm256_setzero_si256());
+    __m256i const high_u8x32 = _mm256_andnot_si256(ascii_u8x32, high_in_u8x32);
+    __m256i const low_u8x32 = _mm256_blendv_epi8(low_in_u8x32, window_u8x32, ascii_u8x32);
+    __m256i const block_id_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_bmp_block_, high_u8x32);
+    __m256i const bitmap_byte_u8x32 = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_bmp_bitmaps_columns_,
+                                                                        block_id_u8x32, low_u8x32);
+    return sz_delimiter_test_bit_haswell_(bitmap_byte_u8x32, low_u8x32);
 }
 
 /** @brief  Astral (codepoint >= 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask. The full
  *          21-bit codepoint is reconstructed in byte-domain from the raw lead/continuation bytes; the small L1/L2 network
  *          and bitmap are then walked exactly as for the BMP path. Only meaningful on 4-byte lead lanes (caller blends). */
 SZ_HELPER_AUTO __m256i sz_delimiter_astral_membership_haswell_( //
-    __m256i window, __m256i next1, __m256i next2, __m256i next3) {
-    __m256i const b0 = _mm256_and_si256(window, _mm256_set1_epi8(0x07)); // lead bits  cp[20:18]
-    __m256i const b1 = _mm256_and_si256(next1, _mm256_set1_epi8(0x3F));  // cp[17:12]
-    __m256i const b2 = _mm256_and_si256(next2, _mm256_set1_epi8(0x3F));  // cp[11:6]
-    __m256i const b3 = _mm256_and_si256(next3, _mm256_set1_epi8(0x3F));  // cp[5:0]
+    __m256i window_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, __m256i next3_u8x32) {
+    __m256i const b0_u8x32 = _mm256_and_si256(window_u8x32, _mm256_set1_epi8(0x07)); // lead bits  cp[20:18]
+    __m256i const b1_u8x32 = _mm256_and_si256(next1_u8x32, _mm256_set1_epi8(0x3F));  // cp[17:12]
+    __m256i const b2_u8x32 = _mm256_and_si256(next2_u8x32, _mm256_set1_epi8(0x3F));  // cp[11:6]
+    __m256i const b3_u8x32 = _mm256_and_si256(next3_u8x32, _mm256_set1_epi8(0x3F));  // cp[5:0]
 
     // super = (cp >> 16) - 1 = (((b0 << 2) | (b1 >> 4)) - 1). cp[20:16] = b0(3 bits) << 2 | b1[5:4].
-    __m256i const cp_hi5 = _mm256_or_si256(_mm256_slli_epi16(b0, 2),
-                                           _mm256_and_si256(_mm256_srli_epi16(b1, 4), _mm256_set1_epi8(0x03)));
-    __m256i const super = _mm256_and_si256(_mm256_sub_epi8(cp_hi5, _mm256_set1_epi8(1)), _mm256_set1_epi8(0x0F));
+    __m256i const cp_hi5_u8x32 = _mm256_or_si256(
+        _mm256_slli_epi16(b0_u8x32, 2), _mm256_and_si256(_mm256_srli_epi16(b1_u8x32, 4), _mm256_set1_epi8(0x03)));
+    __m256i const super_u8x32 = _mm256_and_si256(_mm256_sub_epi8(cp_hi5_u8x32, _mm256_set1_epi8(1)),
+                                                 _mm256_set1_epi8(0x0F));
 
     // sub = (offset >> 8) & 0xFF where offset = cp - 0x10000. (cp >> 8) = (b1[3:0] << 4) | (b2 >> 2 ... wait b2 spans
     // cp[11:6], so cp[15:8] = (b1[3:0] << 4) | (b2[5:2]). offset>>8 differs from cp>>8 by the -0x100 borrow folded into
     // super; (offset >> 8) & 0xFF == (cp >> 8) & 0xFF since the subtraction only affects bit 16+. So sub = (cp>>8)&0xFF.
-    __m256i const sub = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b1, _mm256_set1_epi8(0x0F)), 4),
-                                        _mm256_and_si256(_mm256_srli_epi16(b2, 2), _mm256_set1_epi8(0x0F)));
+    __m256i const sub_u8x32 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b1_u8x32, _mm256_set1_epi8(0x0F)), 4),
+                                              _mm256_and_si256(_mm256_srli_epi16(b2_u8x32, 2), _mm256_set1_epi8(0x0F)));
 
     // low8 = offset & 0xFF = cp & 0xFF = (b2[1:0] << 6) | b3.
-    __m256i const low8 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b2, _mm256_set1_epi8(0x03)), 6), b3);
+    __m256i const low8_u8x32 = _mm256_or_si256(_mm256_slli_epi16(_mm256_and_si256(b2_u8x32, _mm256_set1_epi8(0x03)), 6),
+                                               b3_u8x32);
 
     // group = astral_l1[super]; row id = astral_l2[group*256 + sub]; bitmap byte from astral columns.
-    __m256i const group = sz_utf8_rune_lut16_haswell_(sz_utf8_delimiter_astral_l1_, super);
+    __m256i const group_u8x32 = sz_utf8_rune_lut16_haswell_(sz_utf8_delimiter_astral_l1_, super_u8x32);
     // l2 index = group*256 + sub. group < 2, so the index high byte is `group` and the low byte is `sub`; a 512-entry
     // table is two 256-entry pages selected by `group`.
-    __m256i const page0 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 0, sub);
-    __m256i const page1 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 256, sub);
-    __m256i const pick_page1 = _mm256_cmpeq_epi8(group, _mm256_set1_epi8(1));
-    __m256i const row = _mm256_blendv_epi8(page0, page1, pick_page1);
-    __m256i const bitmap_byte = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_astral_bitmaps_columns_, row, low8);
-    return sz_delimiter_test_bit_haswell_(bitmap_byte, low8);
+    __m256i const page0_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 0, sub_u8x32);
+    __m256i const page1_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_delimiter_astral_l2_ + 256, sub_u8x32);
+    __m256i const pick_page1_u8x32 = _mm256_cmpeq_epi8(group_u8x32, _mm256_set1_epi8(1));
+    __m256i const row_u8x32 = _mm256_blendv_epi8(page0_u8x32, page1_u8x32, pick_page1_u8x32);
+    __m256i const bitmap_byte_u8x32 = sz_delimiter_bitmap_byte_haswell_(sz_utf8_delimiter_astral_bitmaps_columns_,
+                                                                        row_u8x32, low8_u8x32);
+    return sz_delimiter_test_bit_haswell_(bitmap_byte_u8x32, low8_u8x32);
 }
 
 /** @brief  Per-lane UTF-8 validity for codepoint-start lanes, mirroring `sz_rune_decode` exactly: a 2/3/4-byte lead is
  *          valid only when its continuation bytes are present (within the loaded span) and well-formed, and it is not
  *          overlong, a surrogate, or beyond U+10FFFF. Returned as a `sz_u64_t` lane mask. */
 SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_haswell_( //
-    sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo, __m256i next1_hi, __m256i next2_lo,
-    __m256i next2_hi, __m256i next3_lo, __m256i next3_hi) {
+    sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo_u8x32, __m256i next1_hi_u8x32,
+    __m256i next2_lo_u8x32, __m256i next2_hi_u8x32, __m256i next3_lo_u8x32, __m256i next3_hi_u8x32) {
     sz_size_t const loaded = decoded->loaded;
     sz_u64_t const loaded_mask = loaded >= 64 ? ~(sz_u64_t)0 : (((sz_u64_t)1 << loaded) - 1);
 
-    __m256i const continuation_mask = _mm256_set1_epi8((char)0xC0);
-    __m256i const continuation_pattern = _mm256_set1_epi8((char)0x80);
+    __m256i const continuation_mask_u8x32 = _mm256_set1_epi8((char)0xC0);
+    __m256i const continuation_pattern_u8x32 = _mm256_set1_epi8((char)0x80);
     sz_u64_t const c1_ok = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(_mm256_and_si256(next1_lo, continuation_mask), continuation_pattern),
-        _mm256_cmpeq_epi8(_mm256_and_si256(next1_hi, continuation_mask), continuation_pattern));
+        _mm256_cmpeq_epi8(_mm256_and_si256(next1_lo_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32),
+        _mm256_cmpeq_epi8(_mm256_and_si256(next1_hi_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32));
     sz_u64_t const c2_ok = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(_mm256_and_si256(next2_lo, continuation_mask), continuation_pattern),
-        _mm256_cmpeq_epi8(_mm256_and_si256(next2_hi, continuation_mask), continuation_pattern));
+        _mm256_cmpeq_epi8(_mm256_and_si256(next2_lo_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32),
+        _mm256_cmpeq_epi8(_mm256_and_si256(next2_hi_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32));
     sz_u64_t const c3_ok = sz_utf8_mask_combine_haswell_(
-        _mm256_cmpeq_epi8(_mm256_and_si256(next3_lo, continuation_mask), continuation_pattern),
-        _mm256_cmpeq_epi8(_mm256_and_si256(next3_hi, continuation_mask), continuation_pattern));
+        _mm256_cmpeq_epi8(_mm256_and_si256(next3_lo_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32),
+        _mm256_cmpeq_epi8(_mm256_and_si256(next3_hi_u8x32, continuation_mask_u8x32), continuation_pattern_u8x32));
 
     // 2-byte: lead >= 0xC2 (reject C0/C1 overlong).
     sz_u64_t const lead_ge_c2 = sz_utf8_mask_combine_haswell_(
@@ -367,9 +378,9 @@ SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_haswell_( //
     sz_u64_t const lead_ed = sz_utf8_mask_combine_haswell_(
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xED)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xED)));
-    __m256i const n1_lo_ge_a0 = sz_delimiter_cmpge_epu8_haswell_(next1_lo, _mm256_set1_epi8((char)0xA0));
-    __m256i const n1_hi_ge_a0 = sz_delimiter_cmpge_epu8_haswell_(next1_hi, _mm256_set1_epi8((char)0xA0));
-    sz_u64_t const n1_ge_a0 = sz_utf8_mask_combine_haswell_(n1_lo_ge_a0, n1_hi_ge_a0);
+    __m256i const n1_lo_ge_a0_u8x32 = sz_delimiter_cmpge_epu8_haswell_(next1_lo_u8x32, _mm256_set1_epi8((char)0xA0));
+    __m256i const n1_hi_ge_a0_u8x32 = sz_delimiter_cmpge_epu8_haswell_(next1_hi_u8x32, _mm256_set1_epi8((char)0xA0));
+    sz_u64_t const n1_ge_a0 = sz_utf8_mask_combine_haswell_(n1_lo_ge_a0_u8x32, n1_hi_ge_a0_u8x32);
     sz_u64_t const n1_lt_a0 = ~n1_ge_a0;
 
     // 4-byte: lead <= 0xF4, not overlong (F0 with next1 < 0x90), not > U+10FFFF (F4 with next1 >= 0x90).
@@ -385,8 +396,8 @@ SZ_HELPER_AUTO sz_u64_t sz_delimiter_valid_starts_haswell_( //
         _mm256_cmpeq_epi8(decoded->window_lo, _mm256_set1_epi8((char)0xF4)),
         _mm256_cmpeq_epi8(decoded->window_hi, _mm256_set1_epi8((char)0xF4)));
     sz_u64_t const n1_ge_90 = sz_utf8_mask_combine_haswell_(
-        sz_delimiter_cmpge_epu8_haswell_(next1_lo, _mm256_set1_epi8((char)0x90)),
-        sz_delimiter_cmpge_epu8_haswell_(next1_hi, _mm256_set1_epi8((char)0x90)));
+        sz_delimiter_cmpge_epu8_haswell_(next1_lo_u8x32, _mm256_set1_epi8((char)0x90)),
+        sz_delimiter_cmpge_epu8_haswell_(next1_hi_u8x32, _mm256_set1_epi8((char)0x90)));
     sz_u64_t const n1_lt_90 = ~n1_ge_90;
 
     sz_u64_t const ascii = loaded_mask &
@@ -426,11 +437,12 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
                                                                                           length - base);
         sz_size_t const loaded = decoded.loaded;
 
-        __m256i next1_lo, next1_hi, next2_lo, next2_hi;
-        sz_utf8_forward_neighbours_haswell_(decoded.window_lo, decoded.window_hi, &next1_lo, &next1_hi, &next2_lo,
-                                            &next2_hi);
-        __m256i next3_lo, next3_hi;
-        sz_delimiter_forward_neighbour3_haswell_(decoded.window_lo, decoded.window_hi, &next3_lo, &next3_hi);
+        __m256i next1_lo_u8x32, next1_hi_u8x32, next2_lo_u8x32, next2_hi_u8x32;
+        sz_utf8_forward_neighbours_haswell_(decoded.window_lo, decoded.window_hi, &next1_lo_u8x32, &next1_hi_u8x32,
+                                            &next2_lo_u8x32, &next2_hi_u8x32);
+        __m256i next3_lo_u8x32, next3_hi_u8x32;
+        sz_delimiter_forward_neighbour3_haswell_(decoded.window_lo, decoded.window_hi, &next3_lo_u8x32,
+                                                 &next3_hi_u8x32);
 
         // Effective-window trim: a multi-byte lead near the 64-byte edge whose span runs past `loaded` would decode
         // against a wrapped neighbour; defer it to the next window. The lowest overrunning start bounds the span.
@@ -443,8 +455,9 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
         }
         sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
 
-        sz_u64_t const valid_starts = sz_delimiter_valid_starts_haswell_(&decoded, next1_lo, next1_hi, next2_lo,
-                                                                         next2_hi, next3_lo, next3_hi) &
+        sz_u64_t const valid_starts = sz_delimiter_valid_starts_haswell_(&decoded, next1_lo_u8x32, next1_hi_u8x32,
+                                                                         next2_lo_u8x32, next2_hi_u8x32, next3_lo_u8x32,
+                                                                         next3_hi_u8x32) &
                                       decoded.codepoint_starts & span_mask;
 
         // BMP membership for every lane; astral membership blended onto the four-byte lanes (gated on presence).
@@ -454,8 +467,10 @@ SZ_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell(   //
         sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
         if (four_byte) {
             sz_u64_t const astral_member = sz_utf8_mask_combine_haswell_(
-                sz_delimiter_astral_membership_haswell_(decoded.window_lo, next1_lo, next2_lo, next3_lo),
-                sz_delimiter_astral_membership_haswell_(decoded.window_hi, next1_hi, next2_hi, next3_hi));
+                sz_delimiter_astral_membership_haswell_(decoded.window_lo, next1_lo_u8x32, next2_lo_u8x32,
+                                                        next3_lo_u8x32),
+                sz_delimiter_astral_membership_haswell_(decoded.window_hi, next1_hi_u8x32, next2_hi_u8x32,
+                                                        next3_hi_u8x32));
             member = (member & ~four_byte) | (astral_member & four_byte);
         }
 

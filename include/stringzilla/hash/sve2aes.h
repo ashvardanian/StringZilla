@@ -38,18 +38,18 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, s
 
     // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
     state_key_u8x = svreinterpret_u8_u64(svdup_n_u64(seed));
-    svbool_t const all64 = svptrue_b64();
-    svbool_t const all8 = svptrue_b8();
+    svbool_t const all_b64x = svptrue_b64();
+    svbool_t const all_b8x = svptrue_b8();
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
-    svuint64_t pi0_u64x = svld1_u64(all64, pi);
-    svuint64_t pi1_u64x = svld1_u64(all64, pi + 8);
-    state_aes_u8x = sveor_u8_x(all8, state_key_u8x, svreinterpret_u8_u64(pi0_u64x));
-    state_sum_u8x = sveor_u8_x(all8, state_key_u8x, svreinterpret_u8_u64(pi1_u64x));
+    svuint64_t pi0_u64x = svld1_u64(all_b64x, pi);
+    svuint64_t pi1_u64x = svld1_u64(all_b64x, pi + 8);
+    state_aes_u8x = sveor_u8_x(all_b8x, state_key_u8x, svreinterpret_u8_u64(pi0_u64x));
+    state_sum_u8x = sveor_u8_x(all_b8x, state_key_u8x, svreinterpret_u8_u64(pi1_u64x));
 
     // We will only use the first 128 bits of the shuffle mask
-    svuint8_t const order_u8x = svld1_u8(all8, sz_hash_u8x16x4_shuffle_());
+    svuint8_t const order_u8x = svld1_u8(all_b8x, sz_hash_u8x16x4_shuffle_());
 
     // This is our best case for SVE2 dominance over NEON - we can load the data in one go with a predicate.
     svuint8_t block_u8x = svld1_u8(svwhilelt_b8((sz_u64_t)0, (sz_u64_t)length), (sz_u8_t const *)text);
@@ -57,10 +57,11 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, s
     state_aes_u8x = sz_emulate_aesenc_u8x16_sve2_(state_aes_u8x, block_u8x);
     svuint8_t sum_shuffled_u8x = svtbl_u8(state_sum_u8x, order_u8x);
     state_sum_u8x = svreinterpret_u8_u64(
-        svadd_u64_x(all64, svreinterpret_u64_u8(sum_shuffled_u8x), svreinterpret_u64_u8(block_u8x)));
+        svadd_u64_x(all_b64x, svreinterpret_u64_u8(sum_shuffled_u8x), svreinterpret_u64_u8(block_u8x)));
 
     // Now mix, folding the length into the key
-    svuint64_t key_with_length_u64x = svadd_u64_x(all64, svreinterpret_u64_u8(state_key_u8x), svdupq_n_u64(length, 0));
+    svuint64_t key_with_length_u64x = svadd_u64_x(all_b64x, svreinterpret_u64_u8(state_key_u8x),
+                                                  svdupq_n_u64(length, 0));
     // Combine the "sum" and the "AES" blocks
     svuint8_t mixed_u8x = sz_emulate_aesenc_u8x16_sve2_(state_sum_u8x, state_aes_u8x);
     // Make sure the "key" mixes enough with the state,
@@ -69,7 +70,7 @@ SZ_HELPER_AUTO sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, s
         sz_emulate_aesenc_u8x16_sve2_(mixed_u8x, svreinterpret_u8_u64(key_with_length_u64x)), mixed_u8x);
     // Extract the low 64 bits
     svuint64_t final_mixed_u64x = svreinterpret_u64_u8(final_mixed_u8x);
-    return svlasta_u64(all64, final_mixed_u64x); // Extract the first element
+    return svlasta_u64(all_b64x, final_mixed_u64x); // Extract the first element
 }
 
 /*  @brief  SVE2 increment hash functions currently mostly delegate to NEON for optimal performance.

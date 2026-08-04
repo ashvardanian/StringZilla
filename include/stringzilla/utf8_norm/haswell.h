@@ -36,28 +36,28 @@ extern "C" {
  *         quadrants, selected by the index's high two bits. `families & flag` then identifies the form.
  *  @return The vector of flagged lanes (nonzero where a lead byte begins a candidate-non-inert codepoint).
  */
-SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes, __m256i is_lead,
+SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_classify_shuffle_haswell_(__m256i bytes_u8x32, __m256i is_lead_u8x32,
                                                                      sz_u8_t form_flag) {
-    __m256i index = _mm256_and_si256(bytes, _mm256_set1_epi8(0x3F));
-    __m256i low_nibble = _mm256_and_si256(index, _mm256_set1_epi8(0x0F));
+    __m256i index_u8x32 = _mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(0x3F));
+    __m256i low_nibble_u8x32 = _mm256_and_si256(index_u8x32, _mm256_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
     // two bits live in bits 0..1, and masking with 0x03 recovers `index >> 4` per byte.
-    __m256i quadrant = _mm256_and_si256(_mm256_srli_epi16(index, 4), _mm256_set1_epi8(0x03));
-    __m256i table0 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 0)));
-    __m256i table1 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 16)));
-    __m256i table2 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 32)));
-    __m256i table3 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 48)));
-    __m256i families = _mm256_shuffle_epi8(table0, low_nibble);
-    families = _mm256_blendv_epi8(families, _mm256_shuffle_epi8(table1, low_nibble),
-                                  _mm256_cmpeq_epi8(quadrant, _mm256_set1_epi8(1)));
-    families = _mm256_blendv_epi8(families, _mm256_shuffle_epi8(table2, low_nibble),
-                                  _mm256_cmpeq_epi8(quadrant, _mm256_set1_epi8(2)));
-    families = _mm256_blendv_epi8(families, _mm256_shuffle_epi8(table3, low_nibble),
-                                  _mm256_cmpeq_epi8(quadrant, _mm256_set1_epi8(3)));
+    __m256i quadrant_u8x32 = _mm256_and_si256(_mm256_srli_epi16(index_u8x32, 4), _mm256_set1_epi8(0x03));
+    __m256i table0_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 0)));
+    __m256i table1_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 16)));
+    __m256i table2_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 32)));
+    __m256i table3_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(sz_utf8_norm_lead_lut_ + 48)));
+    __m256i families_u8x32 = _mm256_shuffle_epi8(table0_u8x32, low_nibble_u8x32);
+    families_u8x32 = _mm256_blendv_epi8(families_u8x32, _mm256_shuffle_epi8(table1_u8x32, low_nibble_u8x32),
+                                        _mm256_cmpeq_epi8(quadrant_u8x32, _mm256_set1_epi8(1)));
+    families_u8x32 = _mm256_blendv_epi8(families_u8x32, _mm256_shuffle_epi8(table2_u8x32, low_nibble_u8x32),
+                                        _mm256_cmpeq_epi8(quadrant_u8x32, _mm256_set1_epi8(2)));
+    families_u8x32 = _mm256_blendv_epi8(families_u8x32, _mm256_shuffle_epi8(table3_u8x32, low_nibble_u8x32),
+                                        _mm256_cmpeq_epi8(quadrant_u8x32, _mm256_set1_epi8(3)));
     // `families & flag != 0` per lane: invert the `== 0` compare to get an all-ones mask where a family bit is set.
-    __m256i has_flag = _mm256_cmpeq_epi8(_mm256_and_si256(families, _mm256_set1_epi8((char)form_flag)),
-                                         _mm256_setzero_si256());
-    return _mm256_andnot_si256(has_flag, is_lead);
+    __m256i has_flag_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(families_u8x32, _mm256_set1_epi8((char)form_flag)),
+                                               _mm256_setzero_si256());
+    return _mm256_andnot_si256(has_flag_u8x32, is_lead_u8x32);
 }
 
 /**
@@ -74,20 +74,21 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_haswell_(sz_cptr_t text, sz_s
     sz_u8_t previous_canonical_combining_class = 0;
 
     while (position + 32 <= end) {
-        __m256i bytes = _mm256_loadu_si256((__m256i const *)position);
-        if (_mm256_movemask_epi8(bytes) == 0) { // all 32 bytes ASCII: inert
+        __m256i bytes_u8x32 = _mm256_loadu_si256((__m256i const *)position);
+        if (_mm256_movemask_epi8(bytes_u8x32) == 0) { // all 32 bytes ASCII: inert
             position += 32, previous_canonical_combining_class = 0;
             continue;
         }
         // Lead bytes only: non-ASCII (high bit set) and not a 10xxxxxx continuation. AVX2 lacks unsigned
         // byte compares, so the continuation test rides the `min_epu8` range idiom: (byte - 0x80) < 0x40.
-        __m256i non_ascii = _mm256_cmpeq_epi8(_mm256_and_si256(bytes, _mm256_set1_epi8((char)0x80)),
-                                              _mm256_set1_epi8((char)0x80));
-        __m256i offsets = _mm256_sub_epi8(bytes, _mm256_set1_epi8((char)0x80));
-        __m256i continuation = _mm256_cmpeq_epi8(_mm256_min_epu8(offsets, _mm256_set1_epi8(0x3F)), offsets);
-        __m256i is_lead = _mm256_andnot_si256(continuation, non_ascii);
-        __m256i flagged = sz_utf8_norm_lead_classify_shuffle_haswell_(bytes, is_lead, form_flag);
-        if (_mm256_movemask_epi8(flagged) == 0) { // 32 bytes inert for the form: skip, then realign onto a boundary
+        __m256i non_ascii_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(bytes_u8x32, _mm256_set1_epi8((char)0x80)),
+                                                    _mm256_set1_epi8((char)0x80));
+        __m256i offsets_u8x32 = _mm256_sub_epi8(bytes_u8x32, _mm256_set1_epi8((char)0x80));
+        __m256i continuation_u8x32 = _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_u8x32, _mm256_set1_epi8(0x3F)),
+                                                       offsets_u8x32);
+        __m256i is_lead_u8x32 = _mm256_andnot_si256(continuation_u8x32, non_ascii_u8x32);
+        __m256i flagged_u8x32 = sz_utf8_norm_lead_classify_shuffle_haswell_(bytes_u8x32, is_lead_u8x32, form_flag);
+        if (_mm256_movemask_epi8(flagged_u8x32) == 0) { // 32 bytes inert for the form: skip, realign onto a boundary
             position += 32, previous_canonical_combining_class = 0;
             while (position < end && (*position & 0xC0) == 0x80) ++position;
             continue;

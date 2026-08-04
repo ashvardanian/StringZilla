@@ -119,14 +119,14 @@ SZ_HELPER_AUTO v128_t sz_utf8_word_break_astral_class_v128_(v128_t plane_off_u8x
  *          lookup is index-safe on any byte, so the maskless full-window read matches the RVV backend and stays
  *          bit-exact at every start lane (every other lane is a don't-care left at zero, exactly as NEON leaves it). */
 SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_v128_( //
-    sz_utf8_rune_window_v128_t window, v128_t *classes) {
-    v128_t const *raw = window.window;
+    sz_utf8_rune_window_v128_t window, v128_t *classes_u8x16) {
+    v128_t const *raw_u8x16 = window.window;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
                                   ~window.four_byte_starts;
     sz_u64_t const bmp_starts = window.two_byte_starts | window.three_byte_starts;
 
-    v128_t next1[4], next2[4], next3[4];
-    sz_utf8_forward_neighbours_v128_(raw, next1, next2, next3);
+    v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+    sz_utf8_forward_neighbours_v128_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
 
     v128_t const low_two_bits_u8x16 = wasm_i8x16_splat(0x03), low_three_bits_u8x16 = wasm_i8x16_splat(0x07),
                  low_nibble_u8x16 = wasm_i8x16_splat(0x0F), plane_high_bits_u8x16 = wasm_i8x16_splat(0x1C),
@@ -134,7 +134,7 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_v128_( //
                  high_nibble_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF0);
 
     for (int quarter = 0; quarter < 4; ++quarter) {
-        v128_t const raw_quarter_u8x16 = raw[quarter];
+        v128_t const raw_quarter_u8x16 = raw_u8x16[quarter];
         int const lane_base = quarter * 16;
         v128_t class_bytes_u8x16 = wasm_i8x16_splat(0);
 
@@ -154,25 +154,26 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_v128_( //
         // 4-byte (astral) lanes: reconstruct the codepoint from the lead + three forward neighbours, then the astral
         // cascade addressed by offset = codepoint - 0x10000 (the offset's plane nibble is `plane - 1`).
         if (window.four_byte_starts) {
-            v128_t const next1_u8x16 = next1[quarter], next2_u8x16 = next2[quarter], next3_u8x16 = next3[quarter];
+            v128_t const n1_u8x16 = next1_u8x16[quarter], n2_u8x16 = next2_u8x16[quarter],
+                         n3_u8x16 = next3_u8x16[quarter];
             v128_t const four_select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_v128_(window.four_byte_starts,
                                                                                           lane_base);
             v128_t const plane_u8x16 = wasm_v128_or(
                 wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(raw_quarter_u8x16, low_three_bits_u8x16), 2),
                               plane_high_bits_u8x16),
-                sz_utf8_srl8_v128_(next1_u8x16, 4, 0x03));
+                sz_utf8_srl8_v128_(n1_u8x16, 4, 0x03));
             v128_t const high_four_u8x16 = wasm_v128_or(
-                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(next1_u8x16, low_nibble_u8x16), 4), high_nibble_u8x16),
-                sz_utf8_srl8_v128_(next2_u8x16, 2, 0x0F));
+                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(n1_u8x16, low_nibble_u8x16), 4), high_nibble_u8x16),
+                sz_utf8_srl8_v128_(n2_u8x16, 2, 0x0F));
             v128_t const low_four_u8x16 = wasm_v128_or(
-                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(next2_u8x16, low_two_bits_u8x16), 6), high_two_bits_u8x16),
-                wasm_v128_and(next3_u8x16, low_six_bits_u8x16));
+                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(n2_u8x16, low_two_bits_u8x16), 6), high_two_bits_u8x16),
+                wasm_v128_and(n3_u8x16, low_six_bits_u8x16));
             v128_t const plane_off_u8x16 = wasm_i8x16_sub(plane_u8x16, wasm_i8x16_splat(1));
             class_bytes_u8x16 = wasm_v128_bitselect(
                 sz_utf8_word_break_astral_class_v128_(plane_off_u8x16, high_four_u8x16, low_four_u8x16),
                 class_bytes_u8x16, four_select_u8x16);
         }
-        classes[quarter] = class_bytes_u8x16;
+        classes_u8x16[quarter] = class_bytes_u8x16;
     }
 }
 
@@ -181,27 +182,29 @@ SZ_HELPER_AUTO void sz_utf8_word_break_classify_window_v128_( //
 #pragma region Mask algebra extractor
 
 /** @brief  A 64-bit "class byte == @p value" lane mask over the four class quarters (four `wasm_i8x16_eq` -> combine). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_v128_(v128_t const *classes, sz_u8_t value) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_v128_(v128_t const *classes_u8x16, sz_u8_t value) {
     v128_t const value_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)value);
     return sz_utf8_mask_combine_v128_(
-        wasm_i8x16_eq(classes[0], value_broadcast_u8x16), wasm_i8x16_eq(classes[1], value_broadcast_u8x16),
-        wasm_i8x16_eq(classes[2], value_broadcast_u8x16), wasm_i8x16_eq(classes[3], value_broadcast_u8x16));
+        wasm_i8x16_eq(classes_u8x16[0], value_broadcast_u8x16), wasm_i8x16_eq(classes_u8x16[1], value_broadcast_u8x16),
+        wasm_i8x16_eq(classes_u8x16[2], value_broadcast_u8x16), wasm_i8x16_eq(classes_u8x16[3], value_broadcast_u8x16));
 }
 
 /** @brief  A 64-bit "raw window byte == @p value" lane mask over the four window quarters. */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_v128_(v128_t const *quarters, sz_u8_t value) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_v128_(v128_t const *quarters_u8x16, sz_u8_t value) {
     v128_t const value_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)value);
-    return sz_utf8_mask_combine_v128_(
-        wasm_i8x16_eq(quarters[0], value_broadcast_u8x16), wasm_i8x16_eq(quarters[1], value_broadcast_u8x16),
-        wasm_i8x16_eq(quarters[2], value_broadcast_u8x16), wasm_i8x16_eq(quarters[3], value_broadcast_u8x16));
+    return sz_utf8_mask_combine_v128_(wasm_i8x16_eq(quarters_u8x16[0], value_broadcast_u8x16),
+                                      wasm_i8x16_eq(quarters_u8x16[1], value_broadcast_u8x16),
+                                      wasm_i8x16_eq(quarters_u8x16[2], value_broadcast_u8x16),
+                                      wasm_i8x16_eq(quarters_u8x16[3], value_broadcast_u8x16));
 }
 
 /** @brief  A 64-bit "raw window byte >= @p bound" (unsigned) lane mask over the four window quarters (`wasm_u8x16_ge`). */
-SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const *quarters, sz_u8_t bound) {
+SZ_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const *quarters_u8x16, sz_u8_t bound) {
     v128_t const bound_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)bound);
-    return sz_utf8_mask_combine_v128_(
-        wasm_u8x16_ge(quarters[0], bound_broadcast_u8x16), wasm_u8x16_ge(quarters[1], bound_broadcast_u8x16),
-        wasm_u8x16_ge(quarters[2], bound_broadcast_u8x16), wasm_u8x16_ge(quarters[3], bound_broadcast_u8x16));
+    return sz_utf8_mask_combine_v128_(wasm_u8x16_ge(quarters_u8x16[0], bound_broadcast_u8x16),
+                                      wasm_u8x16_ge(quarters_u8x16[1], bound_broadcast_u8x16),
+                                      wasm_u8x16_ge(quarters_u8x16[2], bound_broadcast_u8x16),
+                                      wasm_u8x16_ge(quarters_u8x16[3], bound_broadcast_u8x16));
 }
 
 /** @brief  Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the v128 unsigned 16-bit
@@ -229,14 +232,14 @@ SZ_HELPER_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t high_u8x16, 
 /** @brief  A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window quarters,
  *          the v128 twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace / Extended_Pictographic). */
 SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
-    v128_t const *high, v128_t const *low, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
-    v128_t hit[4] = {wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0)};
+    v128_t const *high_u8x16, v128_t const *low_u8x16, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
+    v128_t hit_u8x16[4] = {wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0)};
     for (int range = 0; range < count; ++range)
         for (int quarter = 0; quarter < 4; ++quarter)
-            hit[quarter] = wasm_v128_or(
-                hit[quarter],
-                sz_utf8_word_break_range16_one_v128_(high[quarter], low[quarter], lo_table[range], hi_table[range]));
-    return sz_utf8_mask_combine_v128_(hit[0], hit[1], hit[2], hit[3]);
+            hit_u8x16[quarter] = wasm_v128_or(
+                hit_u8x16[quarter], sz_utf8_word_break_range16_one_v128_(high_u8x16[quarter], low_u8x16[quarter],
+                                                                         lo_table[range], hi_table[range]));
+    return sz_utf8_mask_combine_v128_(hit_u8x16[0], hit_u8x16[1], hit_u8x16[2], hit_u8x16[3]);
 }
 
 /**
@@ -246,13 +249,13 @@ SZ_HELPER_AUTO sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
  *          Extended_Pictographic mask (BMP + SMP range scan), and the per-lane class byte array.
  */
 SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_(
-    sz_utf8_rune_window_v128_t window, v128_t *classes, sz_u64_t start_bytes_all, sz_u64_t length_two,
+    sz_utf8_rune_window_v128_t window, v128_t *classes_u8x16, sz_u64_t start_bytes_all, sz_u64_t length_two,
     sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
     sz_size_t const loaded = window.loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
     sz_u64_t const start_bytes = start_bytes_all & valid;
-    v128_t const *raw = window.window;
+    v128_t const *raw_u8x16 = window.window;
 
     // Truncated-edge U+FFFD reclassify (force the class to Other on a lead whose declared span runs past `loaded`).
     sz_u64_t const lead_two = length_two & start_bytes;
@@ -266,31 +269,31 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
         v128_t const other_u8x16 = wasm_i8x16_splat((sz_i8_t)sz_utf8_word_break_other_k);
         for (int quarter = 0; quarter < 4; ++quarter) {
             v128_t const sel_u8x16 = sz_utf8_word_break_byte_mask_from_bits_v128_(truncated_raw, quarter * 16);
-            classes[quarter] = wasm_v128_bitselect(other_u8x16, classes[quarter], sel_u8x16);
+            classes_u8x16[quarter] = wasm_v128_bitselect(other_u8x16, classes_u8x16[quarter], sel_u8x16);
         }
     }
 
     sz_utf8_word_break_frame_t frame;
-    frame.class_aletter = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_aletter_k);
-    frame.class_hebrew = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_hebrew_letter_k);
-    frame.class_numeric = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_numeric_k);
-    frame.class_katakana = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_katakana_k);
-    frame.class_extendnumlet = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_extendnumlet_k);
-    frame.class_extend = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_extend_k);
-    frame.class_zwj = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_zwj_k);
-    frame.class_format = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_format_k);
-    frame.class_midletter = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_midletter_k);
-    frame.class_midnum = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_midnum_k);
-    frame.class_mid_quotes = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_mid_quotes_k);
-    frame.class_cr = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_cr_k);
-    frame.class_lf = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_lf_k);
-    frame.class_newline = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_newline_k);
-    frame.class_regional = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_regional_ind_k);
+    frame.class_aletter = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_aletter_k);
+    frame.class_hebrew = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_hebrew_letter_k);
+    frame.class_numeric = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_numeric_k);
+    frame.class_katakana = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_katakana_k);
+    frame.class_extendnumlet = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_extendnumlet_k);
+    frame.class_extend = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_extend_k);
+    frame.class_zwj = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_zwj_k);
+    frame.class_format = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_format_k);
+    frame.class_midletter = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_midletter_k);
+    frame.class_midnum = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_midnum_k);
+    frame.class_mid_quotes = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_mid_quotes_k);
+    frame.class_cr = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_cr_k);
+    frame.class_lf = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_lf_k);
+    frame.class_newline = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_newline_k);
+    frame.class_regional = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_regional_ind_k);
 
-    sz_u64_t const non_ascii_lanes = sz_utf8_word_break_byte_ge_v128_(raw, 0x80) & valid;
+    sz_u64_t const non_ascii_lanes = sz_utf8_word_break_byte_ge_v128_(raw_u8x16, 0x80) & valid;
     frame.non_ascii_lanes = non_ascii_lanes;
-    frame.double_quote_byte = sz_utf8_word_break_byte_equal_v128_(raw, 0x22) & valid;
-    frame.single_quote_byte = sz_utf8_word_break_byte_equal_v128_(raw, 0x27) & valid;
+    frame.double_quote_byte = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0x22) & valid;
+    frame.single_quote_byte = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0x27) & valid;
 
     // WB3d WSegSpace raw membership: the ASCII U+0020 byte compare OR the multibyte (high,low) range scan.
     sz_u64_t wseg_multibyte = 0ull;
@@ -299,7 +302,7 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
                                                                sz_utf8_word_break_wseg_hi_,
                                                                sz_utf8_word_break_wseg_count_k) &
                          non_ascii_lanes;
-    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_v128_(raw, 0x20) & valid));
+    frame.wseg = (wseg_multibyte | (sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0x20) & valid));
 
     // WB3c Extended_Pictographic raw membership (BMP range scan on non-4-byte lanes, SMP range scan on plane-one
     // 4-byte lanes). Rare-class gated on `want_pictographic` (an in-window ZWJ or the carried `prev_ends_in_zwj`), so
@@ -307,42 +310,43 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
     frame.pictographic = 0ull;
     sz_u64_t const four_byte = window.four_byte_starts & valid;
     if (want_pictographic) {
-        v128_t next1[4], next2[4], next3[4];
-        sz_utf8_forward_neighbours_v128_(raw, next1, next2, next3);
+        v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+        sz_utf8_forward_neighbours_v128_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
         v128_t const low_two_bits_u8x16 = wasm_i8x16_splat(0x03), low_three_bits_u8x16 = wasm_i8x16_splat(0x07),
                      low_nibble_u8x16 = wasm_i8x16_splat(0x0F), plane_high_bits_u8x16 = wasm_i8x16_splat(0x1C),
                      low_six_bits_u8x16 = wasm_i8x16_splat(0x3F), high_two_bits_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0),
                      high_nibble_u8x16 = wasm_i8x16_splat((sz_i8_t)0xF0);
-        v128_t plane_q[4], smp_high[4], smp_low[4];
+        v128_t plane_q_u8x16[4], smp_high_u8x16[4], smp_low_u8x16[4];
         for (int quarter = 0; quarter < 4; ++quarter) {
-            v128_t const raw_quarter_u8x16 = raw[quarter], next1_u8x16 = next1[quarter], next2_u8x16 = next2[quarter],
-                         next3_u8x16 = next3[quarter];
-            plane_q[quarter] = wasm_v128_or(
+            v128_t const raw_quarter_u8x16 = raw_u8x16[quarter], n1_u8x16 = next1_u8x16[quarter],
+                         n2_u8x16 = next2_u8x16[quarter], n3_u8x16 = next3_u8x16[quarter];
+            plane_q_u8x16[quarter] = wasm_v128_or(
                 wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(raw_quarter_u8x16, low_three_bits_u8x16), 2),
                               plane_high_bits_u8x16),
-                sz_utf8_srl8_v128_(next1_u8x16, 4, 0x03));
-            smp_high[quarter] = wasm_v128_or(
-                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(next1_u8x16, low_nibble_u8x16), 4), high_nibble_u8x16),
-                sz_utf8_srl8_v128_(next2_u8x16, 2, 0x0F));
-            smp_low[quarter] = wasm_v128_or(
-                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(next2_u8x16, low_two_bits_u8x16), 6), high_two_bits_u8x16),
-                wasm_v128_and(next3_u8x16, low_six_bits_u8x16));
+                sz_utf8_srl8_v128_(n1_u8x16, 4, 0x03));
+            smp_high_u8x16[quarter] = wasm_v128_or(
+                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(n1_u8x16, low_nibble_u8x16), 4), high_nibble_u8x16),
+                sz_utf8_srl8_v128_(n2_u8x16, 2, 0x0F));
+            smp_low_u8x16[quarter] = wasm_v128_or(
+                wasm_v128_and(wasm_i8x16_shl(wasm_v128_and(n2_u8x16, low_two_bits_u8x16), 6), high_two_bits_u8x16),
+                wasm_v128_and(n3_u8x16, low_six_bits_u8x16));
         }
         v128_t const one_u8x16 = wasm_i8x16_splat(1);
         sz_u64_t const plane_one = sz_utf8_mask_combine_v128_(
-            wasm_i8x16_eq(plane_q[0], one_u8x16), wasm_i8x16_eq(plane_q[1], one_u8x16),
-            wasm_i8x16_eq(plane_q[2], one_u8x16), wasm_i8x16_eq(plane_q[3], one_u8x16));
+            wasm_i8x16_eq(plane_q_u8x16[0], one_u8x16), wasm_i8x16_eq(plane_q_u8x16[1], one_u8x16),
+            wasm_i8x16_eq(plane_q_u8x16[2], one_u8x16), wasm_i8x16_eq(plane_q_u8x16[3], one_u8x16));
         sz_u64_t const pictographic_bmp = sz_utf8_word_break_range16_mask_v128_(
             window.high, window.low, sz_utf8_word_break_pict_bmp_lo_, sz_utf8_word_break_pict_bmp_hi_,
             sz_utf8_word_break_pict_bmp_count_k);
         sz_u64_t const pictographic_smp = sz_utf8_word_break_range16_mask_v128_(
-            smp_high, smp_low, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
+            smp_high_u8x16, smp_low_u8x16, sz_utf8_word_break_pict_smp_lo_, sz_utf8_word_break_pict_smp_hi_,
             sz_utf8_word_break_pict_smp_count_k);
         frame.pictographic = (pictographic_bmp & non_ascii_lanes & ~four_byte) |
                              (pictographic_smp & four_byte & plane_one);
     }
 
-    for (int quarter = 0; quarter < 4; ++quarter) wasm_v128_store(frame.classes_byte + quarter * 16, classes[quarter]);
+    for (int quarter = 0; quarter < 4; ++quarter)
+        wasm_v128_store(frame.classes_byte + quarter * 16, classes_u8x16[quarter]);
     return frame;
 }
 
@@ -355,28 +359,29 @@ SZ_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_
  *          @ref sz_utf8_word_break_partition_from_masks_. */
 SZ_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_v128_(sz_utf8_rune_window_v128_t window,
                                                                                  sz_u64_t valid, int at_end_of_text) {
-    v128_t const *raw = window.window;
+    v128_t const *raw_u8x16 = window.window;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict
     // `two`/`three_byte_starts` masks already match 0xC0-0xDF and 0xE0-0xEF; only `length_four` needs widening to fold
     // the ill-formed leads 0xF8-0xFF so they collapse to U+FFFD like serial/Haswell instead of leaking as a class.
     sz_u64_t const length_two = window.two_byte_starts & valid;
     sz_u64_t const length_three = window.three_byte_starts & valid;
-    sz_u64_t const length_four = (window.four_byte_starts | sz_utf8_word_break_byte_ge_v128_(raw, 0xF8)) & valid;
+    sz_u64_t const length_four = (window.four_byte_starts | sz_utf8_word_break_byte_ge_v128_(raw_u8x16, 0xF8)) & valid;
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t bad_second_byte = 0ull;
     if (length_ge_two) {
-        v128_t next1[4], next2[4], next3[4];
-        sz_utf8_forward_neighbours_v128_(raw, next1, next2, next3);
-        sz_u64_t const next1_at_least_a0 = sz_utf8_word_break_byte_ge_v128_(next1, 0xA0);
-        sz_u64_t const next1_at_least_90 = sz_utf8_word_break_byte_ge_v128_(next1, 0x90);
-        sz_u64_t const lead_c0_c1 =
-            (sz_utf8_word_break_byte_equal_v128_(raw, 0xC0) | sz_utf8_word_break_byte_equal_v128_(raw, 0xC1)) & valid;
-        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_v128_(raw, 0xE0) & valid;
-        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_v128_(raw, 0xED) & valid;
-        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_v128_(raw, 0xF0) & valid;
-        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_v128_(raw, 0xF4) & valid;
-        sz_u64_t const lead_f5_or_more = sz_utf8_word_break_byte_ge_v128_(raw, 0xF5) & valid;
+        v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+        sz_utf8_forward_neighbours_v128_(raw_u8x16, next1_u8x16, next2_u8x16, next3_u8x16);
+        sz_u64_t const next1_at_least_a0 = sz_utf8_word_break_byte_ge_v128_(next1_u8x16, 0xA0);
+        sz_u64_t const next1_at_least_90 = sz_utf8_word_break_byte_ge_v128_(next1_u8x16, 0x90);
+        sz_u64_t const lead_c0_c1 = (sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xC0) |
+                                     sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xC1)) &
+                                    valid;
+        sz_u64_t const lead_e0 = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xE0) & valid;
+        sz_u64_t const lead_ed = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xED) & valid;
+        sz_u64_t const lead_f0 = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xF0) & valid;
+        sz_u64_t const lead_f4 = sz_utf8_word_break_byte_equal_v128_(raw_u8x16, 0xF4) & valid;
+        sz_u64_t const lead_f5_or_more = sz_utf8_word_break_byte_ge_v128_(raw_u8x16, 0xF5) & valid;
         bad_second_byte = lead_c0_c1 | (lead_e0 & ~next1_at_least_a0) | (lead_ed & next1_at_least_a0) |
                           (lead_f0 & ~next1_at_least_90) | (lead_f4 & next1_at_least_90) | lead_f5_or_more;
     }
@@ -417,8 +422,8 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(   //
         sz_size_t const loaded = window.loaded;
         sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
 
-        v128_t classes[4];
-        sz_utf8_word_break_classify_window_v128_(window, classes);
+        v128_t classes_u8x16[4];
+        sz_utf8_word_break_classify_window_v128_(window, classes_u8x16);
 
         sz_utf8_word_break_partition_t const partition = sz_utf8_word_break_partition_v128_(
             window, valid, position + loaded >= length);
@@ -432,7 +437,7 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(   //
             v128_t const other_u8x16 = wasm_i8x16_splat((sz_i8_t)sz_utf8_word_break_other_k);
             for (int quarter = 0; quarter < 4; ++quarter) {
                 v128_t const sel_u8x16 = sz_utf8_word_break_byte_mask_from_bits_v128_(forced_other, quarter * 16);
-                classes[quarter] = wasm_v128_bitselect(other_u8x16, classes[quarter], sel_u8x16);
+                classes_u8x16[quarter] = wasm_v128_bitselect(other_u8x16, classes_u8x16[quarter], sel_u8x16);
             }
         }
 
@@ -460,10 +465,11 @@ SZ_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(   //
             if (limit > 0) complete_limit = limit;
         }
 
-        int const want_pictographic = sz_utf8_word_break_class_mask_v128_(classes, sz_utf8_word_break_zwj_k) != 0 ||
+        int const want_pictographic = sz_utf8_word_break_class_mask_v128_(classes_u8x16, sz_utf8_word_break_zwj_k) !=
+                                          0 ||
                                       carry.prev_ends_in_zwj;
         sz_utf8_word_break_frame_t const frame = sz_utf8_word_break_build_frame_v128_(
-            window, classes, start_bytes_all, length_two, length_three, length_four, want_pictographic);
+            window, classes_u8x16, start_bytes_all, length_two, length_three, length_four, want_pictographic);
 
         sz_utf8_word_break_carry_t carry_full = carry;
         sz_utf8_word_break_window_t const win = sz_utf8_word_break_decide_window_(

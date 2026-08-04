@@ -31,17 +31,17 @@ extern "C" {
 
 /*  See `utf8_runes/lasx.h`: `__lasx_xvmskltz_b` packs each byte's sign bit into a per-128-bit-lane
  *  16-bit mask (word 0 = low lane, word 4 = high lane), recombined to match AVX2's `_mm256_movemask_epi8`. */
-SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended) {
-    __m256i collected = __lasx_xvmskltz_b(sign_extended);
-    sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 0);
-    sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected, 4);
+SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_u8x32) {
+    __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
+    sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 0);
+    sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 4);
     return (low & 0xFFFFu) | ((high & 0xFFFFu) << 16);
 }
 
 /**
  *  @brief 64-entry lead lookup without a wide permute: two even/odd `__lasx_xvshuf_b` selects over the
  *         broadcast LUT halves, blended on bit five of the index. `families & form_flag` then identifies
- *         the form. @p index holds `byte & 0x3F` per lane.
+ *         the form. @p index_u8x32 holds `byte & 0x3F` per lane.
  *
  *  `__lasx_xvshuf_b(high, low, index)` selects, per 128-bit lane, `low[index]` for `index` in [0, 16) and
  *  `high[index - 16]` for `index` in [16, 32), reading only the low five index bits. So one select covers
@@ -49,13 +49,14 @@ SZ_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended)
  *  re-bases the index onto [0, 32) over tables 32..47 and 48..63. `__lasx_xvbitsel_v` then picks the high
  *  select wherever bit five of the index is set (index >= 32).
  */
-SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index, __m256i table_low_0, __m256i table_low_1,
-                                                        __m256i table_high_0, __m256i table_high_1) {
-    __m256i families_low = __lasx_xvshuf_b(table_low_1, table_low_0, index);
-    __m256i families_high = __lasx_xvshuf_b(table_high_1, table_high_0, index);
+SZ_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
+                                                        __m256i table_low_1_u8x32, __m256i table_high_0_u8x32,
+                                                        __m256i table_high_1_u8x32) {
+    __m256i families_low_u8x32 = __lasx_xvshuf_b(table_low_1_u8x32, table_low_0_u8x32, index_u8x32);
+    __m256i families_high_u8x32 = __lasx_xvshuf_b(table_high_1_u8x32, table_high_0_u8x32, index_u8x32);
     // Bit five (value 0x20) of the index is set exactly for index >= 32: select the high half there.
-    __m256i select_high = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0x1F), index);
-    return __lasx_xvbitsel_v(families_low, families_high, select_high);
+    __m256i select_high_u8x32 = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0x1F), index_u8x32);
+    return __lasx_xvbitsel_v(families_low_u8x32, families_high_u8x32, select_high_u8x32);
 }
 
 /**
@@ -80,31 +81,32 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size
         table_high_0_bytes[lane] = table_high_0_bytes[lane + 16] = sz_utf8_norm_lead_lut_[lane + 32];
         table_high_1_bytes[lane] = table_high_1_bytes[lane + 16] = sz_utf8_norm_lead_lut_[lane + 48];
     }
-    __m256i const table_low_0 = __lasx_xvld(table_low_0_bytes, 0);
-    __m256i const table_low_1 = __lasx_xvld(table_low_1_bytes, 0);
-    __m256i const table_high_0 = __lasx_xvld(table_high_0_bytes, 0);
-    __m256i const table_high_1 = __lasx_xvld(table_high_1_bytes, 0);
+    __m256i const table_low_0_u8x32 = __lasx_xvld(table_low_0_bytes, 0);
+    __m256i const table_low_1_u8x32 = __lasx_xvld(table_low_1_bytes, 0);
+    __m256i const table_high_0_u8x32 = __lasx_xvld(table_high_0_bytes, 0);
+    __m256i const table_high_1_u8x32 = __lasx_xvld(table_high_1_bytes, 0);
 
     while (position + 32 <= end) {
-        __m256i bytes = __lasx_xvld(position, 0);
+        __m256i bytes_u8x32 = __lasx_xvld(position, 0);
         // All-ASCII gate: a high (sign) bit marks a non-ASCII byte. An ASCII-only window is inert.
-        sz_u32_t non_ascii = sz_xvmovemask_b_utf8_norm_lasx_(bytes);
+        sz_u32_t non_ascii = sz_xvmovemask_b_utf8_norm_lasx_(bytes_u8x32);
         if (non_ascii == 0) {
             position += 32, previous_canonical_combining_class = 0;
             continue;
         }
         // Lead bytes only: non-ASCII and not a 10xxxxxx continuation byte.
-        __m256i non_ascii_vec = __lasx_xvslt_b(bytes, __lasx_xvreplgr2vr_b(0));
-        __m256i continuation_vec = __lasx_xvseq_b(__lasx_xvand_v(bytes, __lasx_xvreplgr2vr_b((char)0xC0)),
-                                                  __lasx_xvreplgr2vr_b((char)0x80));
-        __m256i is_lead_vec = __lasx_xvandn_v(continuation_vec, non_ascii_vec);
+        __m256i non_ascii_u8x32 = __lasx_xvslt_b(bytes_u8x32, __lasx_xvreplgr2vr_b(0));
+        __m256i continuation_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(bytes_u8x32, __lasx_xvreplgr2vr_b((char)0xC0)),
+                                                    __lasx_xvreplgr2vr_b((char)0x80));
+        __m256i is_lead_u8x32 = __lasx_xvandn_v(continuation_u8x32, non_ascii_u8x32);
         // Classify each lead via the 64-entry LUT (index = byte & 0x3F), then keep the flagged form bit.
-        __m256i index = __lasx_xvand_v(bytes, __lasx_xvreplgr2vr_b(0x3F));
-        __m256i families = sz_utf8_norm_lead_lookup_lasx_(index, table_low_0, table_low_1, table_high_0, table_high_1);
-        __m256i has_flag = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0),
-                                           __lasx_xvand_v(families, __lasx_xvreplgr2vr_b((char)form_flag)));
-        __m256i flagged_vec = __lasx_xvand_v(is_lead_vec, has_flag);
-        if (sz_xvmovemask_b_utf8_norm_lasx_(flagged_vec) == 0) {
+        __m256i index_u8x32 = __lasx_xvand_v(bytes_u8x32, __lasx_xvreplgr2vr_b(0x3F));
+        __m256i families_u8x32 = sz_utf8_norm_lead_lookup_lasx_(index_u8x32, table_low_0_u8x32, table_low_1_u8x32,
+                                                                table_high_0_u8x32, table_high_1_u8x32);
+        __m256i has_flag_u8x32 = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0),
+                                                 __lasx_xvand_v(families_u8x32, __lasx_xvreplgr2vr_b((char)form_flag)));
+        __m256i flagged_u8x32 = __lasx_xvand_v(is_lead_u8x32, has_flag_u8x32);
+        if (sz_xvmovemask_b_utf8_norm_lasx_(flagged_u8x32) == 0) {
             // 32 bytes inert for the form: skip, then realign onto a codepoint boundary.
             position += 32, previous_canonical_combining_class = 0;
             while (position < end && (*position & 0xC0) == 0x80) ++position;

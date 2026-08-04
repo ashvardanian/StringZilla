@@ -51,28 +51,28 @@ SZ_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_rvv_(sz_cptr_t text, sz_size_
 
     while (position < end) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8((sz_size_t)(end - position));
-        vuint8m8_t bytes = __riscv_vle8_v_u8m8(position, vector_length);
+        vuint8m8_t bytes_u8m8 = __riscv_vle8_v_u8m8(position, vector_length);
 
         // ASCII gate: a strip with no high-bit byte is wholly inert for every form.
-        vbool1_t non_ascii = __riscv_vmsgtu_vx_u8m8_b1(bytes, 0x7F, vector_length);
-        if (__riscv_vfirst_m_b1(non_ascii, vector_length) < 0) {
+        vbool1_t non_ascii_b1 = __riscv_vmsgtu_vx_u8m8_b1(bytes_u8m8, 0x7F, vector_length);
+        if (__riscv_vfirst_m_b1(non_ascii_b1, vector_length) < 0) {
             position += vector_length, previous_canonical_combining_class = 0;
             continue;
         }
 
         // Lead bytes only: non-ASCII and not a `10xxxxxx` continuation.
-        vbool1_t continuation = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(bytes, 0xC0, vector_length), 0x80,
-                                                         vector_length);
-        vbool1_t is_lead = __riscv_vmandn_mm_b1(non_ascii, continuation, vector_length);
+        vbool1_t continuation_b1 = __riscv_vmseq_vx_u8m8_b1(__riscv_vand_vx_u8m8(bytes_u8m8, 0xC0, vector_length), 0x80,
+                                                            vector_length);
+        vbool1_t is_lead_b1 = __riscv_vmandn_mm_b1(non_ascii_b1, continuation_b1, vector_length);
 
         // 64-entry lead lookup by indexed gather over `byte & 0x3F` - no table split at any VLEN.
-        vuint8m8_t index = __riscv_vand_vx_u8m8(bytes, 0x3F, vector_length);
-        vuint8m8_t families = __riscv_vluxei8_v_u8m8(sz_utf8_norm_lead_lut_, index, vector_length);
-        vbool1_t has_flag = __riscv_vmsne_vx_u8m8_b1(__riscv_vand_vx_u8m8(families, form_flag, vector_length), 0,
-                                                     vector_length);
-        vbool1_t flagged = __riscv_vmand_mm_b1(is_lead, has_flag, vector_length);
+        vuint8m8_t index_u8m8 = __riscv_vand_vx_u8m8(bytes_u8m8, 0x3F, vector_length);
+        vuint8m8_t families_u8m8 = __riscv_vluxei8_v_u8m8(sz_utf8_norm_lead_lut_, index_u8m8, vector_length);
+        vbool1_t has_flag_b1 = __riscv_vmsne_vx_u8m8_b1(__riscv_vand_vx_u8m8(families_u8m8, form_flag, vector_length),
+                                                        0, vector_length);
+        vbool1_t flagged_b1 = __riscv_vmand_mm_b1(is_lead_b1, has_flag_b1, vector_length);
 
-        if (__riscv_vfirst_m_b1(flagged, vector_length) < 0) { // strip inert for the form: skip and realign
+        if (__riscv_vfirst_m_b1(flagged_b1, vector_length) < 0) { // strip inert for the form: skip and realign
             position += vector_length, previous_canonical_combining_class = 0;
             while (position < end && (*position & 0xC0) == 0x80) ++position;
             continue;

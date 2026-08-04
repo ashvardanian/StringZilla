@@ -29,8 +29,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystac
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
         vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vector_length);
-        vbool1_t eq_mask = __riscv_vmseq_vx_u8m8_b1(haystack_u8m8, needle_byte, vector_length);
-        long match_index = __riscv_vfirst_m_b1(eq_mask, vector_length);
+        vbool1_t eq_mask_b1 = __riscv_vmseq_vx_u8m8_b1(haystack_u8m8, needle_byte, vector_length);
+        long match_index = __riscv_vfirst_m_b1(eq_mask_b1, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(haystack_u8 + match_index);
         haystack_u8 += vector_length, haystack_length -= vector_length;
     }
@@ -58,8 +58,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haysta
         sz_u8_t const *strip = haystack_u8 + haystack_length - vector_length;
         // Reverse the strip: out[i] = in[vector_length-1-i], so `vfirst` returns the highest match.
         vuint8m4_t reversed_u8m4 = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(strip, vector_length), vector_length);
-        vbool2_t eq_mask = __riscv_vmseq_vx_u8m4_b2(reversed_u8m4, needle_byte, vector_length);
-        long match_index = __riscv_vfirst_m_b2(eq_mask, vector_length);
+        vbool2_t eq_mask_b2 = __riscv_vmseq_vx_u8m4_b2(reversed_u8m4, needle_byte, vector_length);
+        long match_index = __riscv_vfirst_m_b2(eq_mask_b2, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(strip + (vector_length - 1 - match_index));
         haystack_length -= vector_length;
     }
@@ -107,8 +107,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t hays
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
         vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vector_length);
-        vbool1_t match_mask = sz_find_byteset_rvv_mask_m8_(haystack_u8m8, &set->_u8s[0], vector_length);
-        long match_index = __riscv_vfirst_m_b1(match_mask, vector_length);
+        vbool1_t match_mask_b1 = sz_find_byteset_rvv_mask_m8_(haystack_u8m8, &set->_u8s[0], vector_length);
+        long match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(haystack_u8 + match_index);
         haystack_u8 += vector_length, haystack_length -= vector_length;
     }
@@ -121,8 +121,8 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t hay
         sz_size_t vector_length = __riscv_vsetvl_e8m4(haystack_length);
         sz_u8_t const *strip = haystack_u8 + haystack_length - vector_length;
         vuint8m4_t reversed_u8m4 = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(strip, vector_length), vector_length);
-        vbool2_t match_mask = sz_find_byteset_rvv_mask_m4_(reversed_u8m4, &set->_u8s[0], vector_length);
-        long match_index = __riscv_vfirst_m_b2(match_mask, vector_length);
+        vbool2_t match_mask_b2 = sz_find_byteset_rvv_mask_m4_(reversed_u8m4, &set->_u8s[0], vector_length);
+        long match_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(strip + (vector_length - 1 - match_index));
         haystack_length -= vector_length;
     }
@@ -151,19 +151,20 @@ SZ_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_len
         vuint8m8_t first_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_first, vector_length);
         vuint8m8_t mid_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_mid, vector_length);
         vuint8m8_t last_u8m8 = __riscv_vle8_v_u8m8(haystack_u8 + position + offset_last, vector_length);
-        vbool1_t first_mask = __riscv_vmseq_vx_u8m8_b1(first_u8m8, n_first, vector_length);
-        vbool1_t mid_mask = __riscv_vmseq_vx_u8m8_b1(mid_u8m8, n_mid, vector_length);
-        vbool1_t last_mask = __riscv_vmseq_vx_u8m8_b1(last_u8m8, n_last, vector_length);
-        vbool1_t match_mask = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(first_mask, mid_mask, vector_length), last_mask,
-                                                  vector_length);
+        vbool1_t first_mask_b1 = __riscv_vmseq_vx_u8m8_b1(first_u8m8, n_first, vector_length);
+        vbool1_t mid_mask_b1 = __riscv_vmseq_vx_u8m8_b1(mid_u8m8, n_mid, vector_length);
+        vbool1_t last_mask_b1 = __riscv_vmseq_vx_u8m8_b1(last_u8m8, n_last, vector_length);
+        vbool1_t match_mask_b1 = __riscv_vmand_mm_b1(__riscv_vmand_mm_b1(first_mask_b1, mid_mask_b1, vector_length),
+                                                     last_mask_b1, vector_length);
         // Iterate set bits low-to-high without materializing a per-lane index: `vmsif` marks every
         // lane up to and including the first set bit, then `vmandn` clears them, leaving the rest.
-        for (long match_index = __riscv_vfirst_m_b1(match_mask, vector_length); match_index >= 0;
-             match_index = __riscv_vfirst_m_b1(match_mask, vector_length)) {
+        for (long match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length); match_index >= 0;
+             match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length)) {
             sz_size_t candidate = position + (sz_size_t)match_index;
             if (sz_equal_rvv((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
                 return (sz_cptr_t)(haystack_u8 + candidate);
-            match_mask = __riscv_vmandn_mm_b1(match_mask, __riscv_vmsif_m_b1(match_mask, vector_length), vector_length);
+            match_mask_b1 = __riscv_vmandn_mm_b1(match_mask_b1, __riscv_vmsif_m_b1(match_mask_b1, vector_length),
+                                                 vector_length);
         }
         position += vector_length;
     }
@@ -191,24 +192,25 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_le
         sz_size_t base = remaining - vector_length; // strip covers candidate starts [base, base+vector_length)
         // Reverse the three anchor loads so reversed lane 0 is the highest candidate (base+vector_length-1);
         // `vfirst` then yields the highest match, with no mask byte-spill round trip.
-        vuint8m4_t first_rev = sz_reverse_strip_rvv_(
+        vuint8m4_t first_rev_u8m4 = sz_reverse_strip_rvv_(
             __riscv_vle8_v_u8m4(haystack_u8 + base + offset_first, vector_length), vector_length);
-        vuint8m4_t mid_rev = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(haystack_u8 + base + offset_mid, vector_length),
-                                                   vector_length);
-        vuint8m4_t last_rev = sz_reverse_strip_rvv_(
+        vuint8m4_t mid_rev_u8m4 = sz_reverse_strip_rvv_(
+            __riscv_vle8_v_u8m4(haystack_u8 + base + offset_mid, vector_length), vector_length);
+        vuint8m4_t last_rev_u8m4 = sz_reverse_strip_rvv_(
             __riscv_vle8_v_u8m4(haystack_u8 + base + offset_last, vector_length), vector_length);
-        vbool2_t first_mask = __riscv_vmseq_vx_u8m4_b2(first_rev, n_first, vector_length);
-        vbool2_t mid_mask = __riscv_vmseq_vx_u8m4_b2(mid_rev, n_mid, vector_length);
-        vbool2_t last_mask = __riscv_vmseq_vx_u8m4_b2(last_rev, n_last, vector_length);
-        vbool2_t match_mask = __riscv_vmand_mm_b2(__riscv_vmand_mm_b2(first_mask, mid_mask, vector_length), last_mask,
-                                                  vector_length);
+        vbool2_t first_mask_b2 = __riscv_vmseq_vx_u8m4_b2(first_rev_u8m4, n_first, vector_length);
+        vbool2_t mid_mask_b2 = __riscv_vmseq_vx_u8m4_b2(mid_rev_u8m4, n_mid, vector_length);
+        vbool2_t last_mask_b2 = __riscv_vmseq_vx_u8m4_b2(last_rev_u8m4, n_last, vector_length);
+        vbool2_t match_mask_b2 = __riscv_vmand_mm_b2(__riscv_vmand_mm_b2(first_mask_b2, mid_mask_b2, vector_length),
+                                                     last_mask_b2, vector_length);
         // Walk reversed lanes low-to-high (= candidates high-to-low) via `vmsif`/`vmandn`.
-        for (long reversed_index = __riscv_vfirst_m_b2(match_mask, vector_length); reversed_index >= 0;
-             reversed_index = __riscv_vfirst_m_b2(match_mask, vector_length)) {
+        for (long reversed_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length); reversed_index >= 0;
+             reversed_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length)) {
             sz_size_t candidate = base + (vector_length - 1 - (sz_size_t)reversed_index);
             if (sz_equal_rvv((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
                 return (sz_cptr_t)(haystack_u8 + candidate);
-            match_mask = __riscv_vmandn_mm_b2(match_mask, __riscv_vmsif_m_b2(match_mask, vector_length), vector_length);
+            match_mask_b2 = __riscv_vmandn_mm_b2(match_mask_b2, __riscv_vmsif_m_b2(match_mask_b2, vector_length),
+                                                 vector_length);
         }
         remaining = base;
     }

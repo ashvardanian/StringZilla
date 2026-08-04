@@ -36,27 +36,27 @@ SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, 
     a_head_length = a_head_length < a_length ? a_head_length : a_length;
     b_head_length = b_head_length < b_length ? b_head_length : b_length;
     sz_size_t head_length = a_head_length < b_head_length ? a_head_length : b_head_length;
-    __mmask64 head_mask = sz_u64_mask_until_(head_length);
-    a_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, a);
-    b_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, b);
-    __mmask64 mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-    if (mask_not_equal != 0) {
+    __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
+    a_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, a);
+    b_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, b);
+    __mmask64 mask_not_equal_m64 = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+    if (mask_not_equal_m64 != 0) {
         // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
-        unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
+        unsigned long long first_diff = _tzcnt_u64(mask_not_equal_m64);
         return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
     }
     else if (head_length == a_length && head_length == b_length) { return sz_equal_k; }
     else { a += head_length, b += head_length, a_length -= head_length, b_length -= head_length; }
 
     // The rare case, when both string are very long.
-    __mmask64 a_mask, b_mask;
+    __mmask64 a_mask_m64, b_mask_m64;
     while ((a_length >= 64) & (b_length >= 64)) {
         a_vec.zmm = _mm512_loadu_si512(a);
         b_vec.zmm = _mm512_loadu_si512(b);
-        mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-        if (mask_not_equal != 0) {
+        mask_not_equal_m64 = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+        if (mask_not_equal_m64 != 0) {
             // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
-            unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
+            unsigned long long first_diff = _tzcnt_u64(mask_not_equal_m64);
             return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
         }
         a += 64, b += 64, a_length -= 64, b_length -= 64;
@@ -64,19 +64,19 @@ SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, 
 
     // In most common scenarios at least one of the strings is under 64 bytes.
     if (a_length | b_length) {
-        a_mask = sz_u64_clamp_mask_until_(a_length);
-        b_mask = sz_u64_clamp_mask_until_(b_length);
-        a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
-        b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
+        a_mask_m64 = sz_u64_clamp_mask_until_(a_length);
+        b_mask_m64 = sz_u64_clamp_mask_until_(b_length);
+        a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask_m64, a);
+        b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask_m64, b);
         // Restrict the comparison to bytes valid in both strings. The masked loads zero out lanes
         // past each string's end, so an unmasked compare would see spurious mismatches against
         // those zeros in the longer string's tail and read out of bounds for the shorter one
         // (e.g. `sz_order("\0baa", 4, "", 0)` would dereference `b[1]`).
-        __mmask64 const common_mask = a_mask & b_mask;
-        mask_not_equal = _mm512_mask_cmpneq_epi8_mask(common_mask, a_vec.zmm, b_vec.zmm);
-        if (mask_not_equal != 0) {
+        __mmask64 const common_mask_m64 = a_mask_m64 & b_mask_m64;
+        mask_not_equal_m64 = _mm512_mask_cmpneq_epi8_mask(common_mask_m64, a_vec.zmm, b_vec.zmm);
+        if (mask_not_equal_m64 != 0) {
             // Reload from original memory (L1 cached) to avoid ZMM-to-stack spill.
-            unsigned long long first_diff = _tzcnt_u64(mask_not_equal);
+            unsigned long long first_diff = _tzcnt_u64(mask_not_equal_m64);
             return sz_order_scalars_((sz_u8_t)a[first_diff], (sz_u8_t)b[first_diff]);
         }
         // From logic perspective, the hardest cases are "abc\0" and "abc".
@@ -88,24 +88,24 @@ SZ_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, 
 }
 
 SZ_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    __mmask64 mask;
+    __mmask64 mask_m64;
     sz_u512_vec_t a_vec, b_vec;
 
     while (length >= 64) {
         a_vec.zmm = _mm512_loadu_si512(a);
         b_vec.zmm = _mm512_loadu_si512(b);
-        mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-        if (mask != 0) return sz_false_k;
+        mask_m64 = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+        if (mask_m64 != 0) return sz_false_k;
         a += 64, b += 64, length -= 64;
     }
 
     if (length) {
-        mask = sz_u64_mask_until_(length);
-        a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
-        b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
-        // Reuse the same `mask` variable to find the bit that doesn't match
-        mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec.zmm, b_vec.zmm);
-        return (sz_bool_t)(mask == 0);
+        mask_m64 = sz_u64_mask_until_(length);
+        a_vec.zmm = _mm512_maskz_loadu_epi8(mask_m64, a);
+        b_vec.zmm = _mm512_maskz_loadu_epi8(mask_m64, b);
+        // Reuse the same `mask_m64` variable to find the bit that doesn't match
+        mask_m64 = _mm512_mask_cmpneq_epi8_mask(mask_m64, a_vec.zmm, b_vec.zmm);
+        return (sz_bool_t)(mask_m64 == 0);
     }
 
     return sz_true_k;
