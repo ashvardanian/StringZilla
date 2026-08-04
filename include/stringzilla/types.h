@@ -231,6 +231,25 @@
 #endif
 
 /**
+ *  @brief Forbids the compiler from eliding stores to @p pointer that nothing afterwards reads back.
+ *
+ *  Zeroing a buffer that is about to die is a dead store, and an optimizer is entitled to drop it. That
+ *  is fatal when the buffer held key material, so a scrub places ordinary wide stores and then this
+ *  barrier, rather than paying for `volatile` on every byte - `volatile` also forbids vectorization, so
+ *  a scrub written that way cannot use more than one byte per store.
+ *
+ *  @sa sz_do_not_optimize in `types.hpp`, the C++ read-side companion for a value rather than a buffer.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define sz_keep_alive_(pointer) __asm__ __volatile__("" : : "r"(pointer) : "memory")
+#elif defined(_MSC_VER)
+#include <intrin.h> // `_ReadWriteBarrier`
+#define sz_keep_alive_(pointer) (_ReadWriteBarrier(), (void)(pointer))
+#else
+#define sz_keep_alive_(pointer) ((void)(pointer))
+#endif
+
+/**
  *  @brief C99 static array parameter annotation for minimum array size.
  *         In C, expands to `static n` enabling compiler bounds checking.
  *         In C++, expands to nothing as this syntax is not supported.
@@ -721,6 +740,11 @@ typedef sz_u16_t sz_error_cost_magnitude_t; // The smallest type that can hold u
 
 struct sz_hash_state_t;            // Forward declaration of a hash state structure
 struct sz_sha256_state_t;          // Forward declaration of a SHA256 hash state structure
+struct sz_aes256_key_t;            // Forward declaration of an AES-256 round-key schedule
+struct sz_aes256_gcm_key_t;        // Forward declaration of an AES-256-GCM key, schedule plus hash powers
+struct sz_aes256_gcm_state_t;      // Forward declaration of the payload both streaming directions share
+struct sz_aes256_gcm_encryptor_t;  // Forward declaration of an AES-256-GCM sealing state
+struct sz_aes256_gcm_decryptor_t;  // Forward declaration of an AES-256-GCM opening state
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
@@ -803,6 +827,8 @@ typedef enum sz_status_t {
     sz_device_code_mismatch_k = -17,
     /** Device memory mismatch: e.g., GPU kernel requires unified/device-accessible memory. */
     sz_device_memory_mismatch_k = -18,
+    /** An authenticated decryption saw a tag that does not match the ciphertext it accompanies. */
+    sz_authentication_failed_k = -19,
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;
@@ -1099,6 +1125,51 @@ typedef void (*sz_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, 
 
 /** @brief Signature of `sz_sha256_state_digest`. */
 typedef void (*sz_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *);
+
+/** @brief Signature of `sz_aes256_key_init`. */
+typedef void (*sz_aes256_key_init_t)(struct sz_aes256_key_t *, sz_u8_t const *);
+
+/** @brief Signature of `sz_aes256_gcm_key_init`. */
+typedef void (*sz_aes256_gcm_key_init_t)(struct sz_aes256_gcm_key_t *, sz_u8_t const *);
+
+/** @brief Signature of `sz_aes256_ctr_xor`. */
+typedef void (*sz_aes256_ctr_xor_t)(struct sz_aes256_key_t const *, sz_u8_t const *, sz_u64_t, sz_cptr_t, sz_size_t,
+                                    sz_ptr_t);
+
+/** @brief Signature of `sz_aes256_gcm_encrypt`. */
+typedef void (*sz_aes256_gcm_encrypt_t)(struct sz_aes256_gcm_key_t const *, sz_u8_t const *, sz_cptr_t, sz_size_t,
+                                        sz_cptr_t, sz_size_t, sz_ptr_t, sz_u8_t *);
+
+/** @brief Signature of `sz_aes256_gcm_decrypt`. */
+typedef sz_status_t (*sz_aes256_gcm_decrypt_t)(struct sz_aes256_gcm_key_t const *, sz_u8_t const *, sz_cptr_t,
+                                               sz_size_t, sz_cptr_t, sz_size_t, sz_ptr_t, sz_u8_t const *);
+
+/** @brief Signature of `sz_aes256_gcm_encryptor_init`. */
+typedef void (*sz_aes256_gcm_encryptor_init_t)(struct sz_aes256_gcm_encryptor_t *, struct sz_aes256_gcm_key_t const *,
+                                               sz_u8_t const *);
+
+/** @brief Signature of `sz_aes256_gcm_encryptor_associate`. */
+typedef void (*sz_aes256_gcm_encryptor_associate_t)(struct sz_aes256_gcm_encryptor_t *, sz_cptr_t, sz_size_t);
+
+/** @brief Signature of `sz_aes256_gcm_encryptor_update`. */
+typedef void (*sz_aes256_gcm_encryptor_update_t)(struct sz_aes256_gcm_encryptor_t *, sz_cptr_t, sz_size_t, sz_ptr_t);
+
+/** @brief Signature of `sz_aes256_gcm_encryptor_digest`. */
+typedef void (*sz_aes256_gcm_encryptor_digest_t)(struct sz_aes256_gcm_encryptor_t const *, sz_u8_t *);
+
+/** @brief Signature of `sz_aes256_gcm_decryptor_init`. */
+typedef void (*sz_aes256_gcm_decryptor_init_t)(struct sz_aes256_gcm_decryptor_t *, struct sz_aes256_gcm_key_t const *,
+                                               sz_u8_t const *);
+
+/** @brief Signature of `sz_aes256_gcm_decryptor_associate`. */
+typedef void (*sz_aes256_gcm_decryptor_associate_t)(struct sz_aes256_gcm_decryptor_t *, sz_cptr_t, sz_size_t);
+
+/** @brief Signature of `sz_aes256_gcm_decryptor_update_unverified`. */
+typedef void (*sz_aes256_gcm_decryptor_update_unverified_t)(struct sz_aes256_gcm_decryptor_t *, sz_cptr_t, sz_size_t,
+                                                            sz_ptr_t);
+
+/** @brief Signature of `sz_aes256_gcm_decryptor_verify`. */
+typedef sz_status_t (*sz_aes256_gcm_decryptor_verify_t)(struct sz_aes256_gcm_decryptor_t const *, sz_u8_t const *);
 
 /** @brief Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
