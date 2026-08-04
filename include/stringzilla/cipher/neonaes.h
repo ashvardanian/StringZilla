@@ -379,7 +379,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_load_neonaes_(sz_u8_t const *block) {
  *  store-forwarding stall.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_load_padded_neonaes_(sz_u8_t const *block, sz_size_t buffered) {
-    uint8x16_t const lane_ids_u8x16 = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const lane_ids_u8x16 = vcombine_u8(vcreate_u8(0x0706050403020100ull), //
+                                                  vcreate_u8(0x0F0E0D0C0B0A0908ull));
     uint8x16_t const keep_u8x16 = vcltq_u8(lane_ids_u8x16, vdupq_n_u8((sz_u8_t)buffered));
     return sz_ghash_reflect_neonaes_(vandq_u8(vld1q_u8(block), keep_u8x16));
 }
@@ -400,14 +401,34 @@ SZ_HELPER_INLINE void sz_ghash_store_neonaes_(uint8x16_t value_u8x16, sz_u8_t *b
 }
 
 /**
+ *  @brief Carry-less product of two 64-bit halves already isolated in their own vectors.
+ *  @param multiplicand_p64x1 One half.
+ *  @param multiplier_p64x1 The other half.
+ *  @return Their 128-bit product.
+ *
+ *  The operands arrive as vectors rather than scalars because that is the only spelling both dialects accept:
+ *  MSVC lowers `vmull_p64` straight onto `neon_pmull_64`, which takes `__n64` lanes, while the ACLE prototype
+ *  on GCC and Clang takes `poly64_t` scalars.
+ */
+SZ_HELPER_INLINE uint8x16_t sz_ghash_product_halves_neonaes_(poly64x1_t multiplicand_p64x1,
+                                                             poly64x1_t multiplier_p64x1) {
+#if defined(_MSC_VER) && !defined(__clang__)
+    return vreinterpretq_u8_p128(vmull_p64(multiplicand_p64x1, multiplier_p64x1));
+#else
+    return vreinterpretq_u8_p128(
+        vmull_p64(vget_lane_p64(multiplicand_p64x1, 0), vget_lane_p64(multiplier_p64x1, 0)));
+#endif
+}
+
+/**
  *  @brief Carry-less product of the low halves of two reflected blocks.
  *  @param multiplicand_u8x16 One reflected operand.
  *  @param multiplier_u8x16 The other reflected operand.
  *  @return Their 128-bit product.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_low_neonaes_(uint8x16_t multiplicand_u8x16, uint8x16_t multiplier_u8x16) {
-    return vreinterpretq_u8_p128(vmull_p64(vgetq_lane_p64(vreinterpretq_p64_u8(multiplicand_u8x16), 0),
-                                           vgetq_lane_p64(vreinterpretq_p64_u8(multiplier_u8x16), 0)));
+    return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(multiplicand_u8x16)),
+                                            vget_low_p64(vreinterpretq_p64_u8(multiplier_u8x16)));
 }
 
 /**
@@ -428,8 +449,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_high_neonaes_(uint8x16_t multiplica
  *  @return Their 128-bit product.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16, uint8x16_t high_u8x16) {
-    return vreinterpretq_u8_p128(vmull_p64(vgetq_lane_p64(vreinterpretq_p64_u8(low_u8x16), 0),
-                                           vgetq_lane_p64(vreinterpretq_p64_u8(high_u8x16), 1)));
+    return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(low_u8x16)),
+                                            vget_high_p64(vreinterpretq_p64_u8(high_u8x16)));
 }
 
 /**
@@ -442,8 +463,8 @@ SZ_HELPER_INLINE uint8x16_t sz_ghash_product_cross_neonaes_(uint8x16_t low_u8x16
  *  same instruction that produced the product also closes it.
  */
 SZ_HELPER_INLINE uint8x16_t sz_ghash_product_polynomial_neonaes_(uint8x16_t value_u8x16) {
-    poly64_t const polynomial = (poly64_t)0xC200000000000000ull;
-    return vreinterpretq_u8_p128(vmull_p64(vgetq_lane_p64(vreinterpretq_p64_u8(value_u8x16), 0), polynomial));
+    poly64x1_t const polynomial_p64x1 = vcreate_p64(0xC200000000000000ull);
+    return sz_ghash_product_halves_neonaes_(vget_low_p64(vreinterpretq_p64_u8(value_u8x16)), polynomial_p64x1);
 }
 
 /**
