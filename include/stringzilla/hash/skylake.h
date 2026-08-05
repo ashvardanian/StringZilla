@@ -345,52 +345,60 @@ SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8])
 /**
  *  @brief Transposes one 64-byte block from each of 16 lanes into word-major big-endian order.
  *  @param lane_blocks Pointers to 16 message blocks, one per lane.
- *  @param schedule Receives 16 registers, where `schedule[word_index]` holds that word from all 16 lanes.
+ *  @param schedule Loaded with the 16 blocks and rewritten in place, so `schedule[word_index]` leaves
+ *                  holding that word from all 16 lanes.
  *
  *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit sub-lane, two sub-lane
  *  exchange stages then move whole quarters across the register. The big-endian byte swap folds into the
  *  initial load, so it costs nothing beyond the shuffle that would happen anyway.
+ *
+ *  Every stage pairs off disjoint registers and rewrites exactly the two it read, so the window is its own
+ *  staging area and no stage needs a second array - the same shape the 8x16 butterfly already has. Written
+ *  with intermediate buffers instead, the four live arrays push this kernel's frame past 4 KB, and MSVC then
+ *  reaches for the CRT's `__chkstk` to probe it, which the `SZ_AVOID_LIBC` build has no way to resolve.
  */
 SZ_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks, __m512i schedule_u32x16[16]) {
-    __m512i const byte_swap_u8x64 = _mm512_set_epi8(                      //
+    __m512i const byte_swap_u8x64 = _mm512_set_epi8(                    //
         60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
         44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
         28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, //
         12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
 
-    __m512i lanes_u32x16[16], first_stage_u32x16[16], second_stage_u32x16[16];
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
-        lanes_u32x16[lane_index] = _mm512_shuffle_epi8(_mm512_loadu_si512(lane_blocks[lane_index]), byte_swap_u8x64);
+        schedule_u32x16[lane_index] =
+            _mm512_shuffle_epi8(_mm512_loadu_si512(lane_blocks[lane_index]), byte_swap_u8x64);
 
     for (sz_size_t butterfly_index = 0; butterfly_index != 8; ++butterfly_index) {
-        first_stage_u32x16[butterfly_index * 2 + 0] = _mm512_unpacklo_epi32(lanes_u32x16[butterfly_index * 2 + 0],
-                                                                         lanes_u32x16[butterfly_index * 2 + 1]);
-        first_stage_u32x16[butterfly_index * 2 + 1] = _mm512_unpackhi_epi32(lanes_u32x16[butterfly_index * 2 + 0],
-                                                                         lanes_u32x16[butterfly_index * 2 + 1]);
+        __m512i const even_u32x16 = schedule_u32x16[butterfly_index * 2 + 0];
+        __m512i const odd_u32x16 = schedule_u32x16[butterfly_index * 2 + 1];
+        schedule_u32x16[butterfly_index * 2 + 0] = _mm512_unpacklo_epi32(even_u32x16, odd_u32x16);
+        schedule_u32x16[butterfly_index * 2 + 1] = _mm512_unpackhi_epi32(even_u32x16, odd_u32x16);
     }
     for (sz_size_t butterfly_index = 0; butterfly_index != 4; ++butterfly_index) {
         sz_size_t const butterfly_base = butterfly_index * 4;
-        second_stage_u32x16[butterfly_base + 0] = _mm512_unpacklo_epi64(first_stage_u32x16[butterfly_base + 0],
-                                                                     first_stage_u32x16[butterfly_base + 2]);
-        second_stage_u32x16[butterfly_base + 1] = _mm512_unpackhi_epi64(first_stage_u32x16[butterfly_base + 0],
-                                                                     first_stage_u32x16[butterfly_base + 2]);
-        second_stage_u32x16[butterfly_base + 2] = _mm512_unpacklo_epi64(first_stage_u32x16[butterfly_base + 1],
-                                                                     first_stage_u32x16[butterfly_base + 3]);
-        second_stage_u32x16[butterfly_base + 3] = _mm512_unpackhi_epi64(first_stage_u32x16[butterfly_base + 1],
-                                                                     first_stage_u32x16[butterfly_base + 3]);
+        __m512i const first_u32x16 = schedule_u32x16[butterfly_base + 0];
+        __m512i const second_u32x16 = schedule_u32x16[butterfly_base + 1];
+        __m512i const third_u32x16 = schedule_u32x16[butterfly_base + 2];
+        __m512i const fourth_u32x16 = schedule_u32x16[butterfly_base + 3];
+        schedule_u32x16[butterfly_base + 0] = _mm512_unpacklo_epi64(first_u32x16, third_u32x16);
+        schedule_u32x16[butterfly_base + 1] = _mm512_unpackhi_epi64(first_u32x16, third_u32x16);
+        schedule_u32x16[butterfly_base + 2] = _mm512_unpacklo_epi64(second_u32x16, fourth_u32x16);
+        schedule_u32x16[butterfly_base + 3] = _mm512_unpackhi_epi64(second_u32x16, fourth_u32x16);
     }
     for (sz_size_t butterfly_index = 0; butterfly_index != 2; ++butterfly_index) {
         sz_size_t const butterfly_base = butterfly_index * 8;
         for (sz_size_t offset = 0; offset != 4; ++offset) {
-            first_stage_u32x16[butterfly_base + offset] = _mm512_shuffle_i32x4(
-                second_stage_u32x16[butterfly_base + offset], second_stage_u32x16[butterfly_base + offset + 4], 0x88);
-            first_stage_u32x16[butterfly_base + offset + 4] = _mm512_shuffle_i32x4(
-                second_stage_u32x16[butterfly_base + offset], second_stage_u32x16[butterfly_base + offset + 4], 0xDD);
+            __m512i const low_u32x16 = schedule_u32x16[butterfly_base + offset + 0];
+            __m512i const high_u32x16 = schedule_u32x16[butterfly_base + offset + 4];
+            schedule_u32x16[butterfly_base + offset + 0] = _mm512_shuffle_i32x4(low_u32x16, high_u32x16, 0x88);
+            schedule_u32x16[butterfly_base + offset + 4] = _mm512_shuffle_i32x4(low_u32x16, high_u32x16, 0xDD);
         }
     }
     for (sz_size_t offset = 0; offset != 8; ++offset) {
-        schedule_u32x16[offset] = _mm512_shuffle_i32x4(first_stage_u32x16[offset], first_stage_u32x16[offset + 8], 0x88);
-        schedule_u32x16[offset + 8] = _mm512_shuffle_i32x4(first_stage_u32x16[offset], first_stage_u32x16[offset + 8], 0xDD);
+        __m512i const low_u32x16 = schedule_u32x16[offset + 0];
+        __m512i const high_u32x16 = schedule_u32x16[offset + 8];
+        schedule_u32x16[offset + 0] = _mm512_shuffle_i32x4(low_u32x16, high_u32x16, 0x88);
+        schedule_u32x16[offset + 8] = _mm512_shuffle_i32x4(low_u32x16, high_u32x16, 0xDD);
     }
 }
 
