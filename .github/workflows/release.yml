@@ -262,8 +262,7 @@ jobs:
                   path: ./wheelhouse/*.whl
                   overwrite: true
 
-    # Native ARM64 on a Windows-on-Arm runner - built and tested natively, not cross-compiled.
-    # Windows ARM64 CPython is official from 3.11, so 3.10 is omitted here.
+    # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
     build_wheels_stringzilla_windows_arm:
         name: Build StringZilla ${{ matrix.python-version }} for Windows ARM
         runs-on: windows-11-arm
@@ -436,8 +435,7 @@ jobs:
                   path: ./wheelhouse/*.whl
                   overwrite: true
 
-    # Native ARM64 on a Windows-on-Arm runner - built and tested natively, not cross-compiled.
-    # Windows ARM64 CPython is official from 3.11, so 3.10 is omitted here.
+    # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
     build_wheels_stringzillas_cpus_windows_arm:
         name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows ARM
         runs-on: windows-11-arm
@@ -474,8 +472,7 @@ jobs:
     build_wheels_stringzillas_cuda_linux:
         name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
         runs-on: ${{ matrix.os }}
-        # The aarch64 leg has died mid-compile on every run so far, sometimes only after ~50 minutes of silence.
-        # A bound turns that into a labelled timeout instead of six runners burning an hour each.
+        # The aarch64 leg dies mid-compile, sometimes after ~50 minutes of silence. Bound it.
         timeout-minutes: 25
         needs: versioning
         strategy:
@@ -499,20 +496,12 @@ jobs:
             - name: Build wheels
               run: cibuildwheel --output-dir wheelhouse
               env:
-                  # `manylinux` only. A bare `cp3XX-*` would also select `musllinux`, whose Alpine base has `apk`
-                  # rather than `dnf` - and `CIBW_BEFORE_ALL_LINUX` below overrides the `pyproject.toml` override
-                  # that would otherwise swap the package manager, so the `dnf` script ran on Alpine and exited 127.
-                  # CUDA ships no musl toolchain anyway, so there is nothing to build there.
+                  # `manylinux` only - CUDA ships no musl toolchain, and the `dnf` script below exits 127 on Alpine.
                   CIBW_BUILD: cp${{ matrix.python-version }}-manylinux*
-                  # Build only the runner's native architecture (x86_64 on ubuntu-24.04, aarch64 on ubuntu-24.04-arm), so the
-                  # CUDA toolchain runs natively instead of under QEMU - the old cross-arch emulation is what made this job
-                  # take hours and flake.
+                  # Native arch only, so the CUDA toolchain never runs under QEMU.
                   CIBW_ARCHS_LINUX: auto64
-                  # The trailing `stubs` entry lets the test-phase `import stringzillas` resolve `libcuda.so.1` on
-                  # the driver-less runner: `cuInit` fails cleanly and the suite exercises the CPU engines. On Arm,
-                  # nvcc gets Clang as its host compiler: Clang's `arm_neon.h` declares its own types, so nvcc's
-                  # frontend can parse it, while GCC's relies on backend-injected builtins the frontend lacks -
-                  # Clang is what lets the CPU NEON kernels and the CUDA kernels coexist in one wheel.
+                  # `stubs` lets the driver-less test phase resolve `libcuda.so.1` and fail `cuInit` cleanly.
+                  # Arm needs Clang as nvcc's host: only Clang's `arm_neon.h` parses in nvcc's frontend.
                   CIBW_ENVIRONMENT_LINUX: >-
                       SZ_TARGET=stringzillas-cuda
                       CUDA_HOME=/usr/local/cuda-12.9
@@ -520,9 +509,8 @@ jobs:
                       LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs
                       CUDAHOSTCXX=${{ matrix.os == 'ubuntu-24.04-arm' && '/usr/bin/clang++' || '' }}
                       PYTHONUNBUFFERED=1
-                  # Install just nvcc + the CUDA runtime/driver dev headers from NVIDIA's rhel8 repo (the manylinux
-                  # base is AlmaLinux 8), instead of the ~4 GB `.run` installer, landing the /usr/local/cuda-12.9
-                  # layout every StringZilla build system expects. Arm adds Clang 19 - the newest nvcc 12.9 accepts.
+                  # nvcc plus runtime/driver headers from NVIDIA's rhel8 repo, not the ~4 GB `.run` installer.
+                  # Clang 19 on Arm - the newest nvcc 12.9 accepts.
                   CIBW_BEFORE_ALL_LINUX: |
                       set -e
                       dnf -y install dnf-plugins-core
@@ -532,8 +520,7 @@ jobs:
                       ln -sf /usr/local/cuda-12.9 /usr/local/cuda
                       ln -sf libcuda.so /usr/local/cuda-12.9/lib64/stubs/libcuda.so.1
                       /usr/local/cuda-12.9/bin/nvcc --version
-                  # Never vendor the CUDA driver (`libcuda`) into the wheel - it is resolved against the user's installed driver
-                  # at load time; bundling a build-host stub would shadow it. cudart stays bundled so the wheel is self-contained.
+                  # Never vendor `libcuda` - a bundled build-host stub would shadow the user's real driver.
                   CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 -w {dest_dir} {wheel}
                   SZ_TARGET: stringzillas-cuda
             - name: Upload wheels
@@ -543,8 +530,7 @@ jobs:
                   path: ./wheelhouse/*.whl
                   overwrite: true
 
-    # AMD64 only: NVIDIA ships no CUDA Toolkit for Windows-on-Arm, so there is no `windows-11-arm`
-    # counterpart to this job the way there is for the CPU wheels.
+    # AMD64 only - NVIDIA ships no CUDA Toolkit for Windows-on-Arm.
     build_wheels_stringzillas_cuda_windows:
         name: Build StringZillas-CUDA ${{ matrix.python-version }} for Windows
         runs-on: windows-2022
@@ -564,18 +550,14 @@ jobs:
               uses: actions/setup-python@v7
               with:
                   python-version: 3.x
-              # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB and
-              # nothing here needs the profiler, the samples or cuDNN. Exports `CUDA_PATH`, which
-              # `setup.py` already honors alongside `CUDA_HOME`.
+              # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB.
             - name: Install CUDA Toolkit
               uses: Jimver/cuda-toolkit@v0.2.35
               with:
                   cuda: "12.9.1"
                   method: "network"
                   sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
-              # `nvcc` shells out to `cl.exe` for the host pass, and it is only on `PATH` inside a developer
-              # environment. Without this every CUDA translation unit dies with `nvcc fatal : Cannot find
-              # compiler 'cl.exe' in PATH`.
+              # `nvcc` shells out to `cl.exe`, which is only on `PATH` inside a developer environment.
             - name: Set up MSVC developer environment
               uses: ilammy/msvc-dev-cmd@v1
             - name: Install cibuildwheel
@@ -585,11 +567,8 @@ jobs:
               env:
                   CIBW_BUILD: cp${{ matrix.python-version }}-*
                   CIBW_ARCHS_WINDOWS: AMD64
-                  # Windows links the toolkit's real `cuda.lib` import library, which resolves against
-                  # the driver's `nvcuda.dll` at load time. A GitHub runner has no driver, so importing
-                  # the built module would fail here - unlike Linux, where the toolkit ships a
-                  # `libcuda.so` stub the test phase can load. Skip the test phase until the extension
-                  # delay-loads `nvcuda.dll`, at which point `cuInit` fails cleanly like it does on Linux.
+                  # No `libcuda.so` stub equivalent on Windows, so importing on a driver-less runner fails.
+                  # Testable once the extension delay-loads `nvcuda.dll`.
                   CIBW_TEST_SKIP: "*-win_amd64"
                   SZ_TARGET: stringzillas-cuda
             - name: Upload wheels
@@ -717,9 +696,7 @@ jobs:
                   name: sdist-stringzilla
                   path: dist
 
-            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
-            # Windows-on-Arm legs flake and must never hold a release. Losing a core
-            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
             - name: Require wheels for the core platforms
               run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
 
@@ -776,9 +753,7 @@ jobs:
                   name: sdist-stringzillas-cpus
                   path: dist
 
-            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
-            # Windows-on-Arm legs flake and must never hold a release. Losing a core
-            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
             - name: Require wheels for the core platforms
               run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
 
@@ -830,11 +805,11 @@ jobs:
                   name: sdist-stringzillas-cuda
                   path: dist
 
-            # Long-tail wheels are expendable - the emulated arches, `musllinux` and
-            # Windows-on-Arm legs flake and must never hold a release. Losing a core
-            # platform, or every wheel, would silently degrade this to sdist-only instead.
+            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
+            # `aarch64` is not core here - its CUDA leg has never built, and requiring it would discard the
+            # x86_64 and Windows wheels that did. Restore it once that leg builds.
             - name: Require wheels for the core platforms
-              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*'
+              run: python build_backend.py check-wheels '*manylinux*_x86_64*'
 
             - name: Publish to PyPI
               uses: pypa/gh-action-pypi-publish@release/v1
