@@ -8043,11 +8043,10 @@ static char const doc_Sha256s_digest[] =                                        
     "Returns:\n"                                                                                  //
     "  list[bytes]: One digest per lane in lane order, or `out` itself when a buffer is given.\n" //
     "Example:\n"                                                                                  //
-    "  >>> import numpy as np\n"                                                                  //
     "  >>> lanes = sz.Sha256s(2)\n"                                                               //
-    "  >>> digests = np.empty((len(lanes), sz.Sha256.digest_length), np.uint8)\n"                 //
+    "  >>> digests = bytearray(len(lanes) * sz.Sha256.digest_length)\n"                           //
     "  >>> _ = lanes.update([b'abc', b'abc']).digest(out=digests)\n"                              //
-    "  >>> bytes(digests[0]) == sz.Sha256().update(b'abc').digest()\n"                            //
+    "  >>> bytes(digests[:sz.Sha256.digest_length]) == sz.Sha256().update(b'abc').digest()\n"      //
     "  True";
 
 static char const doc_Sha256s_hexdigest[] =                                              //
