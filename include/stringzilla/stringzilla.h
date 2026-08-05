@@ -77,8 +77,8 @@
 #define STRINGZILLA_H_
 
 #define STRINGZILLA_H_VERSION_MAJOR 5
-#define STRINGZILLA_H_VERSION_MINOR 0
-#define STRINGZILLA_H_VERSION_PATCH 7
+#define STRINGZILLA_H_VERSION_MINOR 1
+#define STRINGZILLA_H_VERSION_PATCH 0
 
 #include "stringzilla/types.h"   // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
 #include "stringzilla/compare.h" // `sz_equal`, `sz_order`
