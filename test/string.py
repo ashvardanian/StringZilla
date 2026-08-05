@@ -31,6 +31,7 @@ from stringzilla import Str, Strs
 from test.sz_helpers import (
     SEED_VALUES,
     DEGENERATE_HAYSTACKS,
+    scale_iterations,
     seed_random_generators,
     get_random_string,
     numpy_available,
@@ -1235,8 +1236,8 @@ def test_strs_from_4gb_generator():
 @pytest.mark.parametrize("container_class", [tuple, list, iter])
 @pytest.mark.parametrize("view", [False, True])
 def test_strs_reference_counting(container_class: type, view: bool):
-    """`Strs` in view mode increments the source container's refcount by one, copy mode leaves it
-    unchanged, and both drop back to the initial refcount once the `Strs` is deleted and collected."""
+    """`Strs` in view mode pins a tuple source directly and a list source through its snapshot, copy mode
+    pins neither, and every refcount drops back once the `Strs` is deleted and collected."""
 
     # CPython-only: PyPy and other interpreters may not expose refcounts or use a different GC model
     if not hasattr(sys, "getrefcount"):
@@ -1244,7 +1245,8 @@ def test_strs_reference_counting(container_class: type, view: bool):
 
     import gc
 
-    base_items = ["ref", "count", "test"]
+    # Round-tripped through bytes, as string literals are immortal and their refcounts never move
+    base_items = [word.encode().decode() for word in ("ref", "count", "test")]
     container = container_class(base_items)
 
     # Skip iter+view combination as it's not supported
@@ -1261,11 +1263,12 @@ def test_strs_reference_counting(container_class: type, view: bool):
     # For iterators, we can't check refcount behavior the same way since iter() creates a new object
     # and the iterator consumes the original container during iteration
     if container_class != iter:
-        # View mode should increment refcount, copy mode should not
-        if view:
-            assert during_refcount == initial_refcount + 1, "View mode should increment refcount"
-        else:
+        if not view:
             assert during_refcount == initial_refcount, "Copy mode should not change refcount"
+        elif container_class == tuple:
+            assert during_refcount == initial_refcount + 1, "A tuple is pinned directly"
+        else:
+            assert during_refcount == initial_refcount, "A list is pinned through its snapshot, not directly"
 
     # Verify functionality
     assert len(strs) == 3
@@ -1279,6 +1282,24 @@ def test_strs_reference_counting(container_class: type, view: bool):
     if container_class != iter:
         final_refcount = sys.getrefcount(container)
         assert final_refcount == initial_refcount, "Refcount should return to initial value"
+
+
+@pytest.mark.parametrize("view", [False, True])
+@pytest.mark.parametrize("mutation", [list.clear, list.reverse, lambda source: source.__delitem__(slice(1, None))])
+def test_strs_survives_source_mutation(view: bool, mutation):
+    """`Strs(list)` snapshots its source, so clearing, reversing or truncating that list afterwards leaves
+    every element readable - in view mode the spans point into items the snapshot still holds."""
+    # Built twice rather than copied, so the source list holds the only reference to its own items and
+    # mutating it really does free them - a shared list would keep them alive and prove nothing
+    expected = ["prefix-" + "x" * 200 + f"-{index}" for index in range(8)]
+    source = ["prefix-" + "x" * 200 + f"-{index}" for index in range(8)]
+    strs = Strs(source, view=view)
+
+    mutation(source)
+    # Churn same-size-class allocations so a freed item is handed straight back out
+    churn = [("z" * 208).encode() for _ in range(scale_iterations(5000))]
+
+    assert [str(part) for part in strs] == expected, f"spans went stale across {len(churn)} reuses"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")

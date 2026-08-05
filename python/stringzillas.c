@@ -342,16 +342,20 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
         return 0;
     }
 
-    // Any sequence of names, matching the StringZilla module rather than demanding a tuple
-    PyObject *seq = PySequence_Fast(caps_obj, "capabilities must be a sequence of strings or a DeviceScope object");
-    if (!seq) return -1;
+    // Any sequence of names, matching the StringZilla module rather than demanding a tuple. Snapshotted into
+    // a tuple rather than borrowed through `PySequence_Fast`, which returns the caller's list itself and
+    // leaves the walk indexing into storage another thread can resize.
+    PyObject *seq = PySequence_Tuple(caps_obj);
+    if (!seq) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a sequence of strings or a DeviceScope object");
+        return -1;
+    }
 
     sz_capability_t requested_caps = 0;
-    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
-    PyObject **items = PySequence_Fast_ITEMS(seq);
+    Py_ssize_t n = PyTuple_GET_SIZE(seq);
 
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = items[i];
+        PyObject *item = PyTuple_GET_ITEM(seq, i);
         if (!PyUnicode_Check(item)) {
             PyErr_SetString(PyExc_TypeError, "capabilities must be strings");
             Py_DECREF(seq);

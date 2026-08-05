@@ -1194,7 +1194,9 @@ static Py_ssize_t Strs_len(Strs *self);
  *  @brief Points @p sequence at the strings in @p texts, borrowing them in place.
  *
  *  A `Strs` is read through its own layout-aware accessors, so a tape-backed corpus never leaves its
- *  buffer. Any other sequence is unpacked into @p scratch, which must hold @p scratch_capacity views.
+ *  buffer. Any other sequence is snapshotted into a tuple and unpacked into @p scratch, which must hold
+ *  @p scratch_capacity views. The snapshot is what pins the chunks: holding the caller's list would keep
+ *  the container alive while leaving each chunk free to be dropped from under the exported pointers.
  *
  *  @return A new reference that pins the strings and must outlive the kernel call, or `NULL` on failure.
  */
@@ -1216,26 +1218,29 @@ static PyObject *Sha256_bind_texts_(PyObject *texts, sz_sequence_t *sequence, sz
         return texts;
     }
 
-    PyObject *fast = PySequence_Fast(texts, "Argument must be a sequence of string-like chunks");
-    if (!fast) return NULL;
+    PyObject *snapshot = PySequence_Tuple(texts);
+    if (!snapshot) {
+        wrap_current_exception("Argument must be a sequence of string-like chunks");
+        return NULL;
+    }
 
-    sz_size_t const count = (sz_size_t)PySequence_Fast_GET_SIZE(fast);
+    sz_size_t const count = (sz_size_t)PyTuple_GET_SIZE(snapshot);
     if (count > scratch_capacity) {
-        Py_DECREF(fast);
+        Py_DECREF(snapshot);
         PyErr_Format(PyExc_ValueError, "Expected exactly one chunk per lane, got %zu for %zu lanes", count,
                      scratch_capacity);
         return NULL;
     }
     for (sz_size_t index = 0; index != count; ++index)
-        if (!sz_py_export_string_like(PySequence_Fast_GET_ITEM(fast, (Py_ssize_t)index), &scratch[index].start,
+        if (!sz_py_export_string_like(PyTuple_GET_ITEM(snapshot, (Py_ssize_t)index), &scratch[index].start,
                                       &scratch[index].length)) {
-            Py_DECREF(fast);
+            Py_DECREF(snapshot);
             wrap_current_exception("Every chunk must be string-like");
             return NULL;
         }
 
     sz_sequence_from_string_views(scratch, count, sequence);
-    return fast;
+    return snapshot;
 }
 
 /**
@@ -10317,145 +10322,23 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
     return 0;
 }
 
-// The inefficient `Strs_init` path initializing from a Pythonic list of strings.
+/**
+ *  @brief The inefficient `Strs_init` path initializing from a Pythonic list of strings.
+ *
+ *  A list is walked through a tuple snapshot rather than directly. Two things follow from that, and the
+ *  list path needs both: a tuple cannot be resized, so no concurrent `del`/`append` can leave the walk
+ *  indexing past the end, and a tuple holds a strong reference to every item, so the spans that `view`
+ *  mode exports keep pointing at live strings even after the caller empties the list it passed in.
+ *  Holding the list itself pins the container while its contents are free to go.
+ *
+ *  The snapshot copies one pointer per element, never the string data, so `view` mode stays zero-copy.
+ */
 static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
-    Py_ssize_t count = PyList_GET_SIZE(sequence_obj);
-
-    // Handle empty list
-    if (count == 0) {
-        self->layout = STRS_FRAGMENTED;
-        self->data.fragmented.count = 0;
-        self->data.fragmented.spans = NULL;
-        sz_memory_allocator_init_default(&self->data.fragmented.allocator);
-        self->data.fragmented.parent = NULL;
-        return 0;
-    }
-
-    // Zero-copy mode for Python sequences - use reordered layout for memory-scattered strings
-    if (view) {
-        // Initialize allocator for memory management
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
-
-        sz_string_view_t *parts = (sz_string_view_t *)allocator.allocate(count * sizeof(sz_string_view_t),
-                                                                         allocator.handle);
-        if (!parts) {
-            PyErr_NoMemory();
-            return -1;
-        }
-
-        // Build views directly to the string data
-        for (Py_ssize_t i = 0; i < count; i++) {
-            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
-
-            // Export string data directly (no copying, just span)
-            sz_cptr_t item_start;
-            sz_size_t item_length;
-            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
-                allocator.free(parts, count * sizeof(sz_string_view_t), allocator.handle);
-                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
-                return -1;
-            }
-
-            parts[i].start = item_start;
-            parts[i].length = item_length;
-        }
-
-        // Setup reordered layout with parent list to keep strings alive
-        self->layout = STRS_FRAGMENTED;
-        self->data.fragmented.count = count;
-        self->data.fragmented.spans = parts;
-        self->data.fragmented.allocator = allocator;
-        self->data.fragmented.parent = sequence_obj; // Keep list alive
-        Py_INCREF(sequence_obj);
-        return 0;
-    }
-    // Allocate a new tape to fit all of the items
-    else {
-
-        // First pass: calculate total size needed
-        sz_size_t total_bytes = 0;
-        int use_64bit = 0;
-
-        for (Py_ssize_t i = 0; i < count; i++) {
-            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
-            sz_cptr_t item_start;
-            sz_size_t item_length;
-            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
-                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
-                return -1;
-            }
-
-            // Check if we need 64-bit offsets
-            if (total_bytes + item_length > UINT32_MAX) { use_64bit = 1; }
-            total_bytes += item_length;
-        }
-
-        // Initialize allocator for memory management
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
-
-        // Allocate buffers based on calculated sizes
-        sz_ptr_t data_buffer = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle)
-                                           : (sz_ptr_t)NULL;
-
-        // Apache Arrow format: N+1 offsets for N strings
-        void *offsets;
-        if (use_64bit) { offsets = allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle); }
-        else { offsets = allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle); }
-
-        int const failed_to_allocate_data = total_bytes && !data_buffer;
-        if (failed_to_allocate_data || !offsets) {
-            if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
-            if (offsets) {
-                sz_size_t offsets_size = use_64bit ? (count + 1) * sizeof(sz_u64_t) : (count + 1) * sizeof(sz_u32_t);
-                allocator.free(offsets, offsets_size, allocator.handle);
-            }
-            PyErr_NoMemory();
-            return -1;
-        }
-
-        // Second pass: copy data and build offsets (Apache Arrow format)
-        sz_size_t current_offset = 0;
-        // Set first offset to 0
-        if (use_64bit) { ((sz_u64_t *)offsets)[0] = 0; }
-        else { ((sz_u32_t *)offsets)[0] = 0; }
-
-        for (Py_ssize_t i = 0; i < count; i++) {
-            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
-            sz_cptr_t item_start;
-            sz_size_t item_length;
-
-            // We already validated this in first pass, so this should not fail
-            sz_py_export_string_like(item, &item_start, &item_length);
-
-            // Copy the string data
-            memcpy(data_buffer + current_offset, item_start, item_length);
-            current_offset += item_length;
-
-            // Store offset (Apache Arrow format: offset after this string)
-            if (use_64bit) { ((sz_u64_t *)offsets)[i + 1] = current_offset; }
-            else { ((sz_u32_t *)offsets)[i + 1] = current_offset; }
-        }
-
-        // Setup the consecutive layout (32-bit or 64-bit)
-        if (use_64bit) {
-            self->layout = STRS_U64_TAPE;
-            self->data.u64_tape.count = count;
-            self->data.u64_tape.data = data_buffer;
-            self->data.u64_tape.offsets = (sz_u64_t *)offsets;
-            self->data.u64_tape.allocator = allocator;
-        }
-        else {
-            self->layout = STRS_U32_TAPE;
-            self->data.u32_tape.count = count;
-            self->data.u32_tape.data = data_buffer;
-            self->data.u32_tape.offsets = (sz_u32_t *)offsets;
-            self->data.u32_tape.allocator = allocator;
-        }
-
-        return 0;
-    }
+    PyObject *snapshot = PySequence_Tuple(sequence_obj);
+    if (!snapshot) return -1;
+    int const result = Strs_init_from_tuple(self, snapshot, view);
+    Py_DECREF(snapshot); // `view` mode took its own reference; every other layout owns copied bytes
+    return result;
 }
 
 // The inefficient `Strs_init` path initializing from a Pythonic iterable of strings.
@@ -10930,15 +10813,19 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
         PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple or list of strings");
         return -1;
     }
-    PyObject *seq = PySequence_Fast(caps_obj, "capabilities must be a tuple or list of strings");
-    if (!seq) return -1;
+    // A tuple snapshot rather than `PySequence_Fast`, which hands back the caller's list itself and leaves
+    // the walk indexing into storage another thread can resize.
+    PyObject *seq = PySequence_Tuple(caps_obj);
+    if (!seq) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple or list of strings");
+        return -1;
+    }
 
     sz_capability_t requested_caps = 0;
-    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
-    PyObject **items = PySequence_Fast_ITEMS(seq);
+    Py_ssize_t n = PyTuple_GET_SIZE(seq);
 
     for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = items[i];
+        PyObject *item = PyTuple_GET_ITEM(seq, i);
         if (!PyUnicode_Check(item)) {
             PyErr_SetString(PyExc_TypeError, "capabilities must be strings");
             Py_DECREF(seq);
