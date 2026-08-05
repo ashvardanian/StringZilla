@@ -10,14 +10,35 @@ import threading
 import time
 
 
-def _max_compile_workers() -> int:
-    """Concurrency cap for compiling translation units. Each `cicc`/`cc1plus` pass on the heavily-templated
-    similarity headers needs ~1-2 GB, so we cap below the core count to avoid thrashing or OOM on big boxes.
-    `SZ_MAX_COMPILE_WORKERS` lowers it further on a machine that cannot afford this many at once."""
+#: Peak resident set of one host-compiler pass over the templated similarity headers, and of one `cicc` pass
+#: over the same headers with the CUDA kernels on top. The CUDA figure is the one that matters: four
+#: concurrent `.cu` passes exhausted the 15.6 GB of a 4-core arm64 runner and the kernel killed the build.
+CPP_MEMORY_PER_WORKER_GB: Final[float] = 2.0
+CUDA_MEMORY_PER_WORKER_GB: Final[float] = 4.0
+
+
+def _memory_available_and_total_gb():
+    """`(available, total)` in GB from `/proc/meminfo`, or `None` where that file is absent, as on Windows."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            fields = {line.split(":", 1)[0]: line.split()[1] for line in handle if ":" in line}
+        return int(fields["MemAvailable"]) / 1024**2, int(fields["MemTotal"]) / 1024**2
+    except (OSError, KeyError, ValueError, IndexError):
+        return None
+
+
+def _max_compile_workers(memory_per_worker_gb: float = CPP_MEMORY_PER_WORKER_GB) -> int:
+    """Concurrency cap for compiling translation units, bounded by cores and by memory alike. Core count
+    alone is the wrong bound on a small many-core box: a compiler killed by the out-of-memory killer takes
+    the whole build down with no diagnostic. `SZ_MAX_COMPILE_WORKERS` overrides both bounds."""
     requested = os.environ.get("SZ_MAX_COMPILE_WORKERS", "")
     if requested.isdigit() and int(requested) > 0:
         return int(requested)
-    return max(1, min(os.cpu_count() or 1, 8))
+    workers = min(os.cpu_count() or 1, 8)
+    memory = _memory_available_and_total_gb()
+    if memory is not None:
+        workers = min(workers, int(memory[0] // memory_per_worker_gb))
+    return max(1, workers)
 
 
 def _log_build_event(message: str) -> None:
@@ -27,15 +48,9 @@ def _log_build_event(message: str) -> None:
 
 
 def _memory_status() -> str:
-    """`available of total` in GB from `/proc/meminfo`, or `unknown` where that file is absent."""
-    try:
-        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
-            fields = {line.split(":", 1)[0]: line.split()[1] for line in handle if ":" in line}
-        available = int(fields["MemAvailable"]) / 1024**2
-        total = int(fields["MemTotal"]) / 1024**2
-        return f"{available:.1f} of {total:.1f} GB"
-    except (OSError, KeyError, ValueError, IndexError):
-        return "unknown"
+    """`available of total` in GB, or `unknown` where `/proc/meminfo` is absent."""
+    memory = _memory_available_and_total_gb()
+    return "unknown" if memory is None else f"{memory[0]:.1f} of {memory[1]:.1f} GB"
 
 
 def _start_memory_sampler(interval_seconds: float = 10.0):
@@ -420,7 +435,7 @@ class CudaBuildExtension(NumpyBuildExt):
                 continue
             nvcc_jobs.append((lambda command=nvcc_cmd: subprocess.check_call(command), cuda_source))
 
-        _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers())
+        _run_compilations_in_parallel(nvcc_jobs, _max_compile_workers(CUDA_MEMORY_PER_WORKER_GB))
 
         # Update extension: remove .cu sources, add compiled objects
         ext.sources = c_sources
