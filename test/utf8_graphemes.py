@@ -28,14 +28,9 @@ from test.sz_helpers import (
     vector_width_bracketing_strings,
     SEED_VALUES,
     scale_iterations,
-    UnicodeDataDownloadError,
     seed_random_generators,
     run_across_backends,
     assert_backends_agree,
-    get_grapheme_break_properties,
-    get_grapheme_break_test_cases,
-    get_indic_conjunct_break_properties,
-    get_extended_pictographic,
     get_random_string,
     malformed_utf8_corpus,
     representatives_by_class,
@@ -157,12 +152,9 @@ def test_utf8_grapheme_seam(seed_value: int):
 # region Conformance
 
 
-def test_utf8_grapheme_boundary_official_conformance():
+def test_utf8_grapheme_boundary_official_conformance(grapheme_break_cases):
     """Full UAX-29 conformance against every case in the official GraphemeBreakTest.txt."""
-    try:
-        test_cases = get_grapheme_break_test_cases()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    test_cases = grapheme_break_cases
 
     failures = []
     for test_str, expected_byte_boundaries in test_cases:
@@ -178,18 +170,15 @@ def test_utf8_grapheme_boundary_official_conformance():
     )
 
 
-def test_baseline_grapheme_matches_official():
+def test_baseline_grapheme_matches_official(
+    grapheme_break_cases, grapheme_break_props, indic_conjunct_breaks, extended_pictographic
+):
     """Validate the oracle itself: baseline_grapheme_boundaries must reproduce every official
     GraphemeBreakTest.txt case bit-exactly. A baseline that cannot pass the official suite cannot be trusted to
     gate the random fuzz above; this catches a regressed or approximate baseline, for example an
     Extended_Pictographic or Indic-conjunct gap."""
-    try:
-        test_cases = get_grapheme_break_test_cases()
-        properties = get_grapheme_break_properties()
-        indic_conjunct_breaks = get_indic_conjunct_break_properties()
-        extended_pictographic = get_extended_pictographic()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    test_cases = grapheme_break_cases
+    properties = grapheme_break_props
 
     failures = []
     for text, expected_byte_boundaries in test_cases:

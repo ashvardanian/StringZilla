@@ -17,11 +17,18 @@ from test.sz_helpers import (
     UnicodeDataDownloadError,
     _random_seed_for_run,
     get_combining_classes,
+    get_extended_pictographic,
     get_grapheme_break_properties,
+    get_grapheme_break_test_cases,
+    get_indic_conjunct_break_properties,
     get_line_break_properties,
+    get_line_break_test_cases,
+    get_normalization_test_cases,
     get_sentence_break_properties,
+    get_sentence_break_test_cases,
     get_uncased_folding_rules,
     get_word_break_properties,
+    get_word_break_test_cases,
     numpy_available,
     pyarrow_available,
 )
@@ -72,8 +79,9 @@ def log_test_environment():
     print()  # New line for better readability
 
 
-# Unicode property tables shared across the segmentation families. Session-scoped so each table is
-# downloaded and parsed once, and every consumer skips uniformly when the data is unreachable.
+# Unicode property tables and conformance corpora shared across the segmentation families. Session-scoped
+# so each file is downloaded and parsed once, every consumer skips uniformly when the data is unreachable,
+# and no test body reaches for the network from inside a `pytest-run-parallel` thread.
 @pytest.fixture(scope="session")
 def grapheme_break_props():
     try:
@@ -120,3 +128,59 @@ def unicode_folds():
         return get_uncased_folding_rules()
     except UnicodeDataDownloadError:
         pytest.skip("Unicode case-folding data unavailable")
+
+
+@pytest.fixture(scope="session")
+def indic_conjunct_breaks():
+    try:
+        return get_indic_conjunct_break_properties()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode Indic-conjunct-break data unavailable")
+
+
+@pytest.fixture(scope="session")
+def extended_pictographic():
+    try:
+        return get_extended_pictographic()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode Extended_Pictographic data unavailable")
+
+
+@pytest.fixture(scope="session")
+def grapheme_break_cases():
+    try:
+        return get_grapheme_break_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode GraphemeBreakTest data unavailable")
+
+
+@pytest.fixture(scope="session")
+def word_break_cases():
+    try:
+        return get_word_break_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode WordBreakTest data unavailable")
+
+
+@pytest.fixture(scope="session")
+def sentence_break_cases():
+    try:
+        return get_sentence_break_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode SentenceBreakTest data unavailable")
+
+
+@pytest.fixture(scope="session")
+def line_break_cases():
+    try:
+        return get_line_break_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode LineBreakTest data unavailable")
+
+
+@pytest.fixture(scope="session")
+def normalization_cases():
+    try:
+        return get_normalization_test_cases()
+    except UnicodeDataDownloadError:
+        pytest.skip("Unicode NormalizationTest data unavailable")

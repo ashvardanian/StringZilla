@@ -61,6 +61,24 @@ class UnicodeDataDownloadError(Exception):
     pass
 
 
+class UnicodeDataParseError(Exception):
+    """Raised when a downloaded Unicode data file yields no usable entries.
+
+    Distinct from `UnicodeDataDownloadError` on purpose: an unreachable network is a legitimate reason to
+    skip a test, while a file that parses to an empty table means the cache is truncated or the upstream
+    format moved, and a test running against an empty table silently validates nothing.
+    """
+
+    pass
+
+
+def _parsed_or_raise(entries, cache_path: str, description: str):
+    """Return the parsed entries, or raise if the file yielded none."""
+    if not entries:
+        raise UnicodeDataParseError(f"No {description} parsed from {cache_path}")
+    return entries
+
+
 # Unicode version used for all Unicode data files
 UNICODE_VERSION = "17.0.0"
 
@@ -230,7 +248,8 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
         url = f"https://www.unicode.org/Public/{version}/ucd/DerivedNormalizationProps.txt"
         print(f"Downloading Unicode {version} DerivedNormalizationProps.txt from {url}...")
         try:
-            urllib.request.urlretrieve(url, cache_path)
+            with urllib.request.urlopen(url, timeout=30) as response:
+                _write_cache_atomically(cache_path, response.read())
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedNormalizationProps.txt from {url}: {error}")
@@ -645,7 +664,11 @@ def _download_break_property_file(filename: str, version: str) -> str:
 
 
 def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
-    """Parse a ``codepoint(..range) ; Property`` style UCD break-property file into a dict."""
+    """Parse a ``codepoint(..range) ; Property`` style UCD break-property file into a dict.
+
+    An empty result means a truncated cache, so it raises rather than returning a table that would
+    silently make every consumer agree with a broken oracle.
+    """
     properties: Dict[int, str] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
@@ -668,7 +691,7 @@ def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
                     properties[codepoint] = property_name
             except (ValueError, IndexError):
                 continue
-    return properties
+    return _parsed_or_raise(properties, cache_path, "break properties")
 
 
 def _download_break_test_file(filename: str, version: str) -> str:
@@ -716,7 +739,7 @@ def _parse_break_test_file(cache_path: str) -> List[tuple]:
             if codepoints:
                 text = "".join(chr(codepoint) for codepoint in codepoints)
                 test_cases.append((text, boundaries))
-    return test_cases
+    return _parsed_or_raise(test_cases, cache_path, "break-test cases")
 
 
 # region Grapheme
@@ -742,8 +765,11 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[
     cache_path = os.path.join(tempfile.gettempdir(), f"DerivedCoreProperties-{version}.txt")
     if not os.path.exists(cache_path):
         url = f"https://www.unicode.org/Public/{version}/ucd/DerivedCoreProperties.txt"
+        print(f"Downloading Unicode {version} DerivedCoreProperties.txt from {url}...")
         try:
-            urllib.request.urlretrieve(url, cache_path)
+            with urllib.request.urlopen(url, timeout=30) as response:
+                _write_cache_atomically(cache_path, response.read())
+            print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {error}")
     indic_conjunct_breaks: Dict[int, str] = {}
@@ -760,7 +786,7 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[
                 start_codepoint = end_codepoint = int(codepoint_range, 16)
             for codepoint in range(start_codepoint, end_codepoint + 1):
                 indic_conjunct_breaks[codepoint] = parts[2]
-    return indic_conjunct_breaks
+    return _parsed_or_raise(indic_conjunct_breaks, cache_path, "Indic_Conjunct_Break entries")
 
 
 def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:

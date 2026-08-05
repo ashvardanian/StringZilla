@@ -31,9 +31,7 @@ from stringzilla import Str
 from test.sz_helpers import (
     SEED_VALUES,
     scale_iterations,
-    UnicodeDataDownloadError,
     assert_backends_agree,
-    get_word_break_test_cases,
     malformed_utf8_corpus,
     representatives_by_class,
     run_across_backends,
@@ -204,14 +202,11 @@ def test_utf8_word_seam(seed_value: int):
 # region Conformance
 
 
-def test_utf8_word_boundary_official_conformance():
+def test_utf8_word_boundary_official_conformance(word_break_cases):
     """Full UAX-29 conformance: exact boundary match against every case in the official Unicode
     WordBreakTest.txt. This is the authoritative gate, matching on all cases rather than a "first 50"
     sample with a `len >= 2` placeholder that let a ~50%-conformant kernel ship undetected."""
-    try:
-        test_cases = get_word_break_test_cases()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    test_cases = word_break_cases
 
     failures = []
     for test_str, expected_boundaries in test_cases:

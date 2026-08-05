@@ -30,11 +30,9 @@ from test.sz_helpers import (
     vector_width_bracketing_strings,
     SEED_VALUES,
     scale_iterations,
-    UnicodeDataDownloadError,
     seed_random_generators,
     run_across_backends,
     assert_backends_agree,
-    get_normalization_test_cases,
     get_random_string,
     malformed_utf8_corpus,
 )
@@ -153,17 +151,14 @@ def test_unit_utf8_find_denormalized():
 # region Conformance
 
 
-def test_utf8_norm_official_conformance():
+def test_utf8_norm_official_conformance(normalization_cases):
     """Authoritative NFC/NFD/NFKC/NFKD conformance against the official NormalizationTest.txt.
 
     Version-pinned to the project's target Unicode 17.0 and independent of ICU's or the host Python's
     Unicode version, this is the normalization analogue of the *BreakTest.txt segmentation suites: for every
     listed source string, each form must reproduce the file's expected column bit-exactly.
     """
-    try:
-        cases = get_normalization_test_cases()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    cases = normalization_cases
 
     failures = []
     for source, nfc, nfd, nfkc, nfkd in cases:

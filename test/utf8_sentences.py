@@ -29,9 +29,7 @@ from stringzilla import Str
 from test.sz_helpers import (
     SEED_VALUES,
     scale_iterations,
-    UnicodeDataDownloadError,
     assert_backends_agree,
-    get_sentence_break_test_cases,
     baseline_sentence_boundaries,
     malformed_utf8_corpus,
     representatives_by_class,
@@ -135,12 +133,9 @@ def test_utf8_sentence_seam(seed_value: int):
 # region Conformance
 
 
-def test_utf8_sentence_boundary_official_conformance():
+def test_utf8_sentence_boundary_official_conformance(sentence_break_cases):
     """Full UAX-29 conformance against every case in the official SentenceBreakTest.txt."""
-    try:
-        test_cases = get_sentence_break_test_cases()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    test_cases = sentence_break_cases
 
     failures = []
     for test_str, expected_byte_boundaries in test_cases:

@@ -29,9 +29,7 @@ from stringzilla import Str
 from test.sz_helpers import (
     SEED_VALUES,
     scale_iterations,
-    UnicodeDataDownloadError,
     assert_backends_agree,
-    get_line_break_test_cases,
     malformed_utf8_corpus,
     representatives_by_class,
     run_across_backends,
@@ -139,7 +137,7 @@ def test_utf8_linewrap_seam(seed_value: int):
 # region Conformance
 
 
-def test_utf8_linewrap_boundary_official_conformance():
+def test_utf8_linewrap_boundary_official_conformance(line_break_cases):
     """Full UAX-14 conformance against every case in the official LineBreakTest.txt.
 
     The iterator emits a segment at every mandatory or soft break opportunity; their cumulative byte
@@ -150,10 +148,7 @@ def test_utf8_linewrap_boundary_official_conformance():
     which break at start. The segments always start at offset 0, so drop the shared helper's leading 0
     here.
     """
-    try:
-        test_cases = get_line_break_test_cases()
-    except UnicodeDataDownloadError:
-        pytest.skip("Could not download Unicode test data")
+    test_cases = line_break_cases
 
     failures = []
     for test_str, expected_byte_boundaries in test_cases:
