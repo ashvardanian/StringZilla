@@ -358,7 +358,12 @@ class CudaBuildExtension(NumpyBuildExt):
         # source reading; `/Oi-` (MSVC) and `-fno-builtin-mem*` (GCC/Clang) stop the compiler from substituting
         # builtins for StringZilla's bytewise primitives. `-fPIC` is a GCC/Clang-only flag.
         if is_msvc:
-            host_compiler_flags = ["/Zc:preprocessor", "/Zc:__cplusplus", "/utf-8", "/Oi-"]
+            # nvcc has no host-CRT switch of its own, so the host `cl.exe` falls back to the static runtime while
+            # setuptools compiles every C/C++ object against the dynamic one the interpreter itself uses, and the
+            # two halves refuse to link with one `LNK2038` per CUDA object. An extension module shares CPython's
+            # CRT, so the dynamic runtime is the only correct answer here.
+            runtime_library_flag = "/MDd" if self.debug else "/MD"
+            host_compiler_flags = ["/Zc:preprocessor", "/Zc:__cplusplus", "/utf-8", "/Oi-", runtime_library_flag]
         else:
             host_compiler_flags = [
                 "-fPIC",
