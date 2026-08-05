@@ -296,6 +296,53 @@ SZ_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u3
 }
 
 /**
+ *  @brief Exchanges eight 16-lane registers with sixteen 8-word lanes, in either direction.
+ *  @param words Eight registers, rewritten in place.
+ *
+ *  Going in, register `pair_index` holds lane `pair_index` in its low half and lane `pair_index + 8` in its
+ *  high half; coming out, register `word_index` holds that word from all 16 lanes. The butterfly is its own
+ *  inverse, so the same sequence serves the gather and the scatter and there is only one thing to get right.
+ *
+ *  Built from `vpunpck` and `vpermt2d` rather than `vpgatherdd` and `vpscatterdd`: a 512-bit scatter is 36
+ *  uops on Ice Lake and Sapphire Rapids, the shuffle form measures level with it there, and no cost model
+ *  available for AMD parts describes their gather and scatter at all - so the form built from ordinary
+ *  shuffles is the one whose cost is knowable everywhere.
+ */
+SZ_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
+    __m512i const low_halves_u32x16 = _mm512_setr_epi32(0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27);
+    __m512i const high_halves_u32x16 = _mm512_setr_epi32(4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31);
+    // Pair 32-bit neighbours inside every 128-bit sub-lane.
+    __m512i const paired0_u32x16 = _mm512_unpacklo_epi32(words_u32x16[0], words_u32x16[1]);
+    __m512i const paired1_u32x16 = _mm512_unpackhi_epi32(words_u32x16[0], words_u32x16[1]);
+    __m512i const paired2_u32x16 = _mm512_unpacklo_epi32(words_u32x16[2], words_u32x16[3]);
+    __m512i const paired3_u32x16 = _mm512_unpackhi_epi32(words_u32x16[2], words_u32x16[3]);
+    __m512i const paired4_u32x16 = _mm512_unpacklo_epi32(words_u32x16[4], words_u32x16[5]);
+    __m512i const paired5_u32x16 = _mm512_unpackhi_epi32(words_u32x16[4], words_u32x16[5]);
+    __m512i const paired6_u32x16 = _mm512_unpacklo_epi32(words_u32x16[6], words_u32x16[7]);
+    __m512i const paired7_u32x16 = _mm512_unpackhi_epi32(words_u32x16[6], words_u32x16[7]);
+
+    // Pair those into 64-bit neighbours, still inside each 128-bit sub-lane.
+    __m512i const quadded0_u32x16 = _mm512_unpacklo_epi64(paired0_u32x16, paired2_u32x16);
+    __m512i const quadded1_u32x16 = _mm512_unpackhi_epi64(paired0_u32x16, paired2_u32x16);
+    __m512i const quadded2_u32x16 = _mm512_unpacklo_epi64(paired1_u32x16, paired3_u32x16);
+    __m512i const quadded3_u32x16 = _mm512_unpackhi_epi64(paired1_u32x16, paired3_u32x16);
+    __m512i const quadded4_u32x16 = _mm512_unpacklo_epi64(paired4_u32x16, paired6_u32x16);
+    __m512i const quadded5_u32x16 = _mm512_unpackhi_epi64(paired4_u32x16, paired6_u32x16);
+    __m512i const quadded6_u32x16 = _mm512_unpacklo_epi64(paired5_u32x16, paired7_u32x16);
+    __m512i const quadded7_u32x16 = _mm512_unpackhi_epi64(paired5_u32x16, paired7_u32x16);
+
+    // Exchange whole quarters across the register, which is the only stage that crosses 128-bit boundaries.
+    words_u32x16[0] = _mm512_permutex2var_epi32(quadded0_u32x16, low_halves_u32x16, quadded4_u32x16);
+    words_u32x16[4] = _mm512_permutex2var_epi32(quadded0_u32x16, high_halves_u32x16, quadded4_u32x16);
+    words_u32x16[1] = _mm512_permutex2var_epi32(quadded1_u32x16, low_halves_u32x16, quadded5_u32x16);
+    words_u32x16[5] = _mm512_permutex2var_epi32(quadded1_u32x16, high_halves_u32x16, quadded5_u32x16);
+    words_u32x16[2] = _mm512_permutex2var_epi32(quadded2_u32x16, low_halves_u32x16, quadded6_u32x16);
+    words_u32x16[6] = _mm512_permutex2var_epi32(quadded2_u32x16, high_halves_u32x16, quadded6_u32x16);
+    words_u32x16[3] = _mm512_permutex2var_epi32(quadded3_u32x16, low_halves_u32x16, quadded7_u32x16);
+    words_u32x16[7] = _mm512_permutex2var_epi32(quadded3_u32x16, high_halves_u32x16, quadded7_u32x16);
+}
+
+/**
  *  @brief Transposes one 64-byte block from each of 16 lanes into word-major big-endian order.
  *  @param lane_blocks Pointers to 16 message blocks, one per lane.
  *  @param schedule Receives 16 registers, where `schedule[word_index]` holds that word from all 16 lanes.
@@ -549,17 +596,11 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
     sz_u8_t const *sources[16];
     sz_size_t largest_blocks_count = 0;
 
-    /*  `sz_sha256_state_t` is 128 bytes by static assertion, so a lane's hash words sit at a power-of-two
-     *  stride and the gather index is just the lane number shifted. Zeroing the index of an absent lane
-     *  points it at lane zero, which is the same borrow the digest path makes. */
-    __mmask16 const present_m16 = (__mmask16)((1u << active_lanes_count) - 1u);
-    __m512i const lane_offsets_u32x16 = _mm512_maskz_slli_epi32(
-        present_m16, _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), 7);
 
-    /*  The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
-     *  source array serves both phases and the head costs no extra stack. An absent lane, or one with
-     *  nothing whole left, keeps reading that buffer and never advances, so the transpose stays in bounds
-     *  without a bounds test in the loop. */
+    // The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
+    // source array serves both phases and the head costs no extra stack. An absent lane, or one with
+    // nothing whole left, keeps reading that buffer and never advances, so the transpose stays in bounds
+    // without a bounds test in the loop.
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
         sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
         sz_size_t const lane_blocks = lane_index < active_lanes_count ? blocks_per_lane[lane_index] : 0;
@@ -568,13 +609,20 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
         if (lane_blocks > largest_blocks_count) largest_blocks_count = lane_blocks;
     }
 
-    /*  Token-sized messages compress nothing here - their whole hash is the padding block the digest path
-     *  emits - so leaving before the gather keeps them off the word-major round trip entirely. */
+    // Token-sized messages compress nothing here - their whole hash is the padding block the digest path
+    // emits - so leaving before the gather keeps them off the word-major round trip entirely.
     if (buffered_bitmask == 0 && largest_blocks_count == 0) return;
 
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        hashes_u32x16[word_index] =
-            _mm512_i32gather_epi32(lane_offsets_u32x16, (void const *)&states[0].hash[word_index], 1);
+    // A lane's eight hash words are 32 contiguous bytes, so one 256-bit load and an insert pack lanes
+    // `pair_index` and `pair_index + 8` into a register, and the butterfly does the rest.
+    for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
+        sz_size_t const low_lane = pair_index < active_lanes_count ? pair_index : 0;
+        sz_size_t const high_lane = pair_index + 8 < active_lanes_count ? pair_index + 8 : 0;
+        hashes_u32x16[pair_index] = _mm512_inserti64x4(
+            _mm512_castsi256_si512(_mm256_loadu_si256((__m256i const *)states[low_lane].hash)),
+            _mm256_loadu_si256((__m256i const *)states[high_lane].hash), 1);
+    }
+    sz_sha256_transpose_8x16_skylake_(hashes_u32x16);
 
     if (buffered_bitmask) sz_sha256_compress_skylake_(hashes_u32x16, sources, (__mmask16)buffered_bitmask);
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index)
@@ -591,9 +639,15 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *stat
         counts_u32x16 = _mm512_mask_sub_epi32(counts_u32x16, active_m16, counts_u32x16, ones_u32x16);
     }
 
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        _mm512_mask_i32scatter_epi32((void *)&states[0].hash[word_index], present_m16, lane_offsets_u32x16,
-                                     hashes_u32x16[word_index], 1);
+    sz_sha256_transpose_8x16_skylake_(hashes_u32x16);
+    for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
+        if (pair_index < active_lanes_count)
+            _mm256_storeu_si256((__m256i *)states[pair_index].hash,
+                                _mm512_castsi512_si256(hashes_u32x16[pair_index]));
+        if (pair_index + 8 < active_lanes_count)
+            _mm256_storeu_si256((__m256i *)states[pair_index + 8].hash,
+                                _mm512_extracti64x4_epi64(hashes_u32x16[pair_index], 1));
+    }
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
         cursors[lane_index] += blocks_per_lane[lane_index] * SZ_SHA256_BLOCK_LENGTH;
 }
@@ -608,16 +662,16 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
         sz_size_t remaining[16], blocks_per_lane[16];
         sz_u32_t buffered_bitmask = 0;
 
-        /*  Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
-         *  lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
-         *  the head, body and tail below only move bytes. */
+        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
+        // lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
+        // the head, body and tail below only move bytes.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
             cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
             remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
 
-            /*  The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes through the
-             *  single-state kernel over the very same state and the lane sits the group out. */
+            // The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes through the
+            // single-state kernel over the very same state and the lane sits the group out.
             if (remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH > 0xFFFFFFFFull) {
                 sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
                 remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
@@ -641,7 +695,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
         sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
                                              blocks_per_lane);
 
-        /*  Whatever is left cannot fill a block, so it only ever buffers. */
+        // Whatever is left cannot fill a block, so it only ever buffers.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
             sz_size_t const tail_length = remaining[lane_index] % SZ_SHA256_BLOCK_LENGTH;
@@ -664,56 +718,90 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *stat
  */
 SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
                                                                sz_size_t active_lanes_count, sz_u8_t *digests) {
-    sz_u512_vec_t carrier_vec[16], final_vec[16], interleaved_vec[8];
-    sz_u8_t const *carrier_blocks[16], *final_blocks[16];
+    sz_u512_vec_t staged_vec[16];
+    sz_u8_t const *staged_blocks[16];
+    __m512i hashes_u32x16[8];
     __mmask16 overflow_m16 = 0;
 
     for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
         sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
-        sz_sha256_state_t const *const state = &states[source_lane];
-        sz_size_t const buffered = state->block_length;
-        sz_u64_t const bit_length = state->total_length * 8;
-        carrier_vec[lane_index].zmm = _mm512_setzero_si512();
-        final_vec[lane_index].zmm = _mm512_setzero_si512();
-
-        /*  The terminator lands in a carrier block whenever it would crowd out the trailing bit length. */
-        if (buffered + 1 > SZ_SHA256_BLOCK_LENGTH - 8) {
+        staged_blocks[lane_index] = staged_vec[lane_index].u8s;
+        if (states[source_lane].block_length + 1 > SZ_SHA256_BLOCK_LENGTH - 8)
             overflow_m16 |= (__mmask16)((sz_u32_t)1 << lane_index);
-            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
-                carrier_vec[lane_index].u8s[byte_index] = state->block[byte_index];
-            carrier_vec[lane_index].u8s[buffered] = 0x80;
-        }
-        else {
-            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
-                final_vec[lane_index].u8s[byte_index] = state->block[byte_index];
-            final_vec[lane_index].u8s[buffered] = 0x80;
-        }
-        for (sz_size_t byte_index = 0; byte_index != 8; ++byte_index)
-            final_vec[lane_index].u8s[SZ_SHA256_BLOCK_LENGTH - 8 + byte_index] = (sz_u8_t)(bit_length >>
-                                                                                           (56 - byte_index * 8));
-
-        carrier_blocks[lane_index] = carrier_vec[lane_index].u8s;
-        final_blocks[lane_index] = final_vec[lane_index].u8s;
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-            interleaved_vec[word_index].u32s[lane_index] = state->hash[word_index];
     }
 
-    __m512i hashes_u32x16[8];
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        hashes_u32x16[word_index] = interleaved_vec[word_index].zmm;
+    // A lane's eight hash words are 32 contiguous bytes, so one 256-bit load and an insert pack lanes
+    // `pair_index` and `pair_index + 8` into a register, and the butterfly does the rest.
+    for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
+        sz_size_t const low_lane = pair_index < active_lanes_count ? pair_index : 0;
+        sz_size_t const high_lane = pair_index + 8 < active_lanes_count ? pair_index + 8 : 0;
+        hashes_u32x16[pair_index] = _mm512_inserti64x4(
+            _mm512_castsi256_si512(_mm256_loadu_si256((__m256i const *)states[low_lane].hash)),
+            _mm256_loadu_si256((__m256i const *)states[high_lane].hash), 1);
+    }
+    sz_sha256_transpose_8x16_skylake_(hashes_u32x16);
 
-    if (overflow_m16) sz_sha256_compress_skylake_(hashes_u32x16, carrier_blocks, overflow_m16);
-    sz_sha256_compress_skylake_(hashes_u32x16, final_blocks, (__mmask16)0xFFFF);
-
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        interleaved_vec[word_index].zmm = hashes_u32x16[word_index];
-    for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-            sz_u32_t const word = interleaved_vec[word_index].u32s[lane_index];
-            sz_u8_t *const target = &digests[lane_index * SZ_SHA256_DIGEST_LENGTH + word_index * 4];
-            target[0] = (sz_u8_t)(word >> 24), target[1] = (sz_u8_t)(word >> 16);
-            target[2] = (sz_u8_t)(word >> 8), target[3] = (sz_u8_t)(word >> 0);
+    // The terminator lands in a carrier block whenever it would crowd out the trailing bit length. One
+    // staging buffer serves both blocks: the carrier compression is masked to the lanes that need it and
+    // has consumed the buffer before the final block overwrites it.
+    if (overflow_m16) {
+        for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
+            sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+            sz_size_t const buffered = states[source_lane].block_length;
+            __mmask64 const buffered_m64 = sz_u64_clamp_mask_until_(buffered);
+            staged_vec[lane_index].zmm =
+                _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
+            staged_vec[lane_index].u8s[buffered] = 0x80;
         }
+        sz_sha256_compress_skylake_(hashes_u32x16, staged_blocks, overflow_m16);
+    }
+
+    for (sz_size_t lane_index = 0; lane_index != 16; ++lane_index) {
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        sz_size_t const buffered = states[source_lane].block_length;
+        sz_u64_t const bit_length = states[source_lane].total_length * 8;
+        // An overflowing lane has already spent its buffered bytes on the carrier block, so its final
+        // block carries nothing but the trailing length.
+        int const carried = (overflow_m16 >> lane_index) & 1;
+        __mmask64 const buffered_m64 = carried ? (__mmask64)0 : sz_u64_clamp_mask_until_(buffered);
+        staged_vec[lane_index].zmm = _mm512_maskz_loadu_epi8(buffered_m64, (void const *)states[source_lane].block);
+        if (!carried) staged_vec[lane_index].u8s[buffered] = 0x80;
+        staged_vec[lane_index].u64s[7] = sz_u64_bytes_reverse(bit_length);
+    }
+    sz_sha256_compress_skylake_(hashes_u32x16, staged_blocks, (__mmask16)0xFFFF);
+
+    // Big-endian output is a byte reverse inside each word, and the same butterfly that gathered the state
+    // scatters it back to one 32-byte digest per lane.
+    __m512i const byte_swap_u8x64 = _mm512_set_epi8(                     //
+        60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51,  //
+        44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35,  //
+        28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19,  //
+        12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
+        hashes_u32x16[word_index] = _mm512_shuffle_epi8(hashes_u32x16[word_index], byte_swap_u8x64);
+    sz_sha256_transpose_8x16_skylake_(hashes_u32x16);
+
+    // The butterfly leaves lanes paired as `pair_index` and `pair_index + 8`, but digests land adjacent, so
+    // one more sub-lane exchange brings neighbours together and every lane leaves in a full-width store.
+    __m512i const adjacent0_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[0], hashes_u32x16[1], 0x44);
+    __m512i const adjacent1_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[2], hashes_u32x16[3], 0x44);
+    __m512i const adjacent2_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[4], hashes_u32x16[5], 0x44);
+    __m512i const adjacent3_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[6], hashes_u32x16[7], 0x44);
+    __m512i const adjacent4_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[0], hashes_u32x16[1], 0xEE);
+    __m512i const adjacent5_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[2], hashes_u32x16[3], 0xEE);
+    __m512i const adjacent6_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[4], hashes_u32x16[5], 0xEE);
+    __m512i const adjacent7_u32x16 = _mm512_shuffle_i64x2(hashes_u32x16[6], hashes_u32x16[7], 0xEE);
+    hashes_u32x16[0] = adjacent0_u32x16, hashes_u32x16[1] = adjacent1_u32x16;
+    hashes_u32x16[2] = adjacent2_u32x16, hashes_u32x16[3] = adjacent3_u32x16;
+    hashes_u32x16[4] = adjacent4_u32x16, hashes_u32x16[5] = adjacent5_u32x16;
+    hashes_u32x16[6] = adjacent6_u32x16, hashes_u32x16[7] = adjacent7_u32x16;
+
+    for (sz_size_t pair_index = 0; pair_index != 8; ++pair_index) {
+        __mmask8 const first_m8 = pair_index * 2 + 0 < active_lanes_count ? (__mmask8)0x0F : (__mmask8)0;
+        __mmask8 const second_m8 = pair_index * 2 + 1 < active_lanes_count ? (__mmask8)0xF0 : (__mmask8)0;
+        _mm512_mask_storeu_epi64(&digests[pair_index * 2 * SZ_SHA256_DIGEST_LENGTH], first_m8 | second_m8,
+                                 hashes_u32x16[pair_index]);
+    }
 }
 
 SZ_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,

@@ -165,28 +165,36 @@ SZ_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u3
  *  @param words_u32x8 Receives eight registers, where `words_u32x8[index]` holds that word from all 8 lanes.
  *
  *  Two interleave stages gather 32-bit and then 64-bit neighbours inside each 128-bit half, and a final
- *  cross-half permute completes the exchange.
+ *  cross-half permute completes the exchange. Transposition is its own inverse, so this also carries the
+ *  hash state the other way, from word-major registers back to one 32-byte lane each.
  */
 SZ_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_u32x8[8], __m256i words_u32x8[8]) {
-    __m256i first_stage_u32x8[8], second_stage_u32x8[8];
-    for (sz_size_t butterfly_index = 0; butterfly_index != 4; ++butterfly_index) {
-        first_stage_u32x8[butterfly_index * 2 + 0] = _mm256_unpacklo_epi32(lanes_u32x8[butterfly_index * 2 + 0],
-                                                                         lanes_u32x8[butterfly_index * 2 + 1]);
-        first_stage_u32x8[butterfly_index * 2 + 1] = _mm256_unpackhi_epi32(lanes_u32x8[butterfly_index * 2 + 0],
-                                                                         lanes_u32x8[butterfly_index * 2 + 1]);
-    }
-    second_stage_u32x8[0] = _mm256_unpacklo_epi64(first_stage_u32x8[0], first_stage_u32x8[2]);
-    second_stage_u32x8[1] = _mm256_unpackhi_epi64(first_stage_u32x8[0], first_stage_u32x8[2]);
-    second_stage_u32x8[2] = _mm256_unpacklo_epi64(first_stage_u32x8[1], first_stage_u32x8[3]);
-    second_stage_u32x8[3] = _mm256_unpackhi_epi64(first_stage_u32x8[1], first_stage_u32x8[3]);
-    second_stage_u32x8[4] = _mm256_unpacklo_epi64(first_stage_u32x8[4], first_stage_u32x8[6]);
-    second_stage_u32x8[5] = _mm256_unpackhi_epi64(first_stage_u32x8[4], first_stage_u32x8[6]);
-    second_stage_u32x8[6] = _mm256_unpacklo_epi64(first_stage_u32x8[5], first_stage_u32x8[7]);
-    second_stage_u32x8[7] = _mm256_unpackhi_epi64(first_stage_u32x8[5], first_stage_u32x8[7]);
-    for (sz_size_t offset = 0; offset != 4; ++offset) {
-        words_u32x8[offset] = _mm256_permute2x128_si256(second_stage_u32x8[offset], second_stage_u32x8[offset + 4], 0x20);
-        words_u32x8[offset + 4] = _mm256_permute2x128_si256(second_stage_u32x8[offset], second_stage_u32x8[offset + 4], 0x31);
-    }
+    __m256i const paired0_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[0], lanes_u32x8[1]);
+    __m256i const paired1_u32x8 = _mm256_unpackhi_epi32(lanes_u32x8[0], lanes_u32x8[1]);
+    __m256i const paired2_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[2], lanes_u32x8[3]);
+    __m256i const paired3_u32x8 = _mm256_unpackhi_epi32(lanes_u32x8[2], lanes_u32x8[3]);
+    __m256i const paired4_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[4], lanes_u32x8[5]);
+    __m256i const paired5_u32x8 = _mm256_unpackhi_epi32(lanes_u32x8[4], lanes_u32x8[5]);
+    __m256i const paired6_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[6], lanes_u32x8[7]);
+    __m256i const paired7_u32x8 = _mm256_unpackhi_epi32(lanes_u32x8[6], lanes_u32x8[7]);
+
+    __m256i const quadded0_u32x8 = _mm256_unpacklo_epi64(paired0_u32x8, paired2_u32x8);
+    __m256i const quadded1_u32x8 = _mm256_unpackhi_epi64(paired0_u32x8, paired2_u32x8);
+    __m256i const quadded2_u32x8 = _mm256_unpacklo_epi64(paired1_u32x8, paired3_u32x8);
+    __m256i const quadded3_u32x8 = _mm256_unpackhi_epi64(paired1_u32x8, paired3_u32x8);
+    __m256i const quadded4_u32x8 = _mm256_unpacklo_epi64(paired4_u32x8, paired6_u32x8);
+    __m256i const quadded5_u32x8 = _mm256_unpackhi_epi64(paired4_u32x8, paired6_u32x8);
+    __m256i const quadded6_u32x8 = _mm256_unpacklo_epi64(paired5_u32x8, paired7_u32x8);
+    __m256i const quadded7_u32x8 = _mm256_unpackhi_epi64(paired5_u32x8, paired7_u32x8);
+
+    words_u32x8[0] = _mm256_permute2x128_si256(quadded0_u32x8, quadded4_u32x8, 0x20);
+    words_u32x8[4] = _mm256_permute2x128_si256(quadded0_u32x8, quadded4_u32x8, 0x31);
+    words_u32x8[1] = _mm256_permute2x128_si256(quadded1_u32x8, quadded5_u32x8, 0x20);
+    words_u32x8[5] = _mm256_permute2x128_si256(quadded1_u32x8, quadded5_u32x8, 0x31);
+    words_u32x8[2] = _mm256_permute2x128_si256(quadded2_u32x8, quadded6_u32x8, 0x20);
+    words_u32x8[6] = _mm256_permute2x128_si256(quadded2_u32x8, quadded6_u32x8, 0x31);
+    words_u32x8[3] = _mm256_permute2x128_si256(quadded3_u32x8, quadded7_u32x8, 0x20);
+    words_u32x8[7] = _mm256_permute2x128_si256(quadded3_u32x8, quadded7_u32x8, 0x31);
 }
 
 /**
@@ -394,14 +402,14 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *stat
                                                          sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
                                                          sz_size_t const *blocks_per_lane) {
     __m256i hashes_u32x8[8];
-    sz_u256_vec_t word_vec, counts_vec, buffered_vec;
+    sz_u256_vec_t counts_vec, buffered_vec;
     sz_u8_t const *sources[8];
     sz_size_t largest_blocks_count = 0;
 
-    /*  The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
-     *  source array serves both phases and the head costs no extra stack. An absent lane, or one with
-     *  nothing whole left, keeps reading that buffer and never advances, so the transpose stays in bounds
-     *  without a bounds test in the loop. */
+    // The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
+    // source array serves both phases and the head costs no extra stack. An absent lane, or one with
+    // nothing whole left, keeps reading that buffer and never advances, so the transpose stays in bounds
+    // without a bounds test in the loop.
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
         sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
         sz_size_t const lane_blocks = lane_index < active_lanes_count ? blocks_per_lane[lane_index] : 0;
@@ -411,17 +419,18 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *stat
         if (lane_blocks > largest_blocks_count) largest_blocks_count = lane_blocks;
     }
 
-    /*  Token-sized messages compress nothing here - their whole hash is the padding block the digest path
-     *  emits - so leaving before the gather keeps them off the word-major round trip entirely. */
+    // Token-sized messages compress nothing here - their whole hash is the padding block the digest path
+    // emits - so leaving before the gather keeps them off the word-major round trip entirely.
     if (buffered_bitmask == 0 && largest_blocks_count == 0) return;
 
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
-            sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
-            word_vec.u32s[lane_index] = states[source_lane].hash[word_index];
-        }
-        hashes_u32x8[word_index] = word_vec.ymm;
+    // A lane's eight hash words are exactly one 256-bit register, so the transpose that carries the message
+    // schedule carries the state too, and AVX2's missing scatter never comes up.
+    __m256i lanes_u32x8[8];
+    for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        lanes_u32x8[lane_index] = _mm256_loadu_si256((__m256i const *)states[source_lane].hash);
     }
+    sz_sha256_transpose_8x8_haswell_(lanes_u32x8, hashes_u32x8);
 
     if (buffered_bitmask) sz_sha256_compress_haswell_(hashes_u32x8, sources, buffered_vec.ymm);
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
@@ -439,11 +448,9 @@ SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *stat
         counts_u32x8 = _mm256_add_epi32(counts_u32x8, active_u32x8);
     }
 
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        word_vec.ymm = hashes_u32x8[word_index];
-        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
-            states[lane_index].hash[word_index] = word_vec.u32s[lane_index];
-    }
+    sz_sha256_transpose_8x8_haswell_(hashes_u32x8, lanes_u32x8);
+    for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+        _mm256_storeu_si256((__m256i *)states[lane_index].hash, lanes_u32x8[lane_index]);
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
         cursors[lane_index] += blocks_per_lane[lane_index] * SZ_SHA256_BLOCK_LENGTH;
 }
@@ -458,16 +465,16 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
         sz_size_t remaining[8], blocks_per_lane[8];
         sz_u32_t buffered_bitmask = 0;
 
-        /*  Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
-         *  lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
-         *  the head, body and tail below only move bytes. */
+        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
+        // lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
+        // the head, body and tail below only move bytes.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
             cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
             remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
 
-            /*  The countdown rides in 32-bit lanes AVX2 compares as signed, so a chunk longer than that many
-             *  blocks goes through the single-state kernel over the very same state and sits the group out. */
+            // The countdown rides in 32-bit lanes AVX2 compares as signed, so a chunk longer than that many
+            // blocks goes through the single-state kernel over the very same state and sits the group out.
             if (remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH > 0x7FFFFFFFull) {
                 sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
                 remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
@@ -491,7 +498,7 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
         sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
                                              blocks_per_lane);
 
-        /*  Whatever is left cannot fill a block, so it only ever buffers. */
+        // Whatever is left cannot fill a block, so it only ever buffers.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
             sz_size_t const tail_length = remaining[lane_index] % SZ_SHA256_BLOCK_LENGTH;
@@ -513,60 +520,65 @@ SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *stat
  */
 SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
                                                                sz_size_t active_lanes_count, sz_u8_t *digests) {
-    /*  A SHA256 block is 64 bytes whatever the vector width, so the staged blocks are 512-bit unions even
-     *  though the lanes themselves are 256-bit wide. */
-    sz_u512_vec_t carrier_vec[8], final_vec[8];
-    sz_u256_vec_t interleaved_vec[8], overflow_vec;
-    sz_u8_t const *carrier_blocks[8], *final_blocks[8];
+    // A SHA256 block is 64 bytes whatever the vector width, so the staged blocks are 512-bit unions even
+    // though the lanes themselves are 256-bit wide.
+    sz_u512_vec_t staged_vec[8];
+    sz_u256_vec_t overflow_vec;
+    sz_u8_t const *staged_blocks[8];
+    __m256i hashes_u32x8[8], lanes_u32x8[8];
     sz_bool_t any_overflow = sz_false_k;
 
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
         sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
-        sz_sha256_state_t const *const state = &states[source_lane];
-        sz_size_t const buffered = state->block_length;
-        sz_u64_t const bit_length = state->total_length * 8;
-        for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
-            carrier_vec[lane_index].u8s[byte_index] = 0, final_vec[lane_index].u8s[byte_index] = 0;
+        staged_blocks[lane_index] = staged_vec[lane_index].u8s;
+        lanes_u32x8[lane_index] = _mm256_loadu_si256((__m256i const *)states[source_lane].hash);
         overflow_vec.u32s[lane_index] = 0;
 
-        /*  The terminator lands in a carrier block whenever it would crowd out the trailing bit length. */
-        if (buffered + 1 > SZ_SHA256_BLOCK_LENGTH - 8) {
+        // The terminator lands in a carrier block whenever it would crowd out the trailing bit length.
+        if (states[source_lane].block_length + 1 > SZ_SHA256_BLOCK_LENGTH - 8)
             overflow_vec.u32s[lane_index] = 0xFFFFFFFFu, any_overflow = sz_true_k;
-            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
-                carrier_vec[lane_index].u8s[byte_index] = state->block[byte_index];
-            carrier_vec[lane_index].u8s[buffered] = 0x80;
-        }
-        else {
-            for (sz_size_t byte_index = 0; byte_index != buffered; ++byte_index)
-                final_vec[lane_index].u8s[byte_index] = state->block[byte_index];
-            final_vec[lane_index].u8s[buffered] = 0x80;
-        }
-        for (sz_size_t byte_index = 0; byte_index != 8; ++byte_index)
-            final_vec[lane_index].u8s[SZ_SHA256_BLOCK_LENGTH - 8 + byte_index] = (sz_u8_t)(bit_length >>
-                                                                                           (56 - byte_index * 8));
+    }
+    sz_sha256_transpose_8x8_haswell_(lanes_u32x8, hashes_u32x8);
 
-        carrier_blocks[lane_index] = carrier_vec[lane_index].u8s;
-        final_blocks[lane_index] = final_vec[lane_index].u8s;
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-            interleaved_vec[word_index].u32s[lane_index] = state->hash[word_index];
+    // One staging buffer serves both blocks: the carrier compression is gated to the lanes that need it and
+    // has consumed the buffer before the final block overwrites it.
+    if (any_overflow == sz_true_k) {
+        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
+            sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+            sz_size_t const buffered = states[source_lane].block_length;
+            for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
+                staged_vec[lane_index].u8s[byte_index] = byte_index < buffered ? states[source_lane].block[byte_index]
+                                                                              : (sz_u8_t)0;
+            staged_vec[lane_index].u8s[buffered] = 0x80;
+        }
+        sz_sha256_compress_haswell_(hashes_u32x8, staged_blocks, overflow_vec.ymm);
     }
 
-    __m256i hashes_u32x8[8];
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        hashes_u32x8[word_index] = interleaved_vec[word_index].ymm;
+    for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        sz_size_t const buffered = states[source_lane].block_length;
+        // An overflowing lane has already spent its buffered bytes on the carrier block, so its final block
+        // carries nothing but the trailing length.
+        int const carried = overflow_vec.u32s[lane_index] != 0;
+        sz_size_t const kept = carried ? 0 : buffered;
+        for (sz_size_t byte_index = 0; byte_index != SZ_SHA256_BLOCK_LENGTH; ++byte_index)
+            staged_vec[lane_index].u8s[byte_index] = byte_index < kept ? states[source_lane].block[byte_index]
+                                                                      : (sz_u8_t)0;
+        if (!carried) staged_vec[lane_index].u8s[buffered] = 0x80;
+        staged_vec[lane_index].u64s[7] = sz_u64_bytes_reverse(states[source_lane].total_length * 8);
+    }
+    sz_sha256_compress_haswell_(hashes_u32x8, staged_blocks, _mm256_set1_epi32(-1));
 
-    if (any_overflow == sz_true_k) sz_sha256_compress_haswell_(hashes_u32x8, carrier_blocks, overflow_vec.ymm);
-    sz_sha256_compress_haswell_(hashes_u32x8, final_blocks, _mm256_set1_epi32(-1));
-
+    // Big-endian output is a byte reverse inside each word, and the same transpose that gathered the state
+    // returns each lane's digest as one 32-byte register.
+    __m256i const byte_swap_u8x32 = _mm256_setr_epi8(                                //
+        3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,                        //
+        3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        interleaved_vec[word_index].ymm = hashes_u32x8[word_index];
+        hashes_u32x8[word_index] = _mm256_shuffle_epi8(hashes_u32x8[word_index], byte_swap_u8x32);
+    sz_sha256_transpose_8x8_haswell_(hashes_u32x8, lanes_u32x8);
     for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-            sz_u32_t const word = interleaved_vec[word_index].u32s[lane_index];
-            sz_u8_t *const target = &digests[lane_index * SZ_SHA256_DIGEST_LENGTH + word_index * 4];
-            target[0] = (sz_u8_t)(word >> 24), target[1] = (sz_u8_t)(word >> 16);
-            target[2] = (sz_u8_t)(word >> 8), target[3] = (sz_u8_t)(word >> 0);
-        }
+        _mm256_storeu_si256((__m256i *)&digests[lane_index * SZ_SHA256_DIGEST_LENGTH], lanes_u32x8[lane_index]);
 }
 
 SZ_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
