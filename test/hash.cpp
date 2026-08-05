@@ -523,6 +523,10 @@ void test_sha256_equivalence(reference_ reference, candidate_ candidate, sz_size
  *  call, then again split into random per-lane slices, which is what carries a partial block across calls.
  *  Both digest buffers keep a guard lane past the end, since a batched kernel that miscounts lanes would
  *  otherwise corrupt the caller's memory silently.
+ *
+ *  Messages reach several blocks rather than the one a 64-byte bound would give, because lanes retire from
+ *  the wide loop independently: a batch where every lane owns the same number of blocks never exercises the
+ *  retirement order, the countdown, or the rule that parks a finished lane's cursor on its last full block.
  */
 template <typename reference_, typename candidate_>
 void test_sha256_multistate_equivalence(reference_ reference, candidate_ candidate, sz_size_t inputs) {
@@ -532,7 +536,7 @@ void test_sha256_multistate_equivalence(reference_ reference, candidate_ candida
         fuzzy_config_t config;
         config.batch_size = (std::size_t)lanes_count;
         config.min_string_length = 0;
-        config.max_string_length = (std::size_t)inputs;
+        config.max_string_length = (std::size_t)inputs * SZ_SHA256_BLOCK_LENGTH / 8;
         randomize_strings(config, messages);
 
         std::vector<sz_sha256_state_t> reference_states(lanes_count ? lanes_count : 1);
@@ -583,6 +587,30 @@ void test_sha256_multistate_equivalence(reference_ reference, candidate_ candida
         for (std::size_t guard_index = 0; guard_index != SZ_SHA256_DIGEST_LENGTH;
              ++guard_index) // No overwrite past the last lane
             verify(candidate_digests[lanes_count * SZ_SHA256_DIGEST_LENGTH + guard_index] == 0xA5);
+
+        // Buffered head: each lane parks a different partial block, then the next call completes some of
+        // them and not others. Random slicing reaches this only by luck, but it is the one path where lanes
+        // compress out of a buffer rather than out of the caller's bytes, under a mask of its own.
+        for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index)
+            sz_sha256_state_init(&reference_states[lane_index]), sz_sha256_state_init(&candidate_states[lane_index]);
+        for (std::size_t pass_index = 0; pass_index != 2; ++pass_index) {
+            for (std::size_t lane_index = 0; lane_index != messages.size(); ++lane_index) {
+                std::size_t const parked = 1 + lane_index % (SZ_SHA256_BLOCK_LENGTH - 1);
+                std::size_t const first = parked < messages[lane_index].size() ? parked : messages[lane_index].size();
+                std::size_t const offset = pass_index == 0 ? 0 : first;
+                std::size_t const length = pass_index == 0 ? first : messages[lane_index].size() - first;
+                slices[lane_index].start = messages[lane_index].data() + offset;
+                slices[lane_index].length = (sz_size_t)length;
+            }
+            sz_sequence_t parked_texts;
+            sz_sequence_from_string_views(slices.data(), slices.size(), &parked_texts);
+            reference.update(reference_states.data(), &parked_texts);
+            candidate.update(candidate_states.data(), &parked_texts);
+        }
+        reference.digest(reference_states.data(), lanes_count, reference_digests.data());
+        candidate.digest(candidate_states.data(), lanes_count, candidate_digests.data());
+        verify(std::memcmp(reference_digests.data(), candidate_digests.data(), lanes_count * SZ_SHA256_DIGEST_LENGTH) ==
+               0);
     }
 }
 

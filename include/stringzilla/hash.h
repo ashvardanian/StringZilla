@@ -349,6 +349,10 @@ SZ_API_RUNTIME void sz_sha256_state_digest(sz_sha256_state_t const *state,
  *  @endcode
  *
  *  @note Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @note Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
+ *        longest member. Every lane is correct whatever its length, but throughput is best when inputs
+ *        arrive sorted by length, which puts similar lengths in the same group - `sz_sequence_argsort` gives
+ *        that ordering.
  *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_haswell, sz_sha256_multistate_update_skylake
  */
 SZ_API_RUNTIME void sz_sha256_multistate_update(sz_sha256_state_t *states, sz_sequence_t const *texts);

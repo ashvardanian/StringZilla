@@ -366,6 +366,9 @@ Lanes are workers rather than messages: `lanes[i]` reads one as a `Sha256`, and 
 Both accept a `Strs`, read in place whatever its layout, and an `out` buffer of bytes — a `(count, 32)` `numpy.uint8` matrix receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
 The GIL is released around the kernel, so several threads digest concurrently.
 
+Lanes advance in lockstep within a group, so a group costs as much as its longest message.
+Every length is handled correctly, but throughput is best when messages of similar length share a group, which `Strs.argsort` arranges.
+
 ```python
 import numpy as np
 import stringzilla as sz

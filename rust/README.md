@@ -524,6 +524,9 @@ Digesting one message is a serial dependency chain, but independent messages com
 `sha256_multistate_update` advances one hasher per message, taking anything that dereferences to bytes, so a `Vec<String>` needs no intermediate slice of slices.
 Use `sha256_multistate_update_by` when the messages are not in one contiguous slice.
 
+Lanes advance in lockstep within a group, so a group costs as much as its longest message.
+Every length is handled correctly, but throughput is best when messages of similar length share a group, which `argsort` arranges.
+
 ```rust
 use stringzilla::sz;
 

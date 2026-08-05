@@ -384,6 +384,8 @@ void bench_hashing_multiseed(environment_t const &env) {
     bench_result_t base = bench_unary(env, "sz_hash_loop", validator).log();
 
     bench_unary(env, "sz_hash_multiseed", validator, hash_multiseed_from_sz<sz_hash_multiseed> {env}).log(base);
+    bench_unary(env, "sz_hash_multiseed_serial", validator, hash_multiseed_from_sz<sz_hash_multiseed_serial> {env})
+        .log(base);
 #if SZ_USE_WESTMERE
     bench_unary(env, "sz_hash_multiseed_westmere", validator, hash_multiseed_from_sz<sz_hash_multiseed_westmere> {env})
         .log(base);
@@ -491,7 +493,36 @@ struct sha256_stream_from_sz {
 /** @brief Number of independent messages driven through one multi-state SHA256 call. */
 enum : std::size_t { multistate_lanes_k = 16 };
 
+/**
+ *  @brief Lane-length policies, trimming the corpus tokens into a chosen shape.
+ *
+ *  Lanes in a group advance in lockstep, so the spread of lengths within a group is what the batched kernels
+ *  are actually sensitive to - a corpus alone only ever shows whatever spread it happens to have. Every
+ *  policy trims rather than extends, so lanes stay inside the tokens the environment already owns.
+ */
+struct sha256_lanes_uniform_t {
+    static constexpr char const *name_k = "";
+    static inline std::size_t length(std::size_t, std::size_t token_length) noexcept { return token_length; }
+};
+
+/** @brief One lane far shorter than the rest, which used to drop its whole group to the scalar kernel. */
+struct sha256_lanes_one_short_t {
+    static constexpr char const *name_k = "_one_short";
+    static inline std::size_t length(std::size_t lane_index, std::size_t token_length) noexcept {
+        return lane_index == 0 ? (token_length < 21 ? token_length : 21) : token_length;
+    }
+};
+
+/** @brief One lane far longer than the rest, the shape lockstep pays the most for. */
+struct sha256_lanes_one_long_t {
+    static constexpr char const *name_k = "_one_long";
+    static inline std::size_t length(std::size_t lane_index, std::size_t token_length) noexcept {
+        return lane_index == 0 ? token_length : token_length / 8;
+    }
+};
+
 /** @brief Baseline: digests a batch of tokens through independent single-state SHA256 calls. */
+template <typename lanes_>
 struct sha256_multistate_loop_from_sz {
 
     environment_t const &env;
@@ -501,10 +532,11 @@ struct sha256_multistate_loop_from_sz {
         std::size_t bytes_passed = 0;
         for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
             std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            std::size_t const lane_length = lanes_::length(lane_index, token.size());
             sz_sha256_state_init(&states[lane_index]);
-            sz_sha256_state_update(&states[lane_index], token.data(), token.size());
+            sz_sha256_state_update(&states[lane_index], token.data(), lane_length);
             sz_sha256_state_digest(&states[lane_index], &digests[lane_index * SZ_SHA256_DIGEST_LENGTH]);
-            bytes_passed += token.size();
+            bytes_passed += lane_length;
         }
         // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane ordering is
         // exactly what a batched kernel gets wrong.
@@ -524,8 +556,14 @@ struct sha256_multistate_loop_from_sz {
     }
 };
 
-/** @brief Digests a batch of tokens through one `sz_sha256_multistate_update` call. */
-template <sz_sha256_multistate_update_t update_>
+/**
+ *  @brief Digests a batch of tokens through one `sz_sha256_multistate_update` call.
+ *
+ *  Update and digest come from the same tier on purpose. Goldmont is legacy-SSE SHA-NI while Skylake and
+ *  above are AVX-512, and pairing a legacy-SSE update with a wide digest in one loop makes every SHA-NI
+ *  instruction pay an AVX-SSE transition, which reads as a slow kernel rather than as a mixed measurement.
+ */
+template <sz_sha256_multistate_update_t update_, sz_sha256_multistate_digest_t digest_, typename lanes_>
 struct sha256_multistate_from_sz {
 
     environment_t const &env;
@@ -536,15 +574,16 @@ struct sha256_multistate_from_sz {
         std::size_t bytes_passed = 0;
         for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
             std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            std::size_t const lane_length = lanes_::length(lane_index, token.size());
             lanes[lane_index].start = token.data();
-            lanes[lane_index].length = token.size();
+            lanes[lane_index].length = lane_length;
             sz_sha256_state_init(&states[lane_index]);
-            bytes_passed += token.size();
+            bytes_passed += lane_length;
         }
         sz_sequence_t texts;
         sz_sequence_from_string_views(lanes, multistate_lanes_k, &texts);
         update_(states, &texts);
-        sz_sha256_multistate_digest(states, multistate_lanes_k, digests);
+        digest_(states, multistate_lanes_k, digests);
         // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane ordering is
         // exactly what a batched kernel gets wrong.
         sz_u64_t mixed = 0;
@@ -563,26 +602,44 @@ struct sha256_multistate_from_sz {
     }
 };
 
-void bench_sha256_multistate(environment_t const &env) {
+/** @brief Runs every multi-state backend against one lane-length shape. */
+template <typename lanes_>
+static void bench_sha256_multistate_shape(environment_t const &env, std::string const &suffix) {
 
     // Baseline is the realistic status quo: one dispatched single-state hash per message, so the reported
-    // speedup isolates the structural batch win rather than a backend-versus-serial difference.
-    auto validator = sha256_multistate_loop_from_sz {env};
-    bench_result_t base = bench_unary(env, "sz_sha256_multistate_loop", validator).log();
+    // speedup isolates the structural batch win rather than a backend-versus-serial difference. The baseline
+    // is rebuilt per shape, so each row compares like with like.
+    auto validator = sha256_multistate_loop_from_sz<lanes_> {env};
+    bench_result_t base = bench_unary(env, "sz_sha256_multistate_loop" + suffix, validator).log();
 
-    bench_unary(env, "sz_sha256_multistate_serial", validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_serial> {env})
+    bench_unary(env, "sz_sha256_multistate_serial" + suffix, validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial,
+                                          lanes_> {env})
         .log(base);
+#if SZ_USE_GOLDMONT
+    bench_unary(env, "sz_sha256_multistate_goldmont" + suffix, validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_goldmont, sz_sha256_multistate_digest_goldmont,
+                                          lanes_> {env})
+        .log(base);
+#endif
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_sha256_multistate_haswell", validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_haswell> {env})
+    bench_unary(env, "sz_sha256_multistate_haswell" + suffix, validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_haswell, sz_sha256_multistate_digest_haswell,
+                                          lanes_> {env})
         .log(base);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_sha256_multistate_skylake", validator,
-                sha256_multistate_from_sz<sz_sha256_multistate_update_skylake> {env})
+    bench_unary(env, "sz_sha256_multistate_skylake" + suffix, validator,
+                sha256_multistate_from_sz<sz_sha256_multistate_update_skylake, sz_sha256_multistate_digest_skylake,
+                                          lanes_> {env})
         .log(base);
 #endif
+}
+
+void bench_sha256_multistate(environment_t const &env) {
+    bench_sha256_multistate_shape<sha256_lanes_uniform_t>(env, sha256_lanes_uniform_t::name_k);
+    bench_sha256_multistate_shape<sha256_lanes_one_short_t>(env, sha256_lanes_one_short_t::name_k);
+    bench_sha256_multistate_shape<sha256_lanes_one_long_t>(env, sha256_lanes_one_long_t::name_k);
 }
 
 void bench_sha256(environment_t const &env) {

@@ -229,12 +229,21 @@ SZ_HELPER_INLINE void sz_sha256_round_haswell_(                                 
  *  @brief Transposes and compresses one 64-byte block for each of 8 lanes into word-major hash registers.
  *  @param hashes Eight registers of word-major hash state, updated in place.
  *  @param lane_blocks Pointers to 8 message blocks, one per lane.
+ *  @param active_u32x8 All-ones per lane whose block counts; the rest keep their hash bit-for-bit.
+ *
+ *  Masking rides on the closing accumulation rather than on a saved copy and a blend. Compression ends in
+ *  `hash += working`, so clearing the addend for a lane is all it needs to sit out, which costs one `vpand`
+ *  per word and one live mask register at a point where the state and the message window are already
+ *  competing for sixteen. AVX2 has no write mask, hence the gated addend rather than a masked add. The
+ *  rounds still run for an inactive lane and produce a value nobody reads, so its block pointer only has to
+ *  be readable - `sz_sha256_state_t::block` is always 64 valid bytes and serves that purpose.
  *
  *  A 64-byte block is two 256-bit registers per lane, so the sixteen message words come from two independent
  *  eight-by-eight transposes. The window lives in a local rather than a parameter so it is not forced to
  *  memory across a call boundary.
  */
-SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8_t const *const *lane_blocks) {
+SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8_t const *const *lane_blocks,
+                                                  __m256i active_u32x8) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
 
     __m256i const byte_swap_u8x32 = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, //
@@ -353,87 +362,144 @@ SZ_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8
                                  state_h_u32x8, &state_a_u32x8, schedule_u32x8[15], turn_constants[15]);
     }
 
-    hashes_u32x8[0] = _mm256_add_epi32(hashes_u32x8[0], state_a_u32x8);
-    hashes_u32x8[1] = _mm256_add_epi32(hashes_u32x8[1], state_b_u32x8);
-    hashes_u32x8[2] = _mm256_add_epi32(hashes_u32x8[2], state_c_u32x8);
-    hashes_u32x8[3] = _mm256_add_epi32(hashes_u32x8[3], state_d_u32x8);
-    hashes_u32x8[4] = _mm256_add_epi32(hashes_u32x8[4], state_e_u32x8);
-    hashes_u32x8[5] = _mm256_add_epi32(hashes_u32x8[5], state_f_u32x8);
-    hashes_u32x8[6] = _mm256_add_epi32(hashes_u32x8[6], state_g_u32x8);
-    hashes_u32x8[7] = _mm256_add_epi32(hashes_u32x8[7], state_h_u32x8);
+    hashes_u32x8[0] = _mm256_add_epi32(hashes_u32x8[0], _mm256_and_si256(active_u32x8, state_a_u32x8));
+    hashes_u32x8[1] = _mm256_add_epi32(hashes_u32x8[1], _mm256_and_si256(active_u32x8, state_b_u32x8));
+    hashes_u32x8[2] = _mm256_add_epi32(hashes_u32x8[2], _mm256_and_si256(active_u32x8, state_c_u32x8));
+    hashes_u32x8[3] = _mm256_add_epi32(hashes_u32x8[3], _mm256_and_si256(active_u32x8, state_d_u32x8));
+    hashes_u32x8[4] = _mm256_add_epi32(hashes_u32x8[4], _mm256_and_si256(active_u32x8, state_e_u32x8));
+    hashes_u32x8[5] = _mm256_add_epi32(hashes_u32x8[5], _mm256_and_si256(active_u32x8, state_f_u32x8));
+    hashes_u32x8[6] = _mm256_add_epi32(hashes_u32x8[6], _mm256_and_si256(active_u32x8, state_g_u32x8));
+    hashes_u32x8[7] = _mm256_add_epi32(hashes_u32x8[7], _mm256_and_si256(active_u32x8, state_h_u32x8));
 }
 
 /**
- *  @brief Compresses @p blocks_count whole blocks for 8 already block-aligned lanes.
- *  @param states The 8 lane states, whose hash words are gathered on entry and scattered on exit.
- *  @param cursors Per-lane read positions, advanced past everything consumed.
- *  @param blocks_count Whole 64-byte blocks available in every one of the 8 lanes.
+ *  @brief Compresses each lane's own run of whole blocks, plus an optional buffered block ahead of them.
+ *  @param states The lane states, whose hash words are gathered on entry and scattered on exit.
+ *  @param active_lanes_count Lanes owning a state, 1 to 8; the rest borrow lane zero and are discarded.
+ *  @param buffered_bitmask Lanes whose `block` the caller has just filled to 64 bytes, compressed first.
+ *  @param cursors Per-lane read positions, advanced past every block consumed.
+ *  @param blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs as far as the largest.
+ *
+ *  Lanes retire independently. `blocks_per_lane` rides in a register as a countdown, and two masks come off
+ *  it each turn: `counts > 0` says whose accumulation lands, `counts > 1` says whose cursor steps. Splitting
+ *  the two is what parks a retiring lane on its @b last full block instead of on a short tail, so every read
+ *  stays in bounds with no per-block pointer select. A lane owning no blocks at all reads its own `block`
+ *  buffer, which is always 64 valid bytes.
+ *
+ *  The gather and scatter go through one 32-byte temporary rather than a 256-byte array, since neither is
+ *  live across the loop between them.
+ *
  */
-SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_u8_t const **cursors,
-                                                         sz_size_t blocks_count) {
-    sz_u256_vec_t interleaved_vec[8];
+SZ_HELPER_AUTO void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                         sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                         sz_size_t const *blocks_per_lane) {
     __m256i hashes_u32x8[8];
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
-            interleaved_vec[word_index].u32s[lane_index] = states[lane_index].hash[word_index];
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        hashes_u32x8[word_index] = interleaved_vec[word_index].ymm;
+    sz_u256_vec_t word_vec, counts_vec, buffered_vec;
+    sz_u8_t const *sources[8];
+    sz_size_t largest_blocks_count = 0;
 
-    for (sz_size_t block_index = 0; block_index != blocks_count; ++block_index) {
-        sz_sha256_compress_haswell_(hashes_u32x8, cursors);
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) cursors[lane_index] += SZ_SHA256_BLOCK_LENGTH;
-    }
-
-    for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-        interleaved_vec[word_index].ymm = hashes_u32x8[word_index];
+    /*  The topped-up block and the fallback for a lane with nothing whole left are the same buffer, so one
+     *  source array serves both phases and the head costs no extra stack. An absent lane, or one with
+     *  nothing whole left, keeps reading that buffer and never advances, so the transpose stays in bounds
+     *  without a bounds test in the loop. */
     for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-            states[lane_index].hash[word_index] = interleaved_vec[word_index].u32s[lane_index];
-        states[lane_index].total_length += blocks_count * SZ_SHA256_BLOCK_LENGTH;
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        sz_size_t const lane_blocks = lane_index < active_lanes_count ? blocks_per_lane[lane_index] : 0;
+        counts_vec.u32s[lane_index] = (sz_u32_t)lane_blocks;
+        buffered_vec.u32s[lane_index] = ((buffered_bitmask >> lane_index) & 1u) ? 0xFFFFFFFFu : 0u;
+        sources[lane_index] = states[source_lane].block;
+        if (lane_blocks > largest_blocks_count) largest_blocks_count = lane_blocks;
     }
+
+    /*  Token-sized messages compress nothing here - their whole hash is the padding block the digest path
+     *  emits - so leaving before the gather keeps them off the word-major round trip entirely. */
+    if (buffered_bitmask == 0 && largest_blocks_count == 0) return;
+
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
+        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
+            sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+            word_vec.u32s[lane_index] = states[source_lane].hash[word_index];
+        }
+        hashes_u32x8[word_index] = word_vec.ymm;
+    }
+
+    if (buffered_bitmask) sz_sha256_compress_haswell_(hashes_u32x8, sources, buffered_vec.ymm);
+    for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
+        if (counts_vec.u32s[lane_index] != 0) sources[lane_index] = cursors[lane_index];
+
+    __m256i counts_u32x8 = counts_vec.ymm;
+    __m256i const ones_u32x8 = _mm256_set1_epi32(1);
+    for (sz_size_t block_index = 0; block_index != largest_blocks_count; ++block_index) {
+        __m256i const active_u32x8 = _mm256_cmpgt_epi32(counts_u32x8, _mm256_setzero_si256());
+        __m256i const advance_u32x8 = _mm256_cmpgt_epi32(counts_u32x8, ones_u32x8);
+        sz_u32_t const advance_bitmask = (sz_u32_t)_mm256_movemask_ps(_mm256_castsi256_ps(advance_u32x8));
+        sz_sha256_compress_haswell_(hashes_u32x8, sources, active_u32x8);
+        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
+            sources[lane_index] += ((advance_bitmask >> lane_index) & 1u) * SZ_SHA256_BLOCK_LENGTH;
+        counts_u32x8 = _mm256_add_epi32(counts_u32x8, active_u32x8);
+    }
+
+    for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
+        word_vec.ymm = hashes_u32x8[word_index];
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+            states[lane_index].hash[word_index] = word_vec.u32s[lane_index];
+    }
+    for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+        cursors[lane_index] += blocks_per_lane[lane_index] * SZ_SHA256_BLOCK_LENGTH;
 }
 
 SZ_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts) {
     sz_size_t const lanes_count = texts->count;
-    sz_size_t first_lane_index = 0;
 
-    for (; first_lane_index + 8 <= lanes_count; first_lane_index += 8) {
+    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 8) {
+        sz_size_t const lanes_left = lanes_count - first_lane_index;
+        sz_size_t const active_lanes_count = lanes_left < 8 ? lanes_left : 8;
         sz_u8_t const *cursors[8];
-        sz_size_t remaining[8];
-        sz_size_t shared_blocks = (sz_size_t)-1;
+        sz_size_t remaining[8], blocks_per_lane[8];
+        sz_u32_t buffered_bitmask = 0;
 
-        /*  Top up any buffered partial block first, so every lane that still holds a whole block is aligned.
-         *  A lane too short to fill its block keeps fewer than 64 bytes, which drives the shared count to
-         *  zero on its own and keeps the wide path off. */
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index) {
+        /*  Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
+         *  lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
+         *  the head, body and tail below only move bytes. */
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
             cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
             remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+
+            /*  The countdown rides in 32-bit lanes AVX2 compares as signed, so a chunk longer than that many
+             *  blocks goes through the single-state kernel over the very same state and sits the group out. */
+            if (remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH > 0x7FFFFFFFull) {
+                sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
+                remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
+                continue;
+            }
+
+            state->total_length += remaining[lane_index];
             if (state->block_length != 0) {
-                sz_size_t const missing = 64 - state->block_length;
+                sz_size_t const missing = SZ_SHA256_BLOCK_LENGTH - state->block_length;
                 if (remaining[lane_index] >= missing) {
-                    sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], missing);
+                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
+                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
+                    state->block_length = 0;
                     cursors[lane_index] += missing, remaining[lane_index] -= missing;
                 }
             }
-            if (remaining[lane_index] / 64 < shared_blocks) shared_blocks = remaining[lane_index] / 64;
+            blocks_per_lane[lane_index] = remaining[lane_index] / SZ_SHA256_BLOCK_LENGTH;
         }
 
-        if (shared_blocks != 0) {
-            sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], cursors, shared_blocks);
-            for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
-                remaining[lane_index] -= shared_blocks * SZ_SHA256_BLOCK_LENGTH;
-        }
+        sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
+                                             blocks_per_lane);
 
-        for (sz_size_t lane_index = 0; lane_index != 8; ++lane_index)
-            if (remaining[lane_index] != 0)
-                sz_sha256_state_update_serial(&states[first_lane_index + lane_index], (sz_cptr_t)cursors[lane_index],
-                                              remaining[lane_index]);
+        /*  Whatever is left cannot fill a block, so it only ever buffers. */
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            sz_size_t const tail_length = remaining[lane_index] % SZ_SHA256_BLOCK_LENGTH;
+            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
+                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+            state->block_length += tail_length;
+        }
     }
-
-    for (; first_lane_index != lanes_count; ++first_lane_index)
-        sz_sha256_state_update_serial(&states[first_lane_index], texts->get_start(texts->handle, first_lane_index),
-                                      texts->get_length(texts->handle, first_lane_index));
 }
 
 /**
@@ -489,16 +555,8 @@ SZ_HELPER_AUTO void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
         hashes_u32x8[word_index] = interleaved_vec[word_index].ymm;
 
-    if (any_overflow == sz_true_k) {
-        __m256i unchanged_u32x8[8];
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-            unchanged_u32x8[word_index] = hashes_u32x8[word_index];
-        sz_sha256_compress_haswell_(hashes_u32x8, carrier_blocks);
-        for (sz_size_t word_index = 0; word_index != 8; ++word_index)
-            hashes_u32x8[word_index] = _mm256_blendv_epi8(unchanged_u32x8[word_index], hashes_u32x8[word_index],
-                                                        overflow_vec.ymm);
-    }
-    sz_sha256_compress_haswell_(hashes_u32x8, final_blocks);
+    if (any_overflow == sz_true_k) sz_sha256_compress_haswell_(hashes_u32x8, carrier_blocks, overflow_vec.ymm);
+    sz_sha256_compress_haswell_(hashes_u32x8, final_blocks, _mm256_set1_epi32(-1));
 
     for (sz_size_t word_index = 0; word_index != 8; ++word_index)
         interleaved_vec[word_index].ymm = hashes_u32x8[word_index];
