@@ -737,7 +737,30 @@ if sz_target == "stringzilla":
     ext_modules = [
         Extension(
             "stringzilla",
-            ["python/stringzilla.c"] + STRINGZILLA_CORE_SOURCES,
+            [
+                "python/stringzilla/stringzilla.c",
+                "python/stringzilla/shared.c",
+                "python/stringzilla/file.c",
+                "python/stringzilla/str.c",
+                "python/stringzilla/strs.c",
+                "python/stringzilla/memory.c",
+                "python/stringzilla/hash.c",
+                "python/stringzilla/cipher.c",
+                "python/stringzilla/compare.c",
+                "python/stringzilla/find.c",
+                "python/stringzilla/sort.c",
+                "python/stringzilla/intersect.c",
+                "python/stringzilla/utf8_runes.c",
+                "python/stringzilla/utf8_tokens.c",
+                "python/stringzilla/utf8_boundaries.c",
+                "python/stringzilla/utf8_wordbreaks.c",
+                "python/stringzilla/utf8_graphemes.c",
+                "python/stringzilla/utf8_sentences.c",
+                "python/stringzilla/utf8_linebreaks.c",
+                "python/stringzilla/utf8_uncased_fold.c",
+                "python/stringzilla/utf8_uncased.c",
+                "python/stringzilla/utf8_norm.c",
+            ] + STRINGZILLA_CORE_SOURCES,
             include_dirs=["include", "c/stringzilla"],
             extra_compile_args=compile_args,
             extra_link_args=link_args,
@@ -754,7 +777,12 @@ elif sz_target == "stringzillas-cpus":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c"]
+            [
+                "python/stringzillas/stringzillas.c",
+                "python/stringzillas/device_scope.c",
+                "python/stringzillas/similarities.c",
+                "python/stringzillas/fingerprints.c",
+            ]
             + STRINGZILLAS_API_CPP_SOURCES
             + STRINGZILLAS_CPUS_SOURCES
             + STRINGZILLAS_RUNTIME_SOURCES,
@@ -791,7 +819,12 @@ elif sz_target == "stringzillas-cuda":
     ext_modules = [
         Extension(
             "stringzillas",
-            ["python/stringzillas.c"]
+            [
+                "python/stringzillas/stringzillas.c",
+                "python/stringzillas/device_scope.c",
+                "python/stringzillas/similarities.c",
+                "python/stringzillas/fingerprints.c",
+            ]
             + STRINGZILLAS_API_CU_SOURCES
             + STRINGZILLAS_CPUS_SOURCES
             + STRINGZILLAS_CUDA_SOURCES
