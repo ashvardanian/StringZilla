@@ -222,9 +222,9 @@ fn build_stringzilla() -> HashMap<String, bool> {
     // bugs that deserve a loud error, not a silent fallback to a slower tier.
     build.compile("stringzilla");
 
-    // Only re-run the C build when the C sources, headers, or probes change. The Rust source
-    // (`rust/stringzilla.rs`) does not feed this compilation, so listing it here forced a full ~55s C
-    // rebuild on every Rust-only edit.
+    // Only re-run the C build when the C sources, headers, or probes change. The Rust module trees under
+    // `rust/` do not feed this compilation, so listing them here forced a full ~55s C rebuild on every
+    // Rust-only edit.
     println!("cargo:rerun-if-changed=c/stringzilla");
     println!("cargo:rerun-if-changed=include/stringzilla");
     println!("cargo:rerun-if-changed=probes");
