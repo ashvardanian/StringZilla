@@ -66,8 +66,8 @@ SZ_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 /**
  *  @brief Suggested default batch size for callers that stream boundaries through the `sz_utf8_find_*` kernels.
  *
- *  Iterators that emit one segment/delimiter at a time (the Python and C++ bindings) buffer this many boundaries
- *  per call so the per-item overhead amortizes without an unbounded output buffer. It is only a default - any
+ *  Iterators that emit one segment/delimiter at a time buffer this many boundaries per call so the per-item
+ *  overhead amortizes without an unbounded output buffer. It is only a default - any
  *  capacity works, and the kernels report `bytes_consumed` so the caller can resume past a full buffer.
  */
 enum { sz_iterators_default_steps_k = 64 };

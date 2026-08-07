@@ -568,8 +568,7 @@ public static unsafe class Sz {
         new(haystack, needle, overlapping: false);
 
     /// <summary>Splits at the first occurrence of <paramref name="separator"/> into (before, separator,
-    /// after) views; if absent, returns (<paramref name="text"/>, empty, empty). Mirrors Python's
-    /// <c>str.partition</c>.</summary>
+    /// after) views; if absent, returns (<paramref name="text"/>, empty, empty).</summary>
     public static Partition Partition(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) {
         long at = IndexOf(text, separator);
         if (at < 0) return new Partition(text, default, default);
@@ -577,7 +576,7 @@ public static unsafe class Sz {
     }
 
     /// <summary>As <see cref="Partition"/> but at the last occurrence; if absent, returns
-    /// (empty, empty, <paramref name="text"/>). Mirrors Python's <c>str.rpartition</c>.</summary>
+    /// (empty, empty, <paramref name="text"/>).</summary>
     public static Partition RPartition(ReadOnlySpan<byte> text, ReadOnlySpan<byte> separator) {
         long at = LastIndexOf(text, separator);
         if (at < 0) return new Partition(default, default, text);
@@ -1115,7 +1114,7 @@ public unsafe ref struct UncasedMatchEnumerator {
     public UncasedMatchEnumerator GetEnumerator() => this;
 }
 
-/// <summary>A 256-bit set of byte values (mirrors C <c>sz_byteset_t</c>).</summary>
+/// <summary>A 256-bit set of byte values.</summary>
 [StructLayout(LayoutKind.Sequential, Size = 32)]
 public unsafe struct Byteset {
     private fixed ulong _w[4];

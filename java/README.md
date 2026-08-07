@@ -104,7 +104,7 @@ for (MemorySegment line : StringZilla.splitWhitespaces(text).skipEmpty()) use(li
 long[] offsets = StringZilla.matches(haystack, needle).toArray(); // every offset; .overlapping() for overlaps
 StringZilla.uncasedMatches(haystack, needle).stream().forEach(this::use); // caseless; Match.offset/length
 
-StringZilla.Partition parts = StringZilla.partition(text, equals); // cf. Python str.partition
+StringZilla.Partition parts = StringZilla.partition(text, equals); // (before, separator, after)
 ```
 
 The zero-allocation cursor, e.g. to sort a file's lines without materializing them:
@@ -160,7 +160,7 @@ Pass a native `MemorySegment` (an off-heap `Arena`, a direct `ByteBuffer`, an `M
 | heap `MemorySegment` (e.g. `BytesRef`) | zero-copy          | copies once    |
 | native `MemorySegment` (off-heap)      | zero-copy          | zero-copy      |
 
-The copy exists only because the JVM hides the address of pinned heap memory; .NET exposes it, so the C# binding scans `byte[]` with no copy.
+The copy exists only because the JVM hides the address of pinned heap memory.
 For repeated pointer searches over the same large on-heap buffer, wrap it in a native `MemorySegment` once and reuse it.
 
 ## Zero-Copy with Apache Lucene

@@ -374,7 +374,7 @@ func (h *Hasher) Sum64() uint64 {
 }
 
 // Digest returns the current 64-bit hash without consuming the state.
-// This is an alias for Sum64() for consistency with other bindings.
+// This is an alias for Sum64().
 func (h *Hasher) Digest() uint64 {
 	return h.Sum64()
 }
@@ -445,7 +445,7 @@ func (h *Sha256) Digest() [32]byte {
 }
 
 // Hexdigest returns the current SHA-256 hash as a lowercase hexadecimal string.
-// This is a convenience method matching Python's hashlib interface.
+// This is a convenience wrapper over Digest().
 func (h *Sha256) Hexdigest() string {
 	digest := h.Digest()
 	return fmt.Sprintf("%x", digest)

@@ -516,8 +516,8 @@ class safe_vector {
      *  (see `device_alloc` in `stringzillas/types.cuh`). Allocators that say nothing - `std::allocator` included -
      *  are assumed reachable, so nothing else needs changing.
      *
-     *  @note Detected by overload resolution rather than a `requires` expression: this header is compiled at
-     *        C++17 by the Python extension, where concepts are unavailable.
+     *  @note Detected by overload resolution rather than a `requires` expression: this header must compile at
+     *        C++17, where concepts are unavailable.
      */
     template <typename probed_type_>
     static constexpr bool allocator_host_accessible_(decltype(probed_type_::host_accessible_k) *) noexcept {

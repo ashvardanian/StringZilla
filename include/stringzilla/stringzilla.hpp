@@ -2874,7 +2874,7 @@ class basic_string_slice {
     /**
      *  @brief All @b non-overlapping case-insensitive matches of a pre-compiled UTF-8 needle, as a lazy view.
      *  @param needle A pre-compiled pattern; its folding metadata is cached and reused across the whole scan.
-     *  @return A @ref find_matches_view yielding each match as a `string_view` (the C++ twin of Rust/Python `Utf8UncasedMatches`).
+     *  @return A @ref find_matches_view yielding each match as a `string_view`.
      */
     template <typename needle_char_type_>
     find_matches_view<string_view, matcher_utf8_uncased_search<string_view, needle_char_type_>> utf8_uncased_matches(

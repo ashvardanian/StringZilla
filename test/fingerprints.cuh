@@ -42,9 +42,6 @@ using ashvardanian::stringzillas::rabin_karp_rolling_hasher;
 using ashvardanian::stringzillas::unified_alloc;
 #endif
 
-using namespace stringzilla;
-using namespace stringzilla::scripts;
-
 #pragma region Helpers
 
 /** @brief Verifies that rolling and from-scratch slice digests agree for one hasher across `strs`. */
