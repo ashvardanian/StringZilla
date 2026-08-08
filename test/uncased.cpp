@@ -68,7 +68,7 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
@@ -102,13 +102,6 @@ static void check_uncased_fold_unit_( //
     sz_size_t const expected_length = (sz_size_t)std::strlen(expected);
     verify(produced_length == expected_length);
     verify(std::memcmp(produced, expected, expected_length) == 0);
-}
-
-/** @brief Prints one labeled hex dump line to `stderr`; used by the adversarial UTF-8 case tests below. */
-static void print_uncased_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t i = 0; i < length; ++i) std::fprintf(stderr, "%02X ", (unsigned char)bytes[i]);
-    std::fprintf(stderr, "\n");
 }
 
 /**
@@ -229,8 +222,8 @@ static void check_uncased_find_three_way_(                                  //
         stderr, "%s FAIL: base offset=%ld len=%zu | simd offset=%ld len=%zu kernel=%u | reference offset=%ld len=%zu\n",
         test_name, base_offset, (std::size_t)base_matched, simd_offset, (std::size_t)simd_matched,
         simd_metadata.kernel_id, reference_offset, (std::size_t)reference_matched);
-    print_uncased_test_bytes_("needle  ", needle, needle_length);
-    print_uncased_test_bytes_("haystack", haystack, haystack_length);
+    print_utf8_test_bytes_("needle  ", needle, needle_length);
+    print_utf8_test_bytes_("haystack", haystack, haystack_length);
     verify(base_matches_reference && "Uncased find base backend disagrees with the reference");
     verify(simd_matches_reference && "Uncased find SIMD backend disagrees with the reference");
     verify(base_matches_simd && "Uncased find backends disagree with each other");
@@ -262,7 +255,7 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
     char const *mode = max_needles_per_haystack == 0 ? "exhaustive" : "sampled";
     std::printf("    - fuzz testing (%s, haystack_len=%zu, queries=%zu)...\n", mode, haystack_length, total_queries);
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
 
     // Character pool with normal + weird Unicode characters from safety profiles
     char const *char_pool[] = {
@@ -448,7 +441,7 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
     while (queries_remaining > 0) {
         // 1. Generate random haystack of ~haystack_length bytes
         haystack.clear();
-        while (haystack.size() < haystack_length) haystack += char_pool[pool_dist(rng)];
+        while (haystack.size() < haystack_length) haystack += char_pool[pool_dist(generator)];
 
         // 2. Case-fold the haystack - expands up to 3x
         haystack_folded.resize(haystack.size() * 3);
@@ -533,9 +526,9 @@ static void test_uncased_find_fuzz(sz_utf8_uncased_search_t find_serial, sz_utf8
             // Sampled mode: random (start, length) pairs
             std::uniform_int_distribution<sz_size_t> start_dist(0, runes_in_folded_haystack - 1);
             for (std::size_t i = 0; i < needles_in_this_haystack && queries_remaining > 0; ++i) {
-                sz_size_t start = start_dist(rng);
+                sz_size_t start = start_dist(generator);
                 std::uniform_int_distribution<sz_size_t> rune_count_dist(1, runes_in_folded_haystack - start);
-                if (test_needle(start, rune_count_dist(rng))) {
+                if (test_needle(start, rune_count_dist(generator))) {
                     ++total_passed;
                     --queries_remaining;
                 }
@@ -2104,7 +2097,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
         "Hello \xF0\x9F\x8C\x8D World", // Hello 🌍 World
     };
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::size_t const content_count = span_over(utf8_content).size();
     std::uniform_int_distribution<std::size_t> content_dist(0, content_count - 1);
 
@@ -2117,7 +2110,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
 
         // Build up a random string of at least `min_text_length` bytes
         while (text.size() < min_text_length) {
-            std::size_t content_index = content_dist(rng);
+            std::size_t content_index = content_dist(generator);
             text.append(utf8_content[content_index]);
         }
         check(text);
@@ -2137,7 +2130,7 @@ void test_fold_equivalence(reference_ reference, candidate_ candidate, sz_size_t
     std::vector<char> input_buffer(all_runes.size() * 4); // Max UTF-8 size is 4 bytes per rune
     std::size_t const sweep_iterations = scale_iterations(6);
     for (std::size_t iteration = 0; iteration < sweep_iterations; ++iteration) {
-        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
+        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
 
         char *write_cursor = input_buffer.data();
         for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_encode(codepoint, (sz_u8_t *)write_cursor);
@@ -2221,7 +2214,7 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
                 if (folded_length > length) {
                     std::fprintf(stderr, "%s fold of invalid input returned %zu bytes for %zu input bytes\n",
                                  candidate.name, (std::size_t)folded_length, input_length);
-                    print_uncased_test_bytes_("input", input, input_length);
+                    print_utf8_test_bytes_("input", input, input_length);
                     verify(false && "Fold output must stay within 3x the input length plus one mis-decoded rune");
                 }
             });
@@ -2251,12 +2244,12 @@ static void check_uncased_safety_(sz::span<uncased_safety_backend_t const> backe
         }
 
     // Random garbage buffers spanning whole SIMD chunks
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration < random_inputs; ++iteration) {
-        std::size_t input_length = length_distribution(rng);
-        for (std::size_t index = 0; index < input_length; ++index) input[index] = (char)byte_distribution(rng);
+        std::size_t input_length = length_distribution(generator);
+        for (std::size_t index = 0; index < input_length; ++index) input[index] = (char)byte_distribution(generator);
         check(input, input_length);
     }
 

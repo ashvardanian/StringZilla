@@ -60,22 +60,11 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `print_utf8_test_bytes_`, `encoded_rune_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sv; // for `sz::string_view`
-
-#pragma region Helpers
-
-/** @brief Prints one labeled hex dump line to `stderr`; used by the malformed-input safety test below. */
-static void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t index = 0; index < length; ++index) std::fprintf(stderr, "%02X ", (unsigned char)bytes[index]);
-    std::fprintf(stderr, "\n");
-}
-
-#pragma endregion // Helpers
 
 #pragma region Unit
 
@@ -193,12 +182,12 @@ void test_norm_equivalence(reference_ reference, candidate_ candidate, std::size
     std::vector<char> input_buffer(all_runes.size() * 4);
     std::vector<char> output_reference(input_buffer.size() * 4 + 64); // decomposition can expand
     std::vector<char> output_candidate(input_buffer.size() * 4 + 64);
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
                                                    sz_normal_form_nfkc_k};
 
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
-        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), rng);
+        if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
         char *write_cursor = input_buffer.data();
         for (sz_rune_t codepoint : all_runes) write_cursor += sz_rune_encode(codepoint, (sz_u8_t *)write_cursor);
         sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
@@ -305,12 +294,12 @@ static void check_utf8_norm_safety_(sz_utf8_norm_t norm, sz_utf8_find_denormaliz
     }
 
     // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        std::size_t const input_length = length_distribution(generator);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
         for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, input, input_length);
             check(buffer, input_length);

@@ -341,9 +341,9 @@ struct utf8_segment_corpora_t {
     char const *family_name;                /**< human label printed by the driver (e.g. "word") */
     sz::span<sz::string_view const> motifs; /**< the family's own corner-case motifs */
     /** Streams the family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-    void (*dense_runs)(std::mt19937 &rng, utf8_run_sink_t sink, void *context);
+    void (*dense_runs)(std::mt19937 &generator, utf8_run_sink_t sink, void *context);
     /** Streams the family's long-range straddling constructions for a given @p gap to @p sink. */
-    void (*straddles)(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context);
+    void (*straddles)(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context);
     sz::span<sz::string_view const> regressions; /**< optional fixed hand-found regression inputs */
     utf8_corpus_alphabet_t const *alphabet;      /**< per-family random-corpus alphabet (null -> the shared default) */
 };
@@ -368,12 +368,18 @@ inline void print_utf8_test_bytes_(char const *label, char const *bytes, std::si
     std::fprintf(stderr, "\n");
 }
 
-/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
-inline void append_codepoint_(std::string &text, sz_rune_t codepoint) {
+/**
+ *  @brief One codepoint encoded as UTF-8 via `sz_rune_encode`; empty when the rune is unencodable.
+ *
+ *  Short-string optimization keeps the four bytes in the returned object, so the corpus builders that call this
+ *  once per codepoint never reach the allocator. Returning rather than appending is what lets every arm of a
+ *  corpus `switch` read as one `out.append(...)`.
+ */
+inline std::string encoded_rune_(sz_rune_t codepoint) {
     sz_u8_t bytes[4];
     sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
-    if (length == sz_rune_invalid_k) return;
-    text.append((char const *)bytes, (std::size_t)length);
+    if (length == sz_rune_invalid_k) return std::string();
+    return std::string((char const *)bytes, (std::size_t)length);
 }
 
 /**
@@ -392,17 +398,58 @@ static sz::string_view const utf8_astral_fixtures[] = {
 };
 
 /** @brief Append @p link_count Regional-Indicator codepoints to @p out (cleared first); cross-family run builder. */
-inline void utf8_dense_regional_indicators_(std::string &out, std::mt19937 &rng, std::size_t link_count) {
+inline void utf8_dense_regional_indicators_(std::string &out, std::mt19937 &generator, std::size_t link_count) {
     out.clear();
     std::uniform_int_distribution<sz_rune_t> indicator(0x1F1E6, 0x1F1FF); // U+1F1E6..U+1F1FF
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, indicator(rng));
+    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(indicator(generator)));
 }
 
 /**
- *  @brief Append one randomly chosen malformed-UTF-8 class to @p text: overlong encodings, surrogates, lone
- *         continuations, invalid leads, truncated tails, out-of-range leads, and noncharacters. Drawn from @p rng.
+ *  @brief Random well-formed UTF-8 of @p target_codepoints codepoints, spanning all four byte-widths and every
+ *         1->2->3->4 transition, so the count / find-nth / unpack / scan kernels hit their mixed-width paths.
  */
-inline void append_malformed_class_(std::string &text, std::mt19937 &rng) {
+inline std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &generator) {
+    // Disjoint ranges, one per byte-width, chosen to avoid surrogates and noncharacters.
+    static struct {
+        sz_rune_t low, high;
+    } const ranges[] = {
+        {0x000020u, 0x00007Eu}, // 1-byte ASCII printable
+        {0x0000A1u, 0x0007FFu}, // 2-byte Latin-1 symbols, Greek and Cyrillic letters
+        {0x000800u, 0x00CFFFu}, // 3-byte punctuation and CJK; stays below the U+D800 surrogate block
+        {0x010000u, 0x0EFFFFu}, // 4-byte symbols and emoji; avoids the plane-ender noncharacters
+    };
+    std::uniform_int_distribution<int> width_pick(0, 3);
+    std::string text;
+    text.reserve(target_codepoints * 4);
+    for (std::size_t index = 0; index != target_codepoints; ++index) {
+        int const width = width_pick(generator);
+        std::uniform_int_distribution<sz_rune_t> codepoint(ranges[width].low, ranges[width].high);
+        // Retry until one valid codepoint is actually appended, so the emitted count is exact.
+        std::size_t const before = text.size();
+        while (text.size() == before) text.append(encoded_rune_(codepoint(generator)));
+    }
+    return text;
+}
+
+/** @brief Well-formed UTF-8 of exactly @p target_bytes bytes, ASCII-padded to land on the mark. */
+inline std::string random_valid_utf8_bytes_(std::size_t target_bytes, std::mt19937 &generator) {
+    std::string text;
+    text.reserve(target_bytes);
+    while (text.size() != target_bytes) {
+        std::size_t const remaining = target_bytes - text.size();
+        std::string const one_rune = random_valid_utf8_(1, generator);
+        if (one_rune.size() <= remaining) text += one_rune;
+        else text.append(remaining, 'x');
+    }
+    return text;
+}
+
+/**
+ *  @brief The malformed-UTF-8 sample pool: overlong encodings, surrogates, lone continuations, invalid leads,
+ *         truncated tails, out-of-range leads, and noncharacters. Exposed so a test can sweep every class
+ *         deterministically instead of hoping a scaled-down random draw reaches all of them.
+ */
+inline sz::span<char const *const> malformed_classes_() {
     static char const *const malformed[] = {
         "\xC0\x80",         // overlong 2-byte encoding of NUL
         "\xC1\xBF",         // overlong 2-byte encoding of U+007F
@@ -425,32 +472,38 @@ inline void append_malformed_class_(std::string &text, std::mt19937 &rng) {
         "\xEF\xBF\xBE",     // plane-ender noncharacter U+FFFE
         "\xEF\xBF\xBF",     // plane-ender noncharacter U+FFFF
     };
-    std::size_t const count = span_over(malformed).size();
-    std::uniform_int_distribution<std::size_t> pick(0, count - 1);
-    text.append(malformed[pick(rng)]);
+    return span_over(malformed);
+}
+
+/** @brief One entry of `malformed_classes_()`, drawn from @p generator. */
+inline char const *random_malformed_class_(std::mt19937 &generator) {
+    sz::span<char const *const> const pool = malformed_classes_();
+    std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1);
+    return pool[pick(generator)];
 }
 
 /**
  *  @brief Apply structural mutation passes to @p text: NUL injection (10%), random byte-swap (10%), a
- *         truncate-last-codepoint pass, and a stray-continuation insertion. All randomness flows through @p rng.
+ *         truncate-last-codepoint pass, and a stray-continuation insertion. Randomness flows through @p generator.
  */
-inline void apply_mutation_passes_(std::string &text, std::mt19937 &rng) {
+inline void apply_mutation_passes_(std::string &text, std::mt19937 &generator) {
     if (text.empty()) return;
     std::uniform_int_distribution<std::size_t> byte_index(0, text.size() - 1);
     std::size_t const to_corrupt = text.size() / 10;
-    for (std::size_t index = 0; index != to_corrupt; ++index) text[byte_index(rng)] = '\0';
-    for (std::size_t index = 0; index != to_corrupt; ++index) std::swap(text[byte_index(rng)], text[byte_index(rng)]);
+    for (std::size_t index = 0; index != to_corrupt; ++index) text[byte_index(generator)] = '\0';
+    for (std::size_t index = 0; index != to_corrupt; ++index)
+        std::swap(text[byte_index(generator)], text[byte_index(generator)]);
 
     // Truncate the last codepoint: drop a 1-3 byte trailing run so a multi-byte sequence loses its tail.
     std::uniform_int_distribution<std::size_t> truncate_distribution(1, 3);
-    std::size_t const truncate_by = std::min((std::size_t)truncate_distribution(rng), text.size());
+    std::size_t const truncate_by = std::min((std::size_t)truncate_distribution(generator), text.size());
     text.resize(text.size() - truncate_by);
 
     // Insert a stray continuation byte at a random position, breaking codepoint alignment.
     if (!text.empty()) {
         std::uniform_int_distribution<std::size_t> insert_at(0, text.size());
         std::uniform_int_distribution<int> continuation(0x80, 0xBF);
-        text.insert(text.begin() + insert_at(rng), (char)continuation(rng));
+        text.insert(text.begin() + insert_at(generator), (char)continuation(generator));
     }
 }
 
@@ -496,7 +549,7 @@ static utf8_corpus_alphabet_t const utf8_default_alphabet = {
  */
 inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_length, utf8_corpus_flavor_t flavor,
                                              utf8_corpus_alphabet_t const &alphabet,
-                                             sz::span<sz::string_view const> motifs, std::mt19937 &rng) {
+                                             sz::span<sz::string_view const> motifs, std::mt19937 &generator) {
     out.clear();
     std::array<double, utf8_corpus_category_count_k> weights;
     for (int category = 0; category != utf8_corpus_category_count_k; ++category)
@@ -515,19 +568,21 @@ inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_l
     std::uniform_int_distribution<std::size_t> motif_pick(0, motifs.empty() ? 0 : motifs.size() - 1);
 
     while (out.size() < min_length) {
-        switch ((utf8_corpus_category_t)category(rng)) {
-        case utf8_corpus_malformed_k: append_malformed_class_(out, rng); break;
-        case utf8_corpus_boundary_k: append_codepoint_(out, alphabet.boundary_codepoints[boundary_pick(rng)]); break;
+        switch ((utf8_corpus_category_t)category(generator)) {
+        case utf8_corpus_malformed_k: out.append(random_malformed_class_(generator)); break;
+        case utf8_corpus_boundary_k:
+            out.append(encoded_rune_(alphabet.boundary_codepoints[boundary_pick(generator)]));
+            break;
         case utf8_corpus_astral_k: {
-            sz::string_view const fixture = utf8_astral_fixtures[astral_pick(rng)];
+            sz::string_view const fixture = utf8_astral_fixtures[astral_pick(generator)];
             out.append(fixture.data(), fixture.size());
         } break;
         case utf8_corpus_motif_k: {
-            sz::string_view const motif = motifs[motif_pick(rng)];
+            sz::string_view const motif = motifs[motif_pick(generator)];
             out.append(motif.data(), motif.size());
         } break;
         case utf8_corpus_snippet_k:
-        default: out.append(alphabet.snippets[snippet_pick(rng)]); break;
+        default: out.append(alphabet.snippets[snippet_pick(generator)]); break;
         }
     }
 }
@@ -745,7 +800,7 @@ inline void check_utf8_rule_coverage_(char const *family, sz_utf8_segmenter_t re
  *         Factored so each family's `_safety` runs one shared sweep instead of three copies of the 65 536-pair loop.
  */
 template <typename callback_type_>
-inline void for_each_adversarial_utf8_input_(std::mt19937 &rng, std::size_t random_input_count,
+inline void for_each_adversarial_utf8_input_(std::mt19937 &generator, std::size_t random_input_count,
                                              callback_type_ &&callback) {
     char input[utf8_unit_capacity_k];
 
@@ -773,8 +828,8 @@ inline void for_each_adversarial_utf8_input_(std::mt19937 &rng, std::size_t rand
     std::uniform_int_distribution<std::size_t> length_distribution(1, utf8_unit_capacity_k);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration != random_input_count; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        std::size_t const input_length = length_distribution(generator);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
         for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, input, input_length);
             callback((char const *)buffer, input_length);
@@ -874,7 +929,7 @@ struct utf8_differential_context_t {
     sz::span<utf8_segment_backend_t const> candidates;
     std::vector<std::string> labels; // "<family>:<candidate>" per candidate, named in the divergence record
     utf8_segment_corpora_t const *corpora;
-    std::mt19937 *rng;
+    std::mt19937 *generator;
     std::string scratch;
     std::size_t input_index; // rotates the capacity sweep when the multiplier samples instead of exhausts
 };
@@ -944,26 +999,26 @@ inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context,
     std::string mutated;
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         utf8_random_segmentation_corpus_(context.scratch, 400, utf8_corpus_flavor_t::valid_k, alphabet, motifs,
-                                         *context.rng);
+                                         *context.generator);
         utf8_differential_input_(context, "fuzz-corpus", iteration, context.scratch.data(), context.scratch.size(),
                                  utf8_corpus_flavor_t::valid_k);
 
         if ((iteration & 0x7u) == 0) {
             utf8_random_segmentation_corpus_(context.scratch, 4096, utf8_corpus_flavor_t::valid_k, alphabet, motifs,
-                                             *context.rng);
+                                             *context.generator);
             utf8_differential_input_(context, "fuzz-corpus-wide", iteration, context.scratch.data(),
                                      context.scratch.size(), utf8_corpus_flavor_t::valid_k);
         }
 
         utf8_random_segmentation_corpus_(context.scratch, 400, utf8_corpus_flavor_t::valid_k, alphabet, motifs,
-                                         *context.rng);
+                                         *context.generator);
         mutated.assign(context.scratch.data(), context.scratch.size());
-        apply_mutation_passes_(mutated, *context.rng);
+        apply_mutation_passes_(mutated, *context.generator);
         utf8_differential_input_(context, "fuzz-mutated", iteration, mutated.data(), mutated.size(),
                                  utf8_corpus_flavor_t::malformed_k);
 
         utf8_random_segmentation_corpus_(context.scratch, 400, utf8_corpus_flavor_t::malformed_k, alphabet, motifs,
-                                         *context.rng);
+                                         *context.generator);
         utf8_differential_input_(context, "fuzz-malformed", iteration, context.scratch.data(), context.scratch.size(),
                                  utf8_corpus_flavor_t::malformed_k);
     }
@@ -976,7 +1031,7 @@ inline void utf8_differential_fuzz_dense_runs_(utf8_differential_context_t &cont
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         utf8_sink_context_t sink;
         sink.context = &context, sink.stressor = "dense-run", sink.iteration = iteration, sink.filler = 0;
-        context.corpora->dense_runs(*context.rng, utf8_sink_run_, &sink);
+        context.corpora->dense_runs(*context.generator, utf8_sink_run_, &sink);
     }
 }
 
@@ -989,8 +1044,8 @@ inline void utf8_differential_fuzz_straddles_(utf8_differential_context_t &conte
         for (std::size_t gap : utf8_straddle_gaps) {
             utf8_sink_context_t sink;
             sink.context = &context, sink.stressor = "straddle", sink.iteration = iteration;
-            sink.filler = filler_length(*context.rng);
-            context.corpora->straddles(*context.rng, gap, utf8_sink_run_, &sink);
+            sink.filler = filler_length(*context.generator);
+            context.corpora->straddles(*context.generator, gap, utf8_sink_run_, &sink);
         }
 }
 
@@ -1001,7 +1056,7 @@ inline void utf8_differential_alignment_sweep_(utf8_differential_context_t &cont
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
     for (std::size_t round = 0; round != span_over(utf8_sweep_capacities).size(); ++round) {
         utf8_random_segmentation_corpus_(context.scratch, 256, utf8_corpus_flavor_t::valid_k, alphabet,
-                                         context.corpora->motifs, *context.rng);
+                                         context.corpora->motifs, *context.generator);
         std::string const probe = context.scratch; // stable source copied into each aligned buffer
         for_each_cacheline_offset_(probe.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, probe.data(), probe.size());
@@ -1121,7 +1176,7 @@ inline void test_utf8_segment_equivalence_(sz_utf8_segmenter_t reference,
     std::printf("  - testing %s serial-vs-ISA differential...\n", corpora.family_name);
     utf8_differential_context_t context;
     context.reference = reference, context.candidates = candidates, context.corpora = &corpora,
-    context.rng = &global_random_generator(), context.input_index = 0;
+    context.generator = &global_random_generator(), context.input_index = 0;
     for (utf8_segment_backend_t const &candidate : candidates)
         context.labels.push_back(std::string(corpora.family_name) + ":" + candidate.name);
 

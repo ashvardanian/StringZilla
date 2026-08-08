@@ -119,10 +119,10 @@ static sz::string_view const utf8_sentences_motifs[] = {
 /** @brief ATerm + Close* + Sp* run @p link_count wide, then a Lower (SB8 continuation, no break), into @p out. */
 static void utf8_sentences_dense_aterm_sp_lower_(std::string &out, std::size_t link_count) {
     out.clear();
-    append_codepoint_(out, 0x0055);                                                           // 'U' Upper
-    append_codepoint_(out, 0x002E);                                                           // '.' ATerm
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x0020); // Sp run
-    append_codepoint_(out, 0x0061);                                                           // 'a' Lower
+    out.append(encoded_rune_(0x0055));                                                           // 'U' Upper
+    out.append(encoded_rune_(0x002E));                                                           // '.' ATerm
+    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x0020)); // Sp run
+    out.append(encoded_rune_(0x0061));                                                           // 'a' Lower
 }
 
 /** @brief Terminator-dense `A. A. A. ...` repeated @p link_count times (one break per terminator), into @p out. */
@@ -135,44 +135,45 @@ static void utf8_sentences_dense_terminators_(std::string &out, std::size_t link
 static void utf8_sentences_dense_cjk_term_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x4E2D); // 中
-        append_codepoint_(out, 0x3002); // 。 ideographic full stop (STerm)
-        append_codepoint_(out, 0x0020); // Sp
+        out.append(encoded_rune_(0x4E2D)); // 中
+        out.append(encoded_rune_(0x3002)); // 。 ideographic full stop (STerm)
+        out.append(encoded_rune_(0x0020)); // Sp
     }
 }
 
 /** @brief Stream the sentence family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_sentences_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_sentences_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
     utf8_sentences_dense_aterm_sp_lower_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_sentences_dense_terminators_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_sentences_dense_cjk_term_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief SB8: `Upper ATerm Sp{gap} Lower` — long Sp run before a lowercase keeps one sentence, into @p out. */
-static void utf8_straddle_sb8_lower_(std::string &out, std::size_t gap) {
+static void utf8_sentences_straddle_sb8_lower_(std::string &out, std::size_t gap) {
     out.clear();
-    append_codepoint_(out, 0x0055);                                                    // 'U'
-    append_codepoint_(out, 0x002E);                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(out, 0x0020); // Sp run across windows
-    append_codepoint_(out, 0x0061);                                                    // 'a' Lower
+    out.append(encoded_rune_(0x0055));                                                    // 'U'
+    out.append(encoded_rune_(0x002E));                                                    // '.'
+    for (std::size_t index = 0; index != gap; ++index) out.append(encoded_rune_(0x0020)); // Sp run across windows
+    out.append(encoded_rune_(0x0061));                                                    // 'a' Lower
 }
 
 /** @brief SB11: `Upper ATerm Sp{gap} Upper` — same run before an uppercase must break, into @p out. */
-static void utf8_straddle_sb11_upper_(std::string &out, std::size_t gap) {
+static void utf8_sentences_straddle_sb11_upper_(std::string &out, std::size_t gap) {
     out.clear();
-    append_codepoint_(out, 0x0055);                                                    // 'U'
-    append_codepoint_(out, 0x002E);                                                    // '.'
-    for (std::size_t index = 0; index != gap; ++index) append_codepoint_(out, 0x0020); // Sp run across windows
-    append_codepoint_(out, 0x0042);                                                    // 'B' Upper
+    out.append(encoded_rune_(0x0055));                                                    // 'U'
+    out.append(encoded_rune_(0x002E));                                                    // '.'
+    for (std::size_t index = 0; index != gap; ++index) out.append(encoded_rune_(0x0020)); // Sp run across windows
+    out.append(encoded_rune_(0x0042));                                                    // 'B' Upper
 }
 
 /** @brief Stream the sentence family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_sentences_straddles_(std::mt19937 & /*rng*/, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_sentences_straddles_(std::mt19937 & /*generator*/, std::size_t gap, utf8_run_sink_t sink,
+                                      void *context) {
     std::string scratch;
-    utf8_straddle_sb8_lower_(scratch, gap), sink(context, scratch.data(), scratch.size());
-    utf8_straddle_sb11_upper_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_sentences_straddle_sb8_lower_(scratch, gap), sink(context, scratch.data(), scratch.size());
+    utf8_sentences_straddle_sb11_upper_(scratch, gap), sink(context, scratch.data(), scratch.size());
 }
 
 /** @brief Sentence-biased snippets: ATerm/STerm + space + case across scripts, numeric, CJK stop, ParaSep. */

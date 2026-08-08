@@ -60,20 +60,13 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "stringzilla.hpp" // `global_random_generator`, `random_string`
+#include "utf8.hpp" // `encoded_rune_`, `random_valid_utf8_`, `print_utf8_test_bytes_`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sv; // for `sz::string_view`
 
 #pragma region Helpers
-
-/** @brief Prints one labeled hex dump line to `stderr`; used by the malformed-input safety test below. */
-static void print_utf8_test_bytes_(char const *label, char const *bytes, std::size_t length) {
-    std::fprintf(stderr, "  %s (%zu bytes): ", label, length);
-    for (std::size_t index = 0; index < length; ++index) std::fprintf(stderr, "%02X ", (unsigned char)bytes[index]);
-    std::fprintf(stderr, "\n");
-}
 
 /**
  *  @brief Runs one UTF-8 backend's counting and boundary-finding kernels over the known-answer anchors
@@ -612,7 +605,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         "\xE2\x81\x9F", "\xE3\x80\x80",                                                      // 3-byte
     };
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::size_t const utf8_content_count = span_over(utf8_content).size();
     std::size_t const special_delimiter_count = span_over(special_chars).size();
     std::size_t const total_strings_to_sample = utf8_content_count + special_delimiter_count;
@@ -645,7 +638,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
 
         // Build up a random string of at least `min_text_length` bytes
         while (text.size() < min_text_length) {
-            std::size_t random_content_index = content_dist(rng);
+            std::size_t random_content_index = content_dist(generator);
             if (random_content_index < utf8_content_count) { text.append(utf8_content[random_content_index]); }
             else { text.append(special_chars[random_content_index - utf8_content_count]); }
         }
@@ -655,15 +648,15 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
         std::size_t num_bytes_to_corrupt = text.size() / 10;
         std::uniform_int_distribution<std::size_t> byte_index_dist(0, text.size() - 1);
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t byte_index = byte_index_dist(rng);
+            std::size_t byte_index = byte_index_dist(generator);
             text[byte_index] = '\0';
         }
         check(text.data(), text.size());
 
         // Swap 10% of bytes at random positions, creating malformed UTF-8 sequences
         for (std::size_t i = 0; i < num_bytes_to_corrupt; ++i) {
-            std::size_t byte_index_1 = byte_index_dist(rng);
-            std::size_t byte_index_2 = byte_index_dist(rng);
+            std::size_t byte_index_1 = byte_index_dist(generator);
+            std::size_t byte_index_2 = byte_index_dist(generator);
             std::swap(text[byte_index_1], text[byte_index_2]);
         }
         check(text.data(), text.size());
@@ -673,7 +666,7 @@ void test_utf8_tokens_equivalence(reference_ reference, candidate_ candidate, //
     // so the SIMD load alignment - not just the content - is swept against the serial reference.
     std::string alignment_probe;
     while (alignment_probe.size() < 256) {
-        std::size_t random_content_index = content_dist(rng);
+        std::size_t random_content_index = content_dist(generator);
         if (random_content_index < utf8_content_count) { alignment_probe.append(utf8_content[random_content_index]); }
         else { alignment_probe.append(special_chars[random_content_index - utf8_content_count]); }
     }
@@ -780,12 +773,12 @@ void test_utf8_tokens_safety() {
 
     // Random garbage buffers spanning whole SIMD chunks, at every sub-cache-line alignment.
     std::size_t const random_inputs = scale_iterations(10000);
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        std::size_t const input_length = length_distribution(generator);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
         for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, input, input_length);
             check(buffer, input_length);
@@ -848,40 +841,6 @@ void test_utf8_tokens_all() {
 #pragma endregion // Drivers
 
 #pragma region Delimiter Helpers
-
-/** @brief Append one codepoint to @p text as UTF-8 via `sz_rune_encode` (silently skips invalid runes). */
-static void append_codepoint_(std::string &text, sz_rune_t codepoint) {
-    sz_u8_t bytes[4];
-    sz_rune_length_t const length = sz_rune_encode(codepoint, bytes);
-    if (length == sz_rune_invalid_k) return;
-    text.append((char const *)bytes, (std::size_t)length);
-}
-
-/**
- *  @brief Builds a random, well-formed UTF-8 string whose codepoints span all four byte-widths and every
- *         1->2->3->4 transition, mixing delimiter and non-delimiter codepoints so the scan kernels hit their
- *         mixed-width paths and resolve a match at every alignment.
- */
-static std::string random_valid_utf8_(std::size_t target_codepoints, std::mt19937 &rng) {
-    static struct {
-        sz_rune_t low, high;
-    } const ranges[] = {
-        {0x000020u, 0x00007Eu}, // 1-byte ASCII printable (space + punctuation + letters + digits)
-        {0x0000A1u, 0x0007FFu}, // 2-byte (Latin-1 symbols, Greek/Cyrillic letters)
-        {0x000800u, 0x00CFFFu}, // 3-byte (general punctuation, CJK; stays below U+D800 surrogates)
-        {0x010000u, 0x0EFFFFu}, // 4-byte (symbols, emoji; avoids the plane-ender noncharacters)
-    };
-    std::uniform_int_distribution<int> width_pick(0, 3);
-    std::string text;
-    text.reserve(target_codepoints * 4);
-    for (std::size_t index = 0; index != target_codepoints; ++index) {
-        int const width = width_pick(rng);
-        std::uniform_int_distribution<sz_rune_t> codepoint(ranges[width].low, ranges[width].high);
-        std::size_t const before = text.size();
-        while (text.size() == before) append_codepoint_(text, codepoint(rng));
-    }
-    return text;
-}
 
 /**
  *  @brief The UTF-8 delimiter segmenters compiled on this target. The always-present `dispatched` entry keeps the
@@ -1024,7 +983,7 @@ void test_utf8_delimiters_unit() {
  */
 static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, sz_utf8_segmenter_t finder_candidate,
                                              sz_size_t inputs) {
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::vector<sz_size_t> serial_offsets, serial_lengths, candidate_offsets, candidate_lengths, resumed_offsets,
         resumed_lengths;
 
@@ -1052,7 +1011,7 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 
     sz_size_t const ladder[] = {0u, 1u, 2u, 15u, 16u, 17u, 31u, 32u, 33u, 63u, 64u, 65u, 100u, 200u};
     for (sz_size_t codepoints : ladder) {
-        std::string const text = random_valid_utf8_(codepoints, rng);
+        std::string const text = random_valid_utf8_(codepoints, generator);
         check(text.data(), (sz_size_t)text.size());
     }
 
@@ -1074,7 +1033,7 @@ static void test_utf8_delimiters_equivalence(sz_utf8_segmenter_t finder_serial, 
 
     std::uniform_int_distribution<std::size_t> codepoint_distribution(0, 300);
     for (sz_size_t iteration = 0; iteration != inputs; ++iteration) {
-        std::string const text = random_valid_utf8_(codepoint_distribution(rng), rng);
+        std::string const text = random_valid_utf8_(codepoint_distribution(generator), generator);
         // The probe buffer itself is handed to the kernels: copying it back into a fresh `std::string` would
         // hand them whatever alignment the allocator picked, and the sweep would test one alignment repeatedly.
         for_each_cacheline_offset_(text.size(), [&](sz_ptr_t buffer, std::size_t /*offset*/) {
@@ -1125,12 +1084,12 @@ static void check_utf8_delimiters_safety_(sz_utf8_segmenter_t finder,
         check(input, 2);
     }
 
-    auto &rng = global_random_generator();
+    auto &generator = global_random_generator();
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_input_length);
     std::uniform_int_distribution<int> byte_distribution(0, 255);
     for (std::size_t iteration = 0; iteration != random_inputs; ++iteration) {
-        std::size_t const input_length = length_distribution(rng);
-        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(rng);
+        std::size_t const input_length = length_distribution(generator);
+        for (std::size_t index = 0; index != input_length; ++index) input[index] = (char)byte_distribution(generator);
         for_each_cacheline_offset_(input_length, [&](sz_ptr_t buffer, std::size_t /*offset*/) {
             std::memcpy(buffer, input, input_length);
             check(buffer, input_length);

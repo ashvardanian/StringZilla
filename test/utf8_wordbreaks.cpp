@@ -258,7 +258,7 @@ static sz::string_view const utf8_wordbreaks_seam_regressions[] = {
 /** @brief Katakana run @p link_count codepoints long (WB13 Katakana x Katakana), into @p out (cleared first). */
 static void utf8_wordbreaks_dense_katakana_(std::string &out, std::size_t link_count) {
     out.clear();
-    for (std::size_t index = 0; index != link_count; ++index) append_codepoint_(out, 0x30AB); // カ
+    for (std::size_t index = 0; index != link_count; ++index) out.append(encoded_rune_(0x30AB)); // カ
 }
 
 /** @brief Numeric run with MidNum and Extend marks, @p link_count groups (WB11/12 + Extend), into @p out. */
@@ -266,8 +266,8 @@ static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_co
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
         out.append("12");
-        append_codepoint_(out, 0x0301); // Extend combining mark inside a number
-        out.append(",34 ");             // MidNum comma
+        out.append(encoded_rune_(0x0301)); // Extend combining mark inside a number
+        out.append(",34 ");                // MidNum comma
     }
 }
 
@@ -275,9 +275,9 @@ static void utf8_wordbreaks_dense_numeric_(std::string &out, std::size_t link_co
 static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x0061);                         // 'a'
-        append_codepoint_(out, (index & 1u) ? 0x00B7 : 0x0027); // MIDDLE DOT or apostrophe
-        append_codepoint_(out, 0x0062);                         // 'b'
+        out.append(encoded_rune_(0x0061));                         // 'a'
+        out.append(encoded_rune_((index & 1u) ? 0x00B7 : 0x0027)); // MIDDLE DOT or apostrophe
+        out.append(encoded_rune_(0x0062));                         // 'b'
     }
 }
 
@@ -285,17 +285,17 @@ static void utf8_wordbreaks_dense_midletter_(std::string &out, std::size_t link_
 static void utf8_wordbreaks_dense_hebrew_quote_(std::string &out, std::size_t link_count) {
     out.clear();
     for (std::size_t index = 0; index != link_count; ++index) {
-        append_codepoint_(out, 0x05D0); // א
-        append_codepoint_(out, 0x0027); // single quote
-        append_codepoint_(out, 0x05D1); // ב
+        out.append(encoded_rune_(0x05D0)); // א
+        out.append(encoded_rune_(0x0027)); // single quote
+        out.append(encoded_rune_(0x05D1)); // ב
     }
 }
 
 /** @brief Stream the word family's high-density homogeneous runs (each spans several 64-byte windows) to @p sink. */
-static void utf8_wordbreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_dense_runs_(std::mt19937 &generator, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(rng);
-    utf8_dense_regional_indicators_(scratch, rng, wide_count), sink(context, scratch.data(), scratch.size());
+    std::size_t const wide_count = std::uniform_int_distribution<std::size_t>(60, 220)(generator);
+    utf8_dense_regional_indicators_(scratch, generator, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_katakana_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_numeric_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_midletter_(scratch, wide_count), sink(context, scratch.data(), scratch.size());
@@ -303,9 +303,9 @@ static void utf8_wordbreaks_dense_runs_(std::mt19937 &rng, utf8_run_sink_t sink,
 }
 
 /** @brief Stream the word family's long-range straddling constructions for a given @p gap to @p sink. */
-static void utf8_wordbreaks_straddles_(std::mt19937 &rng, std::size_t gap, utf8_run_sink_t sink, void *context) {
+static void utf8_wordbreaks_straddles_(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context) {
     std::string scratch;
-    utf8_dense_regional_indicators_(scratch, rng, gap);
+    utf8_dense_regional_indicators_(scratch, generator, gap);
     scratch.append("a"); // ASCII tail forces the WB15/16 parity decision after the long run
     sink(context, scratch.data(), scratch.size());
     utf8_wordbreaks_dense_midletter_(scratch, gap), sink(context, scratch.data(), scratch.size());
