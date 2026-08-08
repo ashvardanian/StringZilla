@@ -485,6 +485,32 @@ size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, 
 }
 
 /**
+ *  @brief A running, cache-line-padded scratch byte amount, used to lay out an engine's sub-buffers.
+ *
+ *  An engine partitions one flat scratch block into a handful of sub-buffers - score diagonals, a reversed
+ *  copy of the shorter string, an automaton's edge CSR, ... Growing this amount once per sub-buffer keeps
+ *  every offset cache-line aligned and yields the total the engine needs, a single source of truth shared
+ *  by its `layout()` and the code that reads those buffers back. Cache-line width is `>=` any CPU register
+ *  width, so the padding also keeps full-register SIMD over-reads near a buffer's end in bounds.
+ */
+struct scratch_amount_t {
+    // ? Deliberately a poison default (not `SZ_CACHE_LINE_WIDTH`): an instance built without an explicit
+    // ? `cpu_specs_t::cache_line_width` should produce an obviously-broken `total` (huge → `bad_alloc`/ASan),
+    // ? surfacing any place that forgot to propagate the alignment rather than silently assuming 64 bytes.
+    size_t alignment = std::numeric_limits<size_t>::max();
+    size_t total = 0; // ? The accumulated, padded byte count == the next buffer's offset.
+
+    /** @brief Reads the current end of the scratch, i.e. the offset where the next sub-buffer would start. */
+    constexpr operator size_t() const noexcept { return total; }
+
+    /** @brief Reserves @p bytes for the next sub-buffer, padded so the following offset stays aligned. */
+    constexpr scratch_amount_t &operator+=(size_t bytes) noexcept {
+        total += round_up_to_multiple<size_t>(bytes, alignment);
+        return *this;
+    }
+};
+
+/**
  *  @brief Safer alternative to `std::vector`, that avoids exceptions, copy constructors,
  *      and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
  */

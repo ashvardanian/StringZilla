@@ -1,0 +1,1974 @@
+/**
+ *  @brief  Hardware-accelerated multi-pattern exact and case-folded substring search (serial backend).
+ *  @file   include/stringzillas/find_many/serial.hpp
+ *  @author Ash Vardanian
+ *
+ *  Implements the Aho-Corasick automaton at the core of the multi-pattern search engine:
+ *
+ *  - `aho_corasick_dictionary` builds the trie, completes it via the classic goto/failure BFS, splits the
+ *    result into a frequency-ordered hot tier and a double-array cold tier, and exposes CSR-flattened
+ *    match outputs through the shared `aho_corasick_view` contract. Construction allocates a constant
+ *    number of flat buffers rather than one per state, and none of them outlives `try_build`.
+ *  - `find_many` wraps the dictionary behind a `try_build` / `try_count` / `try_find` triple, with a
+ *    single-threaded serial specialization and a two-level parallel one - one haystack per core below the
+ *    L2 size, all cores on one haystack above it.
+ *
+ *  Every other StringZillas engine exposes a single `operator()`; the triple exists here because a
+ *  dictionary is compiled once and reused across many later calls, and counting is useful in its own right.
+ *
+ *  @section Case-Folding via Preimage Reconvergence
+ *
+ *  A case-insensitive dictionary cannot enumerate every spelling and insert each as its own path - that is
+ *  multiplicative in the number of case-sensitive positions. Instead, one state is allocated per folded
+ *  position, and every codepoint whose fold produces that position's folded subsequence gets its own edge
+ *  into the very same successor state, so all spellings reconverge. Codepoints whose full fold changes the
+ *  UTF-8 byte length - the Kelvin sign folding to 'k', sharp S folding to "ss" - mean two paths can reach the
+ *  same folded position having consumed a different number of haystack bytes, so states are additionally
+ *  keyed by the byte delta accumulated relative to the folded spelling's own canonical encoding.
+ */
+#ifndef STRINGZILLAS_FIND_MANY_SERIAL_HPP_
+#define STRINGZILLAS_FIND_MANY_SERIAL_HPP_
+
+#include "stringzilla/types.hpp"                  // `status_t::status_t`
+#include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
+#include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
+#include "stringzillas/find_many/tables.h"        // `szs_fold_preimage_narrow_images_`
+#include "stringzillas/types.hpp"                 // `dummy_executor_t`
+
+#include <forkunion/types.hpp> // `indexed_split_t` - the balanced range split every executor uses
+
+#include <limits>      // `std::numeric_limits` for numeric types
+#include <memory>      // `std::allocator_traits` to re-bind the allocator
+#include <type_traits> // `std::enable_if_t` for meta-programming
+
+namespace ashvardanian {
+namespace stringzillas {
+
+namespace fu = ashvardanian::forkunion;
+
+// Per-symbol: a using-directive re-exports our `memcpy` and nvcc then finds the call ambiguous.
+using ashvardanian::stringzilla::byte_t;
+using ashvardanian::stringzilla::dummy_alloc_t;
+using ashvardanian::stringzilla::size_t;
+using ashvardanian::stringzilla::span;
+
+#pragma region Vocabulary
+
+/** @brief Whether a dictionary matches needles byte-for-byte or folds both sides to a shared case first. */
+enum find_many_mode_t {
+    /** @brief Byte-exact matching; needles may be arbitrary bytes. */
+    find_many_exact_k,
+    /** @brief Full Unicode case folding; needles must be valid UTF-8. */
+    find_many_uncased_k,
+};
+
+/**
+ *  @brief  One reported match: which needle matched, and how many haystack bytes the match actually spans.
+ *
+ *  Under case folding, a needle's @b own byte length is not the length of every match: needle "k" matches
+ *  both the 1-byte "k" and the 3-byte Kelvin sign U+212A, so the span has to be carried per match, not
+ *  looked up from the needle.
+ */
+template <typename state_id_type_>
+struct find_many_output {
+    using state_id_t = state_id_type_;
+
+    state_id_t needle_index {};
+    /** @brief Haystack bytes this match spans; a walk traverses one edge per byte, so it fits a state id. */
+    state_id_t match_bytes {};
+};
+
+/**
+ *  @brief  Light-weight structure to hold the result of a match in many-to-many
+ *          search with multiple haystacks and needles.
+ */
+struct find_many_match_t {
+
+    span<byte_t const> haystack {};
+    /**
+     *  @brief  The substring of the @p haystack that matched the needle.
+     *          Can be used to infer the offset of the needle in the haystack.
+     */
+    span<byte_t const> needle {};
+    size_t haystack_index {};
+    size_t needle_index {};
+
+    /**
+     *  @brief  Helper function discouraged outside of testing and debugging, used to sort match lists
+     *          in many-to-many search, to compare the outputs of multiple algorithms.
+     */
+    inline static bool less_globally(find_many_match_t const &lhs, find_many_match_t const &rhs) noexcept {
+        return (lhs.needle.data() < rhs.needle.data()) ||
+               (lhs.needle.data() == rhs.needle.data() && lhs.needle.end() < rhs.needle.end());
+    }
+
+    inline bool operator==(find_many_match_t const &other) const noexcept {
+        return haystack.begin() == other.haystack.begin() && needle.begin() == other.needle.begin() &&
+               needle.end() == other.needle.end();
+    }
+
+    inline bool operator!=(find_many_match_t const &other) const noexcept { return !(*this == other); }
+};
+
+#pragma endregion Vocabulary
+
+#pragma region Published View
+
+/** @brief Number of columns in a hot-tier row, one per possible input byte. */
+static constexpr size_t find_many_alphabet_size_k = 256;
+
+/**
+ *  @brief  Immutable, trivially-copyable view of a built dictionary, safe to pass to a CUDA kernel by value.
+ *
+ *  Owns nothing. Every pointer refers to storage held by the `aho_corasick_dictionary` that produced the
+ *  view, which must outlive it. A device-side view points at device memory holding the same layout.
+ *
+ *  @section Two Tiers
+ *
+ *  Transitions are split by how often a state is visited. Text keeps resetting the walk toward the root, so a
+ *  small set of states absorbs most byte steps whatever the dictionary size, and the tiers are sized to that
+ *  skew rather than to the automaton as a whole.
+ *
+ *  The @b hot tier is a dense goto-completed table, one row of 256 targets per state. A step is a single load
+ *  with no branch and no failure chasing. The @b cold tier is a double array: `base` and `check` encode
+ *  transitions as address arithmetic plus an ownership test, and `fail` restores the failure links that
+ *  goto-completion would otherwise have folded away. Completing the cold tier the same way would require
+ *  every one of a state's 256 slots to be free, which is a dense row again, so its failure links stay live.
+ *
+ *  States are numbered so the hot ones come first, making the tier test `state < hot_count` with no lookup.
+ */
+template <typename state_id_type_>
+struct aho_corasick_view {
+    using state_id_t = state_id_type_;
+    using output_t = find_many_output<state_id_t>;
+
+    /** @brief Hot tier: `hot_count * 256` goto-completed targets, row-major, frequency-ordered. */
+    state_id_t const *hot_rows {};
+
+    /** @brief Cold tier: transition target for `state` on `byte` is `base[state] + byte`, if owned. */
+    state_id_t const *base {};
+    /** @brief Cold tier: owner of each slot, so a collision reads as a missing edge rather than a wrong one. */
+    state_id_t const *check {};
+    /** @brief Cold tier: failure link, followed when `check` denies ownership. */
+    state_id_t const *fail {};
+
+    /**
+     *  @brief Matches ending at each state, flattened; already merged along failure chains at build time.
+     *
+     *  Offsets are `size_t` rather than a narrower width because a state's outputs are its own plus its
+     *  failure state's whole run, so a nested-suffix dictionary drives the pool to O(states squared).
+     */
+    output_t const *outputs {};
+    state_id_t const *outputs_counts {};
+    size_t const *outputs_offsets {};
+    /** @brief Length of `outputs`, so a consumer never has to rescan the CSR to recover it. */
+    size_t outputs_total {};
+
+    /** @brief States `[0, hot_count)` live in `hot_rows`; the rest live in the double array. */
+    state_id_t hot_count {};
+    state_id_t state_count {};
+    state_id_t root {};
+
+    /** @brief Longest match any needle can produce, in bytes. Sets the overlap when slicing a haystack. */
+    state_id_t max_match_bytes {};
+
+    /** @brief Whether the cold tier is empty, so every step takes the branch-free hot path. */
+    constexpr bool all_hot() const noexcept { return state_count <= hot_count; }
+
+    /** @brief One goto-completed row, whose width is the alphabet and therefore known at compile time. */
+    constexpr span<state_id_t const, find_many_alphabet_size_k> hot_row(state_id_t state) const noexcept {
+        return {hot_rows + (size_t)state * find_many_alphabet_size_k};
+    }
+};
+
+#pragma endregion Published View
+
+#pragma region Transition
+
+/**
+ *  @brief  Advances one state by one byte. The single definition shared by every CPU and GPU kernel.
+ *
+ *  Hot states resolve in one load. Cold states probe the double array and, when the slot is owned by
+ *  somebody else, hop to the failure link and retry the same byte. The root is total - every one of its
+ *  slots resolves, self-looping where the trie has no edge - which is what terminates the retry loop.
+ *
+ *  `constexpr` rather than host-device annotated, so CUDA kernels reach it through
+ *  @b `--expt-relaxed-constexpr`, which every build path already passes.
+ */
+template <typename state_id_type_>
+constexpr state_id_type_ aho_corasick_step( //
+    aho_corasick_view<state_id_type_> const &view, state_id_type_ state, u8_t byte) noexcept {
+
+    for (;;) {
+        if (state < view.hot_count) return view.hot_row(state)[byte];
+        state_id_type_ const candidate = (state_id_type_)(view.base[state] + byte);
+        if (view.check[candidate] == state) return candidate;
+        if (state == view.root) return view.root;
+        state = view.fail[state];
+    }
+}
+
+/**
+ *  @brief  Advances @p state by one byte and reports how many needles end on the new state.
+ *
+ *  The pair every walk repeats: the transition, then the output count that decides whether the walk stops
+ *  to enumerate matches. Sharing it keeps `find`, `count`, and the per-core counters reading one array.
+ */
+template <typename state_id_type_>
+constexpr state_id_type_ aho_corasick_step_counting( //
+    aho_corasick_view<state_id_type_> const &view, state_id_type_ &state, u8_t byte) noexcept {
+
+    state = aho_corasick_step(view, state, byte);
+    return view.outputs_counts[state];
+}
+
+#pragma endregion Transition
+
+#pragma region Engine
+
+/**
+ *  @brief  Multi-pattern search engine: one compiled dictionary applied to many haystacks in a single pass.
+ *
+ *  Declared without a body so every backend supplies its own specialization, guarded on @p capability_ -
+ *  the shape `levenshtein_distances` and the other StringZillas engines already use. A bodied primary here
+ *  would carry the default template arguments and make out-of-header specialization ill-formed.
+ */
+template <typename state_id_type_ = u32_t, typename allocator_type_ = dummy_alloc_t,
+          sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
+struct find_many;
+
+#pragma endregion Engine
+
+#pragma region Dictionary
+
+#pragma region Fold Preimage Reverse Index
+
+/**
+ *  @brief Scratch capacity for one preimage lookup: the identity codepoint plus the widest fan-out.
+ *
+ *  A window wider than one rune contributes no identity, so the narrow case bounds both.
+ */
+static constexpr size_t fold_preimage_max_sources_k = 1 + szs_fold_preimage_max_fanout_k;
+
+/** @brief Source codepoints whose full fold is the single rune @p image, empty when it folds to itself. */
+inline span<rune_t const> fold_preimage_of_rune(rune_t image) noexcept {
+    size_t low = 0, high = szs_fold_preimage_narrow_count_k;
+    while (low < high) {
+        size_t const middle = low + (high - low) / 2;
+        if (szs_fold_preimage_narrow_images_[middle] < image) low = middle + 1;
+        else high = middle;
+    }
+    if (low == szs_fold_preimage_narrow_count_k || szs_fold_preimage_narrow_images_[low] != image) return {};
+    u32_t const begin = szs_fold_preimage_narrow_offsets_[low];
+    return {szs_fold_preimage_narrow_sources_ + begin, szs_fold_preimage_narrow_offsets_[low + 1] - begin};
+}
+
+/**
+ *  @brief First multi-rune image whose leading rune is at least @p leading.
+ *
+ *  Only 73 images span more than one rune, so this same bound answers both "can this rune begin a wide
+ *  image at all" - the answer is no when the entry it lands on leads with a different rune - and "where
+ *  does its group start", which is why no separate filter is needed.
+ */
+inline size_t fold_preimage_wide_lower_bound(rune_t leading) noexcept {
+    size_t low = 0, high = szs_fold_preimage_wide_count_k;
+    while (low < high) {
+        size_t const middle = low + (high - low) / 2;
+        if (szs_fold_preimage_wide_images_[middle][0] < leading) low = middle + 1;
+        else high = middle;
+    }
+    return low;
+}
+
+/** @brief Source codepoints whose full fold is exactly the runes of @p image, for `image.size() > 1`. */
+inline span<rune_t const> fold_preimage_of_runes(span<rune_t const> image) noexcept {
+    rune_t const second = image[1];
+    rune_t const third = image.size() >= 3 ? image[2] : 0;
+    for (size_t index = fold_preimage_wide_lower_bound(image[0]);
+         index < szs_fold_preimage_wide_count_k && szs_fold_preimage_wide_images_[index][0] == image[0]; ++index) {
+        if (szs_fold_preimage_wide_images_[index][1] != second) continue;
+        if (szs_fold_preimage_wide_images_[index][2] != third) continue;
+        u32_t const begin = szs_fold_preimage_wide_offsets_[index];
+        return {szs_fold_preimage_wide_sources_ + begin, szs_fold_preimage_wide_offsets_[index + 1] - begin};
+    }
+    return {};
+}
+
+#pragma endregion Fold Preimage Reverse Index
+
+/**
+ *  @brief Two-tier @b byte-level Aho-Corasick dictionary for multi-pattern exact and case-folded substring
+ *         search: a dense goto-completed hot tier plus a double-array cold tier.
+ *  @tparam state_id_type_ The type of the state ID. Default is `u32_t`; `u16_t` fits dictionaries under
+ *          65534 states into half the row width.
+ *  @tparam allocator_type_ The type of the allocator. Default is `dummy_alloc_t`.
+ *
+ *  Holds no STL container and throws nothing, reporting through `status_t` and `try_`-prefixed functions.
+ *  Construction allocates a constant number of flat buffers rather than one per state, none of which
+ *  survives `try_build`, and no phase ever materializes a dense row per state.
+ *
+ *  @section Storage
+ *
+ *  `hot_rows_` is a plain dense 256-wide goto-completed table for the `hot_count_` most-visited states -
+ *  raw state IDs, no byte-class compression and no premultiplication, so a lookup is
+ *  `hot_rows_[state * 256 + byte]`. Every other state lives in the double array `base_` / `check_` /
+ *  `fail_`, exactly as `aho_corasick_view` publishes it.
+ */
+template <typename state_id_type_ = u32_t, typename allocator_type_ = dummy_alloc_t>
+struct aho_corasick_dictionary {
+
+    using state_id_t = state_id_type_;
+    using allocator_t = allocator_type_;
+    using output_t = find_many_output<state_id_t>;
+    using match_t = find_many_match_t;
+    static_assert(std::is_unsigned<state_id_t>::value, "State ID should be unsigned");
+
+    static constexpr size_t alphabet_size_k = 256;
+    static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
+    /** @brief `hot_count_`'s "not chosen yet" state, so `hot_count(0)` stays a real all-cold request. */
+    static constexpr size_t derive_hot_count_k = std::numeric_limits<size_t>::max();
+    /**
+     *  @brief Index into `edges_`; converging uncased preimages let edges outnumber states, so this is
+     *         its own domain rather than a borrowed `state_id_t`.
+     */
+    enum class edge_id_t : size_t { invalid_k = SZ_SIZE_MAX };
+    /** @brief Index into `chain_slots_`, live only for the needle currently being folded. */
+    enum class chain_id_t : size_t { invalid_k = SZ_SIZE_MAX };
+    /** @brief Index into `own_outputs_`, before failure-chain inheritance merges the runs. */
+    enum class output_id_t : size_t { invalid_k = SZ_SIZE_MAX };
+
+    /**
+     *  @brief How a chain slot was reached, which is part of its identity rather than a passing property.
+     *
+     *  An atomic arrival consumes its source bytes as one unit - sharp S folding to "ss" is the standing
+     *  example - so no haystack position exists partway through it. Merging it with a stepped arrival at
+     *  the same delta would hand it a failure link computed for a resuming position it does not have, so
+     *  the two stay on separate slots and the ordinary failure-link computation stays correct for each.
+     */
+    enum class rune_arrival_t : u8_t {
+        stepped_k = 0,
+        atomic_k = 1,
+    };
+
+    /** @brief One literal trie edge, appended as it is created and counting-sorted by `parent` at build. */
+    struct trie_edge_t {
+        state_id_t parent;
+        state_id_t child;
+        u8_t byte;
+    };
+
+    /** @brief One trie edge again, narrowed for the build-time CSR where `parent` is the row index. */
+    struct csr_edge_t {
+        state_id_t child;
+        u8_t byte;
+    };
+
+    /** @brief One pending match at a raw state, threaded into that state's own list by `output_run_t`. */
+    struct pending_output_t {
+        state_id_t needle_index;
+        state_id_t match_bytes;
+        output_id_t next;
+    };
+
+    /** @brief Per raw state: the list of matches ending on it, and the run it publishes once completed. */
+    struct output_run_t {
+        /** @brief Head of this state's own match list, most recent first. */
+        output_id_t own_head = output_id_t::invalid_k;
+        /** @brief Matches ending exactly on this state, before failure-chain inheritance. */
+        state_id_t own_count = 0;
+        /** @brief Into `outputs_`: own matches followed by the failure state's whole run. */
+        size_t total_offset = 0;
+        state_id_t total_count = 0;
+    };
+
+    /** @brief One reachable `(byte delta, raw state)` pair at a given folded position of one needle's chain. */
+    struct chain_slot_t {
+        /**
+         *  @brief Source bytes consumed minus the folded spelling's own canonical bytes.
+         *
+         *  Its consumer is `match_bytes`, published as `state_id_t`, so a wider accumulator would only
+         *  represent matches the view cannot describe.
+         */
+        i32_t delta;
+        state_id_t state;
+        /** @brief Next slot at the same folded position; the position itself holds the head. */
+        chain_id_t next;
+        rune_arrival_t arrival;
+    };
+
+    /** @brief One folded rune of the needle under construction, plus the slots reachable at that position. */
+    struct folded_position_t {
+        rune_t rune;
+        /** @brief Canonical encoded length, which is why no prefix-sum array is needed. */
+        rune_length_t utf8_length;
+        chain_id_t chain_head = chain_id_t::invalid_k;
+    };
+
+  private:
+    using allocator_traits_t = std::allocator_traits<allocator_t>;
+    using state_id_allocator_t = typename allocator_traits_t::template rebind_alloc<state_id_t>;
+    using output_allocator_t = typename allocator_traits_t::template rebind_alloc<output_t>;
+    using edge_allocator_t = typename allocator_traits_t::template rebind_alloc<trie_edge_t>;
+    using pending_output_allocator_t = typename allocator_traits_t::template rebind_alloc<pending_output_t>;
+    using output_run_allocator_t = typename allocator_traits_t::template rebind_alloc<output_run_t>;
+    using folded_position_allocator_t = typename allocator_traits_t::template rebind_alloc<folded_position_t>;
+    using chain_slot_allocator_t = typename allocator_traits_t::template rebind_alloc<chain_slot_t>;
+    using word_allocator_t = typename allocator_traits_t::template rebind_alloc<u64_t>;
+    using byte_allocator_t = typename allocator_traits_t::template rebind_alloc<std::byte>;
+    using edge_id_allocator_t = typename allocator_traits_t::template rebind_alloc<edge_id_t>;
+    /** @brief Rebinds to `size_t`, matching `aho_corasick_view::outputs_counts` / `outputs_offsets`. */
+    using offset_allocator_t = typename allocator_traits_t::template rebind_alloc<size_t>;
+
+    /** @brief Every literal trie edge, in creation order; `compact_edges_into_csr_` consumes it. */
+    safe_vector<trie_edge_t, edge_allocator_t> edges_;
+    /** @brief Open-addressed indices into `edges_`, giving insertion and the failure chase an O(1) lookup
+     *         of `(parent, byte)` without storing a key of its own. Released alongside `edges_`. */
+    safe_vector<edge_id_t, edge_id_allocator_t> edge_index_;
+    /** @brief Matches ending at each raw state, before failure-chain inheritance merges them. */
+    safe_vector<pending_output_t, pending_output_allocator_t> own_outputs_;
+    /** @brief One entry per raw state; grows with the state pool and survives into the output pass. */
+    safe_vector<output_run_t, output_run_allocator_t> output_runs_;
+    /** @brief The needle under construction, one entry per folded rune; uncased mode only. */
+    safe_vector<folded_position_t, folded_position_allocator_t> folded_positions_;
+    /** @brief Pooled chain slots for that needle, threaded per position by `folded_position_t::chain_head`. */
+    safe_vector<chain_slot_t, chain_slot_allocator_t> chain_slots_;
+
+    /** @brief One block carved by `build_layout_` into the buffers whose size is fixed once insertion ends. */
+    safe_vector<std::byte, byte_allocator_t> build_scratch_;
+    /** @brief Published slot -> raw state; grows with the double array, so it lives outside the layout. */
+    safe_vector<state_id_t, state_id_allocator_t> old_of_final_;
+    /** @brief One bit per double-array slot; the only record of what the packing search has claimed. */
+    safe_vector<u64_t, word_allocator_t> occupied_bits_;
+    /** @brief Lowest slot that could still be free; packing only fills forward, so it never moves back. */
+    size_t lowest_free_cursor_ = 0;
+
+    /** @brief Hot tier: `hot_count_ * alphabet_size_k` goto-completed targets, row-major, frequency-ordered. */
+    safe_vector<state_id_t, state_id_allocator_t> hot_rows_;
+    /** @brief Cold tier: transition target for `state` on `byte` is `base_[state] + byte`, if `check_` confirms
+     *         ownership. Sized `count_states_ + (alphabet_size_k - 1)`, since a child's ID is address
+     *         arithmetic and can exceed the real state count; only entries `>= hot_count_` are meaningful. */
+    safe_vector<state_id_t, state_id_allocator_t> base_;
+    /** @brief Cold tier: owner of each double-array slot; a mismatch means "no such edge", not "wrong edge".
+     *         Same length as `base_`. */
+    safe_vector<state_id_t, state_id_allocator_t> check_;
+    /** @brief Cold tier: failure link, followed when `check_` denies ownership. Same length as `base_`. */
+    safe_vector<state_id_t, state_id_allocator_t> fail_;
+    /** @brief CSR-flattened match outputs, addressed through `outputs_offsets_` / `outputs_counts_`. */
+    safe_vector<output_t, output_allocator_t> outputs_;
+    /** @brief Number of outputs per state, frequency-ordered numbering, same length as `base_`. */
+    safe_vector<state_id_t, state_id_allocator_t> outputs_counts_;
+    /** @brief Exclusive prefix sum of `outputs_counts_`, same length as `base_`. */
+    safe_vector<size_t, offset_allocator_t> outputs_offsets_;
+
+    size_t count_states_ = 0;
+    size_t count_needles_ = 0;
+    state_id_t max_match_bytes_ = 0;
+    find_many_mode_t mode_ = find_many_exact_k;
+
+    /** @brief States `[0, hot_count_)` live in `hot_rows_`; `derive_hot_count_k` asks `try_build` to size
+     *         the tier from `cpu_specs_t` instead, which `hot_count` overrides with any explicit value. */
+    size_t hot_count_ = derive_hot_count_k;
+    /** @brief The root's ID in the frequency-ordered numbering; always `0`, since the root is the unique
+     *         shallowest state and therefore always sorts first. */
+    state_id_t root_ = 0;
+
+    allocator_t alloc_;
+
+#pragma region Construction Helpers
+
+    /** @brief Scrambles a `(parent, byte)` pair into a starting probe; the index stores no key of its own. */
+    static size_t probe_of_(state_id_t parent, u8_t byte) noexcept {
+        u64_t const mixed = ((((u64_t)parent << 8) | byte) + 1) * 0x9E3779B97F4A7C15ull;
+        return (size_t)(mixed >> 32);
+    }
+
+    /** @brief Rebuilds `edge_index_` at @p new_capacity slots, reinserting every edge already in `edges_`. */
+    status_t rehash_edge_index_(size_t new_capacity) noexcept {
+        if (edge_index_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t slot = 0; slot < new_capacity; ++slot) edge_index_[slot] = edge_id_t::invalid_k;
+        size_t const mask = new_capacity - 1;
+        for (size_t edge = 0; edge < edges_.size(); ++edge) {
+            trie_edge_t const &record = edges_[edge];
+            size_t slot = probe_of_(record.parent, record.byte) & mask;
+            while (edge_index_[slot] != edge_id_t::invalid_k) slot = (slot + 1) & mask;
+            edge_index_[slot] = (edge_id_t)edge;
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Index into `edges_` of the `(parent, byte)` edge, or the invalid sentinel when absent. */
+    edge_id_t find_edge_(state_id_t parent, u8_t byte) const noexcept {
+        size_t const mask = edge_index_.size() - 1;
+        for (size_t slot = probe_of_(parent, byte) & mask;; slot = (slot + 1) & mask) {
+            edge_id_t const edge = edge_index_[slot];
+            if (edge == edge_id_t::invalid_k) return edge;
+            trie_edge_t const &record = edges_[(size_t)edge];
+            if (record.parent == parent && record.byte == byte) return edge;
+        }
+    }
+
+    /** @brief Records a `(parent, byte) -> child` edge that `find_edge_` has just reported missing. */
+    status_t add_edge_(state_id_t parent, u8_t byte, state_id_t child) noexcept {
+        // Keep the load factor under one half, so linear probing stays a couple of slots deep.
+        if ((edges_.size() + 1) * 2 >= edge_index_.size())
+            if (rehash_edge_index_(sz_size_bit_ceil(edge_index_.size() + 1) * 2) != status_t::success_k)
+                return status_t::bad_alloc_k;
+        if (edges_.try_push_back(trie_edge_t {parent, child, byte}) != status_t::success_k)
+            return status_t::bad_alloc_k;
+
+        size_t const mask = edge_index_.size() - 1;
+        size_t slot = probe_of_(parent, byte) & mask;
+        while (edge_index_[slot] != edge_id_t::invalid_k) slot = (slot + 1) & mask;
+        edge_index_[slot] = (edge_id_t)(edges_.size() - 1);
+        return status_t::success_k;
+    }
+
+    status_t allocate_raw_state_(state_id_t &new_state) noexcept {
+        if (count_states_ >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        if (output_runs_.try_resize(count_states_ + 1) != status_t::success_k) return status_t::bad_alloc_k;
+        new_state = static_cast<state_id_t>(count_states_);
+        ++count_states_;
+        return status_t::success_k;
+    }
+
+    status_t ensure_root_() noexcept {
+        if (edge_index_.size() == 0 && rehash_edge_index_(1024) != status_t::success_k) return status_t::bad_alloc_k;
+        if (count_states_ != 0) return status_t::success_k;
+        state_id_t root;
+        status_t const status = allocate_raw_state_(root);
+        sz_assert_(status != status_t::success_k || root == 0);
+        return status;
+    }
+
+    /**
+     *  @brief Appends a match ending at @p state, onto that state's own list.
+     *
+     *  A match traverses one edge per byte along a trie path whose positions strictly increase, so it can
+     *  never span more bytes than the automaton has states - which is why the length rides `state_id_t`.
+     */
+    status_t add_output_(state_id_t state, state_id_t needle_index, size_t match_bytes) noexcept {
+        if (match_bytes > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+        output_run_t &run = output_runs_[state];
+        if (own_outputs_.try_push_back(pending_output_t {needle_index, (state_id_t)match_bytes, run.own_head}) !=
+            status_t::success_k)
+            return status_t::bad_alloc_k;
+        run.own_head = (output_id_t)(own_outputs_.size() - 1);
+        ++run.own_count;
+        max_match_bytes_ = sz_max_of_two(max_match_bytes_, (state_id_t)match_bytes);
+        return status_t::success_k;
+    }
+
+    /** @brief Canonical UTF-8 length of @p rune, as the encoder itself reports it. */
+    static rune_length_t utf8_length_of_rune_(rune_t rune) noexcept {
+        u8_t scratch[4];
+        return sz_rune_encode(rune, scratch);
+    }
+
+    /** @brief Follows @p parent's @p byte edge, minting a state and wiring the edge when it is missing. */
+    status_t follow_or_create_(state_id_t parent, u8_t byte, state_id_t &child) noexcept {
+        edge_id_t const edge = find_edge_(parent, byte);
+        if (edge != edge_id_t::invalid_k) {
+            child = edges_[(size_t)edge].child;
+            return status_t::success_k;
+        }
+        status_t const status = allocate_raw_state_(child);
+        if (status != status_t::success_k) return status;
+        return add_edge_(parent, byte, child);
+    }
+
+    /**
+     *  @brief Byte-exact trie insertion: standard follow-or-create walk, one state per byte consumed.
+     */
+    status_t try_insert_exact_(span<byte_t const> needle, state_id_t needle_index) noexcept {
+        status_t status = ensure_root_();
+        if (status != status_t::success_k) return status;
+
+        state_id_t current_state = 0;
+        for (size_t offset = 0; offset < needle.size(); ++offset) {
+            status = follow_or_create_(current_state, (u8_t)needle[offset], current_state);
+            if (status != status_t::success_k) return status;
+        }
+
+        return add_output_(current_state, needle_index, needle.size());
+    }
+
+    /**
+     *  @brief Walks the interior bytes of `encode_utf8(codepoint)` from @p source_state, stopping one byte
+     *         short: @p parent_of_last_byte owns the codepoint's trailing byte and @p last_byte is that byte.
+     *
+     *  Stopping short lets the caller choose the final target before any state ID is spent, so a needle
+     *  sharing a byte prefix with an earlier one never mints an ID it then discards.
+     */
+    status_t walk_byte_path_(state_id_t source_state, rune_t codepoint, state_id_t &parent_of_last_byte,
+                             u8_t &last_byte) noexcept {
+        u8_t encoded[4];
+        rune_length_t const length = sz_rune_encode(codepoint, encoded);
+
+        state_id_t current_state = source_state;
+        for (size_t index = 0; index + 1 < (size_t)length; ++index) {
+            status_t const status = follow_or_create_(current_state, encoded[index], current_state);
+            if (status != status_t::success_k) return status;
+        }
+
+        parent_of_last_byte = current_state;
+        last_byte = encoded[length - 1];
+        return status_t::success_k;
+    }
+
+    /** @brief Decodes and fully folds @p needle into `folded_positions_`, one entry per folded rune. */
+    status_t fold_needle_(span<byte_t const> needle) noexcept {
+        folded_positions_.clear();
+        byte_t const *cursor = needle.begin();
+        byte_t const *const needle_end = needle.end();
+        while (cursor != needle_end) {
+            rune_t rune;
+            rune_length_t const consumed = sz_rune_decode(reinterpret_cast<cptr_t>(cursor),
+                                                          reinterpret_cast<cptr_t>(needle_end), &rune);
+            if (consumed == sz_rune_invalid_k) return status_t::invalid_utf8_k;
+            rune_t folded[3];
+            size_t const folded_count = sz_unicode_fold_codepoint_(rune, folded);
+            for (size_t index = 0; index < folded_count; ++index) {
+                folded_position_t entry;
+                entry.rune = folded[index];
+                entry.utf8_length = utf8_length_of_rune_(folded[index]);
+                if (folded_positions_.try_push_back(entry) != status_t::success_k) return status_t::bad_alloc_k;
+            }
+            cursor += consumed;
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief The slot already reachable at @p position with this key, or the invalid sentinel. */
+    chain_id_t find_slot_(size_t position, i32_t delta, rune_arrival_t arrival) const noexcept {
+        for (chain_id_t walk = folded_positions_[position].chain_head; walk != chain_id_t::invalid_k;
+             walk = chain_slots_[(size_t)walk].next) {
+            chain_slot_t const &slot = chain_slots_[(size_t)walk];
+            if (slot.delta == delta && slot.arrival == arrival) return walk;
+        }
+        return chain_id_t::invalid_k;
+    }
+
+    /** @brief Gathers the preimage codepoints of the @p window runes starting at @p position. */
+    size_t collect_preimages_(size_t position, size_t window,
+                              safe_array<rune_t, fold_preimage_max_sources_k> &sources) const noexcept {
+        rune_t const leading = folded_positions_[position].rune;
+        size_t count = 0;
+        span<rune_t const> run;
+        if (window == 1) {
+            // Every codepoint folds to itself unless the table says otherwise, and the table lists only
+            // non-identity folds, so the identity spelling is added here rather than looked up.
+            sources[count++] = leading;
+            run = fold_preimage_of_rune(leading);
+        }
+        else {
+            // Zeroed, so a two-rune window's unused third lane matches the trailing zero the wide table
+            // stores for two-rune images rather than holding whatever was on the stack.
+            rune_t window_runes[3] = {};
+            for (size_t within = 0; within < window; ++within)
+                window_runes[within] = folded_positions_[position + within].rune;
+            run = fold_preimage_of_runes({window_runes, window});
+        }
+        for (size_t within = 0; within < run.size() && count < fold_preimage_max_sources_k; ++within)
+            sources[count++] = run[within];
+        return count;
+    }
+
+    /**
+     *  @brief Resolves one `(source slot, window)` pair: every codepoint whose fold is the window's runes
+     *         gets a byte path from the source slot's state, all converging on one successor slot.
+     */
+    status_t insert_window_(size_t position, size_t window, chain_id_t source) noexcept {
+        size_t canonical_span = 0;
+        for (size_t within = 0; within < window; ++within)
+            canonical_span += (size_t)folded_positions_[position + within].utf8_length;
+
+        safe_array<rune_t, fold_preimage_max_sources_k> preimage_sources;
+        size_t const preimage_count = collect_preimages_(position, window, preimage_sources);
+
+        // A window wider than one rune consumes its source codepoint atomically, and that taints every slot
+        // reached through it from here on, even if a later single-rune hop would land back on a delta a
+        // purely stepped chain also reaches.
+        rune_arrival_t const arrival = chain_slots_[(size_t)source].arrival == rune_arrival_t::atomic_k || window > 1
+                                           ? rune_arrival_t::atomic_k
+                                           : rune_arrival_t::stepped_k;
+
+        for (size_t index = 0; index < preimage_count; ++index) {
+            rune_t const source_codepoint = preimage_sources[index];
+            size_t const encoded_length = (size_t)utf8_length_of_rune_(source_codepoint);
+            i32_t const child_delta = chain_slots_[(size_t)source].delta + (i32_t)encoded_length -
+                                      (i32_t)canonical_span;
+
+            chain_id_t const matching_slot = find_slot_(position + window, child_delta, arrival);
+            bool const slot_exists = matching_slot != chain_id_t::invalid_k;
+
+            // Probe the byte path before committing to a target: an earlier needle sharing this exact
+            // `(source state, source codepoint)` pair may already own the transition, in which case its
+            // target is reused outright and no state ID is spent on this step.
+            state_id_t parent_of_last_byte;
+            u8_t last_byte;
+            status_t status = walk_byte_path_(chain_slots_[(size_t)source].state, source_codepoint, parent_of_last_byte,
+                                              last_byte);
+            if (status != status_t::success_k) return status;
+            edge_id_t const existing_edge = find_edge_(parent_of_last_byte, last_byte);
+
+            state_id_t actual_target;
+            if (existing_edge != edge_id_t::invalid_k) { actual_target = edges_[(size_t)existing_edge].child; }
+            else {
+                if (slot_exists) { actual_target = chain_slots_[(size_t)matching_slot].state; }
+                else {
+                    status = allocate_raw_state_(actual_target);
+                    if (status != status_t::success_k) return status;
+                }
+                status = add_edge_(parent_of_last_byte, last_byte, actual_target);
+                if (status != status_t::success_k) return status;
+            }
+
+            if (slot_exists) { chain_slots_[(size_t)matching_slot].state = actual_target; }
+            else {
+                folded_position_t &target_position = folded_positions_[position + window];
+                chain_slot_t const fresh {child_delta, actual_target, target_position.chain_head, arrival};
+                if (chain_slots_.try_push_back(fresh) != status_t::success_k) return status_t::bad_alloc_k;
+                target_position.chain_head = (chain_id_t)(chain_slots_.size() - 1);
+            }
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Case-folded trie insertion: one state per `(folded position, byte delta, arrival)` triple,
+     *         with every codepoint whose fold matches a 1-3 rune window reconverging onto the shared
+     *         successor for that window - except across the split `rune_arrival_t` documents, which stays
+     *         two states even at matching deltas.
+     *
+     *  A step from position `p` only ever writes positions `p + 1 .. p + 3`, so a position's own chain is
+     *  already complete when the loop reaches it and can be walked in place rather than snapshotted.
+     */
+    status_t try_insert_uncased_(span<byte_t const> needle, state_id_t needle_index) noexcept {
+        status_t status = ensure_root_();
+        if (status != status_t::success_k) return status;
+
+        // Reject malformed UTF-8 outright: a raw continuation byte could otherwise pick up a failure link
+        // mid-codepoint and report a spurious match.
+        status = fold_needle_(needle);
+        if (status != status_t::success_k) return status;
+
+        size_t const folded_length = folded_positions_.size();
+        if (folded_length == 0) return status_t::success_k;
+
+        // One extra position holds the terminal slots, and every chain starts empty but the root's.
+        folded_position_t terminal_position {};
+        if (folded_positions_.try_push_back(terminal_position) != status_t::success_k) return status_t::bad_alloc_k;
+        chain_slots_.clear();
+        chain_slot_t const root_slot {0, 0, chain_id_t::invalid_k, rune_arrival_t::stepped_k};
+        if (chain_slots_.try_push_back(root_slot) != status_t::success_k) return status_t::bad_alloc_k;
+        folded_positions_[0].chain_head = (chain_id_t)0;
+
+        size_t canonical_prefix = 0; // ? Bytes the folded spelling itself spends before `position`.
+        for (size_t position = 0; position < folded_length; ++position) {
+            size_t const reachable_window = sz_min_of_two((size_t)3, folded_length - position);
+            // Only 73 of the 1524 fold images span more than one rune, so a leading rune that cannot begin
+            // one skips both wider windows outright.
+            size_t const wide_bound = fold_preimage_wide_lower_bound(folded_positions_[position].rune);
+            bool const may_lead_wide = wide_bound < szs_fold_preimage_wide_count_k &&
+                                       szs_fold_preimage_wide_images_[wide_bound][0] ==
+                                           folded_positions_[position].rune;
+            size_t const max_window = may_lead_wide ? reachable_window : 1;
+
+            for (chain_id_t source = folded_positions_[position].chain_head; source != chain_id_t::invalid_k;
+                 source = chain_slots_[(size_t)source].next)
+                for (size_t window = 1; window <= max_window; ++window) {
+                    status = insert_window_(position, window, source);
+                    if (status != status_t::success_k) return status;
+                }
+
+            canonical_prefix += (size_t)folded_positions_[position].utf8_length;
+        }
+
+        for (chain_id_t walk = folded_positions_[folded_length].chain_head; walk != chain_id_t::invalid_k;
+             walk = chain_slots_[(size_t)walk].next) {
+            chain_slot_t const &slot = chain_slots_[(size_t)walk];
+            status = add_output_(slot.state, needle_index, canonical_prefix + (size_t)slot.delta);
+            if (status != status_t::success_k) return status;
+        }
+        return status_t::success_k;
+    }
+
+#pragma endregion Construction Helpers
+
+#pragma region Build Phases
+
+    /** @brief Byte offsets of every construction buffer whose size is fixed once insertion ends. */
+    struct layout_t {
+        size_t edges = 0, edge_offsets = 0, failures = 0, bfs_order = 0, reorder = 0, final_id = 0, total = 0;
+    };
+
+    layout_t build_layout_(cpu_specs_t const &specs) const noexcept {
+        scratch_amount_t amount {specs.cache_line_width};
+        layout_t layout;
+        layout.edges = amount, amount += edges_.size() * sizeof(csr_edge_t);
+        layout.edge_offsets = amount, amount += (count_states_ + 1) * sizeof(state_id_t);
+        layout.failures = amount, amount += count_states_ * sizeof(state_id_t);
+        layout.bfs_order = amount, amount += count_states_ * sizeof(state_id_t);
+        // The band sort finishes before packing writes the first `final_id`, so the two share one region.
+        layout.reorder = amount;
+        layout.final_id = amount, amount += count_states_ * sizeof(state_id_t);
+        layout.total = amount;
+        return layout;
+    }
+
+    csr_edge_t *edges_at_(layout_t const &layout) noexcept {
+        return (csr_edge_t *)(build_scratch_.data() + layout.edges);
+    }
+    state_id_t *edge_offsets_at_(layout_t const &layout) noexcept {
+        return (state_id_t *)(build_scratch_.data() + layout.edge_offsets);
+    }
+    state_id_t *failures_at_(layout_t const &layout) noexcept {
+        return (state_id_t *)(build_scratch_.data() + layout.failures);
+    }
+    state_id_t *bfs_order_at_(layout_t const &layout) noexcept {
+        return (state_id_t *)(build_scratch_.data() + layout.bfs_order);
+    }
+    state_id_t *reorder_at_(layout_t const &layout) noexcept {
+        return (state_id_t *)(build_scratch_.data() + layout.reorder);
+    }
+    state_id_t *final_id_at_(layout_t const &layout) noexcept {
+        return (state_id_t *)(build_scratch_.data() + layout.final_id);
+    }
+
+    /**
+     *  @brief Turns the insertion-time edge pool into a state-major CSR - one counting sort, no comparisons.
+     *
+     *  Byte order inside a row is left alone: the packing search below anchors on the lowest set bit of a
+     *  `sz_byteset_t` child mask, so it never needs a sorted row to find the smallest child byte.
+     */
+    void compact_edges_into_csr_(layout_t const &layout) noexcept {
+        state_id_t *const offsets = edge_offsets_at_(layout);
+        csr_edge_t *const rows = edges_at_(layout);
+        for (size_t state = 0; state <= count_states_; ++state) offsets[state] = 0;
+        for (size_t edge = 0; edge < edges_.size(); ++edge) ++offsets[(size_t)edges_[edge].parent + 1];
+        for (size_t state = 0; state < count_states_; ++state) offsets[state + 1] += offsets[state];
+        // Scatter with `offsets[parent]` doubling as that row's fill cursor, which leaves every entry
+        // holding its row's END; one backward shift turns them into starts again.
+        for (size_t edge = 0; edge < edges_.size(); ++edge) {
+            trie_edge_t const &record = edges_[edge];
+            rows[offsets[record.parent]++] = csr_edge_t {record.child, record.byte};
+        }
+        for (size_t state = count_states_; state > 0; --state) offsets[state] = offsets[state - 1];
+        offsets[0] = 0;
+    }
+
+    /** @brief Goto-completed target for @p state on @p byte, chasing failure links across real edges only. */
+    state_id_t chase_(state_id_t state, u8_t byte, state_id_t const *failures) const noexcept {
+        for (state_id_t current = state;;) {
+            edge_id_t const edge = find_edge_(current, byte);
+            if (edge != edge_id_t::invalid_k) return edges_[(size_t)edge].child;
+            if (current == 0) return 0; // ? The root self-loops.
+            current = failures[current];
+        }
+    }
+
+    /**
+     *  @brief Reorders one depth band of `bfs_order` by out-degree descending, so shallow high-fan-out
+     *         states - the ones text keeps returning to - land in the hot tier regardless of dictionary
+     *         content. A counting sort over a bounded degree, not a comparison sort over indirect loads.
+     */
+    void order_band_by_out_degree_(layout_t const &layout, size_t band_first, size_t band_last) noexcept {
+        if (band_last - band_first < 2) return;
+        state_id_t *const bfs_order = bfs_order_at_(layout);
+        state_id_t *const reorder = reorder_at_(layout);
+        state_id_t const *const offsets = edge_offsets_at_(layout);
+
+        // Positions into `bfs_order`, so they ride the state id like every other state ordinal - a hard-coded
+        // width would both overpay for a `u16` automaton and truncate a wider one.
+        state_id_t histogram[alphabet_size_k + 1] = {};
+        for (size_t index = band_first; index < band_last; ++index) {
+            state_id_t const state = bfs_order[index];
+            ++histogram[offsets[state + 1] - offsets[state]];
+        }
+        // Suffix-summed, so the highest degree claims the lowest positions in the band.
+        state_id_t running = (state_id_t)band_first;
+        for (size_t degree = alphabet_size_k + 1; degree-- > 0;) {
+            state_id_t const count = histogram[degree];
+            histogram[degree] = running;
+            running += count;
+        }
+        for (size_t index = band_first; index < band_last; ++index) {
+            state_id_t const state = bfs_order[index];
+            reorder[histogram[offsets[state + 1] - offsets[state]]++] = state;
+        }
+        for (size_t index = band_first; index < band_last; ++index) bfs_order[index] = reorder[index];
+    }
+
+    /**
+     *  @brief Classic goto/failure completion, walked one depth band at a time so the band boundaries the
+     *         frequency ordering needs come for free - no depth array, and no separate discovered flag,
+     *         since `failures[state] == invalid_state_k` already means "not reached yet".
+     *  @return The number of live states, i.e. the root plus everything the BFS reached.
+     */
+    size_t complete_failure_links_(layout_t const &layout) noexcept {
+        state_id_t *const failures = failures_at_(layout);
+        state_id_t *const bfs_order = bfs_order_at_(layout);
+        state_id_t const *const offsets = edge_offsets_at_(layout);
+        csr_edge_t const *const rows = edges_at_(layout);
+
+        for (size_t state = 0; state < count_states_; ++state) failures[state] = invalid_state_k;
+        failures[0] = 0; // ? The root self-loops, and that also marks it discovered.
+        bfs_order[0] = 0;
+        size_t live_state_count = 1;
+
+        for (size_t band_first = 0, band_last = 1; band_first != band_last;) {
+            for (size_t index = band_first; index < band_last; ++index) {
+                state_id_t const parent = bfs_order[index];
+                for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
+                    state_id_t const child = rows[edge].child;
+                    if (failures[child] != invalid_state_k) continue; // ? Reached by an earlier edge.
+                    // A depth-one state always fails to the root; anything deeper chases its parent's link.
+                    failures[child] = parent == 0 ? 0 : chase_(failures[parent], rows[edge].byte, failures);
+                    bfs_order[live_state_count++] = child;
+                }
+            }
+            order_band_by_out_degree_(layout, band_first, band_last);
+            band_first = band_last, band_last = live_state_count;
+        }
+        return live_state_count;
+    }
+
+    /** @brief Grows every slot-indexed array to hold @p minimum slots. */
+    status_t ensure_slot_capacity_(size_t minimum) noexcept {
+        if (minimum <= check_.size()) return status_t::success_k;
+        size_t const old_capacity = check_.size();
+        size_t const new_capacity = sz_size_bit_ceil(minimum);
+        if (new_capacity >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
+
+        if (base_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (check_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (old_of_final_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+
+        // Four words of headroom so a 256-bit feasibility window never reads past the end. `try_resize`
+        // skips construction for trivially-constructible types, so every new word is explicitly cleared -
+        // the bitmap is the only record of what is claimed, and a stale set bit would hide a free slot.
+        size_t const old_words = occupied_bits_.size();
+        size_t const new_words = (new_capacity >> 6) + 8;
+        if (occupied_bits_.try_resize(new_words) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t word = old_words; word < new_words; ++word) occupied_bits_[word] = 0;
+
+        for (size_t slot = old_capacity; slot < new_capacity; ++slot) {
+            base_[slot] = 0;
+            check_[slot] = invalid_state_k;
+            old_of_final_[slot] = invalid_state_k;
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Marks @p slot taken; the bitmap is the only record of what is free. */
+    void claim_slot_(size_t slot) noexcept { occupied_bits_[slot >> 6] |= (u64_t)1 << (slot & 63); }
+
+    /** @brief Whether @p slot is still unclaimed. */
+    bool slot_is_free_(size_t slot) const noexcept { return ((occupied_bits_[slot >> 6] >> (slot & 63)) & 1) == 0; }
+
+    /**
+     *  @brief First free slot at or after @p from, growing the arena when the search runs off the end.
+     *
+     *  Packing only ever fills forward, so `lowest_free_cursor_` never moves back and the whole walk across
+     *  one build is amortized linear in the slot count.
+     */
+    status_t next_free_slot_(size_t from, size_t &found) noexcept {
+        for (size_t word = from >> 6;; ++word) {
+            if ((word << 6) >= check_.size()) {
+                status_t const status = ensure_slot_capacity_(check_.size() * 2);
+                if (status != status_t::success_k) return status;
+            }
+            u64_t vacancies = ~occupied_bits_[word];
+            // Slots before `from` are not candidates, even when the word says they are free.
+            if (word == (from >> 6)) vacancies &= ~(u64_t)0 << (from & 63);
+            if (vacancies == 0) continue;
+            found = (word << 6) + (size_t)sz_u64_ctz(vacancies);
+            return status_t::success_k;
+        }
+    }
+
+    /** @brief True when every byte set in @p wanted lands on a currently-free slot at @p base. */
+    bool slots_are_free_(size_t base, sz_byteset_t const &wanted) const noexcept {
+        size_t const word = base >> 6, shift = base & 63;
+        for (size_t quarter = 0; quarter < 4; ++quarter) {
+            u64_t const low = occupied_bits_[word + quarter];
+            u64_t const high = occupied_bits_[word + quarter + 1];
+            u64_t const window = shift == 0 ? low : (low >> shift) | (high << (64 - shift));
+            if (window & wanted._u64s[quarter]) return false;
+        }
+        return true;
+    }
+
+    /**
+     *  @brief Assigns every live state its published ID: the hot tier takes `[0, hot_count_)` in frequency
+     *         order, and the rest are packed into the double array by a free list walked in the same
+     *         depth-ascending order, so a state's literal parent always resolves before the state itself.
+     *
+     *  Case folding lets several preimage bytes converge on one shared successor, and a double array can
+     *  encode only one of them as the state's real slot. Every other converging byte still gets a slot that
+     *  `check_` verifies, but that slot is a relay - `publish_` recognizes it as a slot whose raw state's
+     *  real slot is elsewhere, and points its failure link straight there.
+     */
+    status_t pack_cold_tier_(layout_t const &layout, size_t live_state_count) noexcept {
+        state_id_t *const bfs_order = bfs_order_at_(layout);
+        state_id_t *const final_id = final_id_at_(layout);
+
+        for (size_t state = 0; state < count_states_; ++state) final_id[state] = invalid_state_k;
+        lowest_free_cursor_ = hot_count_; // ? Hot states own the low IDs outright.
+        status_t status = ensure_slot_capacity_(hot_count_ + alphabet_size_k);
+        if (status != status_t::success_k) return status;
+
+        for (size_t hot_index = 0; hot_index < hot_count_; ++hot_index) {
+            final_id[bfs_order[hot_index]] = (state_id_t)hot_index;
+            old_of_final_[hot_index] = bfs_order[hot_index];
+            claim_slot_(hot_index);
+        }
+
+        if (hot_count_ == 0) { // ? The root has no parent to assign it a cold ID.
+            size_t assigned;
+            status = next_free_slot_(lowest_free_cursor_, assigned);
+            if (status != status_t::success_k) return status;
+            claim_slot_(assigned);
+            check_[assigned] = (state_id_t)assigned;
+            old_of_final_[assigned] = 0;
+            final_id[0] = (state_id_t)assigned;
+            lowest_free_cursor_ = assigned + 1;
+        }
+
+        for (size_t index = 0; index < live_state_count; ++index) {
+            state_id_t const parent = bfs_order[index];
+            status = index < hot_count_ ? pack_hot_children_(layout, parent) : pack_cold_children_(layout, parent);
+            if (status != status_t::success_k) return status;
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Places a hot parent's children on whatever free slots come next.
+     *
+     *  `hot_rows_` addresses every child unconditionally, so nothing has to verify ownership through
+     *  `check_` for them and they need no shared base. A child some other parent already placed keeps the
+     *  slot it has, since both routes resolve to the same target through the completed row.
+     */
+    status_t pack_hot_children_(layout_t const &layout, state_id_t parent) noexcept {
+        state_id_t *const final_id = final_id_at_(layout);
+        state_id_t const *const offsets = edge_offsets_at_(layout);
+        csr_edge_t const *const rows = edges_at_(layout);
+
+        for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
+            state_id_t const child = rows[edge].child;
+            if (final_id[child] != invalid_state_k) continue;
+            size_t assigned;
+            status_t const status = next_free_slot_(lowest_free_cursor_, assigned);
+            if (status != status_t::success_k) return status;
+            claim_slot_(assigned);
+            check_[assigned] = (state_id_t)assigned;
+            old_of_final_[assigned] = child;
+            final_id[child] = (state_id_t)assigned;
+            lowest_free_cursor_ = assigned + 1;
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Places a cold parent's children on one shared base, so `base_[parent] + byte` addresses each.
+     *
+     *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child byte, and
+     *  the whole row is tested at once rather than probed child by child.
+     */
+    status_t pack_cold_children_(layout_t const &layout, state_id_t parent) noexcept {
+        state_id_t *const final_id = final_id_at_(layout);
+        state_id_t const *const offsets = edge_offsets_at_(layout);
+        csr_edge_t const *const rows = edges_at_(layout);
+        if (offsets[parent] == offsets[parent + 1]) return status_t::success_k;
+
+        safe_array<state_id_t, alphabet_size_k> child_of_byte;
+        sz_byteset_t child_mask;
+        sz_byteset_init(&child_mask);
+        for (state_id_t edge = offsets[parent]; edge < offsets[parent + 1]; ++edge) {
+            sz_byteset_add_u8(&child_mask, rows[edge].byte);
+            child_of_byte[rows[edge].byte] = rows[edge].child;
+        }
+
+        u8_t anchor_byte = 0;
+        for (size_t quarter = 0; quarter < 4; ++quarter)
+            if (child_mask._u64s[quarter]) {
+                anchor_byte = (u8_t)(quarter * 64 + sz_u64_ctz(child_mask._u64s[quarter]));
+                break;
+            }
+
+        for (size_t candidate = lowest_free_cursor_;;) {
+            status_t status = next_free_slot_(candidate, candidate);
+            if (status != status_t::success_k) return status;
+            if (candidate < anchor_byte) {
+                ++candidate;
+                continue;
+            }
+            size_t const candidate_base = candidate - anchor_byte;
+            status = ensure_slot_capacity_(candidate_base + alphabet_size_k);
+            if (status != status_t::success_k) return status;
+            if (!slots_are_free_(candidate_base, child_mask)) {
+                ++candidate;
+                continue;
+            }
+
+            state_id_t const parent_final = final_id[parent];
+            base_[parent_final] = (state_id_t)candidate_base;
+            for (size_t quarter = 0; quarter < 4; ++quarter)
+                for (u64_t bits = child_mask._u64s[quarter]; bits; bits &= bits - 1) {
+                    u8_t const byte = (u8_t)(quarter * 64 + sz_u64_ctz(bits));
+                    size_t const slot = candidate_base + byte;
+                    state_id_t const child = child_of_byte[byte];
+                    claim_slot_(slot);
+                    check_[slot] = parent_final;
+                    old_of_final_[slot] = child;
+                    // The first slot to claim a raw state owns it; later ones become relays.
+                    if (final_id[child] == invalid_state_k) final_id[child] = (state_id_t)slot;
+                }
+            return status_t::success_k;
+        }
+    }
+
+    /**
+     *  @brief Sizes and fills the published output pool in one pass each.
+     *
+     *  A state's matches are its own plus its failure state's complete set, and BFS order guarantees the
+     *  failure state is finished first, so the pool is written once at exactly the right size rather than
+     *  staged through a per-state list and then reindexed.
+     */
+    status_t size_and_fill_outputs_(layout_t const &layout, size_t live_state_count) noexcept {
+        state_id_t const *const bfs_order = bfs_order_at_(layout);
+        state_id_t const *const failures = failures_at_(layout);
+
+        size_t running = 0;
+        for (size_t index = 0; index < live_state_count; ++index) {
+            state_id_t const state = bfs_order[index];
+            output_run_t &run = output_runs_[state];
+            // A state's matches are its own plus its failure state's whole run. That total is read on every
+            // byte step, so it rides `state_id_t` and the ceiling is refused here rather than assumed.
+            size_t const total = (size_t)run.own_count +
+                                 (state == 0 ? (size_t)0 : (size_t)output_runs_[failures[state]].total_count);
+            if (total > (size_t)invalid_state_k) return status_t::overflow_risk_k;
+            run.total_count = (state_id_t)total;
+            run.total_offset = running;
+            running += run.total_count;
+        }
+
+        if (outputs_.try_resize(running) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t index = 0; index < live_state_count; ++index) {
+            state_id_t const state = bfs_order[index];
+            output_run_t const &run = output_runs_[state];
+            output_t *const destination = outputs_.data() + run.total_offset;
+
+            // The per-state list is most-recent-first, so filling it backwards restores insertion order.
+            size_t written = run.own_count;
+            for (output_id_t walk = run.own_head; walk != output_id_t::invalid_k;
+                 walk = own_outputs_[(size_t)walk].next) {
+                pending_output_t const &pending = own_outputs_[(size_t)walk];
+                destination[--written] = output_t {pending.needle_index, pending.match_bytes};
+            }
+
+            if (state == 0) continue;
+            output_run_t const &inherited = output_runs_[failures[state]];
+            for (size_t position = 0; position < inherited.total_count; ++position)
+                destination[run.own_count + position] = outputs_[inherited.total_offset + position];
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Materializes the hot tier's goto-completed rows by inheritance.
+     *
+     *  Goto completion means `goto(state, byte) == goto(fail(state), byte)` wherever `state` has no literal
+     *  edge on `byte`. The depth-primary ordering puts `fail(state)` at a strictly smaller index, so a hot
+     *  state's failure state is always hot and always already materialized - one row copy plus one store per
+     *  literal edge, instead of a failure chase per cell.
+     */
+    status_t materialize_hot_rows_(layout_t const &layout) noexcept {
+        state_id_t const *const bfs_order = bfs_order_at_(layout);
+        state_id_t const *const failures = failures_at_(layout);
+        state_id_t const *const final_id = final_id_at_(layout);
+        state_id_t const *const offsets = edge_offsets_at_(layout);
+        csr_edge_t const *const rows = edges_at_(layout);
+
+        if (hot_rows_.try_resize(hot_count_ * alphabet_size_k) != status_t::success_k) return status_t::bad_alloc_k;
+        if (hot_count_ == 0) return status_t::success_k;
+
+        state_id_t *const root_row = hot_rows_.data();
+        for (size_t byte = 0; byte < alphabet_size_k; ++byte) root_row[byte] = root_;
+        for (state_id_t edge = offsets[0]; edge < offsets[1]; ++edge)
+            root_row[rows[edge].byte] = final_id[rows[edge].child];
+
+        for (size_t hot_index = 1; hot_index < hot_count_; ++hot_index) {
+            state_id_t const state = bfs_order[hot_index];
+            // A failure state is strictly shallower, so depth-primary order places it earlier and its row is
+            // already final. A real return rather than an assert: violated in a release build this would read
+            // an unwritten row and bake wrong transitions into the published automaton, silently.
+            size_t const inherited_index = (size_t)final_id[failures[state]];
+            if (inherited_index >= hot_index) return status_t::unexpected_dimensions_k;
+            state_id_t const *const inherited = hot_rows_.data() + inherited_index * alphabet_size_k;
+            state_id_t *const row = hot_rows_.data() + hot_index * alphabet_size_k;
+            for (size_t byte = 0; byte < alphabet_size_k; ++byte) row[byte] = inherited[byte];
+            for (state_id_t edge = offsets[state]; edge < offsets[state + 1]; ++edge)
+                row[rows[edge].byte] = final_id[rows[edge].child];
+        }
+        return status_t::success_k;
+    }
+
+    /** @brief Fills `fail_`, `outputs_counts_`, and `outputs_offsets_` over the published slot range. */
+    status_t publish_(layout_t const &layout, size_t cold_capacity_published) noexcept {
+        state_id_t const *const failures = failures_at_(layout);
+        state_id_t const *const final_id = final_id_at_(layout);
+
+        if (fail_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_counts_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_offsets_.try_resize(cold_capacity_published) != status_t::success_k) return status_t::bad_alloc_k;
+
+        for (size_t slot = 0; slot < cold_capacity_published; ++slot) {
+            state_id_t const raw_state = slot < old_of_final_.size() ? old_of_final_[slot] : invalid_state_k;
+            if (raw_state == invalid_state_k) {
+                outputs_counts_[slot] = 0, outputs_offsets_[slot] = 0;
+                if (slot >= hot_count_) fail_[slot] = root_;
+                continue;
+            }
+            // A relay slot shares its raw state's run outright, so nothing is duplicated in `outputs_`.
+            output_run_t const &run = output_runs_[raw_state];
+            outputs_counts_[slot] = run.total_count;
+            outputs_offsets_[slot] = run.total_offset;
+            if (slot < hot_count_) continue;
+            // A relay names a raw state whose real slot is elsewhere; one extra failure hop lands on that
+            // state's own children, which the relay itself does not own.
+            state_id_t const real_slot = final_id[raw_state];
+            fail_[slot] = real_slot != (state_id_t)slot ? real_slot : final_id[failures[raw_state]];
+        }
+        return status_t::success_k;
+    }
+
+#pragma endregion Build Phases
+
+  public:
+    aho_corasick_dictionary() = default;
+    ~aho_corasick_dictionary() noexcept { reset(); }
+
+    explicit aho_corasick_dictionary(allocator_t alloc) noexcept
+        : edges_(alloc), edge_index_(alloc), own_outputs_(alloc), output_runs_(alloc), folded_positions_(alloc),
+          chain_slots_(alloc), build_scratch_(alloc), old_of_final_(alloc), occupied_bits_(alloc), hot_rows_(alloc),
+          base_(alloc), check_(alloc), fail_(alloc), outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc),
+          alloc_(alloc) {}
+
+    aho_corasick_dictionary(aho_corasick_dictionary &&) noexcept = default;
+    aho_corasick_dictionary &operator=(aho_corasick_dictionary &&) noexcept = default;
+    aho_corasick_dictionary(aho_corasick_dictionary const &) = delete;
+    aho_corasick_dictionary &operator=(aho_corasick_dictionary const &) = delete;
+
+    /** @brief Frees every buffer construction needs and matching never touches. */
+    void release_construction_scratch_() noexcept {
+        edges_.reset();
+        edge_index_.reset();
+        own_outputs_.reset();
+        output_runs_.reset();
+        folded_positions_.reset();
+        chain_slots_.reset();
+        build_scratch_.reset();
+        old_of_final_.reset();
+        occupied_bits_.reset();
+        lowest_free_cursor_ = 0;
+    }
+
+    void reset() noexcept {
+        release_construction_scratch_();
+        hot_rows_.reset();
+        base_.reset();
+        check_.reset();
+        fail_.reset();
+        outputs_.reset();
+        outputs_counts_.reset();
+        outputs_offsets_.reset();
+        count_states_ = 0;
+        count_needles_ = 0;
+        max_match_bytes_ = 0;
+        mode_ = find_many_exact_k;
+        hot_count_ = derive_hot_count_k;
+        root_ = 0;
+    }
+
+    /** @brief Selects byte-exact or case-folded matching; must be called before the first `try_insert`. */
+    void mode(find_many_mode_t new_mode) noexcept {
+        sz_assert_(count_needles_ == 0 && "Mode can't change once needles have been inserted");
+        mode_ = new_mode;
+    }
+    find_many_mode_t mode() const noexcept { return mode_; }
+
+    /** @brief Forces the hot-tier size instead of deriving it from `cpu_specs_t` in `try_build`. */
+    void hot_count(size_t desired) noexcept { hot_count_ = desired; }
+
+    size_t count_states() const noexcept { return count_states_; }
+    size_t count_needles() const noexcept { return count_needles_; }
+    state_id_t max_match_bytes() const noexcept { return max_match_bytes_; }
+    size_t hot_count() const noexcept { return hot_count_; }
+    allocator_t const &allocator() const noexcept { return alloc_; }
+
+    /** @brief Bytes held by both transition tiers together, hot rows plus the double array. */
+    size_t transitions_bytes() const noexcept {
+        return (hot_rows_.size() + base_.size() + check_.size() + fail_.size()) * sizeof(state_id_t);
+    }
+
+    /**
+     *  @brief Adds a single @p needle to the vocabulary, assigning it a unique, insertion-order needle ID.
+     *  @note Can't be called after `try_build`. Can't be called from multiple threads at the same time.
+     *  @retval `status_t::success_k` The needle was successfully added.
+     *  @retval `status_t::bad_alloc_k` Memory allocation failed.
+     *  @retval `status_t::overflow_risk_k` Too many needles or states for the current state ID type.
+     *  @retval `status_t::invalid_utf8_k` In `find_many_uncased_k` mode, the needle was not valid UTF-8.
+     */
+    status_t try_insert(span<byte_t const> needle) noexcept {
+        if (needle.size() == 0) return status_t::success_k;
+        if (count_needles_ >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
+
+        state_id_t const needle_index = static_cast<state_id_t>(count_needles_);
+        status_t const status = mode_ == find_many_uncased_k ? try_insert_uncased_(needle, needle_index)
+                                                             : try_insert_exact_(needle, needle_index);
+        if (status != status_t::success_k) return status;
+        ++count_needles_;
+        return status_t::success_k;
+    }
+
+    status_t try_insert(span<char const> needle) noexcept { return try_insert(needle.template cast<byte_t const>()); }
+
+    /**
+     *  @brief Constructs the automaton from the vocabulary. Can only be called @b once.
+     *  @param[in] specs Sizes the hot tier from the host's last-level cache, unless `hot_count` forced it.
+     *
+     *  Seven phases, each named below: the edge pool becomes a CSR, goto/failure completion walks it one
+     *  depth band at a time while ordering each band by out-degree, the hot/cold split falls out of that
+     *  ordering, the double array packs the rest, and the outputs and hot rows are each materialized once.
+     */
+    status_t try_build(cpu_specs_t const &specs = {}) noexcept {
+        status_t status = ensure_root_();
+        if (status != status_t::success_k) return status;
+
+        // Every sub-buffer is written before it is read, so zeroing the block first would be pure waste.
+        layout_t const layout = build_layout_(specs);
+        if (build_scratch_.try_resize_uninitialized(layout.total) != status_t::success_k) return status_t::bad_alloc_k;
+
+        compact_edges_into_csr_(layout);
+        size_t const live_state_count = complete_failure_links_(layout);
+
+        // The edge pool and its index have no reader past this point; the CSR carries every edge from here.
+        edges_.reset();
+        edge_index_.reset();
+
+        // Hot rows are shared, read-mostly, and re-entered on nearly every byte, so they're sized against
+        // the last-level cache rather than a private L2 slice.
+        if (hot_count_ == derive_hot_count_k) hot_count_ = specs.l3_bytes / (alphabet_size_k * sizeof(state_id_t));
+        hot_count_ = sz_min_of_two(hot_count_, live_state_count);
+
+        status = pack_cold_tier_(layout, live_state_count);
+        if (status != status_t::success_k) return status;
+
+        state_id_t const *const bfs_order = bfs_order_at_(layout);
+        state_id_t const *const final_id = final_id_at_(layout);
+        root_ = final_id[0];
+        sz_assert_(root_ == 0 && "The root is the unique shallowest state, so it always sorts first");
+
+        // The exclusive published bound: not `hot_count_` plus the cold-state count, since a packed child's
+        // ID is address arithmetic and can skip past slots no state ever ended up owning.
+        size_t state_count_published = hot_count_;
+        for (size_t index = 0; index < live_state_count; ++index)
+            state_count_published = sz_max_of_two(state_count_published, (size_t)final_id[bfs_order[index]] + 1);
+        size_t const cold_capacity_published = state_count_published + (alphabet_size_k - 1);
+
+        // `base_` and `check_` were written in place by the packing above; widening them here only extends
+        // the address-arithmetic headroom a `base_[state] + byte` lookup can reach.
+        status = ensure_slot_capacity_(cold_capacity_published);
+        if (status != status_t::success_k) return status;
+
+        status = size_and_fill_outputs_(layout, live_state_count);
+        if (status != status_t::success_k) return status;
+        status = materialize_hot_rows_(layout);
+        if (status != status_t::success_k) return status;
+        status = publish_(layout, cold_capacity_published);
+        if (status != status_t::success_k) return status;
+
+        count_states_ = state_count_published;
+        release_construction_scratch_();
+        return status_t::success_k;
+    }
+
+#pragma region Published View
+
+    using view_t = aho_corasick_view<state_id_t>;
+
+    /**
+     *  @brief Immutable, trivially-copyable view of this dictionary, safe to pass to a CUDA kernel by value.
+     *  @note Every pointer refers to storage owned by `*this`, which must outlive the view.
+     */
+    view_t view() const noexcept {
+        view_t result;
+        result.hot_rows = hot_rows_.data();
+        result.base = base_.data();
+        result.check = check_.data();
+        result.fail = fail_.data();
+        result.outputs = outputs_.data();
+        result.outputs_counts = outputs_counts_.data();
+        result.outputs_offsets = outputs_offsets_.data();
+        result.outputs_total = outputs_.size();
+        result.hot_count = (state_id_t)hot_count_;
+        result.state_count = (state_id_t)count_states_;
+        result.root = root_;
+        result.max_match_bytes = max_match_bytes_;
+        return result;
+    }
+
+#pragma endregion Published View
+
+#pragma region Matching
+
+    /**
+     *  @brief Finds all occurrences of all needles in the @p haystack.
+     *  @note This is the serial reference oracle: obvious correctness over speed.
+     *  @param[in] callback The handler for a @b `match_t` match, returning `true` to continue.
+     */
+    template <typename callback_type_>
+    void find(span<byte_t const> haystack, callback_type_ &&callback) const noexcept {
+        view_t const automaton = view();
+        state_id_t current_state = automaton.root;
+        for (size_t offset = 0; offset < haystack.size(); ++offset) {
+            u8_t const byte = (u8_t)haystack[offset];
+            size_t const output_count = aho_corasick_step_counting(automaton, current_state, byte);
+            if (output_count == 0) continue;
+            size_t const output_offset = automaton.outputs_offsets[current_state];
+
+            for (size_t index = 0; index < output_count; ++index) {
+                output_t const &output = automaton.outputs[output_offset + index];
+                size_t const match_length = output.match_bytes;
+                // Tested by addition rather than by subtracting the length from the position: the walk
+                // always restarts at the root at this span's own start, so a match can never reach behind
+                // it, but a subtraction would wrap and read as in-bounds if that ever stopped holding.
+                if (offset + 1 < match_length) continue;
+                span<byte_t const> match_span(&haystack[offset + 1 - match_length], match_length);
+                match_t match {haystack, match_span, 0, output.needle_index};
+                if (!callback(match)) return;
+            }
+        }
+    }
+
+    template <typename callback_type_>
+    void find(span<char const> haystack, callback_type_ &&callback) const noexcept {
+        find(haystack.template cast<byte_t const>(), std::forward<callback_type_>(callback));
+    }
+
+    /**
+     *  @brief Counts the number of occurrences of all the needles in the @p haystack.
+     *  @return The number of potentially-overlapping occurrences.
+     */
+    size_t count(span<byte_t const> haystack) const noexcept {
+        view_t const automaton = view();
+        size_t total = 0;
+        state_id_t current_state = automaton.root;
+        for (size_t offset = 0; offset < haystack.size(); ++offset) {
+            total += aho_corasick_step_counting(automaton, current_state, (u8_t)haystack[offset]);
+        }
+        return total;
+    }
+
+    size_t count(span<char const> haystack) const noexcept { return count(haystack.template cast<byte_t const>()); }
+
+#pragma endregion Matching
+};
+
+using find_many_u16_dictionary_t = aho_corasick_dictionary<u16_t, std::allocator<char>>;
+using find_many_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
+
+#pragma endregion Dictionary
+
+#pragma region Primary API
+
+/**
+ *  @brief Aho-Corasick-based @b single-threaded multi-pattern exact/case-folded substring search.
+ *  @tparam state_id_type_ The type of the state ID.
+ *  @tparam allocator_type_ The type of the allocator.
+ *  @tparam capability_ Matches `sz_cap_serial_k` and any other capability that isn't parallel or CUDA; the
+ *          two-level parallel specialization below claims `sz_caps_sp_k` specifically.
+ *
+ *  A partial specialization of the bodiless primary `find_many` declared above, not a second primary: that
+ *  declaration carries the default template arguments, so a bodied primary would make this ill-formed.
+ */
+template <typename state_id_type_, typename allocator_type_, sz_capability_t capability_>
+struct find_many<state_id_type_, allocator_type_, capability_,
+                 std::enable_if_t<(capability_ & (sz_cap_parallel_k | sz_cap_cuda_k)) == 0>> {
+    using dictionary_t = aho_corasick_dictionary<state_id_type_, allocator_type_>;
+    using state_id_t = typename dictionary_t::state_id_t;
+    using allocator_t = typename dictionary_t::allocator_t;
+    using match_t = typename dictionary_t::match_t;
+
+    explicit find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
+    void reset() noexcept { dict_.reset(); }
+    dictionary_t const &dictionary() const noexcept { return dict_; }
+
+    /**
+     *  @brief Indexes all of the @p needles strings into the FSM.
+     *  @param[in] specs Sizes the hot tier from the host's last-level cache.
+     *  @note Before reusing, please `reset` the FSM.
+     *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
+     */
+    template <typename needles_type_>
+    status_t try_build(needles_type_ &&needles, find_many_mode_t mode = find_many_exact_k,
+                       cpu_specs_t const &specs = {}) noexcept {
+        dict_.mode(mode);
+        for (auto const &needle : needles) {
+            status_t const status = dict_.try_insert(needle);
+            if (status != status_t::success_k) return status;
+        }
+        return dict_.try_build(specs);
+    }
+
+    /** @brief Occurrences of all needles in each of the @p haystacks, for filtering and ranking. */
+    template <typename haystacks_type_>
+    status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
+        sz_assert_(counts.size() == haystacks.size());
+        for (size_t index = 0; index < counts.size(); ++index) counts[index] = dict_.count(haystacks[index]);
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Finds all occurrences of all needles in all the @p haystacks.
+     *  @note Both @p haystacks and @p matches need random access; a match must be assignable from `match_t`.
+     */
+    template <typename haystacks_type_, typename output_matches_type_ = span<find_many_match_t>>
+    status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts,
+                      output_matches_type_ &&matches) const noexcept {
+
+        // `counts` states the requirement and `matches` supplies the capacity, matching the parallel
+        // overload; an oversized buffer is legal, and an undersized one is refused before any write.
+        size_t required = 0;
+        for (size_t index = 0; index < counts.size(); ++index) required += counts[index];
+        if (required > matches.size()) return status_t::unexpected_dimensions_k;
+
+        size_t count_found = 0;
+        for (auto iterator = haystacks.begin(); iterator != haystacks.end(); ++iterator)
+            dict_.find(*iterator, [&](match_t match) noexcept {
+                match.haystack_index = static_cast<size_t>(iterator - haystacks.begin());
+                matches[count_found] = match;
+                count_found++;
+                return true;
+            });
+        return status_t::success_k;
+    }
+
+  private:
+    dictionary_t dict_;
+};
+
+#pragma endregion Primary API
+
+#pragma region Parallel Backend
+
+struct find_many_short_matches_in_part_t {
+    size_t total = 0;
+    size_t prefix = 0;
+};
+
+/**
+ *  @brief  Aho-Corasick-based @b multi-threaded multi-pattern exact/case-folded substring search.
+ *  @note   Construction of the FSM is not parallelized, as it is not generally a bottleneck.
+ *
+ *  Two levels of parallelism: one core per input below the L2 size, all cores on one input above it.
+ *
+ *  Matches straddling two threads' slices are the hard part. Rather than firing a callback concurrently
+ *  and leaving the user to synchronize, this counts each slice first and then writes the slices in
+ *  parallel into disjoint output ranges, so neither a mutex nor an atomic sits on the write path.
+ */
+template <typename state_id_type_, typename allocator_type_, typename enable_>
+struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
+
+    using dictionary_t = aho_corasick_dictionary<state_id_type_, allocator_type_>;
+    using state_id_t = typename dictionary_t::state_id_t;
+    using allocator_t = typename dictionary_t::allocator_t;
+    using match_t = typename dictionary_t::match_t;
+
+    using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+
+    explicit find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
+    void reset() noexcept { dict_.reset(); }
+    dictionary_t const &dictionary() const noexcept { return dict_; }
+
+    /** @brief Indexes all of the @p needles strings into the FSM; @p specs sizes the hot tier from the
+     *         host's last-level cache, forwarded to `aho_corasick_dictionary::try_build`. */
+    template <typename needles_type_>
+    status_t try_build(needles_type_ &&needles, find_many_mode_t mode = find_many_exact_k,
+                       cpu_specs_t const &specs = {}) noexcept {
+        dict_.mode(mode);
+        for (auto const &needle : needles)
+            if (status_t const status = dict_.try_insert(needle); status != status_t::success_k) return status;
+        return dict_.try_build(specs);
+    }
+
+    /**
+     *  @brief Occurrences of all needles in each of the @p haystacks, for filtering and ranking.
+     *  @param[in] specs Picks the threading strategy per haystack, by comparing its size against the L2.
+     */
+    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts, executor_type_ &&executor = {},
+                       cpu_specs_t const &specs = {}) const noexcept {
+
+        sz_assert_(counts.size() == haystacks.size());
+
+        using haystacks_t = typename std::remove_reference<haystacks_type_>::type;
+        using haystack_t = typename haystacks_t::value_type;
+        using char_t = typename haystack_t::value_type;
+        static_assert(std::is_trivially_copyable<haystack_t>::value,
+                      "The haystack should be trivially copyable for higher compatibility.");
+
+        // On small strings, individually compute the counts.
+        executor.for_n_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
+            haystack_t const &haystack = haystacks[haystack_index];
+            if (is_large_(haystack.size_bytes(), specs)) return;
+            counts[haystack_index] = dict_.count(haystack);
+        });
+
+        // On longer strings, throw all cores on each haystack.
+        safe_vector<size_t, size_allocator_t> counts_per_core(dict_.allocator());
+        if (counts_per_core.try_resize(executor.threads_count()) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
+            if (!is_large_(haystack.size_bytes(), specs)) continue; // ? Already processed above.
+            auto const haystack_bytes =
+                span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+
+            count_matches_per_core_(haystack_bytes, executor, counts_per_core);
+            size_t total = 0;
+            for (size_t core_index = 0; core_index < counts_per_core.size(); ++core_index)
+                total += counts_per_core[core_index];
+            counts[haystack_index] = total;
+        }
+
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Finds all occurrences of all needles in all the @p haystacks.
+     */
+    template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, //
+                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
+
+        using haystacks_t = typename std::remove_reference<haystacks_type_>::type;
+        using haystack_t = typename haystacks_t::value_type;
+        using char_t = typename haystack_t::value_type;
+
+        if (haystacks.size() == 0) return status_t::success_k;
+        size_t const cores_total = executor.threads_count();
+
+        // Counting here rather than through `try_count` is what keeps every large haystack to two walks
+        // instead of three: `try_count` may attribute a straddling match to the core it ends on, while the
+        // scatter reserves each core's slot by where a match starts, so its split cannot be reused.
+        size_t large_total = 0;
+        for (size_t index = 0; index < haystacks.size(); ++index)
+            if (is_large_(haystacks[index].size_bytes(), specs)) ++large_total;
+
+        safe_vector<size_t, size_allocator_t> counts_per_haystack(dict_.allocator());
+        safe_vector<size_t, size_allocator_t> offsets_per_haystack(dict_.allocator());
+        safe_vector<size_t, size_allocator_t> counts_per_core_per_large(dict_.allocator());
+        if (counts_per_haystack.try_resize(haystacks.size()) != status_t::success_k ||
+            offsets_per_haystack.try_resize(haystacks.size()) != status_t::success_k ||
+            counts_per_core_per_large.try_resize(large_total * cores_total) != status_t::success_k)
+            return status_t::bad_alloc_k;
+
+        executor.for_n_dynamic(haystacks.size(), [&](size_t haystack_index) noexcept {
+            haystack_t const &haystack = haystacks[haystack_index];
+            if (is_large_(haystack.size_bytes(), specs)) return;
+            counts_per_haystack[haystack_index] = dict_.count(haystack);
+        });
+
+        size_t large_index = 0;
+        for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
+            if (!is_large_(haystack.size_bytes(), specs)) continue;
+            auto const haystack_bytes =
+                span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+
+            span<size_t> const counts_per_core {counts_per_core_per_large.data() + large_index * cores_total,
+                                                cores_total};
+            count_matches_per_core_by_start_(haystack_bytes, executor, counts_per_core);
+            size_t total = 0;
+            for (size_t core_index = 0; core_index < cores_total; ++core_index)
+                counts_per_core[core_index] = (total += counts_per_core[core_index]);
+            counts_per_haystack[haystack_index] = total;
+            ++large_index;
+        }
+
+        status_t const prologue = prefix_and_check_(counts_per_haystack, offsets_per_haystack, matches.size());
+        if (prologue != status_t::success_k) return prologue;
+
+        scatter_matches_of_small_(haystacks, counts_per_haystack, offsets_per_haystack, matches, executor, specs);
+
+        large_index = 0;
+        for (size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
+            if (!is_large_(haystack.size_bytes(), specs)) continue;
+            auto const haystack_bytes =
+                span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+
+            span<size_t const> const counts_per_core {counts_per_core_per_large.data() + large_index * cores_total,
+                                                      cores_total};
+            scatter_matches_of_one_large_(haystack_bytes, haystack_index, offsets_per_haystack[haystack_index],
+                                          counts_per_core, matches, executor);
+            ++large_index;
+        }
+
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Finds all occurrences of all needles in all the @p haystacks, given precomputed @p counts.
+     */
+    template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
+#if SZ_HAS_CONCEPTS_
+        requires executor_like<executor_type_>
+#endif
+    status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,
+                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
+
+        sz_assert_(counts.size() == haystacks.size());
+        size_t const cores_total = executor.threads_count();
+
+        using haystacks_t = typename std::remove_reference<haystacks_type_>::type;
+        using haystack_t = typename haystacks_t::value_type;
+        using char_t = typename haystack_t::value_type;
+
+        // An empty batch has nothing to write and no first offset to seed, and `try_resize(0)` leaves the
+        // storage null, so the unconditional `[0]` below would dereference it.
+        if (counts.size() == 0) return status_t::success_k;
+
+        safe_vector<size_t, size_allocator_t> offsets_per_haystack(dict_.allocator());
+        if (offsets_per_haystack.try_resize(counts.size()) != status_t::success_k) return status_t::bad_alloc_k;
+        status_t const prologue = prefix_and_check_(counts, offsets_per_haystack, matches.size());
+        if (prologue != status_t::success_k) return prologue;
+
+        scatter_matches_of_small_(haystacks, counts, offsets_per_haystack, matches, executor, specs);
+
+        // Longer strings: throw all cores at each one, tracking per-core match counts to avoid atomics.
+        // Only per-haystack totals arrived, so each large one is re-split by start before it is written.
+        safe_vector<size_t, size_allocator_t> counts_per_core(dict_.allocator());
+        if (counts_per_core.try_resize(cores_total) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
+            auto const haystack_bytes =
+                span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+            if (!is_large_(haystack_bytes.size(), specs)) continue;
+
+            count_matches_per_core_by_start_(haystack_bytes, executor, counts_per_core);
+            for (size_t core_index = 1; core_index < cores_total; ++core_index)
+                counts_per_core[core_index] += counts_per_core[core_index - 1];
+            scatter_matches_of_one_large_(haystack_bytes, haystack_index, offsets_per_haystack[haystack_index],
+                                          counts_per_core, matches, executor);
+        }
+
+        return status_t::success_k;
+    }
+
+  private:
+    dictionary_t dict_;
+
+    /** @brief Whether a haystack is big enough to deserve every core, rather than one core of its own. */
+    static bool is_large_(size_t haystack_bytes, cpu_specs_t const &specs) noexcept {
+        return haystack_bytes > specs.l2_bytes;
+    }
+
+    /**
+     *  @brief Turns per-haystack @p counts into the exclusive prefix @p offsets, refusing a short output.
+     *
+     *  Nothing downstream bounds its writes against the output, so its capacity is checked once, up front,
+     *  and the whole call is refused rather than half-written.
+     */
+    static status_t prefix_and_check_(span<size_t const> counts, span<size_t> offsets,
+                                      size_t matches_capacity) noexcept {
+        offsets[0] = 0;
+        for (size_t index = 1; index < counts.size(); ++index) offsets[index] = offsets[index - 1] + counts[index - 1];
+        size_t const matches_total = offsets[counts.size() - 1] + counts[counts.size() - 1];
+        return matches_total > matches_capacity ? status_t::unexpected_dimensions_k : status_t::success_k;
+    }
+
+    /**
+     *  @brief Fills @p counts_per_core for one haystack, attributing a straddling match to the core it
+     *         @b starts on - the rule the scatter reserves slots by, unlike `count_matches_per_core_`.
+     */
+    template <typename executor_type_>
+    void count_matches_per_core_by_start_(span<byte_t const> haystack, executor_type_ &executor,
+                                          span<size_t> counts_per_core) const noexcept {
+        fu::indexed_split_t const optimal_split {haystack.size(), counts_per_core.size()};
+        executor.for_threads([&](size_t core_index) noexcept {
+            counts_per_core[core_index] = count_matches_in_one_part(haystack, optimal_split[core_index]);
+        });
+    }
+
+    /** @brief Writes every small haystack's matches, one core per haystack into disjoint output ranges. */
+    template <typename haystacks_type_, typename output_matches_type_, typename executor_type_>
+    void scatter_matches_of_small_(haystacks_type_ const &haystacks, span<size_t const> counts,
+                                   span<size_t const> offsets, output_matches_type_ &matches, executor_type_ &executor,
+                                   cpu_specs_t const &specs) const noexcept {
+
+        using haystack_t = typename haystacks_type_::value_type;
+        using char_t = typename haystack_t::value_type;
+        sz_unused_(counts);
+
+        executor.for_n_dynamic(offsets.size(), [&](size_t haystack_index) noexcept {
+            haystack_t const &haystack = haystacks[haystack_index];
+            auto const haystack_bytes =
+                span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+            if (is_large_(haystack_bytes.size(), specs)) return;
+
+            size_t matches_found = 0;
+            dict_.find(haystack_bytes, [&](match_t match) noexcept {
+                match.haystack_index = haystack_index;
+                matches[offsets[haystack_index] + matches_found] = match;
+                ++matches_found;
+                return true;
+            });
+            sz_assert_(counts[haystack_index] == matches_found);
+        });
+    }
+
+    /**
+     *  @brief Writes one large haystack's matches, each core into the slot its own prefix sum reserves.
+     *  @param[in] counts_per_core Inclusive prefix sums of each core's match count, attributed by start.
+     */
+    template <typename output_matches_type_, typename executor_type_>
+    void scatter_matches_of_one_large_(span<byte_t const> haystack, size_t haystack_index, size_t base_offset,
+                                       span<size_t const> counts_per_core, output_matches_type_ &matches,
+                                       executor_type_ &executor) const noexcept {
+
+        fu::indexed_split_t const optimal_split {haystack.size(), counts_per_core.size()};
+        executor.for_threads([&](size_t core_index) noexcept {
+            size_t const count_matches_before_this_core = core_index ? counts_per_core[core_index - 1] : 0;
+            size_t const count_matches_expected_on_this_core = counts_per_core[core_index] -
+                                                               count_matches_before_this_core;
+
+            fu::indexed_range_t const optimal_subrange = optimal_split[core_index];
+            byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
+            byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
+            byte_t const *const overlapping_end = sz_min_of_two(optimal_end + dict_.max_match_bytes() - 1,
+                                                                haystack.end());
+
+            size_t count_matches_found_on_this_core = 0;
+            dict_.find({optimal_begin, overlapping_end}, [&](match_t match) noexcept {
+                bool const belongs_to_this_core = match.needle.begin() < optimal_end;
+                if (!belongs_to_this_core) return true;
+                match.haystack = haystack;
+                match.haystack_index = haystack_index;
+                matches[base_offset + count_matches_before_this_core + count_matches_found_on_this_core] = match;
+                count_matches_found_on_this_core++;
+                return true;
+            });
+            sz_assert_(count_matches_found_on_this_core == count_matches_expected_on_this_core);
+        });
+    }
+
+    /**
+     *  @brief Fills @p counts_per_core for one haystack, picking the cheaper of the two counting strategies.
+     *
+     *  The two strategies attribute a straddling match to different cores - `count_matches_in_one_part` to
+     *  the core the match starts on, `count_short_matches_in_one_part` to the core it ends on - so only a
+     *  caller that sums across cores may choose freely. `try_find` scatters by start and therefore calls
+     *  `count_matches_in_one_part` directly rather than going through here.
+     */
+    template <typename executor_type_>
+    void count_matches_per_core_(span<byte_t const> haystack, executor_type_ &executor,
+                                 span<size_t> counts_per_core) const noexcept {
+        fu::indexed_split_t const optimal_split {haystack.size(), counts_per_core.size()};
+        bool const longest_match_fits_on_one_core = optimal_split.smallest_size() >= dict_.max_match_bytes();
+
+        if (!longest_match_fits_on_one_core)
+            executor.for_threads([&](size_t core_index) noexcept {
+                counts_per_core[core_index] = count_matches_in_one_part(haystack, optimal_split[core_index]);
+            });
+        else
+            executor.for_threads([&](size_t core_index) noexcept {
+                find_many_short_matches_in_part_t const partial = count_short_matches_in_one_part( //
+                    haystack, optimal_split[core_index]);
+                counts_per_core[core_index] = partial.total - non_zero_if<size_t>(partial.prefix, core_index > 0);
+            });
+    }
+
+    /**
+     *  @brief  Helper method implementing the core logic of the parallel `try_count` and part of `try_find`.
+     *  @return Number of matches that @b begin in this core's slice and may end in another core's slice.
+     */
+    size_t count_matches_in_one_part(span<byte_t const> haystack,
+                                     fu::indexed_range_t const optimal_subrange) const noexcept {
+
+        size_t const max_match_bytes = sz_min_of_two(dict_.max_match_bytes(), haystack.size());
+
+        byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
+        byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
+
+        size_t const count_matches_non_overlapping = dict_.count({optimal_begin, optimal_end});
+
+        byte_t const *overlapping_start;
+        byte_t const *overlapping_end;
+        if (optimal_begin + max_match_bytes >= optimal_end) {
+            overlapping_start = optimal_begin;
+            overlapping_end = sz_min_of_two(optimal_end + max_match_bytes, haystack.end());
+        }
+        else {
+            overlapping_start = sz_max_of_two(optimal_end - max_match_bytes + 1, optimal_begin);
+            overlapping_end = sz_min_of_two(optimal_end + max_match_bytes - 1, haystack.end());
+        }
+
+        size_t count_matches_overlapping = 0;
+        dict_.find({overlapping_start, overlapping_end}, [&](match_t match) noexcept {
+            bool const belongs_to_this_core =            //
+                match.needle.begin() >= optimal_begin && // ? Starts within or after this core's slice.
+                match.needle.begin() < optimal_end &&    // ? Starts before this core's slice ends.
+                match.needle.end() > optimal_end;        // ? Ends beyond this core's slice.
+            count_matches_overlapping += belongs_to_this_core;
+            return true;
+        });
+
+        return count_matches_non_overlapping + count_matches_overlapping;
+    }
+
+    /**
+     *  @brief  More optimized alternative to `count_matches_in_one_part`, assuming the longest match fits
+     *          within a single core's slice, so a match can only spill into 2 core regions at most.
+     */
+    find_many_short_matches_in_part_t count_short_matches_in_one_part(
+        span<byte_t const> haystack, fu::indexed_range_t const optimal_subrange) const noexcept {
+
+        typename dictionary_t::view_t const automaton = dict_.view();
+        size_t const max_match_bytes = dict_.max_match_bytes();
+        byte_t const *optimal_begin = haystack.begin() + optimal_subrange.first;
+        byte_t const *const optimal_end = optimal_begin + optimal_subrange.count;
+        byte_t const *const prefix_end = sz_min_of_two(optimal_begin + max_match_bytes, haystack.end());
+        byte_t const *const overlapping_end = sz_min_of_two(optimal_end + max_match_bytes, haystack.end());
+
+        find_many_short_matches_in_part_t result;
+        state_id_t current_state = automaton.root;
+        for (; optimal_begin != overlapping_end; ++optimal_begin) {
+            state_id_t const output_count = aho_corasick_step_counting(automaton, current_state, (u8_t)*optimal_begin);
+            result.total += output_count;
+            result.prefix += non_zero_if<size_t>(output_count, optimal_begin < prefix_end);
+        }
+
+        return result;
+    }
+};
+
+using find_many_u16_serial_t = find_many<u16_t, std::allocator<char>, sz_cap_serial_k>;
+using find_many_u16_parallel_t = find_many<u16_t, std::allocator<char>, sz_caps_sp_k>;
+using find_many_u32_serial_t = find_many<u32_t, std::allocator<char>, sz_cap_serial_k>;
+using find_many_u32_parallel_t = find_many<u32_t, std::allocator<char>, sz_caps_sp_k>;
+
+#pragma endregion Parallel Backend
+
+} // namespace stringzillas
+} // namespace ashvardanian
+
+#endif // STRINGZILLAS_FIND_MANY_SERIAL_HPP_
