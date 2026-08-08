@@ -1,5 +1,13 @@
-# StringZilla C# style — mirrors the C/C++ .clang-format base (4-space, 120 cols, K&R braces).
+# StringZilla editor defaults. C# mirrors the C/C++ .clang-format base — 4-space, 120 cols, K&R braces.
+# YAML mirrors .prettierrc, so editors without Prettier still land on the 2-space GitHub Actions style.
 root = true
+
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
 
 [*.cs]
 indent_style = space

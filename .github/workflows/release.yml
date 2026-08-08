@@ -1,1232 +1,1232 @@
 name: Release
 
 on:
-    push:
-        branches: ["main"]
+  push:
+    branches: ["main"]
 
 env:
-    BUILD_TYPE: Release
-    GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
-    PYTHONUTF8: 1
+  BUILD_TYPE: Release
+  GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+  PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
-    contents: write
-    pages: write
-    id-token: write
-    packages: write
+  contents: write
+  pages: write
+  id-token: write
+  packages: write
 
 jobs:
-    versioning:
-        name: Update Version
-        runs-on: ubuntu-24.04
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: 0
-                  fetch-tags: true
-                  persist-credentials: false
-            - name: Run TinySemVer
-              uses: ashvardanian/tinysemver@v3.0.1
-              with:
-                  verbose: "true"
-                  version-file: "VERSION"
-                  update-version-in: |
-                      Cargo.toml:^version = "(\d+\.\d+\.\d+)"
-                      Cargo.lock:name = "stringzilla"\nversion = "(\d+\.\d+\.\d+)"
-                      package.json:"version": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/darwin-arm64": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/darwin-x64": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/linux-arm64": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/linux-x64": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/win32-arm64": "(\d+\.\d+\.\d+)"
-                      package.json:"@stringzilla/win32-x64": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-darwin-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-darwin-x64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-linux-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-linux-x64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-win32-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
-                      CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
-                      CITATION.cff:^version: (\d+\.\d+\.\d+)
-                      StringZilla.csproj:<Version>(\d+\.\d+\.\d+)</Version>
-                      pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+)</version>
-                  update-major-version-in: |
-                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
-                  update-minor-version-in: |
-                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
-                  update-patch-version-in: |
-                      include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
-                  dry-run: "false"
-                  push: "true"
-                  create-release: "true"
-                  github-token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+  versioning:
+    name: Update Version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Run TinySemVer
+        uses: ashvardanian/tinysemver@v3.0.1
+        with:
+          verbose: "true"
+          version-file: "VERSION"
+          update-version-in: |
+            Cargo.toml:^version = "(\d+\.\d+\.\d+)"
+            Cargo.lock:name = "stringzilla"\nversion = "(\d+\.\d+\.\d+)"
+            package.json:"version": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/darwin-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/darwin-x64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/linux-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/linux-x64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/win32-arm64": "(\d+\.\d+\.\d+)"
+            package.json:"@stringzilla/win32-x64": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-darwin-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-darwin-x64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-linux-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-linux-x64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-win32-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
+            javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
+            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+            CITATION.cff:^version: (\d+\.\d+\.\d+)
+            StringZilla.csproj:<Version>(\d+\.\d+\.\d+)</Version>
+            pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+)</version>
+          update-major-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+          update-minor-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+          update-patch-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+          dry-run: "false"
+          push: "true"
+          create-release: "true"
+          github-token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
-    rebase:
-        name: Rebase Dev. Branch
-        runs-on: ubuntu-24.04
-        if: github.ref == 'refs/heads/main'
-        needs: versioning
-        steps:
-            - name: Checkout the latest code
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: 0
-                  submodules: recursive
+  rebase:
+    name: Rebase Dev. Branch
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    needs: versioning
+    steps:
+      - name: Checkout the latest code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-            - name: Perform rebase
-              run: |
-                  git fetch origin main
-                  git checkout main-dev
-                  git rebase origin/main
+      - name: Perform rebase
+        run: |
+          git fetch origin main
+          git checkout main-dev
+          git rebase origin/main
 
-            - name: Push changes
-              uses: CasperWA/push-protected@v2
-              with:
-                  token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
-                  branch: main-dev
-                  unprotect_reviews: True
-                  force: True
+      - name: Push changes
+        uses: CasperWA/push-protected@v2
+        with:
+          token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
+          branch: main-dev
+          unprotect_reviews: True
+          force: True
 
-    # Native x86_64 - full SIMD, full test depth, single image.
-    build_wheels_stringzilla_linux_x86:
-        name: Build StringZilla ${{ matrix.python-version }} for Ubuntu x86
-        runs-on: ubuntu-24.04
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_LINUX: x86_64
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-linux-x86-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native aarch64 on an ARM runner - no QEMU, mirrors the CUDA job's approach.
-    build_wheels_stringzilla_linux_arm:
-        name: Build StringZilla ${{ matrix.python-version }} for Ubuntu ARM
-        runs-on: ubuntu-24.04-arm
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_LINUX: aarch64
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-linux-arm-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Emulated arches - one image per runner, all Pythons per arch, fuzz depth thinned under QEMU.
-    build_wheels_stringzilla_linux_emulated:
-        name: Build StringZilla wheels for ${{ matrix.arch }}
-        runs-on: ubuntu-24.04
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                arch: [ppc64le, s390x, i686, armv7l, riscv64]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Setup QEMU
-              uses: docker/setup-qemu-action@v4
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
-                  CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-                  CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05 SZ_TARGET=stringzilla
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-linux-emulated-${{ matrix.arch }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    build_wheels_stringzilla_macos:
-        name: Build StringZilla ${{ matrix.python-version }} for macOS
-        runs-on: macos-15
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  MACOSX_DEPLOYMENT_TARGET: "11.0"
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-macos-15-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native AMD64 + 32-bit x86 on an Intel runner.
-    build_wheels_stringzilla_windows_x86:
-        name: Build StringZilla ${{ matrix.python-version }} for Windows x86
-        runs-on: windows-2022
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_WINDOWS: AMD64 x86
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-windows-x86-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
-    build_wheels_stringzilla_windows_arm:
-        name: Build StringZilla ${{ matrix.python-version }} for Windows ARM
-        runs-on: windows-11-arm
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_WINDOWS: ARM64
-                  SZ_TARGET: stringzilla
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzilla-windows-arm-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native x86_64 - full SIMD, single image.
-    build_wheels_stringzillas_cpus_linux_x86:
-        name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu x86
-        runs-on: ubuntu-24.04
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_LINUX: x86_64
-                  CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
-                  SZ_TARGET: stringzillas-cpus
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cpus-linux-x86-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native aarch64 on an ARM runner - no QEMU.
-    build_wheels_stringzillas_cpus_linux_arm:
-        name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu ARM
-        runs-on: ubuntu-24.04-arm
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_LINUX: aarch64
-                  CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
-                  SZ_TARGET: stringzillas-cpus
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cpus-linux-arm-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    build_wheels_stringzillas_cpus_macos:
-        name: Build StringZillas-CPUs ${{ matrix.python-version }} for macOS
-        runs-on: macos-15
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  MACOSX_DEPLOYMENT_TARGET: "11.0"
-                  SZ_TARGET: stringzillas-cpus
-                  CIBW_ARCHS_MACOS: x86_64 arm64
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cpus-macos-15-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native AMD64 on an Intel runner.
-    build_wheels_stringzillas_cpus_windows_x86:
-        name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows x86
-        runs-on: windows-2022
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  SZ_TARGET: stringzillas-cpus
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cpus-windows-x86-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
-    build_wheels_stringzillas_cpus_windows_arm:
-        name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows ARM
-        runs-on: windows-11-arm
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_WINDOWS: ARM64
-                  SZ_TARGET: stringzillas-cpus
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cpus-windows-arm-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    build_wheels_stringzillas_cuda_linux:
-        name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
-        runs-on: ${{ matrix.os }}
-        # The aarch64 leg dies mid-compile, sometimes after ~50 minutes of silence. Bound it.
-        timeout-minutes: 25
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  # `manylinux` only - CUDA ships no musl toolchain, and the `dnf` script below exits 127 on Alpine.
-                  CIBW_BUILD: cp${{ matrix.python-version }}-manylinux*
-                  # Native arch only, so the CUDA toolchain never runs under QEMU.
-                  CIBW_ARCHS_LINUX: auto64
-                  # `stubs` lets the driver-less test phase resolve `libcuda.so.1` and fail `cuInit` cleanly.
-                  # Arm needs Clang as nvcc's host: only Clang's `arm_neon.h` parses in nvcc's frontend.
-                  CIBW_ENVIRONMENT_LINUX: >-
-                      SZ_TARGET=stringzillas-cuda
-                      CUDA_HOME=/usr/local/cuda-12.9
-                      PATH=/usr/local/cuda-12.9/bin:$PATH
-                      LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs
-                      CUDAHOSTCXX=${{ matrix.os == 'ubuntu-24.04-arm' && '/usr/bin/clang++' || '' }}
-                      PYTHONUNBUFFERED=1
-                  # nvcc plus runtime/driver headers from NVIDIA's rhel8 repo, not the ~4 GB `.run` installer.
-                  # Clang 19 on Arm - the newest nvcc 12.9 accepts.
-                  CIBW_BEFORE_ALL_LINUX: |
-                      set -e
-                      dnf -y install dnf-plugins-core
-                      dnf config-manager --add-repo "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${{ matrix.os == 'ubuntu-24.04-arm' && 'sbsa' || 'x86_64' }}/cuda-rhel8.repo"
-                      dnf -y install --setopt=obsoletes=0 cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9
-                      if [ "${{ matrix.os }}" = "ubuntu-24.04-arm" ]; then dnf -y install 'clang-19*'; fi
-                      ln -sf /usr/local/cuda-12.9 /usr/local/cuda
-                      ln -sf libcuda.so /usr/local/cuda-12.9/lib64/stubs/libcuda.so.1
-                      /usr/local/cuda-12.9/bin/nvcc --version
-                  # Never vendor `libcuda` - a bundled build-host stub would shadow the user's real driver.
-                  CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 -w {dest_dir} {wheel}
-                  SZ_TARGET: stringzillas-cuda
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cuda-${{ matrix.os }}-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    # AMD64 only - NVIDIA ships no CUDA Toolkit for Windows-on-Arm.
-    build_wheels_stringzillas_cuda_windows:
-        name: Build StringZillas-CUDA ${{ matrix.python-version }} for Windows
-        runs-on: windows-2022
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                python-version: ["310", "311", "312", "313", "314", "314t"]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-              # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB.
-            - name: Install CUDA Toolkit
-              uses: Jimver/cuda-toolkit@v0.2.35
-              with:
-                  cuda: "12.9.1"
-                  method: "network"
-                  sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
-              # `nvcc` shells out to `cl.exe`, which is only on `PATH` inside a developer environment.
-            - name: Set up MSVC developer environment
-              uses: ilammy/msvc-dev-cmd@v1
-            - name: Install cibuildwheel
-              run: python -m pip install cibuildwheel==3.4.1
-            - name: Build wheels
-              run: cibuildwheel --output-dir wheelhouse
-              env:
-                  CIBW_BUILD: cp${{ matrix.python-version }}-*
-                  CIBW_ARCHS_WINDOWS: AMD64
-                  # No `libcuda.so` stub equivalent on Windows, so importing on a driver-less runner fails.
-                  # Testable once the extension delay-loads `nvcuda.dll`.
-                  CIBW_TEST_SKIP: "*-win_amd64"
-                  SZ_TARGET: stringzillas-cuda
-            - name: Upload wheels
-              uses: actions/upload-artifact@v7
-              with:
-                  name: cibw-wheels-stringzillas-cuda-windows-${{ strategy.job-index }}
-                  path: ./wheelhouse/*.whl
-                  overwrite: true
-
-    build_sdist_stringzilla:
-        name: Build StringZilla Source Distribution
-        runs-on: ubuntu-24.04
-        needs: versioning
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Build source distribution
-              run: pip install build &&
-                  python -m build --sdist
-              env:
-                  SZ_TARGET: stringzilla
-            - name: Upload source distribution
-              uses: actions/upload-artifact@v7
-              with:
-                  name: sdist-stringzilla
-                  path: dist/*.tar.gz
-                  retention-days: 1
-
-    build_sdist_stringzillas_cpus:
-        name: Build StringZillas-CPUs Source Distribution
-        runs-on: ubuntu-24.04
-        needs: versioning
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Build source distribution
-              run: pip install build &&
-                  python -m build --sdist
-              env:
-                  SZ_TARGET: stringzillas-cpus
-            - name: Upload source distribution
-              uses: actions/upload-artifact@v7
-              with:
-                  name: sdist-stringzillas-cpus
-                  path: dist/*.tar.gz
-                  retention-days: 1
-
-    build_sdist_stringzillas_cuda:
-        name: Build StringZillas-CUDA Source Distribution
-        runs-on: ubuntu-24.04
-        needs: versioning
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Set up Python
-              uses: actions/setup-python@v7
-              with:
-                  python-version: 3.x
-            - name: Build source distribution
-              run: pip install build &&
-                  python -m build --sdist
-              env:
-                  SZ_TARGET: stringzillas-cuda
-            - name: Upload source distribution
-              uses: actions/upload-artifact@v7
-              with:
-                  name: sdist-stringzillas-cuda
-                  path: dist/*.tar.gz
-                  retention-days: 1
-
-    publish_pypi_stringzilla:
-        name: Publish StringZilla to PyPI
-        needs:
-            [
-                build_wheels_stringzilla_linux_x86,
-                build_wheels_stringzilla_linux_arm,
-                build_wheels_stringzilla_linux_emulated,
-                build_wheels_stringzilla_macos,
-                build_wheels_stringzilla_windows_x86,
-                build_wheels_stringzilla_windows_arm,
-                build_sdist_stringzilla,
-            ]
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        environment:
-            name: pypi-stringzilla
-            url: https://pypi.org/p/stringzilla
-        steps:
-            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Prepare dist directory
-              run: mkdir -p dist
-
-            - name: Download wheels
-              uses: actions/download-artifact@v8
-              with:
-                  # unpacks all StringZilla wheel artifacts into dist/
-                  pattern: cibw-wheels-stringzilla-*
-                  path: dist
-                  merge-multiple: true
-
-            - name: Download source distribution
-              uses: actions/download-artifact@v8
-              with:
-                  name: sdist-stringzilla
-                  path: dist
-
-            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
-            - name: Require wheels for the core platforms
-              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
-
-            - name: Publish to PyPI
-              uses: pypa/gh-action-pypi-publish@release/v1
-              with:
-                  user: __token__
-                  password: ${{ secrets.PYPI_API_TOKEN }}
-                  packages-dir: dist
-                  verbose: true
-                  print-hash: true
-                  skip-existing: true
-
-    publish_pypi_stringzillas_cpus:
-        name: Publish StringZillas-CPUs to PyPI
-        # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
-        needs:
-            [
-                publish_pypi_stringzilla,
-                build_wheels_stringzillas_cpus_linux_x86,
-                build_wheels_stringzillas_cpus_linux_arm,
-                build_wheels_stringzillas_cpus_macos,
-                build_wheels_stringzillas_cpus_windows_x86,
-                build_wheels_stringzillas_cpus_windows_arm,
-                build_sdist_stringzillas_cpus,
-            ]
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        environment:
-            name: pypi-stringzillas-cpus
-            url: https://pypi.org/p/stringzillas-cpus
-        permissions: {}
-
-        steps:
-            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Prepare dist directory
-              run: mkdir -p dist
-
-            - name: Download wheels
-              uses: actions/download-artifact@v8
-              with:
-                  # unpacks all StringZillas-CPUs wheel artifacts into dist/
-                  pattern: cibw-wheels-stringzillas-cpus-*
-                  path: dist
-                  merge-multiple: true
-
-            - name: Download source distribution
-              uses: actions/download-artifact@v8
-              with:
-                  name: sdist-stringzillas-cpus
-                  path: dist
-
-            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
-            - name: Require wheels for the core platforms
-              run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
-
-            - name: Publish to PyPI
-              uses: pypa/gh-action-pypi-publish@release/v1
-              with:
-                  user: __token__
-                  password: ${{ secrets.PYPI_API_TOKEN }}
-                  packages-dir: dist
-                  verbose: true
-                  print-hash: true
-                  skip-existing: true
-
-    publish_pypi_stringzillas_cuda:
-        name: Publish StringZillas-CUDA to PyPI
-        # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
-        needs:
-            [
-                publish_pypi_stringzilla,
-                build_wheels_stringzillas_cuda_linux,
-                build_wheels_stringzillas_cuda_windows,
-                build_sdist_stringzillas_cuda,
-            ]
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        environment:
-            name: pypi-stringzillas-cuda
-            url: https://pypi.org/p/stringzillas-cuda
-        steps:
-            # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Prepare dist directory
-              run: mkdir -p dist
-
-            - name: Download wheels
-              uses: actions/download-artifact@v8
-              with:
-                  # unpacks all StringZillas-CUDA wheel artifacts into dist/
-                  pattern: cibw-wheels-stringzillas-cuda-*
-                  path: dist
-                  merge-multiple: true
-
-            - name: Download source distribution
-              uses: actions/download-artifact@v8
-              with:
-                  name: sdist-stringzillas-cuda
-                  path: dist
-
-            # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
-            # `aarch64` is not core here - its CUDA leg has never built, and requiring it would discard the
-            # x86_64 and Windows wheels that did. Restore it once that leg builds.
-            - name: Require wheels for the core platforms
-              run: python build_backend.py check-wheels '*manylinux*_x86_64*'
-
-            - name: Publish to PyPI
-              uses: pypa/gh-action-pypi-publish@release/v1
-              with:
-                  user: __token__
-                  password: ${{ secrets.PYPI_API_TOKEN }}
-                  packages-dir: dist
-                  verbose: true
-                  print-hash: true
-                  skip-existing: true
-
-    publish_rust:
-        name: Publish Rust
-        runs-on: ubuntu-22.04
-        needs: versioning
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-                  submodules: recursive
-            - name: Initialize submodules
-              run: git submodule update --init --recursive
-            - name: Set up Rust
-              uses: dtolnay/rust-toolchain@stable
-            - name: Test Rust with dynamic dispatch
-              run: cargo test --release
-            - name: Publish to crates.io
-              uses: katyo/publish-crates@v2
-              with:
-                  registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-    # JavaScript
-    build_javascript_native:
-        name: Build JS ${{ matrix.platform }}
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                include:
-                    - platform: linux-x64
-                      os: ubuntu-24.04
-                      node-gyp-args: ""
-                    - platform: linux-arm64
-                      os: ubuntu-24.04-arm
-                      node-gyp-args: ""
-                    - platform: darwin-arm64
-                      os: macos-15
-                      node-gyp-args: ""
-                    - platform: darwin-x64
-                      os: macos-15
-                      node-gyp-args: "--arch=x64"
-                    - platform: win32-x64
-                      os: windows-latest
-                      node-gyp-args: ""
-                    - platform: win32-arm64
-                      os: windows-latest
-                      node-gyp-args: "--arch=arm64"
-        runs-on: ${{ matrix.os }}
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Setup Node.js
-              uses: actions/setup-node@v7
-              with:
-                  node-version: "22"
-            - name: Set up MSVC ARM64 cross-compiler
-              if: matrix.platform == 'win32-arm64'
-              shell: pwsh
-              run: |
-                  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-                  $vsPath = & $vswhere -latest -property installationPath
-                  $vcvars = "$vsPath\VC\Auxiliary\Build\vcvarsall.bat"
-                  cmd /c "`"$vcvars`" amd64_arm64 >NUL 2>&1 && set" | ForEach-Object {
-                    if ($_ -match '^([^=]+)=(.*)$') {
-                      $name = $matches[1]; $value = $matches[2]
-                      if ([System.Environment]::GetEnvironmentVariable($name) -ne $value) {
-                        "$name=$value" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
-                      }
-                    }
-                  }
-            - name: Install dependencies
-              run: npm install --ignore-scripts
-            - name: Build native module
-              run: npx node-gyp rebuild ${{ matrix.node-gyp-args }}
-            - name: Copy binary into platform package
-              shell: bash
-              run: cp build/Release/stringzilla.node javascript/@stringzilla-${{ matrix.platform }}/stringzilla.node
-            - name: Upload platform package
-              uses: actions/upload-artifact@v7
-              with:
-                  name: stringzilla-js-${{ matrix.platform }}
-                  path: javascript/@stringzilla-${{ matrix.platform }}/
-                  retention-days: 1
-
-    publish_javascript_platforms:
-        name: Publish JS @stringzilla/${{ matrix.platform }}
-        needs: [build_javascript_native]
-        if: always()
-        runs-on: ubuntu-24.04
-        environment:
-            name: npm-stringzilla
-        permissions:
-            contents: read
-            id-token: write
-        strategy:
-            fail-fast: false
-            matrix:
-                platform:
-                    [
-                        linux-x64,
-                        linux-arm64,
-                        darwin-x64,
-                        darwin-arm64,
-                        win32-x64,
-                        win32-arm64,
-                    ]
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Setup Node.js
-              uses: actions/setup-node@v7
-              with:
-                  node-version: "24"
-                  registry-url: "https://registry.npmjs.org"
-            - name: Download platform artifact
-              id: download
-              uses: actions/download-artifact@v8
-              with:
-                  name: stringzilla-js-${{ matrix.platform }}
-                  path: javascript/@stringzilla-${{ matrix.platform }}/
-              continue-on-error: true
-            - name: Publish @stringzilla/${{ matrix.platform }}
-              if: steps.download.outcome == 'success'
-              working-directory: javascript/@stringzilla-${{ matrix.platform }}
-              run: npm publish --provenance --access public
-
-    publish_javascript_main:
-        name: Publish JavaScript
-        needs: [publish_javascript_platforms]
-        runs-on: ubuntu-24.04
-        environment:
-            name: npm-stringzilla
-            url: https://www.npmjs.com/package/stringzilla
-        permissions:
-            contents: read
-            id-token: write
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  ref: "main"
-            - name: Setup Node.js
-              uses: actions/setup-node@v7
-              with:
-                  node-version: "24"
-                  registry-url: "https://registry.npmjs.org"
-            - name: Install dependencies
-              run: npm install
-            - name: Run tests
-              run: npm test
-            - name: Publish to NPM
-              run: npm publish --provenance --access public
-
-    create_linux_deb_package:
-        name: Create Debian Package for ${{ matrix.arch }}
-        runs-on: ubuntu-22.04
-        needs: versioning
+  # Native x86_64 - full SIMD, full test depth, single image.
+  build_wheels_stringzilla_linux_x86:
+    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu x86
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
         env:
-            CC: clang-16
-            CXX: clang++-16
-            AR: llvm-ar
-            NM: llvm-nm
-            RANLIB: llvm-ranlib
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: x86_64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-linux-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-        strategy:
-            fail-fast: false
-            matrix:
-                include:
-                    - arch: amd64
-                      target: x86_64-linux-gnu
-                    - arch: arm64
-                      target: aarch64-linux-gnu
+  # Native aarch64 on an ARM runner - no QEMU, mirrors the CUDA job's approach.
+  build_wheels_stringzilla_linux_arm:
+    name: Build StringZilla ${{ matrix.python-version }} for Ubuntu ARM
+    runs-on: ubuntu-24.04-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: aarch64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-linux-arm-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  persist-credentials: false
-                  ref: "main"
-                  submodules: recursive
+  # Emulated arches - one image per runner, all Pythons per arch, fuzz depth thinned under QEMU.
+  build_wheels_stringzilla_linux_emulated:
+    name: Build StringZilla wheels for ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ppc64le, s390x, i686, armv7l, riscv64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v4
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05 SZ_TARGET=stringzilla
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-linux-emulated-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Get version
-              id: set_version
-              run: |
-                  version=$(cat VERSION)
-                  echo "version=$version" >> $GITHUB_OUTPUT
+  build_wheels_stringzilla_macos:
+    name: Build StringZilla ${{ matrix.python-version }} for macOS
+    runs-on: macos-15
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
 
-            - name: Install dependencies
-              run: |
-                  sudo apt-get update
-                  sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
-                  wget https://apt.llvm.org/llvm.sh
-                  chmod +x llvm.sh
-                  sudo ./llvm.sh 16
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-macos-15-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Build C/C++
-              run: |
-                  # Configure and build the project
-                  cmake -B build_release \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-                    -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-                    -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-                    -DCMAKE_SYSTEM_NAME=Linux \
-                    -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
-                    -DSTRINGZILLA_BUILD_SHARED=1 \
-                    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-                    -DSTRINGZILLA_BUILD_TEST=1
+  # Native AMD64 + 32-bit x86 on an Intel runner.
+  build_wheels_stringzilla_windows_x86:
+    name: Build StringZilla ${{ matrix.python-version }} for Windows x86
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: AMD64 x86
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-windows-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-                  cmake --build build_release --config Release
+  # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
+  build_wheels_stringzilla_windows_arm:
+    name: Build StringZilla ${{ matrix.python-version }} for Windows ARM
+    runs-on: windows-11-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: ARM64
+          SZ_TARGET: stringzilla
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-windows-arm-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-                  cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
-                  mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
-                  touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-                  mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
-                  mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
-                  cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
-                  cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-                  echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-                  dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
+  # Native x86_64 - full SIMD, single image.
+  build_wheels_stringzillas_cpus_linux_x86:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu x86
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-linux-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Upload library
-              uses: xresloader/upload-to-github-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  file: "*.so"
-                  update_latest_release: true
+  # Native aarch64 on an ARM runner - no QEMU.
+  build_wheels_stringzillas_cpus_linux_arm:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Ubuntu ARM
+    runs-on: ubuntu-24.04-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_LINUX: aarch64
+          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-linux-arm-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Upload archive
-              uses: xresloader/upload-to-github-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  file: "*.deb"
-                  update_latest_release: true
+  build_wheels_stringzillas_cpus_macos:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for macOS
+    runs-on: macos-15
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
 
-    create_windows_dll_library:
-        name: Create Dll Library for Windows ${{ matrix.arch }}
-        runs-on: windows-2022
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                include:
-                    - arch: x64
-                      target: x64
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  persist-credentials: false
-                  ref: "main"
-                  submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          SZ_TARGET: stringzillas-cpus
+          CIBW_ARCHS_MACOS: x86_64 arm64
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-macos-15-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Set up MSVC developer environment
-              uses: ilammy/msvc-dev-cmd@v1
-              with:
-                  arch: ${{ matrix.arch }}
+  # Native AMD64 on an Intel runner.
+  build_wheels_stringzillas_cpus_windows_x86:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows x86
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: AMD64
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-windows-x86-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Get version
-              id: set_version
-              shell: cmd
-              run: |
-                  set /p version=<VERSION
-                  echo version=%version% >> %GITHUB_OUTPUT%
+  # Native ARM64, not cross-compiled. Windows ARM64 CPython is official from 3.11, so 3.10 is omitted.
+  build_wheels_stringzillas_cpus_windows_arm:
+    name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows ARM
+    runs-on: windows-11-arm
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: ARM64
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cpus-windows-arm-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Build library
-              shell: cmd
-              run: |
-                  cmake -DCMAKE_BUILD_TYPE=Release -GNinja -B build_release -DSTRINGZILLA_BUILD_SHARED=1
-                  cmake --build build_release --config Release
-                  tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzilla_bare.dll" "build_release\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
+  build_wheels_stringzillas_cuda_linux:
+    name: Build StringZillas-CUDA ${{ matrix.python-version }} for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # The aarch64 leg dies mid-compile, sometimes after ~50 minutes of silence. Bound it.
+    timeout-minutes: 25
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm] # native x86_64 and aarch64 runners - no QEMU emulation
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
 
-            - name: Upload archive
-              uses: xresloader/upload-to-github-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  file: "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar"
-                  update_latest_release: true
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          # `manylinux` only - CUDA ships no musl toolchain, and the `dnf` script below exits 127 on Alpine.
+          CIBW_BUILD: cp${{ matrix.python-version }}-manylinux*
+          # Native arch only, so the CUDA toolchain never runs under QEMU.
+          CIBW_ARCHS_LINUX: auto64
+          # `stubs` lets the driver-less test phase resolve `libcuda.so.1` and fail `cuInit` cleanly.
+          # Arm needs Clang as nvcc's host: only Clang's `arm_neon.h` parses in nvcc's frontend.
+          CIBW_ENVIRONMENT_LINUX: >-
+            SZ_TARGET=stringzillas-cuda
+            CUDA_HOME=/usr/local/cuda-12.9
+            PATH=/usr/local/cuda-12.9/bin:$PATH
+            LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs
+            CUDAHOSTCXX=${{ matrix.os == 'ubuntu-24.04-arm' && '/usr/bin/clang++' || '' }}
+            PYTHONUNBUFFERED=1
+          # nvcc plus runtime/driver headers from NVIDIA's rhel8 repo, not the ~4 GB `.run` installer.
+          # Clang 19 on Arm - the newest nvcc 12.9 accepts.
+          CIBW_BEFORE_ALL_LINUX: |
+            set -e
+            dnf -y install dnf-plugins-core
+            dnf config-manager --add-repo "https://developer.download.nvidia.com/compute/cuda/repos/rhel8/${{ matrix.os == 'ubuntu-24.04-arm' && 'sbsa' || 'x86_64' }}/cuda-rhel8.repo"
+            dnf -y install --setopt=obsoletes=0 cuda-nvcc-12-9 cuda-cudart-devel-12-9 cuda-driver-devel-12-9 cuda-cccl-12-9
+            if [ "${{ matrix.os }}" = "ubuntu-24.04-arm" ]; then dnf -y install 'clang-19*'; fi
+            ln -sf /usr/local/cuda-12.9 /usr/local/cuda
+            ln -sf libcuda.so /usr/local/cuda-12.9/lib64/stubs/libcuda.so.1
+            /usr/local/cuda-12.9/bin/nvcc --version
+          # Never vendor `libcuda` - a bundled build-host stub would shadow the user's real driver.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 -w {dest_dir} {wheel}
+          SZ_TARGET: stringzillas-cuda
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cuda-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-    create_macos_library:
-        name: Create Library for MacOS ${{ matrix.arch }}
-        runs-on: macos-15
-        needs: versioning
-        strategy:
-            fail-fast: false
-            matrix:
-                arch: [arm64] # Only Apple Silicon for now
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v7
-              with:
-                  persist-credentials: false
-                  ref: "main"
-                  submodules: recursive
+  # AMD64 only - NVIDIA ships no CUDA Toolkit for Windows-on-Arm.
+  build_wheels_stringzillas_cuda_windows:
+    name: Build StringZillas-CUDA ${{ matrix.python-version }} for Windows
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["310", "311", "312", "313", "314", "314t"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
 
-            - name: Get version
-              id: set_version
-              run: |
-                  version=$(cat VERSION)
-                  echo "version=$version" >> $GITHUB_OUTPUT
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+        # Only `nvcc`, the runtime and the MSVC integration - the full toolkit is several GB.
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: "12.9.1"
+          method: "network"
+          sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+        # `nvcc` shells out to `cl.exe`, which is only on `PATH` inside a developer environment.
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-*
+          CIBW_ARCHS_WINDOWS: AMD64
+          # No `libcuda.so` stub equivalent on Windows, so importing on a driver-less runner fails.
+          # Testable once the extension delay-loads `nvcuda.dll`.
+          CIBW_TEST_SKIP: "*-win_amd64"
+          SZ_TARGET: stringzillas-cuda
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzillas-cuda-windows-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
 
-            - name: Build library
-              run: |
-                  cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
-                  cmake --build build_release --config Release        
-                  zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
+  build_sdist_stringzilla:
+    name: Build StringZilla Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzilla
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist-stringzilla
+          path: dist/*.tar.gz
+          retention-days: 1
 
-            - name: Upload archive
-              uses: xresloader/upload-to-github-release@v1
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  file: "*.zip"
-                  update_latest_release: true
+  build_sdist_stringzillas_cpus:
+    name: Build StringZillas-CPUs Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzillas-cpus
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist-stringzillas-cpus
+          path: dist/*.tar.gz
+          retention-days: 1
 
-    # Aggregators for README badges (per-platform)
-    status_linux:
-        name: Linux CI
-        needs:
-            - build_wheels_stringzilla_linux_x86
-            - build_wheels_stringzilla_linux_arm
-            - build_wheels_stringzilla_linux_emulated
-            - build_wheels_stringzillas_cpus_linux_x86
-            - build_wheels_stringzillas_cpus_linux_arm
-            - build_wheels_stringzillas_cuda_linux
-            - create_linux_deb_package
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        steps:
-            - name: Aggregate Linux status
-              run: |
-                  echo "Linux job results:"
-                  echo "build_wheels_stringzilla_linux_x86: ${{ needs.build_wheels_stringzilla_linux_x86.result }}"
-                  echo "build_wheels_stringzilla_linux_arm: ${{ needs.build_wheels_stringzilla_linux_arm.result }}"
-                  echo "build_wheels_stringzilla_linux_emulated: ${{ needs.build_wheels_stringzilla_linux_emulated.result }}"
-                  echo "build_wheels_stringzillas_cpus_linux_x86: ${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}"
-                  echo "build_wheels_stringzillas_cpus_linux_arm: ${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}"
-                  echo "build_wheels_stringzillas_cuda_linux: ${{ needs.build_wheels_stringzillas_cuda_linux.result }}"
-                  echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
-                  if [ "${{ needs.build_wheels_stringzilla_linux_x86.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzilla_linux_arm.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzilla_linux_emulated.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cuda_linux.result }}" != "success" ] || \
-                     [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
-                    echo "One or more Linux dependencies failed.";
-                    exit 1;
-                  fi
+  build_sdist_stringzillas_cuda:
+    name: Build StringZillas-CUDA Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+        env:
+          SZ_TARGET: stringzillas-cuda
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist-stringzillas-cuda
+          path: dist/*.tar.gz
+          retention-days: 1
 
-    status_windows:
-        name: Windows CI
-        needs:
-            - build_wheels_stringzilla_windows_x86
-            - build_wheels_stringzilla_windows_arm
-            - build_wheels_stringzillas_cpus_windows_x86
-            - build_wheels_stringzillas_cpus_windows_arm
-            - build_wheels_stringzillas_cuda_windows
-            - create_windows_dll_library
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        steps:
-            - name: Aggregate Windows status
-              run: |
-                  echo "Windows job results:"
-                  echo "build_wheels_stringzilla_windows_x86: ${{ needs.build_wheels_stringzilla_windows_x86.result }}"
-                  echo "build_wheels_stringzilla_windows_arm: ${{ needs.build_wheels_stringzilla_windows_arm.result }}"
-                  echo "build_wheels_stringzillas_cpus_windows_x86: ${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}"
-                  echo "build_wheels_stringzillas_cpus_windows_arm: ${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}"
-                  echo "build_wheels_stringzillas_cuda_windows: ${{ needs.build_wheels_stringzillas_cuda_windows.result }}"
-                  echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
-                  if [ "${{ needs.build_wheels_stringzilla_windows_x86.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cuda_windows.result }}" != "success" ] || \
-                     [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
-                    echo "One or more Windows dependencies failed.";
-                    exit 1;
-                  fi
+  publish_pypi_stringzilla:
+    name: Publish StringZilla to PyPI
+    needs:
+      [
+        build_wheels_stringzilla_linux_x86,
+        build_wheels_stringzilla_linux_arm,
+        build_wheels_stringzilla_linux_emulated,
+        build_wheels_stringzilla_macos,
+        build_wheels_stringzilla_windows_x86,
+        build_wheels_stringzilla_windows_arm,
+        build_sdist_stringzilla,
+      ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi-stringzilla
+      url: https://pypi.org/p/stringzilla
+    steps:
+      # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Prepare dist directory
+        run: mkdir -p dist
 
-    status_macos:
-        name: macOS CI
-        needs:
-            - build_wheels_stringzilla_macos
-            - build_wheels_stringzillas_cpus_macos
-            - create_macos_library
-        if: ${{ always() }}
-        runs-on: ubuntu-24.04
-        steps:
-            - name: Aggregate macOS status
-              run: |
-                  echo "macOS job results:"
-                  echo "build_wheels_stringzilla_macos: ${{ needs.build_wheels_stringzilla_macos.result }}"
-                  echo "build_wheels_stringzillas_cpus_macos: ${{ needs.build_wheels_stringzillas_cpus_macos.result }}"
-                  echo "create_macos_library: ${{ needs.create_macos_library.result }}"
-                  if [ "${{ needs.build_wheels_stringzilla_macos.result }}" != "success" ] || \
-                     [ "${{ needs.build_wheels_stringzillas_cpus_macos.result }}" != "success" ] || \
-                     [ "${{ needs.create_macos_library.result }}" != "success" ]; then
-                    echo "One or more macOS dependencies failed.";
-                    exit 1;
-                  fi
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          # unpacks all StringZilla wheel artifacts into dist/
+          pattern: cibw-wheels-stringzilla-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: sdist-stringzilla
+          path: dist
+
+      # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
+      - name: Require wheels for the core platforms
+        run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: dist
+          verbose: true
+          print-hash: true
+          skip-existing: true
+
+  publish_pypi_stringzillas_cpus:
+    name: Publish StringZillas-CPUs to PyPI
+    # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
+    needs:
+      [
+        publish_pypi_stringzilla,
+        build_wheels_stringzillas_cpus_linux_x86,
+        build_wheels_stringzillas_cpus_linux_arm,
+        build_wheels_stringzillas_cpus_macos,
+        build_wheels_stringzillas_cpus_windows_x86,
+        build_wheels_stringzillas_cpus_windows_arm,
+        build_sdist_stringzillas_cpus,
+      ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi-stringzillas-cpus
+      url: https://pypi.org/p/stringzillas-cpus
+    permissions: {}
+
+    steps:
+      # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          # unpacks all StringZillas-CPUs wheel artifacts into dist/
+          pattern: cibw-wheels-stringzillas-cpus-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: sdist-stringzillas-cpus
+          path: dist
+
+      # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
+      - name: Require wheels for the core platforms
+        run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: dist
+          verbose: true
+          print-hash: true
+          skip-existing: true
+
+  publish_pypi_stringzillas_cuda:
+    name: Publish StringZillas-CUDA to PyPI
+    # Depends on the base package's publish so `stringzilla==<version>` is already on PyPI when users install this.
+    needs:
+      [
+        publish_pypi_stringzilla,
+        build_wheels_stringzillas_cuda_linux,
+        build_wheels_stringzillas_cuda_windows,
+        build_sdist_stringzillas_cuda,
+      ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi-stringzillas-cuda
+      url: https://pypi.org/p/stringzillas-cuda
+    steps:
+      # Only for `build_backend.py check-wheels` below - the wheels themselves arrive as artifacts.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Prepare dist directory
+        run: mkdir -p dist
+
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          # unpacks all StringZillas-CUDA wheel artifacts into dist/
+          pattern: cibw-wheels-stringzillas-cuda-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v8
+        with:
+          name: sdist-stringzillas-cuda
+          path: dist
+
+      # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
+      # `aarch64` is not core here - its CUDA leg has never built, and requiring it would discard the
+      # x86_64 and Windows wheels that did. Restore it once that leg builds.
+      - name: Require wheels for the core platforms
+        run: python build_backend.py check-wheels '*manylinux*_x86_64*'
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: dist
+          verbose: true
+          print-hash: true
+          skip-existing: true
+
+  publish_rust:
+    name: Publish Rust
+    runs-on: ubuntu-22.04
+    needs: versioning
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Test Rust with dynamic dispatch
+        run: cargo test --release
+      - name: Publish to crates.io
+        uses: katyo/publish-crates@v2
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # JavaScript
+  build_javascript_native:
+    name: Build JS ${{ matrix.platform }}
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-24.04
+            node-gyp-args: ""
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            node-gyp-args: ""
+          - platform: darwin-arm64
+            os: macos-15
+            node-gyp-args: ""
+          - platform: darwin-x64
+            os: macos-15
+            node-gyp-args: "--arch=x64"
+          - platform: win32-x64
+            os: windows-latest
+            node-gyp-args: ""
+          - platform: win32-arm64
+            os: windows-latest
+            node-gyp-args: "--arch=arm64"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Set up MSVC ARM64 cross-compiler
+        if: matrix.platform == 'win32-arm64'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          $vcvars = "$vsPath\VC\Auxiliary\Build\vcvarsall.bat"
+          cmd /c "`"$vcvars`" amd64_arm64 >NUL 2>&1 && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              $name = $matches[1]; $value = $matches[2]
+              if ([System.Environment]::GetEnvironmentVariable($name) -ne $value) {
+                "$name=$value" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8
+              }
+            }
+          }
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Build native module
+        run: npx node-gyp rebuild ${{ matrix.node-gyp-args }}
+      - name: Copy binary into platform package
+        shell: bash
+        run: cp build/Release/stringzilla.node javascript/@stringzilla-${{ matrix.platform }}/stringzilla.node
+      - name: Upload platform package
+        uses: actions/upload-artifact@v7
+        with:
+          name: stringzilla-js-${{ matrix.platform }}
+          path: javascript/@stringzilla-${{ matrix.platform }}/
+          retention-days: 1
+
+  publish_javascript_platforms:
+    name: Publish JS @stringzilla/${{ matrix.platform }}
+    needs: [build_javascript_native]
+    if: always()
+    runs-on: ubuntu-24.04
+    environment:
+      name: npm-stringzilla
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          [
+            linux-x64,
+            linux-arm64,
+            darwin-x64,
+            darwin-arm64,
+            win32-x64,
+            win32-arm64,
+          ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Download platform artifact
+        id: download
+        uses: actions/download-artifact@v8
+        with:
+          name: stringzilla-js-${{ matrix.platform }}
+          path: javascript/@stringzilla-${{ matrix.platform }}/
+        continue-on-error: true
+      - name: Publish @stringzilla/${{ matrix.platform }}
+        if: steps.download.outcome == 'success'
+        working-directory: javascript/@stringzilla-${{ matrix.platform }}
+        run: npm publish --provenance --access public
+
+  publish_javascript_main:
+    name: Publish JavaScript
+    needs: [publish_javascript_platforms]
+    runs-on: ubuntu-24.04
+    environment:
+      name: npm-stringzilla
+      url: https://www.npmjs.com/package/stringzilla
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install dependencies
+        run: npm install
+      - name: Run tests
+        run: npm test
+      - name: Publish to NPM
+        run: npm publish --provenance --access public
+
+  create_linux_deb_package:
+    name: Create Debian Package for ${{ matrix.arch }}
+    runs-on: ubuntu-22.04
+    needs: versioning
+    env:
+      CC: clang-16
+      CXX: clang++-16
+      AR: llvm-ar
+      NM: llvm-nm
+      RANLIB: llvm-ranlib
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-linux-gnu
+          - arch: arm64
+            target: aarch64-linux-gnu
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: "main"
+          submodules: recursive
+
+      - name: Get version
+        id: set_version
+        run: |
+          version=$(cat VERSION)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+
+      - name: Build C/C++
+        run: |
+          # Configure and build the project
+          cmake -B build_release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
+            -DSTRINGZILLA_BUILD_SHARED=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_release --config Release
+
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
+          touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
+          mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
+          cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
+          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
+
+      - name: Upload library
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.so"
+          update_latest_release: true
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.deb"
+          update_latest_release: true
+
+  create_windows_dll_library:
+    name: Create Dll Library for Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: "main"
+          submodules: recursive
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Get version
+        id: set_version
+        shell: cmd
+        run: |
+          set /p version=<VERSION
+          echo version=%version% >> %GITHUB_OUTPUT%
+
+      - name: Build library
+        shell: cmd
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release -GNinja -B build_release -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_release --config Release
+          tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzilla_bare.dll" "build_release\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar"
+          update_latest_release: true
+
+  create_macos_library:
+    name: Create Library for MacOS ${{ matrix.arch }}
+    runs-on: macos-15
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64] # Only Apple Silicon for now
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: "main"
+          submodules: recursive
+
+      - name: Get version
+        id: set_version
+        run: |
+          version=$(cat VERSION)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Build library
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release -DSTRINGZILLA_BUILD_SHARED=1
+          cmake --build build_release --config Release
+          zip -r stringzilla_shared_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_shared.dylib include/stringzilla/stringzilla.h
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.zip"
+          update_latest_release: true
+
+  # Aggregators for README badges (per-platform)
+  status_linux:
+    name: Linux CI
+    needs:
+      - build_wheels_stringzilla_linux_x86
+      - build_wheels_stringzilla_linux_arm
+      - build_wheels_stringzilla_linux_emulated
+      - build_wheels_stringzillas_cpus_linux_x86
+      - build_wheels_stringzillas_cpus_linux_arm
+      - build_wheels_stringzillas_cuda_linux
+      - create_linux_deb_package
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate Linux status
+        run: |
+          echo "Linux job results:"
+          echo "build_wheels_stringzilla_linux_x86: ${{ needs.build_wheels_stringzilla_linux_x86.result }}"
+          echo "build_wheels_stringzilla_linux_arm: ${{ needs.build_wheels_stringzilla_linux_arm.result }}"
+          echo "build_wheels_stringzilla_linux_emulated: ${{ needs.build_wheels_stringzilla_linux_emulated.result }}"
+          echo "build_wheels_stringzillas_cpus_linux_x86: ${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}"
+          echo "build_wheels_stringzillas_cpus_linux_arm: ${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}"
+          echo "build_wheels_stringzillas_cuda_linux: ${{ needs.build_wheels_stringzillas_cuda_linux.result }}"
+          echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_linux_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_linux_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_linux_emulated.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_linux_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_linux_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cuda_linux.result }}" != "success" ] || \
+             [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
+            echo "One or more Linux dependencies failed.";
+            exit 1;
+          fi
+
+  status_windows:
+    name: Windows CI
+    needs:
+      - build_wheels_stringzilla_windows_x86
+      - build_wheels_stringzilla_windows_arm
+      - build_wheels_stringzillas_cpus_windows_x86
+      - build_wheels_stringzillas_cpus_windows_arm
+      - build_wheels_stringzillas_cuda_windows
+      - create_windows_dll_library
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate Windows status
+        run: |
+          echo "Windows job results:"
+          echo "build_wheels_stringzilla_windows_x86: ${{ needs.build_wheels_stringzilla_windows_x86.result }}"
+          echo "build_wheels_stringzilla_windows_arm: ${{ needs.build_wheels_stringzilla_windows_arm.result }}"
+          echo "build_wheels_stringzillas_cpus_windows_x86: ${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}"
+          echo "build_wheels_stringzillas_cpus_windows_arm: ${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}"
+          echo "build_wheels_stringzillas_cuda_windows: ${{ needs.build_wheels_stringzillas_cuda_windows.result }}"
+          echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_windows_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_windows_x86.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_windows_arm.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cuda_windows.result }}" != "success" ] || \
+             [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
+            echo "One or more Windows dependencies failed.";
+            exit 1;
+          fi
+
+  status_macos:
+    name: macOS CI
+    needs:
+      - build_wheels_stringzilla_macos
+      - build_wheels_stringzillas_cpus_macos
+      - create_macos_library
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Aggregate macOS status
+        run: |
+          echo "macOS job results:"
+          echo "build_wheels_stringzilla_macos: ${{ needs.build_wheels_stringzilla_macos.result }}"
+          echo "build_wheels_stringzillas_cpus_macos: ${{ needs.build_wheels_stringzillas_cpus_macos.result }}"
+          echo "create_macos_library: ${{ needs.create_macos_library.result }}"
+          if [ "${{ needs.build_wheels_stringzilla_macos.result }}" != "success" ] || \
+             [ "${{ needs.build_wheels_stringzillas_cpus_macos.result }}" != "success" ] || \
+             [ "${{ needs.create_macos_library.result }}" != "success" ]; then
+            echo "One or more macOS dependencies failed.";
+            exit 1;
+          fi
