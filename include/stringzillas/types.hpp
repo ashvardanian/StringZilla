@@ -194,6 +194,34 @@ class forkunion_executor_t {
     mutex_t make_mutex() const noexcept { return {}; }
 
     /**
+     *  @brief The specs of the machine this executor spawned on, read from its own detected topology.
+     *      Fills the shared-cache volume and core counts; `l1_bytes` and `l2_bytes` keep their conservative
+     *      defaults - the ForkUnion C API exposes no per-core cache-level query. Defaults throughout when
+     *      the pool was never spawned or the platform reports nothing.
+     */
+    cpu_specs_t specs() const noexcept {
+        cpu_specs_t specs;
+        if (!topology_) return specs;
+        // The deepest cache confined to each compute domain - the shared L3 on uniform machines. The
+        // smallest nonzero domain wins so cache-resident chunk sizing never overshoots the tightest cluster.
+        size_t const compute_domains = fu_compute_domains_count(topology_);
+        size_t confined_cache_bytes = 0;
+        for (size_t domain = 0; domain != compute_domains; ++domain) {
+            size_t const domain_cache_bytes = fu_compute_cache_bytes_in(topology_, domain);
+            if (domain_cache_bytes && (confined_cache_bytes == 0 || domain_cache_bytes < confined_cache_bytes))
+                confined_cache_bytes = domain_cache_bytes;
+        }
+        if (confined_cache_bytes) specs.l3_bytes = confined_cache_bytes;
+        size_t const logical_cores = fu_logical_cores_count(topology_);
+        size_t const memory_domains = fu_memory_domains_count(topology_);
+        if (logical_cores) {
+            specs.sockets = memory_domains ? memory_domains : 1;
+            specs.cores_per_socket = sz_max_of_two(logical_cores / specs.sockets, (size_t)1);
+        }
+        return specs;
+    }
+
+    /**
      *  @brief Calls the @p function for each index from 0 to @p (n) in such
      *      a way that consecutive elements are likely to be processed by
      *      the same thread.

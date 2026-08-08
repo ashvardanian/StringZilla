@@ -449,10 +449,10 @@ void bench_substrings(environment_t const &env) {
         "%zu under-2-occurrence\n",                                                               //
         vocabulary.size(), vocabulary.total_occurrences, vocabulary.dropped_frequent, vocabulary.dropped_hapax);
 
-    cpu_specs_t const cpu_specs;
     forkunion_executor_t pool;
     if (pool.try_spawn(std::thread::hardware_concurrency()) != status_t::success_k)
         throw std::runtime_error("Failed to spawn the thread pool.");
+    cpu_specs_t const cpu_specs = pool.specs();
 
     std::printf("Starting substrings benchmarks...\n");
     for (substrings_sweep_cell_t const &cell : substrings_sweep_k)
