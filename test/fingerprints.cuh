@@ -72,14 +72,14 @@ static void check_rolling_hasher_unit_(hasher_type_ &&hasher, std::vector<std::s
         state_t rolling_state = 0;
         for (std::size_t j = 0; j < window_width; ++j) rolling_state = hasher.push(rolling_state, str[j]);
         hash_t rolling_hash = hasher.digest(rolling_state);
-        sz_assert_(rolling_hash == hashes[0]);
+        verify(rolling_hash == hashes[0]);
 
         // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
         std::size_t const rolling_end = window_width + count_hashes - 1;
         for (std::size_t j = window_width; j < rolling_end; ++j) {
             rolling_state = hasher.roll(rolling_state, str[j - window_width], str[j]);
             rolling_hash = hasher.digest(rolling_state);
-            sz_assert_(rolling_hash == hashes[j - window_width + 1]);
+            verify(rolling_hash == hashes[j - window_width + 1]);
         }
     }
 }
@@ -117,7 +117,7 @@ static void check_rolling_hasher_unit_(hasher_type_ &&hasher, baseline_hasher_ty
             }
             hashes[j] = hasher.digest(slice_state);
             baseline_hashes[j] = baseline_hasher.digest(baseline_slice_state);
-            sz_assert_(hashes[j] == baseline_hashes[j] && "Slice hashes do not match baseline hashes");
+            verify(hashes[j] == baseline_hashes[j] && "Slice hashes do not match baseline hashes");
         }
 
         // Pre-populate the rolling-hash state until the first window ends
@@ -129,7 +129,7 @@ static void check_rolling_hasher_unit_(hasher_type_ &&hasher, baseline_hasher_ty
         }
         hash_t rolling_hash = hasher.digest(rolling_state);
         baseline_hash_t baseline_rolling_hash = baseline_hasher.digest(baseline_rolling_state);
-        sz_assert_(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline hashes");
+        verify(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline hashes");
 
         // Now compute the rolling hash and compare it to the slice hashes (bounded to the verified positions).
         std::size_t const rolling_end = window_width + count_hashes - 1;
@@ -140,9 +140,9 @@ static void check_rolling_hasher_unit_(hasher_type_ &&hasher, baseline_hasher_ty
             baseline_rolling_state = baseline_hasher.roll(baseline_rolling_state, str[j - window_width], str[j]);
             baseline_rolling_hash = baseline_hasher.digest(baseline_rolling_state);
 
-            sz_assert_(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline rolling hashes");
-            sz_assert_(rolling_hash == hashes[j - window_width + 1]);
-            sz_assert_(baseline_rolling_hash == baseline_hashes[j - window_width + 1]);
+            verify(rolling_hash == baseline_rolling_hash && "Rolling hashes do not match baseline rolling hashes");
+            verify(rolling_hash == hashes[j - window_width + 1]);
+            verify(baseline_rolling_hash == baseline_hashes[j - window_width + 1]);
         }
     }
 }
@@ -391,7 +391,8 @@ void test_rolling_hashers_equivalence_against_baseline( //
     unified_vector<min_hashes_t> serial_hashes_per_text, accelerated_hashes_per_text;
     unified_vector<min_counts_t> serial_counts_per_text, accelerated_counts_per_text;
 
-    sz_assert_(texts_tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+    let_verify(status_t const assign_status = texts_tape.try_assign(texts.begin(), texts.end()),
+               assign_status == status_t::success_k);
     serial_hashes_per_text.resize(texts.size());
     accelerated_hashes_per_text.resize(texts.size());
     serial_counts_per_text.resize(texts.size());
@@ -424,17 +425,17 @@ void test_rolling_hashers_equivalence_against_baseline( //
                 std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_hashes[i], accelerated_hashes[i]);
             }
         }
-        sz_assert_(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
+        verify(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
 
         // Counters can't be zero, if the input string is at least the size of a window
         for (std::size_t i = 0; i < serial_counts.size(); ++i) {
             if (text.size() >= baseline_hasher.window_width(i)) {
-                sz_assert_(serial_counts[i] > 0 && "Serial fingerprint count is zero");
-                sz_assert_(accelerated_counts[i] > 0 && "Accelerated fingerprint count is zero");
+                verify(serial_counts[i] > 0 && "Serial fingerprint count is zero");
+                verify(accelerated_counts[i] > 0 && "Accelerated fingerprint count is zero");
             }
             else {
-                sz_assert_(serial_counts[i] == 0 && "Serial fingerprint should be zero");
-                sz_assert_(accelerated_counts[i] == 0 && "Accelerated fingerprint should be zero");
+                verify(serial_counts[i] == 0 && "Serial fingerprint should be zero");
+                verify(accelerated_counts[i] == 0 && "Accelerated fingerprint should be zero");
             }
         }
 
@@ -451,7 +452,7 @@ void test_rolling_hashers_equivalence_against_baseline( //
                 std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_counts[i], accelerated_counts[i]);
             }
         }
-        sz_assert_(first_counts_mismatch_index == serial_counts.size() && "Fingerprint counts do not match");
+        verify(first_counts_mismatch_index == serial_counts.size() && "Fingerprint counts do not match");
     }
 }
 
@@ -480,17 +481,21 @@ void test_rolling_hashers_batched_against_per_text_(hasher_type_ &hasher, std::s
     for (std::size_t repeat = 0; repeat < 3; ++repeat) texts.emplace_back(window_width * 4 + repeat, 'a' + repeat);
 
     arrow_strings_tape_t texts_tape;
-    sz_assert_(texts_tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
+    let_verify(status_t const assign_status = texts_tape.try_assign(texts.begin(), texts.end()),
+               assign_status == status_t::success_k);
 
     unified_vector<min_hashes_t> per_text_hashes(texts.size()), batched_hashes(texts.size());
     unified_vector<min_counts_t> per_text_counts(texts.size()), batched_counts(texts.size());
 
     for (std::size_t text_index = 0; text_index != texts.size(); ++text_index)
-        sz_assert_(hasher.try_fingerprint(texts_tape[text_index].template cast<byte_t const>(),
-                                          per_text_hashes[text_index],
-                                          per_text_counts[text_index]) == status_t::success_k);
+        let_verify(status_t const fingerprint_status =
+                       hasher.try_fingerprint(texts_tape[text_index].template cast<byte_t const>(),
+                                              per_text_hashes[text_index], per_text_counts[text_index]),
+                   fingerprint_status == status_t::success_k);
 
-    sz_assert_(hasher(texts_tape, batched_hashes, batched_counts, dummy_executor_t {}, specs) == status_t::success_k);
+    let_verify(status_t const batched_status = hasher(texts_tape, batched_hashes, batched_counts, dummy_executor_t {},
+                                                      specs),
+               batched_status == status_t::success_k);
 
     for (std::size_t text_index = 0; text_index != texts.size(); ++text_index) {
         min_hashes_t const &expected_hashes = per_text_hashes[text_index];
@@ -504,8 +509,8 @@ void test_rolling_hashers_batched_against_per_text_(hasher_type_ &hasher, std::s
                             "per-text (%u, %u) vs batched (%u, %u)\n",                              //
                             text_index, texts[text_index].size(), dimension, expected_hashes[dimension],
                             expected_counts[dimension], produced_hashes[dimension], produced_counts[dimension]);
-            sz_assert_(expected_hashes[dimension] == produced_hashes[dimension]);
-            sz_assert_(expected_counts[dimension] == produced_counts[dimension]);
+            verify(expected_hashes[dimension] == produced_hashes[dimension]);
+            verify(expected_counts[dimension] == produced_counts[dimension]);
         }
     }
 }
@@ -523,11 +528,13 @@ void test_rolling_hashers_equivalence_for_width(      //
     // Define hasher classes
     using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t>;
     rolling_f64_t rolling_f64;
-    sz_assert_(rolling_f64.try_extend(window_width_k, dims_k) == status_t::success_k);
+    let_verify(status_t const extend_status = rolling_f64.try_extend(window_width_k, dims_k),
+               extend_status == status_t::success_k);
 
     using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, dims_k>;
     rolling_serial_t rolling_serial;
-    sz_assert_(rolling_serial.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_serial.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_serial);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_serial);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_serial);
@@ -544,7 +551,8 @@ void test_rolling_hashers_equivalence_for_width(      //
 #if SZ_USE_HASWELL
     using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, dims_k>;
     rolling_haswell_t rolling_haswell;
-    sz_assert_(rolling_haswell.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_haswell.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_haswell);
@@ -555,7 +563,8 @@ void test_rolling_hashers_equivalence_for_width(      //
 #if SZ_USE_SKYLAKE
     using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, dims_k>;
     rolling_skylake_t rolling_skylake;
-    sz_assert_(rolling_skylake.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_skylake.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_skylake);
@@ -566,7 +575,8 @@ void test_rolling_hashers_equivalence_for_width(      //
 #if SZ_USE_CUDA
     using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, dims_k>;
     rolling_cuda_t rolling_cuda;
-    sz_assert_(rolling_cuda.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_cuda);
@@ -661,7 +671,8 @@ void test_fingerprints_safety() {
     // device-accessible (unified) memory rather than on the host stack - otherwise the kernel's output writes land
     // out of bounds. Stage the degenerate inputs into a tape and reuse one unified output slot, as `equivalence` does.
     arrow_strings_tape_t degenerate_tape;
-    sz_assert_(degenerate_tape.try_assign(degenerate.begin(), degenerate.end()) == status_t::success_k);
+    let_verify(status_t const assign_status = degenerate_tape.try_assign(degenerate.begin(), degenerate.end()),
+               assign_status == status_t::success_k);
     unified_vector<min_hashes_t> hashes_buffer(1);
     unified_vector<min_counts_t> counts_buffer(1);
 
@@ -670,31 +681,36 @@ void test_fingerprints_safety() {
             auto text = degenerate_tape[text_index];
             min_hashes_t &hashes = hashes_buffer[0];
             min_counts_t &counts = counts_buffer[0];
-            sz_assert_(fingerprinter.try_fingerprint(text.template cast<byte_t const>(), hashes, counts) ==
-                       status_t::success_k);
+            let_verify(status_t const fingerprint_status =
+                           fingerprinter.try_fingerprint(text.template cast<byte_t const>(), hashes, counts),
+                       fingerprint_status == status_t::success_k);
             // A degenerate input shorter than the window must yield zero counts on every dimension.
             for (std::size_t dimension = 0; dimension < dims_k; ++dimension)
-                if (text.size() < fingerprinter.window_width(dimension)) sz_assert_(counts[dimension] == 0);
+                if (text.size() < fingerprinter.window_width(dimension)) verify(counts[dimension] == 0);
         }
     };
 
     floating_rolling_hashers<sz_cap_serial_k, dims_k> rolling_serial;
-    sz_assert_(rolling_serial.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_serial.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     check_fingerprinter(rolling_serial);
 
 #if SZ_USE_HASWELL
     floating_rolling_hashers<sz_cap_haswell_k, dims_k> rolling_haswell;
-    sz_assert_(rolling_haswell.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_haswell.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     check_fingerprinter(rolling_haswell);
 #endif
 #if SZ_USE_SKYLAKE
     floating_rolling_hashers<sz_cap_skylake_k, dims_k> rolling_skylake;
-    sz_assert_(rolling_skylake.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_skylake.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     check_fingerprinter(rolling_skylake);
 #endif
 #if SZ_USE_CUDA
     floating_rolling_hashers<sz_cap_cuda_k, dims_k> rolling_cuda;
-    sz_assert_(rolling_cuda.try_seed(window_width_k) == status_t::success_k);
+    let_verify(status_t const seed_status = rolling_cuda.try_seed(window_width_k),
+               seed_status == status_t::success_k);
     check_fingerprinter(rolling_cuda);
 #endif
 }

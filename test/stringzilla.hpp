@@ -399,29 +399,22 @@ struct fuzzy_config_t {
     std::size_t max_string_length = 200;
 };
 
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array) {
     array.resize(config.batch_size);
 
     std::vector<std::string> const characters = alphabet_characters(config.alphabet);
     std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
-    for (std::size_t i = 0; i != config.batch_size; ++i)
-        array[i] = random_string(length_distribution(global_random_generator()), characters);
-
-    if (unique) {
-        std::sort(array.begin(), array.end());
-        auto last = std::unique(array.begin(), array.end());
-        array.erase(last, array.end());
-    }
+    for (std::size_t index = 0; index != config.batch_size; ++index)
+        array[index] = random_string(length_distribution(global_random_generator()), characters);
 }
 
-inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
-                              bool unique = false) {
+inline void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape) {
 
-    randomize_strings(config, array, unique);
+    randomize_strings(config, array);
 
     // Convert to a GPU-friendly layout
-    status_t status = tape.try_assign(array.data(), array.data() + array.size());
-    sz_assert_(status == status_t::success_k);
+    status_t const status = tape.try_assign(array.data(), array.data() + array.size());
+    verify(status == status_t::success_k);
 }
 
 inline char const *status_name(status_t s) noexcept {
