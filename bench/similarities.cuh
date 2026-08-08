@@ -82,69 +82,6 @@ using namespace ashvardanian::stringzilla::scripts;
 
 using similarities_t = unified_vector<sz_ssize_t>;
 
-/**
- *  @brief The device-measured kernel time that an engine reports, in milliseconds, or @b 0 for CPU engines.
- *
- *  GPU engines return a `cuda_status_t` carrying a `float elapsed_milliseconds` measured on the device with
- *  CUDA events, excluding host-to-device materialization. CPU engines return a plain `status_t` with no such
- *  timer, so the trait below resolves to @b 0 for them, keeping a single timed call path for every backend.
- */
-template <typename status_type_, typename = void>
-struct engine_elapsed_milliseconds_trait {
-    static float read(status_type_ const &) noexcept { return 0.0f; }
-};
-template <typename status_type_>
-struct engine_elapsed_milliseconds_trait<status_type_,
-                                         decltype((void)std::declval<status_type_ const &>().elapsed_milliseconds)> {
-    static float read(status_type_ const &materialized) noexcept { return materialized.elapsed_milliseconds; }
-};
-
-/** @brief A status paired with the device-measured kernel time, both surfaced through one materialized read. */
-struct engine_timing_t {
-    status_t status = status_t::success_k;
-    float kernel_milliseconds = 0.0f;
-};
-
-/**
- *  @brief Reads the `status_t` @b and the device-measured `elapsed_milliseconds` out of an engine's return
- *         value through opaque memory, defeating NVCC's host-codegen folding of the read.
- *
- *  @note NVCC 12.x miscompiles the `cuda_status_t` return-by-value of the @b affine alignment engine
- *        instantiations inside this large translation unit at @b -O2 : the `float elapsed_milliseconds`
- *        field survives, but the two leading enum fields (`status`, `cuda_error`) come back as garbage, so a
- *        direct `static_cast<status_t>(result)` reports a bogus `unrecognized` status. The StringZillas
- *        library itself is correct - a direct call to the same engine returns `success_k` - this only bites
- *        the affine instantiations folded into this benchmark. Bouncing the struct through `std::memcpy` in a
- *        `[[gnu::noinline]]` helper forces the compiler to materialize the full object before reading both
- *        fields, so the kernel time is pulled from the same defended copy as the status.
- */
-template <typename status_type_>
-SZ_NOINLINE engine_timing_t read_engine_timing_(status_type_ const &engine_result) noexcept {
-    status_type_ materialized;
-    std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_type_));
-    engine_timing_t timing;
-    timing.status = static_cast<status_t>(materialized);
-    timing.kernel_milliseconds = engine_elapsed_milliseconds_trait<status_type_>::read(materialized);
-    return timing;
-}
-
-/**
- *  @brief Calls an engine and reads its status @b and kernel time entirely inside one @b `[[gnu::noinline]]` frame.
- *
- *  @note `read_engine_timing_` alone is not enough: when the optimizer folds the engine's return-by-value
- *        into the caller it can corrupt the status @b before the read runs (seen with g++ trunk on the Ice
- *        Lake instantiations in this large TU, and with NVCC 12.x on the affine `cuda_status_t`). Performing
- *        the call and the read together in a non-inlined frame reproduces the same code path as a separate-TU
- *        call, which the library validates as correct in isolation.
- */
-template <typename engine_type_, typename queries_type_, typename candidates_type_, typename... rest_types_>
-SZ_NOINLINE engine_timing_t invoke_engine_timed_(engine_type_ &engine, queries_type_ const &queries,
-                                                 candidates_type_ const &candidates, strided_rows<sz_ssize_t> results,
-                                                 rest_types_ &...rest) noexcept {
-    auto status = engine(queries, candidates, results, rest...);
-    do_not_optimize(status);
-    return read_engine_timing_(status);
-}
 
 #pragma region Levenshtein Distance and Alignment Scores
 
@@ -367,12 +304,13 @@ struct similarities_callable {
     }
 
   private:
-    /** @brief Runs the engine call + status/kernel-time read behind the non-inlined `invoke_engine_timed_` boundary. */
+    /** @brief Runs the engine call and its status read behind the non-inlined `invoke_engine_` boundary. */
     void run_engine_(std::span<token_view_t const> queries_block, std::span<token_view_t const> candidates_block,
                      strided_rows<sz_ssize_t> results_matrix) noexcept(false) {
         engine_timing_t const timing = std::apply(
             [&](auto &&...rest) {
-                return invoke_engine_timed_(engine, queries_block, candidates_block, results_matrix, rest...);
+                return invoke_engine_(
+                    [&] { return engine(queries_block, candidates_block, results_matrix, rest...); });
             },
             extra_args);
         if (timing.status != status_t::success_k)

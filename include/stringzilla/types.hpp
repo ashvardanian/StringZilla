@@ -178,6 +178,12 @@ using rune_t = sz_rune_t;
 using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
 
+/**
+ *  @brief A size or offset deliberately held in 32 bits, where the narrower arithmetic is cheaper - GPU
+ *         address math above all. Every use pairs with a range check at the site that establishes the bound.
+ */
+using small_size_t = sz_u32_t;
+
 using f32_t = float;
 using f64_t = double;
 

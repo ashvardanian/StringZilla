@@ -1,0 +1,33 @@
+/**
+ *  @file c/stringzillas/find_many_cuda.cu
+ *  @brief Base-CUDA-tier instantiations for multi-pattern Aho-Corasick search.
+ *  @author Ash Vardanian
+ */
+#include "stringzillas/find_many.cuh"
+
+namespace ashvardanian {
+namespace stringzillas {
+
+/*  The engine's `kernels()` table takes these kernels' addresses from host code, which implicitly instantiates
+ *  NVCC's device-stub wrappers mid-file; instantiating the kernels first makes the stubs precede that use,
+ *  keeping the generated host code well-formed for host compilers that enforce [temp.expl.spec] ordering
+ *  (Clang) rather than tolerating the inversion (GCC). */
+template __global__ void find_many_walk_per_cuda_chunk_<u16_t, find_many_pass_t::counting_k>(
+    aho_corasick_view<u16_t>, u16_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
+    span<size_t const>, span<find_many_match_t>);
+template __global__ void find_many_walk_per_cuda_chunk_<u32_t, find_many_pass_t::counting_k>(
+    aho_corasick_view<u32_t>, u32_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
+    span<size_t const>, span<find_many_match_t>);
+template __global__ void find_many_walk_per_cuda_chunk_<u16_t, find_many_pass_t::scattering_k>(
+    aho_corasick_view<u16_t>, u16_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
+    span<size_t const>, span<find_many_match_t>);
+template __global__ void find_many_walk_per_cuda_chunk_<u32_t, find_many_pass_t::scattering_k>(
+    aho_corasick_view<u32_t>, u32_t, span<span<byte_t const> const>, span<size_t const>, size_t, size_t, span<size_t>,
+    span<size_t const>, span<find_many_match_t>);
+template __global__ void exclusive_sum_across_cuda_device_<size_t>(size_t const *, size_t, size_t *);
+
+template struct find_many_cuda<u16_t, unified_alloc_t, sz_cap_cuda_k>;
+template struct find_many_cuda<u32_t, unified_alloc_t, sz_cap_cuda_k>;
+
+} // namespace stringzillas
+} // namespace ashvardanian

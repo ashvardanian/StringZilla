@@ -15,10 +15,12 @@
 #include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
 
+#include <stringzillas/find_many.hpp>    // C++ templates for multi-pattern search
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity
 
 #if SZ_USE_CUDA
+#include <stringzillas/find_many.cuh>    // Parallel multi-pattern search in CUDA
 #include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #include <stringzillas/similarities.cuh> // Parallel string similarity in CUDA
 #endif
@@ -41,8 +43,14 @@ overloaded(callable_types_...) -> overloaded<callable_types_...>;
 
 /** Wraps a `sz_sequence_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_as_cpp_container_t {
+    using self_t = sz_sequence_as_cpp_container_t;
     using value_type = std::string_view;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_t const *sequence_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(sequence_ != nullptr && "Sequence must not be null");
@@ -59,8 +67,14 @@ struct sz_sequence_as_cpp_container_t {
 
 /** Wraps a `sz_sequence_u64tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u64tape_as_cpp_container_t {
+    using self_t = sz_sequence_u64tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_u64tape_t const *tape_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
@@ -75,8 +89,14 @@ struct sz_sequence_u64tape_as_cpp_container_t {
 
 /** Wraps a `sz_sequence_u32tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u32tape_as_cpp_container_t {
+    using self_t = sz_sequence_u32tape_as_cpp_container_t;
     using value_type = std::string_view;
+    using iterator = sz::indexed_container_iterator<self_t>;
+
     sz_sequence_u32tape_t const *tape_ = nullptr;
+
+    iterator begin() const noexcept { return iterator(*this, 0); }
+    iterator end() const noexcept { return iterator(*this, size()); }
 
     std::size_t size() const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
@@ -537,6 +557,24 @@ struct fingerprints_backends_t {
 
     template <typename... variants_arguments_>
     fingerprints_backends_t(variants_arguments_ &&...args) noexcept
+        : variants(std::forward<variants_arguments_>(args)...) {}
+};
+
+struct find_many_backends_t {
+
+    /**
+     *  Multi-pattern search has no per-ISA CPU kernels - a transition is one data-dependent load - so the
+     *  alternatives are just the threading tiers plus the CUDA engine.
+     */
+    std::variant<
+#if SZ_USE_CUDA
+        szs::find_many_u32_cuda_t,
+#endif
+        szs::find_many_u32_parallel_t, szs::find_many_u32_serial_t>
+        variants;
+
+    template <typename... variants_arguments_>
+    find_many_backends_t(variants_arguments_ &&...args) noexcept
         : variants(std::forward<variants_arguments_>(args)...) {}
 };
 

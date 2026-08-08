@@ -37,17 +37,18 @@
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>
-#include <chrono>     // `std::chrono::high_resolution_clock`
-#include <exception>  // `std::invalid_argument`
-#include <functional> // `std::equal_to`
-#include <limits>     // `std::numeric_limits`
-#include <numeric>    // `std::accumulate`
-#include <random>     // `std::random_device`, `std::mt19937`
-#include <string>     // `std::hash`
-#include <vector>     // `std::vector`
-#include <regex>      // `std::regex`, `std::regex_search`
-#include <thread>     // `std::this_thread::sleep_for`
-#include <optional>   // `std::optional`
+#include <chrono>      // `std::chrono::high_resolution_clock`
+#include <exception>   // `std::invalid_argument`
+#include <functional>  // `std::equal_to`
+#include <limits>      // `std::numeric_limits`
+#include <numeric>     // `std::accumulate`
+#include <optional>    // `std::optional`
+#include <random>      // `std::random_device`, `std::mt19937`
+#include <regex>       // `std::regex`, `std::regex_search`
+#include <string>      // `std::hash`
+#include <thread>      // `std::this_thread::sleep_for`, `std::thread::hardware_concurrency`
+#include <type_traits> // `std::invoke_result_t`
+#include <vector>      // `std::vector`
 
 #include <string_view> // Requires C++17
 #include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
@@ -212,6 +213,49 @@ static void do_not_optimize(argument_type_ &&value) noexcept {
 #endif
 }
 
+/** @brief The device-measured kernel time an engine reports, in milliseconds, or @b 0 for CPU engines, whose
+ *         plain `status_t` carries no such timer. */
+template <typename status_type_, typename = void>
+struct engine_elapsed_milliseconds_trait {
+    static float read(status_type_ const &) noexcept { return 0.0f; }
+};
+template <typename status_type_>
+struct engine_elapsed_milliseconds_trait<status_type_,
+                                         decltype((void)std::declval<status_type_ const &>().elapsed_milliseconds)> {
+    static float read(status_type_ const &materialized) noexcept { return materialized.elapsed_milliseconds; }
+};
+
+/** @brief A status paired with the device-measured kernel time, both read out of one materialized copy. */
+struct engine_timing_t {
+    sz::status_t status = sz::status_t::success_k;
+    float kernel_milliseconds = 0.0f;
+};
+
+/**
+ *  @brief Calls @p invocable and decomposes its returned status through opaque memory, in one non-inlined
+ *         frame. Every timed engine call in the suite goes through here.
+ *
+ *  Both halves must stay in this frame. Compilers miscompile the engines' return-by-value inside these
+ *  large translation units at @b -O2 : NVCC 12.x corrupts a `cuda_status_t`'s two leading enum fields
+ *  while its `float elapsed_milliseconds` survives, and g++ trunk corrupts the status when it folds the
+ *  return into an inlined caller. The libraries are correct - a separate-TU call returns `success_k`.
+ *  Sharing one `[[gnu::noinline]]` frame reproduces that separate-TU code path.
+ */
+template <typename invocable_type_>
+SZ_NOINLINE engine_timing_t invoke_engine_(invocable_type_ &&invocable) noexcept {
+    using status_t = std::invoke_result_t<invocable_type_>;
+    status_t engine_result = invocable();
+    do_not_optimize(engine_result);
+
+    status_t materialized;
+    std::memcpy((void *)&materialized, (void const *)&engine_result, sizeof(status_t));
+
+    engine_timing_t timing;
+    timing.status = static_cast<sz::status_t>(materialized);
+    timing.kernel_milliseconds = engine_elapsed_milliseconds_trait<status_t>::read(materialized);
+    return timing;
+}
+
 /**
  *  @brief Rounds the number @b down to the preceding power of two.
  *  @see Equivalent to `std::bit_floor`: https://en.cppreference.com/w/cpp/numeric/bit_floor
@@ -319,7 +363,6 @@ struct environment_t {
     std::size_t max_tokens = 0;
     /** @brief Optional override for per-benchmark batch sizes, empty means the backend default; `STRINGWARS_BATCH`. */
     std::vector<std::size_t> batch_sizes_override;
-
     /** @brief Textual content of the dataset file, fully loaded into memory. */
     dataset_t dataset;
     /** @brief Array of tokens extracted from the @p dataset. */
@@ -617,6 +660,9 @@ struct bench_result_t {
 
     duration_histogram_t cpu_cycles_histogram;
 
+    /** @brief Cheapest single call observed, in CPU cycles; a less noisy cost estimator than the mean. */
+    std::uint64_t profiled_cpu_cycles_min = std::numeric_limits<std::uint64_t>::max();
+
     std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
     std::size_t operations = 0;   //< Pulled from the `call_result_t`
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
@@ -630,6 +676,7 @@ struct bench_result_t {
      *  @code{.unparsed}
      *  Benchmarking `sz_find_skylake`:
      *  > Throughput: 0.00 TB/s @ 0.00 ns/call
+     *  > Latency: min 0.00 ns/call, p99 0.00 ns/call
      *  > Efficiency: 0.00 TOps/s @ 0.00 ops/cycle
      *  > Errors: 0 in 10 calls
      *  > + 3.5 x against `sz_find_serial`
@@ -681,6 +728,29 @@ struct bench_result_t {
         std::printf("> Throughput: %.2f %s @ %.2f %s/call\n", //
                     bytes_printable, bytes_printable_unit,    //
                     seconds_printable, seconds_printable_unit);
+
+        // Scheduler interference only slows a call down, so the minimum is a less noisy estimator than the
+        // mean above, and the 99th percentile shows whether outliers drag that mean up. Both come from the
+        // CPU-cycle histogram, rescaled by this run's average seconds-per-cycle ratio.
+        if (profiled_cpu_cycles > 0 && profiled_cpu_cycles_min != std::numeric_limits<std::uint64_t>::max()) {
+            double const seconds_per_cycle = profiled_seconds / profiled_cpu_cycles;
+
+            auto minimum_printable = profiled_cpu_cycles_min * seconds_per_cycle * 1e9;
+            char const *minimum_printable_unit = "ns";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "us";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "ms";
+            if (minimum_printable > 1e3) minimum_printable /= 1e3, minimum_printable_unit = "s";
+
+            auto p99_printable = cpu_cycles_histogram.percentile(0.99) * seconds_per_cycle * 1e9;
+            char const *p99_printable_unit = "ns";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "us";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "ms";
+            if (p99_printable > 1e3) p99_printable /= 1e3, p99_printable_unit = "s";
+
+            std::printf("> Latency: min %.2f %s/call, p99 %.2f %s/call\n", //
+                        minimum_printable, minimum_printable_unit,         //
+                        p99_printable, p99_printable_unit);
+        }
 
         // Print the number of operations, if there was a separate tracking mechanism for those.
         if (operations) {
@@ -784,13 +854,15 @@ bench_result_t bench_nullary(  //
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t call_result = callable();
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
+        std::uint64_t const cpu_cycles_spent = cpu_cycles_at_end - cpu_cycles_at_start;
 
         // Aggregate:
         result.operations += call_result.operations;
         result.bytes_passed += call_result.bytes_passed;
         result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
+        result.profiled_cpu_cycles += cpu_cycles_spent;
+        result.profiled_cpu_cycles_min = std::min(result.profiled_cpu_cycles_min, cpu_cycles_spent);
+        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_spent)] += 1;
     }
     result.profiled_calls += repeat.count();
     result.profiled_seconds = repeat.seconds();
@@ -854,22 +926,28 @@ bench_result_t bench_unary(    //
         }
     }
 
-    // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
-    // But then we will repeat it in an unrolled fashion for a more accurate measurement.
+    // Run once to estimate the per-call duration and size the unrolled loop below. This call pays cold-cache
+    // and branch-predictor costs a steady-state call does not, so it stays out of the reported statistics.
+    call_result_t warm_up_result;
+    std::uint64_t warm_up_cpu_cycles = 0;
     auto const first_call_duration = seconds_per_call([&] {
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
-        call_result_t const call_result = callable((std::size_t)0); //? Use the first token
+        warm_up_result = callable((std::size_t)0); //? Use the first token
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
-
-        result.operations += call_result.operations;
-        result.bytes_passed += call_result.bytes_passed;
-        result.profiled_inputs += call_result.inputs_processed;
-        result.profiled_calls += 1;
-        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
-        result.cpu_cycles_histogram[static_cast<double>(cpu_cycles_at_end - cpu_cycles_at_start)] += 1;
+        warm_up_cpu_cycles = cpu_cycles_at_end - cpu_cycles_at_start;
     });
-    result.profiled_seconds = first_call_duration;
-    if (first_call_duration >= env.benchmark_seconds) return result;
+    if (first_call_duration >= env.benchmark_seconds) {
+        // No budget remains for a second, uncontaminated sample, so the cold warm-up call is reported as-is.
+        result.operations += warm_up_result.operations;
+        result.bytes_passed += warm_up_result.bytes_passed;
+        result.profiled_inputs += warm_up_result.inputs_processed;
+        result.profiled_calls += 1;
+        result.profiled_cpu_cycles += warm_up_cpu_cycles;
+        result.profiled_cpu_cycles_min = warm_up_cpu_cycles;
+        result.cpu_cycles_histogram[static_cast<double>(warm_up_cpu_cycles)] += 1;
+        result.profiled_seconds = first_call_duration;
+        return result;
+    }
 
     // Repeat the benchmarks in unrolled batches of `unroll_factor` until the time limit is reached.
     constexpr std::size_t unroll_factor = 8;
@@ -901,11 +979,13 @@ bench_result_t bench_unary(    //
             result.profiled_inputs += r4.inputs_processed, result.profiled_inputs += r5.inputs_processed, //
             result.profiled_inputs += r6.inputs_processed, result.profiled_inputs += r7.inputs_processed; //
 
-        result.profiled_cpu_cycles += t7 - t0;
-        result.cpu_cycles_histogram[static_cast<double>(t7 - t0)] += unroll_factor;
+        std::uint64_t const batch_cpu_cycles = t7 - t0;
+        result.profiled_cpu_cycles += batch_cpu_cycles;
+        result.profiled_cpu_cycles_min = std::min(result.profiled_cpu_cycles_min, batch_cpu_cycles / unroll_factor);
+        result.cpu_cycles_histogram[static_cast<double>(batch_cpu_cycles)] += unroll_factor;
     }
     result.profiled_calls += repeat.count() * unroll_factor;
-    result.profiled_seconds = repeat.seconds() + first_call_duration;
+    result.profiled_seconds = repeat.seconds();
     return result;
 }
 
