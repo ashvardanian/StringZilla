@@ -114,7 +114,7 @@ int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, P
  *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
  *          On failure, sets a Python exception and returns 0.
  */
-SZ_API_RUNTIME sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
+sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python `str` object
         Py_ssize_t signed_length;

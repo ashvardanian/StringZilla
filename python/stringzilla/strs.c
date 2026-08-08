@@ -85,7 +85,7 @@ static sz_size_t sz_py_strs_sequence_member_length_if_fragmented(void const *seq
 /**
  *  @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`.
  */
-SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
+sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
     if (!sequence) return sz_false_k;
 
     if (PyObject_TypeCheck(object, &StrsType)) {
@@ -105,8 +105,8 @@ SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_s
 /**
  *  @brief  Helper function to export a `Strs` object into `sz_sequence_u32tape_t` components.
  */
-SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
-                                                         sz_size_t *count) {
+sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
+                                          sz_size_t *count) {
 
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
@@ -130,8 +130,8 @@ SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cp
 /**
  *  @brief  Helper function to export a `Strs` object into `sz_sequence_u64tape_t` components.
  */
-SZ_API_RUNTIME sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
-                                                         sz_size_t *count) {
+sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
+                                          sz_size_t *count) {
 
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
@@ -403,7 +403,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
  *  - `STRS_U64_TAPE` remains, if the allocator is different.
  *  - `STRS_FRAGMENTED` becomes a `STRS_U32_TAPE` or `STRS_U64_TAPE` depending on the content size.
  */
-SZ_API_RUNTIME sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
+sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
     if (!object || !allocator) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
 
