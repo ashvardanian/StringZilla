@@ -1,6 +1,6 @@
 /**
  *  @brief  Fold-preimage reverse tables for multi-pattern case-folded search.
- *  @file   include/stringzillas/find_many/tables.h
+ *  @file   include/stringzillas/substrings/tables.h
  *  @author Ash Vardanian
  *
  *  `sz_utf8_fold_preimage_*` in `utf8_uncased/tables.h` maps a source codepoint to its fold image. The
@@ -35,8 +35,8 @@
  *          group_offsets.append(len(group_sources))
  *  @endcode
  */
-#ifndef STRINGZILLAS_FIND_MANY_TABLES_H_
-#define STRINGZILLAS_FIND_MANY_TABLES_H_
+#ifndef STRINGZILLAS_SUBSTRINGS_TABLES_H_
+#define STRINGZILLAS_SUBSTRINGS_TABLES_H_
 
 #include "stringzilla/types.h"
 
@@ -524,4 +524,4 @@ sz_align_(64) static sz_u32_t const szs_fold_preimage_wide_sources_[104] = {
 } // extern "C"
 #endif
 
-#endif // STRINGZILLAS_FIND_MANY_TABLES_H_
+#endif // STRINGZILLAS_SUBSTRINGS_TABLES_H_

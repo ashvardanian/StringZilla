@@ -606,21 +606,21 @@ SZ_API_RUNTIME void szs_fingerprints_free(szs_fingerprints_t engine);
  *
  *  @section Case Sensitivity
  *
- *  `szs_find_many_cased_k` matches raw bytes and accepts any needle, including malformed UTF-8.
+ *  `szs_substrings_cased_k` matches raw bytes and accepts any needle, including malformed UTF-8.
  *
- *  `szs_find_many_uncased_k` applies full Unicode case folding as defined by `CaseFolding.txt` status codes
+ *  `szs_substrings_uncased_k` applies full Unicode case folding as defined by `CaseFolding.txt` status codes
  *  `C` and `F`, the same contract `sz_utf8_uncased_find` implements, so the two agree. Needles must be
  *  well-formed UTF-8 and are rejected with `sz_invalid_utf8_k` otherwise. Folding applies no normalization,
  *  so a precomposed character does not match its decomposed spelling; compose `sz_utf8_norm` ahead of the
  *  search when canonical equivalence is wanted.
  */
-typedef void *szs_find_many_t;
+typedef void *szs_substrings_t;
 
 /** @brief Whether a dictionary matches needles byte-for-byte or folds both sides to a shared case first. */
-typedef enum szs_find_many_case_sensitivity_t {
-    szs_find_many_cased_k = 0,   /**< Byte-exact matching; needles may be arbitrary bytes. */
-    szs_find_many_uncased_k = 1, /**< Full Unicode case folding; needles must be valid UTF-8. */
-} szs_find_many_case_sensitivity_t;
+typedef enum szs_substrings_case_sensitivity_t {
+    szs_substrings_cased_k = 0,   /**< Byte-exact matching; needles may be arbitrary bytes. */
+    szs_substrings_uncased_k = 1, /**< Full Unicode case folding; needles must be valid UTF-8. */
+} szs_substrings_case_sensitivity_t;
 
 /**
  *  @brief One reported match, locating it by haystack, by needle, and by byte span.
@@ -628,12 +628,12 @@ typedef enum szs_find_many_case_sensitivity_t {
  *  Under case folding a needle's own byte length is not the length of every match - needle "k" matches both
  *  the 1-byte "k" and the 3-byte Kelvin sign - so the span is carried per match rather than looked up.
  */
-typedef struct szs_find_many_match_t {
+typedef struct szs_substrings_match_t {
     sz_size_t haystack_index; /**< Which haystack the match was found in. */
     sz_size_t needle_index;   /**< Which needle matched. */
     sz_size_t byte_offset;    /**< Offset of the match within its haystack, in bytes. */
     sz_size_t byte_length;    /**< Length of the matched span, in bytes. */
-} szs_find_many_match_t;
+} szs_substrings_match_t;
 
 /**
  *  @brief Initialize a multi-pattern search engine from a set of needles.
@@ -646,10 +646,10 @@ typedef struct szs_find_many_match_t {
  *  @retval `sz_invalid_utf8_k` A needle is not well-formed UTF-8 while folding is requested.
  *  @retval `sz_unexpected_dimensions_k` A needle is empty.
  */
-SZ_API_RUNTIME sz_status_t szs_find_many_init(                                    //
-    sz_sequence_t const *needles, szs_find_many_case_sensitivity_t case_sensitivity, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,             //
-    szs_find_many_t *engine, char const **error_message);
+SZ_API_RUNTIME sz_status_t szs_substrings_init(                                       //
+    sz_sequence_t const *needles, szs_substrings_case_sensitivity_t case_sensitivity, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                 //
+    szs_substrings_t *engine, char const **error_message);
 
 /**
  *  @brief Count matches of every needle in every haystack.
@@ -659,9 +659,9 @@ SZ_API_RUNTIME sz_status_t szs_find_many_init(                                  
  *  @param[out] counts Output array of per-haystack match counts, one entry per haystack.
  *  @param[out] error_message Optional output pointer for detailed error information.
  */
-SZ_API_RUNTIME sz_status_t szs_find_many_count(        //
-    szs_find_many_t engine, szs_device_scope_t device, //
-    sz_sequence_t const *haystacks, sz_size_t *counts, //
+SZ_API_RUNTIME sz_status_t szs_substrings_count(        //
+    szs_substrings_t engine, szs_device_scope_t device, //
+    sz_sequence_t const *haystacks, sz_size_t *counts,  //
     char const **error_message);
 
 /**
@@ -675,43 +675,43 @@ SZ_API_RUNTIME sz_status_t szs_find_many_count(        //
  *  @param[out] error_message Optional output pointer for detailed error information.
  *  @retval `sz_unexpected_dimensions_k` @p matches_capacity is too small to hold every match.
  */
-SZ_API_RUNTIME sz_status_t szs_find_many(                                                 //
-    szs_find_many_t engine, szs_device_scope_t device,                                    //
-    sz_sequence_t const *haystacks,                                                       //
-    szs_find_many_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+SZ_API_RUNTIME sz_status_t szs_substrings_find(                                            //
+    szs_substrings_t engine, szs_device_scope_t device,                                    //
+    sz_sequence_t const *haystacks,                                                        //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
     char const **error_message);
 
-/** @copydoc szs_find_many_count */
-SZ_API_RUNTIME sz_status_t szs_find_many_count_u32tape(        //
-    szs_find_many_t engine, szs_device_scope_t device,         //
+/** @copydoc szs_substrings_count */
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u32tape(       //
+    szs_substrings_t engine, szs_device_scope_t device,        //
     sz_sequence_u32tape_t const *haystacks, sz_size_t *counts, //
     char const **error_message);
 
-/** @copydoc szs_find_many_count */
-SZ_API_RUNTIME sz_status_t szs_find_many_count_u64tape(        //
-    szs_find_many_t engine, szs_device_scope_t device,         //
+/** @copydoc szs_substrings_count */
+SZ_API_RUNTIME sz_status_t szs_substrings_count_u64tape(       //
+    szs_substrings_t engine, szs_device_scope_t device,        //
     sz_sequence_u64tape_t const *haystacks, sz_size_t *counts, //
     char const **error_message);
 
-/** @copydoc szs_find_many */
-SZ_API_RUNTIME sz_status_t szs_find_many_u32tape(                                         //
-    szs_find_many_t engine, szs_device_scope_t device,                                    //
-    sz_sequence_u32tape_t const *haystacks,                                               //
-    szs_find_many_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+/** @copydoc szs_substrings_find */
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u32tape(                                    //
+    szs_substrings_t engine, szs_device_scope_t device,                                    //
+    sz_sequence_u32tape_t const *haystacks,                                                //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
     char const **error_message);
 
-/** @copydoc szs_find_many */
-SZ_API_RUNTIME sz_status_t szs_find_many_u64tape(                                         //
-    szs_find_many_t engine, szs_device_scope_t device,                                    //
-    sz_sequence_u64tape_t const *haystacks,                                               //
-    szs_find_many_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
+/** @copydoc szs_substrings_find */
+SZ_API_RUNTIME sz_status_t szs_substrings_find_u64tape(                                    //
+    szs_substrings_t engine, szs_device_scope_t device,                                    //
+    sz_sequence_u64tape_t const *haystacks,                                                //
+    szs_substrings_match_t *matches, sz_size_t matches_capacity, sz_size_t *matches_found, //
     char const **error_message);
 
 /**
  *  @brief Free multi-pattern search engine resources.
  *  @param[in] engine Engine handle to free.
  */
-SZ_API_RUNTIME void szs_find_many_free(szs_find_many_t engine);
+SZ_API_RUNTIME void szs_substrings_free(szs_substrings_t engine);
 
 /**
  *  @brief Allocates memory using unified memory allocator.

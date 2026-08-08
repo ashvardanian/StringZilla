@@ -15,12 +15,12 @@
 #include <variant>     // For `std::variant`
 #include <string_view> // For `std::string_view`
 
-#include <stringzillas/find_many.hpp>    // C++ templates for multi-pattern search
+#include <stringzillas/substrings.hpp>   // C++ templates for multi-pattern search
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 #include <stringzillas/similarities.hpp> // C++ templates for string similarity
 
 #if SZ_USE_CUDA
-#include <stringzillas/find_many.cuh>    // Parallel multi-pattern search in CUDA
+#include <stringzillas/substrings.cuh>   // Parallel multi-pattern search in CUDA
 #include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #include <stringzillas/similarities.cuh> // Parallel string similarity in CUDA
 #endif
@@ -560,7 +560,7 @@ struct fingerprints_backends_t {
         : variants(std::forward<variants_arguments_>(args)...) {}
 };
 
-struct find_many_backends_t {
+struct substrings_backends_t {
 
     /**
      *  Multi-pattern search has no per-ISA CPU kernels - a transition is one data-dependent load - so the
@@ -568,13 +568,13 @@ struct find_many_backends_t {
      */
     std::variant<
 #if SZ_USE_CUDA
-        szs::find_many_u32_cuda_t,
+        szs::substrings_u32_cuda_t,
 #endif
-        szs::find_many_u32_parallel_t, szs::find_many_u32_serial_t>
+        szs::substrings_u32_parallel_t, szs::substrings_u32_serial_t>
         variants;
 
     template <typename... variants_arguments_>
-    find_many_backends_t(variants_arguments_ &&...args) noexcept
+    substrings_backends_t(variants_arguments_ &&...args) noexcept
         : variants(std::forward<variants_arguments_>(args)...) {}
 };
 

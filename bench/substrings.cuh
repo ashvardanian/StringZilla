@@ -1,5 +1,5 @@
 /**
- *  @file scripts/bench_find_many.cuh
+ *  @file scripts/bench_substrings.cuh
  *  @brief Shared code for CPU and GPU multi-pattern search (Aho-Corasick) benchmarks.
  */
 #include <cstring> // `std::memcpy`, `std::memcmp`
@@ -11,10 +11,10 @@
 #include <utility>   // `std::declval`
 #include <vector>    // `std::vector`
 
-#include "stringzillas/find_many/serial.hpp"
+#include "stringzillas/substrings/serial.hpp"
 
 #if SZ_USE_CUDA
-#include "stringzillas/find_many/cuda.cuh"
+#include "stringzillas/substrings/cuda.cuh"
 #endif
 
 #include "shared.hpp"
@@ -27,21 +27,21 @@ namespace scripts {
 // Per-symbol: a using-directive re-exports our `memcpy` and nvcc then finds the call ambiguous.
 
 // StringZillas library symbols available on every backend:
-using ashvardanian::stringzillas::find_many_alphabet_size_k;
-using ashvardanian::stringzillas::find_many_cased_k;
-using ashvardanian::stringzillas::find_many_match_t;
-using ashvardanian::stringzillas::find_many_case_sensitivity_t;
-using ashvardanian::stringzillas::find_many_u32_dictionary_t;
-using ashvardanian::stringzillas::find_many_u32_parallel_t;
-using ashvardanian::stringzillas::find_many_u32_serial_t;
-using ashvardanian::stringzillas::find_many_uncased_k;
+using ashvardanian::stringzillas::substrings_alphabet_size_k;
+using ashvardanian::stringzillas::substrings_cased_k;
+using ashvardanian::stringzillas::substrings_match_t;
+using ashvardanian::stringzillas::substrings_case_sensitivity_t;
+using ashvardanian::stringzillas::substrings_u32_dictionary_t;
+using ashvardanian::stringzillas::substrings_u32_parallel_t;
+using ashvardanian::stringzillas::substrings_u32_serial_t;
+using ashvardanian::stringzillas::substrings_uncased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
 
 // StringZillas library symbols provided only by the CUDA backend:
 #if SZ_USE_CUDA
 using ashvardanian::stringzillas::cuda_executor_t;
 using ashvardanian::stringzillas::cuda_status_t;
-using ashvardanian::stringzillas::find_many_u32_cuda_t;
+using ashvardanian::stringzillas::substrings_u32_cuda_t;
 using ashvardanian::stringzillas::gpu_specs_fetch;
 #endif
 
@@ -207,10 +207,10 @@ needle_slice_t needle_slice_of(vocabulary_t const &vocabulary, vocabulary_slice_
 /** @brief Structural facts about one compiled automaton. Construction @b throughput is not printed here -
  *         it is measured by `bench_nullary` like every other operation, so it carries the same units and
  *         the same min-of-N latency. */
-void print_dictionary_properties(find_many_u32_dictionary_t const &dictionary, needle_slice_t const &needles) {
+void print_dictionary_properties(substrings_u32_dictionary_t const &dictionary, needle_slice_t const &needles) {
     size_t const state_count = dictionary.count_states();
     size_t const hot_count = dictionary.hot_count();
-    size_t const hot_tier_bytes = hot_count * find_many_alphabet_size_k * sizeof(u32_t);
+    size_t const hot_tier_bytes = hot_count * substrings_alphabet_size_k * sizeof(u32_t);
     size_t const cold_tier_bytes = dictionary.transitions_bytes() - hot_tier_bytes;
 
     std::printf(" - Needles: %zu requested, %zu inserted, %zu bytes\n", needles.size(), dictionary.count_needles(),
@@ -228,14 +228,14 @@ void print_dictionary_properties(find_many_u32_dictionary_t const &dictionary, n
 #pragma region Timed Callables
 
 /**
- *  @brief Wraps one `find_many` engine call into a `bench_nullary`-compatible nullary callable.
+ *  @brief Wraps one `substrings` engine call into a `bench_nullary`-compatible nullary callable.
  *
  *  @p invocable names the method and its arguments at the call site, so this template never learns which
  *  operation it is timing. Reports the device-measured kernel GB/s once it goes out of scope, as
  *  `similarities_callable` does; CPU engines accumulate no device time and are skipped.
  */
 template <typename invocable_type_, typename output_type_>
-struct find_many_callable {
+struct substrings_callable {
     invocable_type_ invocable; // ? Returns the engine's status; the call site supplies the call.
     size_t total_bytes = 0;
     output_type_ const *output = nullptr; // ? The container `arrays_equality` compares two runs on.
@@ -243,7 +243,7 @@ struct find_many_callable {
     double kernel_milliseconds_total = 0.0;
     double kernel_bytes_total = 0.0;
 
-    ~find_many_callable() {
+    ~substrings_callable() {
         if (kernel_milliseconds_total <= 0.0 || kernel_bytes_total <= 0.0) return;
         double const kernel_gigabytes_per_second = kernel_bytes_total / (kernel_milliseconds_total * 1e6);
         std::printf("> Kernel: %.3f GB/s @ %.3f ms device-measured (excludes host materialization)\n",
@@ -253,7 +253,7 @@ struct find_many_callable {
     call_result_t operator()() noexcept(false) {
         engine_timing_t const timing = invoke_engine_(invocable);
         if (timing.status != status_t::success_k)
-            throw std::runtime_error(std::string("find_many operation failed: ") + status_name(timing.status));
+            throw std::runtime_error(std::string("substrings operation failed: ") + status_name(timing.status));
         kernel_milliseconds_total += timing.kernel_milliseconds;
         kernel_bytes_total += (double)total_bytes;
 
@@ -265,9 +265,9 @@ struct find_many_callable {
     }
 };
 
-/** @brief Builds a `find_many_callable` with both template arguments deduced. */
+/** @brief Builds a `substrings_callable` with both template arguments deduced. */
 template <typename invocable_type_, typename output_type_>
-find_many_callable<invocable_type_, output_type_> make_find_many_callable( //
+substrings_callable<invocable_type_, output_type_> make_substrings_callable( //
     size_t total_bytes, output_type_ const &output, invocable_type_ &&invocable) {
     return {std::forward<invocable_type_>(invocable), total_bytes, &output};
 }
@@ -278,7 +278,7 @@ find_many_callable<invocable_type_, output_type_> make_find_many_callable( //
 
 /** @brief A `try_find` output buffer bigger than this is skipped, so a dictionary of very common short
  *         needles can't run the box out of memory. */
-static constexpr size_t find_many_matches_safety_cap_k = 200'000'000;
+static constexpr size_t substrings_matches_safety_cap_k = 200'000'000;
 
 /**
  *  @brief One measured configuration of the sweep.
@@ -286,35 +286,35 @@ static constexpr size_t find_many_matches_safety_cap_k = 200'000'000;
  *  The frequent slices are short terms that keep the walk near the root; the rare slices are long terms that
  *  drive it deep. Every printed line carries this label, so no number is read positionally.
  */
-struct find_many_sweep_cell_t {
+struct substrings_sweep_cell_t {
     vocabulary_slice_t slice;
-    find_many_case_sensitivity_t sensitivity;
+    substrings_case_sensitivity_t sensitivity;
 
-    char const *sensitivity_name() const noexcept { return sensitivity == find_many_uncased_k ? "uncased" : "cased"; }
+    char const *sensitivity_name() const noexcept { return sensitivity == substrings_uncased_k ? "uncased" : "cased"; }
     std::string label() const { return std::string(sensitivity_name()) + ":" + vocabulary_slice_name(slice); }
 };
 
 /** @brief The sweep both the CPU and the CUDA entry points walk, declared once so they cannot drift apart. */
-static find_many_sweep_cell_t const find_many_sweep_k[] = {
-    {vocabulary_slice_t::most_frequent_1_percent_k, find_many_cased_k},
-    {vocabulary_slice_t::most_frequent_10_percent_k, find_many_cased_k},
-    {vocabulary_slice_t::least_frequent_1_percent_k, find_many_cased_k},
-    {vocabulary_slice_t::least_frequent_10_percent_k, find_many_cased_k},
-    {vocabulary_slice_t::entire_k, find_many_cased_k},
-    {vocabulary_slice_t::most_frequent_1_percent_k, find_many_uncased_k},
-    {vocabulary_slice_t::most_frequent_10_percent_k, find_many_uncased_k},
-    {vocabulary_slice_t::least_frequent_1_percent_k, find_many_uncased_k},
-    {vocabulary_slice_t::least_frequent_10_percent_k, find_many_uncased_k},
-    {vocabulary_slice_t::entire_k, find_many_uncased_k},
+static substrings_sweep_cell_t const substrings_sweep_k[] = {
+    {vocabulary_slice_t::most_frequent_1_percent_k, substrings_cased_k},
+    {vocabulary_slice_t::most_frequent_10_percent_k, substrings_cased_k},
+    {vocabulary_slice_t::least_frequent_1_percent_k, substrings_cased_k},
+    {vocabulary_slice_t::least_frequent_10_percent_k, substrings_cased_k},
+    {vocabulary_slice_t::entire_k, substrings_cased_k},
+    {vocabulary_slice_t::most_frequent_1_percent_k, substrings_uncased_k},
+    {vocabulary_slice_t::most_frequent_10_percent_k, substrings_uncased_k},
+    {vocabulary_slice_t::least_frequent_1_percent_k, substrings_uncased_k},
+    {vocabulary_slice_t::least_frequent_10_percent_k, substrings_uncased_k},
+    {vocabulary_slice_t::entire_k, substrings_uncased_k},
 };
 
 /**
  *  @brief Benchmarks one sweep cell on every backend this build links, so a GPU build reports its own CPU
  *         baselines beside the device numbers. Device work is gated inline, as in `similarities.cuh`.
  */
-void bench_find_many_dictionary(                                        //
-    environment_t const &env, size_t haystack_bytes,                    //
-    vocabulary_t const &vocabulary, find_many_sweep_cell_t const &cell, //
+void bench_substrings_dictionary(                                        //
+    environment_t const &env, size_t haystack_bytes,                     //
+    vocabulary_t const &vocabulary, substrings_sweep_cell_t const &cell, //
     cpu_specs_t const &cpu_specs, forkunion_executor_t &pool) {
 
     std::string const dictionary_label = cell.label();
@@ -327,20 +327,20 @@ void bench_find_many_dictionary(                                        //
     }
 
     // Construction reports needle-bytes per second through the same callable as the searches below.
-    find_many_u32_serial_t rebuilt_engine;
-    auto build_call = make_find_many_callable(needles.total_bytes, rebuilt_engine, [&] {
+    substrings_u32_serial_t rebuilt_engine;
+    auto build_call = make_substrings_callable(needles.total_bytes, rebuilt_engine, [&] {
         rebuilt_engine.reset(); // ? Rebuilding from scratch on every call IS the measured operation
         return rebuilt_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
     });
-    bench_nullary(env, "find_many_build_serial:" + dictionary_label, build_call).log();
+    bench_nullary(env, "substrings_build_serial:" + dictionary_label, build_call).log();
 
-    find_many_u32_serial_t serial_engine;
+    substrings_u32_serial_t serial_engine;
     status_t const serial_build_status = serial_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
     if (serial_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the serial dictionary: ") +
                                  status_name(serial_build_status));
 
-    find_many_u32_parallel_t parallel_engine;
+    substrings_u32_parallel_t parallel_engine;
     status_t const parallel_build_status = parallel_engine.try_build(needles.terms, cell.sensitivity, cpu_specs);
     if (parallel_build_status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the parallel dictionary: ") +
@@ -352,18 +352,18 @@ void bench_find_many_dictionary(                                        //
     unified_vector<size_t> parallel_counts(env.tokens.size());
 
     size_t serial_total = 0, parallel_total = 0;
-    auto serial_call = make_find_many_callable(haystack_bytes, serial_counts, [&] {
+    auto serial_call = make_substrings_callable(haystack_bytes, serial_counts, [&] {
         return serial_engine.try_count(env.tokens, span<size_t>(serial_counts.data(), serial_counts.size()),
                                        serial_total);
     });
-    std::string const serial_name = "find_many_count_serial:" + dictionary_label;
+    std::string const serial_name = "substrings_count_serial:" + dictionary_label;
     bench_result_t const serial_result = bench_nullary(env, serial_name, serial_call).log();
 
-    auto parallel_call = make_find_many_callable(haystack_bytes, parallel_counts, [&] {
+    auto parallel_call = make_substrings_callable(haystack_bytes, parallel_counts, [&] {
         return parallel_engine.try_count(env.tokens, span<size_t>(parallel_counts.data(), parallel_counts.size()),
                                          parallel_total, pool, cpu_specs);
     });
-    std::string const parallel_name = "find_many_count_parallel:" + dictionary_label;
+    std::string const parallel_name = "substrings_count_parallel:" + dictionary_label;
     bench_result_t const parallel_result = bench_nullary(env, parallel_name, serial_call, parallel_call,
                                                          callable_no_op_t {}, arrays_equality<size_t> {})
                                                .log(serial_result);
@@ -375,28 +375,28 @@ void bench_find_many_dictionary(                                        //
 
     // `try_find` materializes every match, so a dictionary of very common short needles can blow up the
     // output buffer; size it from the `try_count` pass above and skip outright past the safety cap.
-    if (total_occurrences == 0 || total_occurrences > find_many_matches_safety_cap_k) {
+    if (total_occurrences == 0 || total_occurrences > substrings_matches_safety_cap_k) {
         std::printf("Skipping try_find: %zu occurrences %s the safety cap of %zu\n", total_occurrences,
-                    total_occurrences == 0 ? "is" : "exceeds", find_many_matches_safety_cap_k);
+                    total_occurrences == 0 ? "is" : "exceeds", substrings_matches_safety_cap_k);
         return;
     }
 
     size_t serial_found = 0, parallel_found = 0;
-    unified_vector<find_many_match_t> serial_matches(total_occurrences);
-    auto serial_find_call = make_find_many_callable(haystack_bytes, serial_matches, [&] {
-        return serial_engine.try_find(env.tokens, span<find_many_match_t>(serial_matches.data(), serial_matches.size()),
-                                      serial_found);
+    unified_vector<substrings_match_t> serial_matches(total_occurrences);
+    auto serial_find_call = make_substrings_callable(haystack_bytes, serial_matches, [&] {
+        return serial_engine.try_find(
+            env.tokens, span<substrings_match_t>(serial_matches.data(), serial_matches.size()), serial_found);
     });
-    std::string const serial_find_name = "find_many_find_serial:" + dictionary_label;
+    std::string const serial_find_name = "substrings_find_serial:" + dictionary_label;
     bench_result_t const serial_find_result = bench_nullary(env, serial_find_name, serial_find_call).log();
 
-    unified_vector<find_many_match_t> parallel_matches(total_occurrences);
-    auto parallel_find_call = make_find_many_callable(haystack_bytes, parallel_matches, [&] {
+    unified_vector<substrings_match_t> parallel_matches(total_occurrences);
+    auto parallel_find_call = make_substrings_callable(haystack_bytes, parallel_matches, [&] {
         return parallel_engine.try_find(env.tokens,
-                                        span<find_many_match_t>(parallel_matches.data(), parallel_matches.size()),
+                                        span<substrings_match_t>(parallel_matches.data(), parallel_matches.size()),
                                         parallel_found, pool, cpu_specs);
     });
-    std::string const parallel_find_name = "find_many_find_parallel:" + dictionary_label;
+    std::string const parallel_find_name = "substrings_find_parallel:" + dictionary_label;
     bench_result_t const parallel_find_result =
         bench_nullary(env, parallel_find_name, parallel_find_call).log(serial_find_result);
 
@@ -404,7 +404,7 @@ void bench_find_many_dictionary(                                        //
     gpu_specs_t gpu_specs;
     if (gpu_specs_fetch(gpu_specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 
-    find_many_u32_cuda_t device_engine;
+    substrings_u32_cuda_t device_engine;
     cuda_status_t const device_build_status = device_engine.try_build(needles.terms, cell.sensitivity);
     if (device_build_status.status != status_t::success_k)
         throw std::runtime_error(std::string("Failed to build the device dictionary: ") +
@@ -415,11 +415,11 @@ void bench_find_many_dictionary(                                        //
     unified_vector<size_t> device_counts(env.tokens.size(), 0);
     size_t device_total = 0;
 
-    auto cuda_call = make_find_many_callable(haystack_bytes, device_counts, [&] {
+    auto cuda_call = make_substrings_callable(haystack_bytes, device_counts, [&] {
         return device_engine.try_count(env.tokens, span<size_t>(device_counts.data(), device_counts.size()),
                                        device_total, cuda_executor_t {}, gpu_specs);
     });
-    std::string const cuda_name = "find_many_count_cuda:" + dictionary_label;
+    std::string const cuda_name = "substrings_count_cuda:" + dictionary_label;
     bench_result_t const cuda_result = bench_nullary(env, cuda_name, cuda_call).log(serial_result);
     if (!cuda_result.skipped) {
         bool const matches_reference = arrays_equality<size_t> {}(reinterpret_cast<check_value_t>(&device_counts),
@@ -433,7 +433,7 @@ void bench_find_many_dictionary(                                        //
 
 /** @brief The whole sweep: builds the vocabulary once, then walks every slice and sensitivity on every
  *         backend this build links. */
-void bench_find_many(environment_t const &env) {
+void bench_substrings(environment_t const &env) {
     // `STRINGWARS_UNIQUE` deduplicates `env.tokens` in place, leaving both cutoffs nothing to rank by.
     if (env.unique)
         std::printf(                                                                                   //
@@ -454,9 +454,9 @@ void bench_find_many(environment_t const &env) {
     if (pool.try_spawn(std::thread::hardware_concurrency()) != status_t::success_k)
         throw std::runtime_error("Failed to spawn the thread pool.");
 
-    std::printf("Starting find-many benchmarks...\n");
-    for (find_many_sweep_cell_t const &cell : find_many_sweep_k)
-        bench_find_many_dictionary(env, haystack_bytes, vocabulary, cell, cpu_specs, pool);
+    std::printf("Starting substrings benchmarks...\n");
+    for (substrings_sweep_cell_t const &cell : substrings_sweep_k)
+        bench_substrings_dictionary(env, haystack_bytes, vocabulary, cell, cpu_specs, pool);
 }
 
 #pragma endregion Sweep

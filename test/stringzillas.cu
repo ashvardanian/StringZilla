@@ -31,7 +31,7 @@
 
 #include "stringzilla.hpp"
 
-#include "find_many.cuh"
+#include "substrings.cuh"
 #include "fingerprints.cuh"
 #include "similarities.cuh"
 
@@ -59,15 +59,15 @@ int main(int argc, char const **argv) {
     failures += run_test("test_similarities_safety", test_similarities_safety);
     failures += run_test("test_similarities_memory_usage", test_similarities_memory_usage);
 
-    failures += run_test("test_find_many_unit", test_find_many_unit);
-    failures += run_test("test_find_many_uncased", test_find_many_uncased);
-    failures += run_test("test_find_many_agreement", test_find_many_agreement);
-    failures += run_test("test_find_many_construction", test_find_many_construction);
-    failures += run_test("test_find_many_adversarial", test_find_many_adversarial);
-    failures += run_test("test_find_many_large_haystacks", test_find_many_large_haystacks);
-    failures += run_test("test_find_many_cuda_memory_contract", test_find_many_cuda_memory_contract);
-    failures += run_test("test_find_many_safety", test_find_many_safety);
-    failures += run_test("test_find_many_buffer_contracts", test_find_many_buffer_contracts);
+    failures += run_test("test_substrings_unit", test_substrings_unit);
+    failures += run_test("test_substrings_uncased", test_substrings_uncased);
+    failures += run_test("test_substrings_agreement", test_substrings_agreement);
+    failures += run_test("test_substrings_construction", test_substrings_construction);
+    failures += run_test("test_substrings_adversarial", test_substrings_adversarial);
+    failures += run_test("test_substrings_large_haystacks", test_substrings_large_haystacks);
+    failures += run_test("test_substrings_cuda_memory_contract", test_substrings_cuda_memory_contract);
+    failures += run_test("test_substrings_safety", test_substrings_safety);
+    failures += run_test("test_substrings_buffer_contracts", test_substrings_buffer_contracts);
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%d test(s) failed.\n", failures);

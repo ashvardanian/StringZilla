@@ -1,8 +1,8 @@
 /**
  *  @brief  CUDA backend for multi-pattern exact and case-folded substring search.
- *  @file   include/stringzillas/find_many/cuda.cuh
+ *  @file   include/stringzillas/substrings/cuda.cuh
  *  @author Ash Vardanian
- *  @sa     include/stringzillas/find_many/serial.hpp
+ *  @sa     include/stringzillas/substrings/serial.hpp
  *
  *  `try_build` uploads a host-built `aho_corasick_view`, so this backend consumes the published contract
  *  rather than the builder's internals.
@@ -21,14 +21,14 @@
  *  transitions divergence-free. That prefix is sized against `target_blocks_per_multiprocessor_`, not the
  *  opt-in per-block ceiling; states above it but below `hot_count` still resolve through device memory.
  */
-#ifndef STRINGZILLAS_FIND_MANY_CUDA_CUH_
-#define STRINGZILLAS_FIND_MANY_CUDA_CUH_
+#ifndef STRINGZILLAS_SUBSTRINGS_CUDA_CUH_
+#define STRINGZILLAS_SUBSTRINGS_CUDA_CUH_
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "stringzillas/types.cuh"            // `unified_alloc_t`, `cuda_status_t`
-#include "stringzillas/find_many/serial.hpp" // `aho_corasick_view`, the host-built contract
+#include "stringzillas/types.cuh"             // `unified_alloc_t`, `cuda_status_t`
+#include "stringzillas/substrings/serial.hpp" // `aho_corasick_view`, the host-built contract
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -43,9 +43,9 @@ using ashvardanian::stringzilla::to_bytes_view;
 
 #pragma region Device Kernels
 
-/** @brief Block size every `find_many_cuda` kernel launches with; occupancy is shared-memory-bound, not
+/** @brief Block size every `substrings_cuda` kernel launches with; occupancy is shared-memory-bound, not
  *         thread-count-bound, so a modest fixed block keeps the launch geometry simple. */
-static constexpr unsigned find_many_threads_per_block_k = 256;
+static constexpr unsigned substrings_threads_per_block_k = 256;
 
 /**
  *  @brief Selects a chunk walk's pass: `counting_k` only tallies matches so the caller can size and scan the
@@ -53,15 +53,15 @@ static constexpr unsigned find_many_threads_per_block_k = 256;
  *
  *  A `bool`-backed scoped enum consumed with `if constexpr`, matching `tile_march_t` in `stringzillas/types.cuh`.
  */
-enum class find_many_pass_t : bool { counting_k = false, scattering_k = true };
+enum class substrings_pass_t : bool { counting_k = false, scattering_k = true };
 
 /**
  *  @brief Cooperatively fills @p shared_hot_rows from the head of the hot tier, once per block. Frequency
  *         ordering means this prefix is already the hottest slice - no selection logic needed.
  */
 template <typename state_id_type_>
-SZ_DEVICE_INLINE void find_many_stage_hot_rows_(aho_corasick_view<state_id_type_> const &view,
-                                                span<state_id_type_> shared_hot_rows) noexcept {
+SZ_DEVICE_INLINE void substrings_stage_hot_rows_(aho_corasick_view<state_id_type_> const &view,
+                                                 span<state_id_type_> shared_hot_rows) noexcept {
     for (size_t cell = threadIdx.x; cell < shared_hot_rows.size(); cell += blockDim.x)
         shared_hot_rows[cell] = view.hot_rows[cell];
     __syncthreads();
@@ -76,14 +76,14 @@ SZ_DEVICE_INLINE void find_many_stage_hot_rows_(aho_corasick_view<state_id_type_
  *  shared-memory staging exists to shrink.
  */
 template <typename state_id_type_>
-SZ_DEVICE_INLINE state_id_type_ find_many_step_device_(aho_corasick_view<state_id_type_> const &view,
-                                                       span<state_id_type_ const> shared_hot_rows, state_id_type_ state,
-                                                       u8_t byte) noexcept {
+SZ_DEVICE_INLINE state_id_type_ substrings_step_device_(aho_corasick_view<state_id_type_> const &view,
+                                                        span<state_id_type_ const> shared_hot_rows,
+                                                        state_id_type_ state, u8_t byte) noexcept {
     // The staged prefix is a few hundred rows of shared memory, so `hot_row_of` addresses it in 32 bits.
-    sz_assert_(shared_hot_rows.size() / find_many_alphabet_size_k <= std::numeric_limits<small_size_t>::max() &&
+    sz_assert_(shared_hot_rows.size() / substrings_alphabet_size_k <= std::numeric_limits<small_size_t>::max() &&
                "The staged prefix is budgeted against one multiprocessor's shared memory in `try_build`");
     small_size_t const shared_rows_count = static_cast<small_size_t>(shared_hot_rows.size() /
-                                                                     find_many_alphabet_size_k);
+                                                                     substrings_alphabet_size_k);
     if (static_cast<small_size_t>(state) < shared_rows_count)
         return hot_row_of<small_size_t>(shared_hot_rows, state)[byte];
     return aho_corasick_step(view, state, byte);
@@ -94,8 +94,8 @@ SZ_DEVICE_INLINE state_id_type_ find_many_step_device_(aho_corasick_view<state_i
  *         prefix sum of chunk counts per haystack (`haystack_chunk_offsets[haystack_count]` is the grand
  *         total chunk count, mirroring how `outputs_offsets` bounds `outputs_counts`).
  */
-SZ_DEVICE_INLINE size_t find_many_resolve_haystack_(span<size_t const> haystack_chunk_offsets,
-                                                    size_t chunk_index) noexcept {
+SZ_DEVICE_INLINE size_t substrings_resolve_haystack_(span<size_t const> haystack_chunk_offsets,
+                                                     size_t chunk_index) noexcept {
     size_t low = 0, high = haystack_chunk_offsets.size() - 1;
     while (low + 1 < high) {
         size_t const mid = low + (high - low) / 2;
@@ -113,11 +113,11 @@ SZ_DEVICE_INLINE size_t find_many_resolve_haystack_(span<size_t const> haystack_
  *         per @p pass_.
  *  @return The number of matches found in the chunk.
  */
-template <typename state_id_type_, find_many_pass_t pass_>
-SZ_DEVICE_INLINE size_t find_many_walk_chunk_( //
+template <typename state_id_type_, substrings_pass_t pass_>
+SZ_DEVICE_INLINE size_t substrings_walk_chunk_( //
     aho_corasick_view<state_id_type_> const &view, span<state_id_type_ const> shared_hot_rows,
     span<byte_t const> haystack, size_t chunk_begin, size_t chunk_end, size_t haystack_index, size_t output_base_offset,
-    span<find_many_match_t> matches_out) noexcept {
+    span<substrings_match_t> matches_out) noexcept {
 
     // Offsets are relative to this haystack, so the warm-up clamps against its own start at zero.
     size_t const warm_up_bytes = view.max_match_bytes > 0 ? (size_t)view.max_match_bytes - 1 : 0;
@@ -125,7 +125,7 @@ SZ_DEVICE_INLINE size_t find_many_walk_chunk_( //
 
     // Every 64-bit quantity is resolved here, once, and the per-byte loop below rides 32-bit deltas from it.
     byte_t const *const walk_base = haystack.data() + walk_begin;
-    find_many_match_t *const matches_at_chunk = matches_out.data() + output_base_offset;
+    substrings_match_t *const matches_at_chunk = matches_out.data() + output_base_offset;
     small_size_t const walk_span = static_cast<small_size_t>(chunk_end - walk_begin);
     small_size_t const emit_from = static_cast<small_size_t>(chunk_begin - walk_begin);
 
@@ -133,24 +133,24 @@ SZ_DEVICE_INLINE size_t find_many_walk_chunk_( //
     small_size_t matches_found = 0;
 
     for (small_size_t delta = 0; delta < walk_span; ++delta) {
-        state = find_many_step_device_(view, shared_hot_rows, state, walk_base[delta]);
+        state = substrings_step_device_(view, shared_hot_rows, state, walk_base[delta]);
         if (delta < emit_from) continue; // ? The warm-up prefix primes the state and reports nothing.
 
         // Each local takes the width of the array it reads: counts ride the state id, offsets index a pool
         // that is O(states squared) and so stays 64-bit - but only as a base, hoisted out of the inner loop.
         state_id_type_ const output_count = view.outputs_counts[state];
         if (output_count == 0) continue;
-        find_many_output<state_id_type_> const *const outputs_at_state = view.outputs + view.outputs_offsets[state];
+        substrings_output<state_id_type_> const *const outputs_at_state = view.outputs + view.outputs_offsets[state];
         for (state_id_type_ output_index = 0; output_index < output_count; ++output_index) {
-            find_many_output<state_id_type_> const &output = outputs_at_state[output_index];
+            substrings_output<state_id_type_> const &output = outputs_at_state[output_index];
             // `walk_begin` is clamped to the haystack's own start, so underflowing the walk and underflowing
             // the haystack are the same test - and this one needs no absolute offset.
             if (delta + 1 < static_cast<small_size_t>(output.match_bytes)) continue;
-            if constexpr (pass_ == find_many_pass_t::scattering_k) {
+            if constexpr (pass_ == substrings_pass_t::scattering_k) {
                 size_t const match_end = walk_begin + delta + 1;
-                matches_at_chunk[matches_found] = find_many_match_t {haystack_index, (size_t)output.needle_index,
-                                                                     match_end - output.match_bytes,
-                                                                     (size_t)output.match_bytes};
+                matches_at_chunk[matches_found] = substrings_match_t {haystack_index, (size_t)output.needle_index,
+                                                                      match_end - output.match_bytes,
+                                                                      (size_t)output.match_bytes};
             }
             ++matches_found;
         }
@@ -162,7 +162,7 @@ SZ_DEVICE_INLINE size_t find_many_walk_chunk_( //
  *  @brief How many equal-sized chunks of `chunk_bytes` a haystack of @p haystack_length bytes needs - at
  *         least one, so even an empty or shorter-than-a-chunk haystack still gets a thread.
  */
-constexpr size_t find_many_chunks_for_haystack_(size_t haystack_length, size_t chunk_bytes) noexcept {
+constexpr size_t substrings_chunks_for_haystack_(size_t haystack_length, size_t chunk_bytes) noexcept {
     return haystack_length == 0 ? (size_t)1 : divide_round_up(haystack_length, chunk_bytes);
 }
 
@@ -172,12 +172,12 @@ constexpr size_t find_many_chunks_for_haystack_(size_t haystack_length, size_t c
  *         binary-search to resolve a global chunk index back to its owning haystack.
  */
 template <typename state_id_type_>
-__global__ void find_many_count_chunks_per_haystack_(span<span<byte_t const> const> haystacks, size_t chunk_bytes,
-                                                     span<size_t> chunks_per_haystack) {
+__global__ void substrings_count_chunks_per_haystack_(span<span<byte_t const> const> haystacks, size_t chunk_bytes,
+                                                      span<size_t> chunks_per_haystack) {
     for (size_t haystack_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; haystack_index < haystacks.size();
          haystack_index += (size_t)gridDim.x * blockDim.x)
-        chunks_per_haystack[haystack_index] = find_many_chunks_for_haystack_(haystacks[haystack_index].size(),
-                                                                             chunk_bytes);
+        chunks_per_haystack[haystack_index] = substrings_chunks_for_haystack_(haystacks[haystack_index].size(),
+                                                                              chunk_bytes);
 }
 
 /**
@@ -187,31 +187,29 @@ __global__ void find_many_count_chunks_per_haystack_(span<span<byte_t const> con
  *  scattering pass reads each chunk's exclusive offset out of @p chunk_match_offsets and writes its matches
  *  there. Every chunk owns a private, non-overlapping output range, so placing a write needs no atomics.
  */
-template <typename state_id_type_, find_many_pass_t pass_>
-__global__ void find_many_walk_per_cuda_chunk_(aho_corasick_view<state_id_type_> view, state_id_type_ shared_rows_count,
-                                               span<span<byte_t const> const> haystacks,
-                                               span<size_t const> haystack_chunk_offsets, size_t chunk_bytes,
-                                               size_t chunk_count, span<size_t> chunk_match_counts,
-                                               span<size_t const> chunk_match_offsets,
-                                               span<find_many_match_t> matches_out) {
-    extern __shared__ unsigned char find_many_shared_bytes_[];
-    span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(find_many_shared_bytes_),
-                                                (size_t)shared_rows_count * find_many_alphabet_size_k};
-    find_many_stage_hot_rows_(view, shared_hot_rows);
+template <typename state_id_type_, substrings_pass_t pass_>
+__global__ void substrings_walk_per_cuda_chunk_(
+    aho_corasick_view<state_id_type_> view, state_id_type_ shared_rows_count, span<span<byte_t const> const> haystacks,
+    span<size_t const> haystack_chunk_offsets, size_t chunk_bytes, size_t chunk_count, span<size_t> chunk_match_counts,
+    span<size_t const> chunk_match_offsets, span<substrings_match_t> matches_out) {
+    extern __shared__ unsigned char substrings_shared_bytes_[];
+    span<state_id_type_> const shared_hot_rows {reinterpret_cast<state_id_type_ *>(substrings_shared_bytes_),
+                                                (size_t)shared_rows_count * substrings_alphabet_size_k};
+    substrings_stage_hot_rows_(view, shared_hot_rows);
 
     for (size_t chunk_index = (size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk_index < chunk_count;
          chunk_index += (size_t)gridDim.x * blockDim.x) {
-        size_t const haystack_index = find_many_resolve_haystack_(haystack_chunk_offsets, chunk_index);
+        size_t const haystack_index = substrings_resolve_haystack_(haystack_chunk_offsets, chunk_index);
         span<byte_t const> const haystack = haystacks[haystack_index];
         size_t const local_chunk_index = chunk_index - haystack_chunk_offsets[haystack_index];
         size_t const chunk_begin = local_chunk_index * chunk_bytes;
         size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, haystack.size());
 
-        size_t const output_base_offset = pass_ == find_many_pass_t::scattering_k ? chunk_match_offsets[chunk_index]
-                                                                                  : (size_t)0;
-        size_t const matches_in_chunk = find_many_walk_chunk_<state_id_type_, pass_>( //
+        size_t const output_base_offset = pass_ == substrings_pass_t::scattering_k ? chunk_match_offsets[chunk_index]
+                                                                                   : (size_t)0;
+        size_t const matches_in_chunk = substrings_walk_chunk_<state_id_type_, pass_>( //
             view, shared_hot_rows, haystack, chunk_begin, chunk_end, haystack_index, output_base_offset, matches_out);
-        if constexpr (pass_ == find_many_pass_t::counting_k) chunk_match_counts[chunk_index] = matches_in_chunk;
+        if constexpr (pass_ == substrings_pass_t::counting_k) chunk_match_counts[chunk_index] = matches_in_chunk;
         else sz_unused_(matches_in_chunk);
     }
 }
@@ -237,17 +235,17 @@ template <                                       //
     sz_capability_t capability_ = sz_cap_cuda_k, //
     typename enable_ = void                      //
     >
-struct find_many_cuda;
+struct substrings_cuda;
 
 template <typename state_id_type_, typename allocator_type_, sz_capability_t capability_>
-struct find_many_cuda<state_id_type_, allocator_type_, capability_,
-                      std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
+struct substrings_cuda<state_id_type_, allocator_type_, capability_,
+                       std::enable_if_t<(capability_ & sz_cap_cuda_k) != 0>> {
 
     using state_id_t = state_id_type_;
     using allocator_t = allocator_type_;
     using dictionary_t = aho_corasick_dictionary<state_id_t, allocator_t>;
     using view_t = aho_corasick_view<state_id_t>;
-    using match_t = find_many_match_t;
+    using match_t = substrings_match_t;
     static constexpr sz_capability_t capability_k = capability_;
 
     /**
@@ -257,23 +255,23 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
      *  A cold transition's target is `base[state] + byte` for `byte` in `[0, 256)`, and the builder guarantees
      *  `base[state] < state_count`, so the highest slot ever addressed is `state_count + 254`.
      */
-    static constexpr size_t find_many_cold_slot_headroom_k = find_many_alphabet_size_k - 1;
+    static constexpr size_t substrings_cold_slot_headroom_k = substrings_alphabet_size_k - 1;
 
   private:
     using allocator_traits_t = std::allocator_traits<allocator_t>;
     using state_allocator_t = typename allocator_traits_t::template rebind_alloc<state_id_t>;
-    using output_allocator_t = typename allocator_traits_t::template rebind_alloc<find_many_output<state_id_t>>;
+    using output_allocator_t = typename allocator_traits_t::template rebind_alloc<substrings_output<state_id_t>>;
     /** @brief Rebinds to `size_t`, for the output CSR and the chunk offsets, neither of which has a ceiling. */
     using offset_allocator_t = typename allocator_traits_t::template rebind_alloc<size_t>;
     using descriptor_allocator_t = typename allocator_traits_t::template rebind_alloc<span<byte_t const>>;
-    using match_allocator_t = typename allocator_traits_t::template rebind_alloc<find_many_match_t>;
+    using match_allocator_t = typename allocator_traits_t::template rebind_alloc<substrings_match_t>;
 
     /** @brief Device-resident copies of the dictionary's arrays; this engine's owned scratch. */
     safe_vector<state_id_t, state_allocator_t> device_hot_rows_ {};
     safe_vector<state_id_t, state_allocator_t> device_base_ {};
     safe_vector<state_id_t, state_allocator_t> device_check_ {};
     safe_vector<state_id_t, state_allocator_t> device_fail_ {};
-    safe_vector<find_many_output<state_id_t>, output_allocator_t> device_outputs_ {};
+    safe_vector<substrings_output<state_id_t>, output_allocator_t> device_outputs_ {};
     safe_vector<state_id_t, state_allocator_t> device_outputs_counts_ {};
     safe_vector<size_t, offset_allocator_t> device_outputs_offsets_ {};
 
@@ -287,7 +285,7 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
     safe_vector<size_t, offset_allocator_t> chunk_match_offsets_ {};
     /** @brief Unified staging `try_find` scatters into when the caller's output span is host memory a kernel
      *         cannot reach. Mirrors `cuda_cross_buffers::results_staging_` in the similarities engines. */
-    safe_vector<find_many_match_t, match_allocator_t> matches_staging_ {};
+    safe_vector<substrings_match_t, match_allocator_t> matches_staging_ {};
 
     /** @brief The host-built automaton this engine compiles from its needles and uploads at `try_build`. */
     dictionary_t dictionary_ {};
@@ -315,11 +313,11 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
     cuda_timer_t timer_ {};
 
   public:
-    find_many_cuda() noexcept = default;
-    find_many_cuda(find_many_cuda const &) = delete;
-    find_many_cuda &operator=(find_many_cuda const &) = delete;
-    find_many_cuda(find_many_cuda &&) noexcept = default;
-    find_many_cuda &operator=(find_many_cuda &&) noexcept = default;
+    substrings_cuda() noexcept = default;
+    substrings_cuda(substrings_cuda const &) = delete;
+    substrings_cuda &operator=(substrings_cuda const &) = delete;
+    substrings_cuda(substrings_cuda &&) noexcept = default;
+    substrings_cuda &operator=(substrings_cuda &&) noexcept = default;
 
     /** @brief Releases the dictionary and every device-resident buffer this engine owns; a fresh
      *         `try_build` is required after. */
@@ -364,18 +362,19 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
 
         cuda_status_t status = resolve_kernel_shape(
             table.chunks_per_haystack,
-            reinterpret_cast<void const *>(&find_many_count_chunks_per_haystack_<state_id_t>), 0, 0, false);
+            reinterpret_cast<void const *>(&substrings_count_chunks_per_haystack_<state_id_t>), 0, 0, false);
         if (status.status != status_t::success_k) return status;
 
         status = resolve_kernel_shape(
             table.count_chunk,
-            reinterpret_cast<void const *>(&find_many_walk_per_cuda_chunk_<state_id_t, find_many_pass_t::counting_k>),
+            reinterpret_cast<void const *>(&substrings_walk_per_cuda_chunk_<state_id_t, substrings_pass_t::counting_k>),
             0, static_cast<unsigned>(shared_memory_ceiling), false);
         if (status.status != status_t::success_k) return status;
 
         status = resolve_kernel_shape(
             table.scatter_chunk,
-            reinterpret_cast<void const *>(&find_many_walk_per_cuda_chunk_<state_id_t, find_many_pass_t::scattering_k>),
+            reinterpret_cast<void const *>(
+                &substrings_walk_per_cuda_chunk_<state_id_t, substrings_pass_t::scattering_k>),
             0, static_cast<unsigned>(shared_memory_ceiling), false);
         if (status.status != status_t::success_k) return status;
 
@@ -413,7 +412,7 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
      */
     template <typename needles_type_>
     cuda_status_t try_build(needles_type_ const &needles,
-                            find_many_case_sensitivity_t case_sensitivity = find_many_cased_k,
+                            substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                             cuda_executor_t const &executor = {}, cpu_specs_t const &specs = {}) noexcept {
         dictionary_.case_sensitivity(case_sensitivity);
         for (auto const &needle : needles) {
@@ -433,15 +432,15 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
      *         and sizes the shared-memory hot-tier prefix for @p executor 's device.
      *
      *  Uploads `base`, `check`, `fail`, `outputs_counts`, and `outputs_offsets` at
-     *  `host_view.state_count + find_many_cold_slot_headroom_k` elements each. The CSR `outputs` length comes
+     *  `host_view.state_count + substrings_cold_slot_headroom_k` elements each. The CSR `outputs` length comes
      *  from `outputs_total`, which no single state's run could imply.
      */
     cuda_status_t try_upload_(view_t const &host_view, cuda_executor_t const &executor) noexcept {
         cuda_status_t const current_status = executor.ensure_current();
         if (current_status.status != status_t::success_k) return current_status;
 
-        size_t const hot_cells = (size_t)host_view.hot_count * find_many_alphabet_size_k;
-        size_t const state_capacity = (size_t)host_view.state_count + find_many_cold_slot_headroom_k;
+        size_t const hot_cells = (size_t)host_view.hot_count * substrings_alphabet_size_k;
+        size_t const state_capacity = (size_t)host_view.state_count + substrings_cold_slot_headroom_k;
         size_t const total_outputs = host_view.outputs_total;
 
         if (device_hot_rows_.try_assign({host_view.hot_rows, hot_cells}) != status_t::success_k)
@@ -465,7 +464,7 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
         int shared_memory_per_multiprocessor = 0;
         cuDeviceGetAttribute(&shared_memory_per_multiprocessor,
                              CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR, executor.device_id());
-        size_t const bytes_per_hot_row = find_many_alphabet_size_k * sizeof(state_id_t);
+        size_t const bytes_per_hot_row = substrings_alphabet_size_k * sizeof(state_id_t);
         size_t const shared_memory_budget = static_cast<size_t>(shared_memory_per_multiprocessor) /
                                             target_blocks_per_multiprocessor_;
         size_t const rows_that_fit = shared_memory_budget / bytes_per_hot_row;
@@ -557,17 +556,18 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
                                         unsigned &blocks_per_grid, size_t &chunk_bytes, size_t &chunk_count) noexcept {
         size_t const haystack_count = haystack_descriptors_.size();
 
-        sz_assert_((size_t)shared_rows_ * find_many_alphabet_size_k * sizeof(state_id_t) <=
+        sz_assert_((size_t)shared_rows_ * substrings_alphabet_size_k * sizeof(state_id_t) <=
                        std::numeric_limits<unsigned>::max() &&
                    "The staged prefix is budgeted against one multiprocessor's shared memory in `try_build`");
-        shared_memory_bytes = static_cast<unsigned>((size_t)shared_rows_ * find_many_alphabet_size_k *
+        shared_memory_bytes = static_cast<unsigned>((size_t)shared_rows_ * substrings_alphabet_size_k *
                                                     sizeof(state_id_t));
         cuda_status_t const occupancy_status = occupancy_grid_for(blocks_per_grid, kernel_table.count_chunk.function,
-                                                                  find_many_threads_per_block_k, shared_memory_bytes,
+                                                                  substrings_threads_per_block_k, shared_memory_bytes,
                                                                   specs);
         if (occupancy_status.status != status_t::success_k) return occupancy_status;
 
-        size_t const target_threads = sz_max_of_two((size_t)blocks_per_grid * find_many_threads_per_block_k, (size_t)1);
+        size_t const target_threads = sz_max_of_two((size_t)blocks_per_grid * substrings_threads_per_block_k,
+                                                    (size_t)1);
         chunk_bytes = sz_max_of_two(divide_round_up(total_bytes, target_threads), (size_t)1);
 
         // The kernel's 32-bit deltas span one thread's warm-up prefix plus its chunk. This bounds that reach,
@@ -595,7 +595,7 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
                                                   &chunks_per_haystack_argument};
         CUresult const chunks_error = cuda_launch_t {}
                                           .grid(blocks_per_grid)
-                                          .block(find_many_threads_per_block_k)
+                                          .block(substrings_threads_per_block_k)
                                           .shared(0)
                                           .stream(executor.stream())
                                           .launch(kernel_table.chunks_per_haystack.function,
@@ -631,14 +631,14 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
         size_t chunk_count_argument = chunk_count;
         span<size_t> chunk_counts_argument {chunk_match_offsets_.data(), chunk_match_offsets_.size()};
         span<size_t const> no_chunk_offsets_argument;
-        span<find_many_match_t> no_matches_argument;
+        span<substrings_match_t> no_matches_argument;
         void *count_arguments[9] = {
             &view_argument,        &shared_rows_argument, &haystacks_argument,    &haystack_chunk_offsets_argument,
             &chunk_bytes_argument, &chunk_count_argument, &chunk_counts_argument, &no_chunk_offsets_argument,
             &no_matches_argument};
         CUresult const count_error = cuda_launch_t {}
                                          .grid(blocks_per_grid)
-                                         .block(find_many_threads_per_block_k)
+                                         .block(substrings_threads_per_block_k)
                                          .shared(shared_memory_bytes)
                                          .stream(executor.stream())
                                          .launch(kernel_table.count_chunk.function, count_arguments);
@@ -749,7 +749,7 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
             &matches_out_argument};
         CUresult const scatter_error = cuda_launch_t {}
                                            .grid(blocks_per_grid)
-                                           .block(find_many_threads_per_block_k)
+                                           .block(substrings_threads_per_block_k)
                                            .shared(shared_memory_bytes)
                                            .stream(executor.stream())
                                            .launch(kernel_table.scatter_chunk.function, scatter_arguments);
@@ -762,9 +762,9 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
         // excludes it and the one synchronize below covers it - the same driver-copy idiom as the strided
         // `cuMemcpy2DAsync` draining `results_staging_` in the similarities engines.
         if (!output_is_device_accessible) {
-            CUresult const drain_error = cuMemcpyAsync((CUdeviceptr)matches_out.data(),
-                                                       (CUdeviceptr)matches_staging_.data(),
-                                                       matches_in_batch * sizeof(find_many_match_t), executor.stream());
+            CUresult const drain_error = cuMemcpyAsync(
+                (CUdeviceptr)matches_out.data(), (CUdeviceptr)matches_staging_.data(),
+                matches_in_batch * sizeof(substrings_match_t), executor.stream());
             if (drain_error != CUDA_SUCCESS) return make_cuda_status(drain_error);
         }
 
@@ -776,12 +776,12 @@ struct find_many_cuda<state_id_type_, allocator_type_, capability_,
     }
 };
 
-using find_many_u16_cuda_t = find_many_cuda<u16_t, unified_alloc_t, sz_cap_cuda_k>;
-using find_many_u32_cuda_t = find_many_cuda<u32_t, unified_alloc_t, sz_cap_cuda_k>;
+using substrings_u16_cuda_t = substrings_cuda<u16_t, unified_alloc_t, sz_cap_cuda_k>;
+using substrings_u32_cuda_t = substrings_cuda<u32_t, unified_alloc_t, sz_cap_cuda_k>;
 
 #pragma endregion Engine
 
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_FIND_MANY_CUDA_CUH_
+#endif // STRINGZILLAS_SUBSTRINGS_CUDA_CUH_

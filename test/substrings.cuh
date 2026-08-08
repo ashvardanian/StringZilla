@@ -2,16 +2,16 @@
  *  @brief Extensive @b stress-testing suite for the StringZillas multi-pattern search engine (Aho-Corasick).
  *  @see Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file scripts/test_find_many.cuh
+ *  @file scripts/test_substrings.cuh
  *  @author Ash Vardanian
  *  @date June 16, 2026
  */
 #include "stringzilla/utf8_uncased.h" // `sz_utf8_uncased_search`, the independent single-needle oracle
 
-#include "stringzillas/find_many.hpp"
+#include "stringzillas/substrings.hpp"
 
 #if SZ_USE_CUDA
-#include "stringzillas/find_many.cuh"
+#include "stringzillas/substrings.cuh"
 #endif
 
 #if !SZ_IS_CPP17_
@@ -39,19 +39,19 @@ namespace stringzilla {
 namespace scripts {
 
 using ashvardanian::stringzillas::dummy_executor_t;
-using ashvardanian::stringzillas::find_many_cased_k;
+using ashvardanian::stringzillas::substrings_cased_k;
 using ashvardanian::stringzillas::forkunion_executor_t;
-using ashvardanian::stringzillas::find_many_match_t;
-using ashvardanian::stringzillas::find_many_case_sensitivity_t;
-using ashvardanian::stringzillas::find_many_u16_dictionary_t;
-using ashvardanian::stringzillas::find_many_u32_dictionary_t;
-using ashvardanian::stringzillas::find_many_u32_parallel_t;
-using ashvardanian::stringzillas::find_many_u32_serial_t;
-using ashvardanian::stringzillas::find_many_uncased_k;
+using ashvardanian::stringzillas::substrings_match_t;
+using ashvardanian::stringzillas::substrings_case_sensitivity_t;
+using ashvardanian::stringzillas::substrings_u16_dictionary_t;
+using ashvardanian::stringzillas::substrings_u32_dictionary_t;
+using ashvardanian::stringzillas::substrings_u32_parallel_t;
+using ashvardanian::stringzillas::substrings_u32_serial_t;
+using ashvardanian::stringzillas::substrings_uncased_k;
 
 #if SZ_USE_CUDA
 using ashvardanian::stringzillas::cuda_executor_t;
-using ashvardanian::stringzillas::find_many_u32_cuda_t;
+using ashvardanian::stringzillas::substrings_u32_cuda_t;
 using ashvardanian::stringzillas::gpu_specs_fetch;
 using ashvardanian::stringzillas::gpu_specs_t;
 #endif
@@ -59,13 +59,13 @@ using ashvardanian::stringzillas::gpu_specs_t;
 #pragma region Helpers
 
 /** @brief Field-by-field ordering for `finalize`; the public match deliberately carries no comparators. */
-inline bool find_many_match_less_(find_many_match_t const &left, find_many_match_t const &right) noexcept {
+inline bool substrings_match_less_(substrings_match_t const &left, substrings_match_t const &right) noexcept {
     if (left.haystack_index != right.haystack_index) return left.haystack_index < right.haystack_index;
     if (left.needle_index != right.needle_index) return left.needle_index < right.needle_index;
     if (left.byte_offset != right.byte_offset) return left.byte_offset < right.byte_offset;
     return left.byte_length < right.byte_length;
 }
-inline bool find_many_match_equal_(find_many_match_t const &left, find_many_match_t const &right) noexcept {
+inline bool substrings_match_equal_(substrings_match_t const &left, substrings_match_t const &right) noexcept {
     return left.haystack_index == right.haystack_index && left.needle_index == right.needle_index &&
            left.byte_offset == right.byte_offset && left.byte_length == right.byte_length;
 }
@@ -77,22 +77,22 @@ inline bool find_many_match_equal_(find_many_match_t const &left, find_many_matc
  *  The intermediate `counts` and `matches` buffers are unified, since the CUDA engine writes them; the
  *  sorted set itself is host-only, and `clear` keeps its backing allocation.
  */
-struct find_many_match_set_t {
-    std::vector<find_many_match_t> matches;
+struct substrings_match_set_t {
+    std::vector<substrings_match_t> matches;
     unified_vector<std::size_t> collected_counts;
-    unified_vector<find_many_match_t> collected_matches;
+    unified_vector<substrings_match_t> collected_matches;
 
-    find_many_match_set_t() = default;
+    substrings_match_set_t() = default;
 
     /** @brief Builds an already-ordered expectation from a hand-written table, which can therefore spell its
      *         matches in whatever order reads best. */
-    find_many_match_set_t(std::initializer_list<find_many_match_t> initial) {
-        for (find_many_match_t const &match : initial) matches.push_back(match);
+    substrings_match_set_t(std::initializer_list<substrings_match_t> initial) {
+        for (substrings_match_t const &match : initial) matches.push_back(match);
         finalize();
     }
 
     void clear() noexcept { matches.clear(); }
-    void append(find_many_match_t match) { matches.push_back(match); }
+    void append(substrings_match_t match) { matches.push_back(match); }
     std::size_t size() const noexcept { return matches.size(); }
     bool empty() const noexcept { return matches.empty(); }
     auto begin() const noexcept { return matches.begin(); }
@@ -101,18 +101,18 @@ struct find_many_match_set_t {
     /** @brief Orders the collected matches and fails on a repeat - the four fields identify a match uniquely,
      *         so a duplicate is always a bug. */
     void finalize() {
-        std::sort(matches.begin(), matches.end(), find_many_match_less_);
-        bool const has_duplicate = std::adjacent_find(matches.begin(), matches.end(), find_many_match_equal_) !=
+        std::sort(matches.begin(), matches.end(), substrings_match_less_);
+        bool const has_duplicate = std::adjacent_find(matches.begin(), matches.end(), substrings_match_equal_) !=
                                    matches.end();
         verify(!has_duplicate && "Duplicate (haystack, needle, offset, length) reported twice");
     }
 
     /** @note Both sides must have been finalized since their last mutation. */
-    bool operator==(find_many_match_set_t const &other) const noexcept {
+    bool operator==(substrings_match_set_t const &other) const noexcept {
         return matches.size() == other.matches.size() &&
-               std::equal(matches.begin(), matches.end(), other.matches.begin(), find_many_match_equal_);
+               std::equal(matches.begin(), matches.end(), other.matches.begin(), substrings_match_equal_);
     }
-    bool operator!=(find_many_match_set_t const &other) const noexcept { return !(*this == other); }
+    bool operator!=(substrings_match_set_t const &other) const noexcept { return !(*this == other); }
 };
 
 /**
@@ -123,7 +123,7 @@ struct find_many_match_set_t {
  *        an empty pack leaves each engine on its own defaults.
  */
 template <typename engine_type_, typename haystacks_type_, typename... trailing_args_>
-void collect_matches_into_(engine_type_ &engine, haystacks_type_ const &haystacks, find_many_match_set_t &out,
+void collect_matches_into_(engine_type_ &engine, haystacks_type_ const &haystacks, substrings_match_set_t &out,
                            trailing_args_ &&...trailing_args) {
     out.collected_counts.assign(haystacks.size(), 0);
     std::size_t matches_total = 0;
@@ -131,15 +131,15 @@ void collect_matches_into_(engine_type_ &engine, haystacks_type_ const &haystack
                             matches_total, trailing_args...) == status_t::success_k);
 
     // Sized to exactly what counting promised, so a `try_find` overrun trips instead of writing into slack.
-    out.collected_matches.assign(matches_total, find_many_match_t {});
+    out.collected_matches.assign(matches_total, substrings_match_t {});
     std::size_t matches_found = 0;
     verify(engine.try_find(haystacks,
-                           span<find_many_match_t>(out.collected_matches.data(), out.collected_matches.size()),
+                           span<substrings_match_t>(out.collected_matches.data(), out.collected_matches.size()),
                            matches_found, trailing_args...) == status_t::success_k);
     verify(matches_found == matches_total && "try_count and try_find disagree on the match count");
 
     out.clear();
-    for (find_many_match_t const &match : out.collected_matches) out.append(match);
+    for (substrings_match_t const &match : out.collected_matches) out.append(match);
     out.finalize();
 }
 
@@ -227,8 +227,8 @@ inline std::vector<std::pair<std::size_t, std::size_t>> independent_uncased_matc
  *  `independent_uncased_matches_`. A constant both the serial and the accelerated walk got wrong is still
  *  caught here, which comparing two backends against each other cannot do.
  */
-inline void collect_independent_matches_(find_many_case_sensitivity_t sensitivity, arrow_strings_view_t needles,
-                                         arrow_strings_view_t haystacks, find_many_match_set_t &out) {
+inline void collect_independent_matches_(substrings_case_sensitivity_t sensitivity, arrow_strings_view_t needles,
+                                         arrow_strings_view_t haystacks, substrings_match_set_t &out) {
     out.clear();
     for (std::size_t haystack_index = 0; haystack_index < haystacks.size(); ++haystack_index) {
         span<char const> const haystack = haystacks[haystack_index];
@@ -236,7 +236,7 @@ inline void collect_independent_matches_(find_many_case_sensitivity_t sensitivit
             span<char const> const needle = needles[needle_index];
             if (needle.size() == 0 || needle.size() > haystack.size()) continue;
 
-            if (sensitivity == find_many_uncased_k) {
+            if (sensitivity == substrings_uncased_k) {
                 for (auto const &match : independent_uncased_matches_(haystack, needle))
                     out.append({haystack_index, needle_index, match.first, match.second});
                 continue;
@@ -250,7 +250,7 @@ inline void collect_independent_matches_(find_many_case_sensitivity_t sensitivit
 }
 
 /** @brief Selects one closed-set adversarial needle vocabulary. */
-enum class find_many_needle_generator_t {
+enum class substrings_needle_generator_t {
     self_overlapping_k,     ///< "a", "aa", "aaa", … - every needle a suffix of the next, quadratic outputs.
     mutual_overlap_k,       ///< One needle's suffix is another's prefix - the textbook failure-link case.
     shared_prefix_fan_k,    ///< One long common prefix, diverging only at the final byte.
@@ -261,7 +261,7 @@ enum class find_many_needle_generator_t {
 };
 
 /** @brief Selects one closed-set adversarial haystack construction, built against the generated needles. */
-enum class find_many_haystack_generator_t {
+enum class substrings_haystack_generator_t {
     planted_exact_k,        ///< Each needle embedded once inside disjoint-alphabet noise.
     planted_concatenated_k, ///< Needles back to back with no separator - forces overlapping matches.
     near_miss_k,            ///< Every needle with its final byte perturbed - a negative control.
@@ -272,37 +272,37 @@ enum class find_many_haystack_generator_t {
 
 /** @brief Whether a generator's needles are well-formed UTF-8, and so can be case-folded at all. Only the
  *         double-array pressure vocabulary reaches for `0xFF`, which no UTF-8 sequence ever contains. */
-constexpr bool find_many_needles_are_utf8_(find_many_needle_generator_t kind) noexcept {
-    return kind != find_many_needle_generator_t::sparse_wide_alphabet_k;
+constexpr bool substrings_needles_are_utf8_(substrings_needle_generator_t kind) noexcept {
+    return kind != substrings_needle_generator_t::sparse_wide_alphabet_k;
 }
 
 /** @brief Whether a generator's automaton grows with the square of its needle count, so the driver can pick
  *         `scale_iterations_quadratic` over `scale_iterations` and keep the suite balanced. */
-constexpr bool find_many_needles_grow_quadratically_(find_many_needle_generator_t kind) noexcept {
-    return kind == find_many_needle_generator_t::self_overlapping_k;
+constexpr bool substrings_needles_grow_quadratically_(substrings_needle_generator_t kind) noexcept {
+    return kind == substrings_needle_generator_t::self_overlapping_k;
 }
 
-constexpr char const *find_many_needle_generator_name(find_many_needle_generator_t kind) noexcept {
+constexpr char const *substrings_needle_generator_name(substrings_needle_generator_t kind) noexcept {
     switch (kind) {
-    case find_many_needle_generator_t::self_overlapping_k: return "self_overlapping";
-    case find_many_needle_generator_t::mutual_overlap_k: return "mutual_overlap";
-    case find_many_needle_generator_t::shared_prefix_fan_k: return "shared_prefix_fan";
-    case find_many_needle_generator_t::sparse_wide_alphabet_k: return "sparse_wide_alphabet";
-    case find_many_needle_generator_t::fold_expanding_k: return "fold_expanding";
-    case find_many_needle_generator_t::random_short_k: return "random_short";
-    case find_many_needle_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
+    case substrings_needle_generator_t::self_overlapping_k: return "self_overlapping";
+    case substrings_needle_generator_t::mutual_overlap_k: return "mutual_overlap";
+    case substrings_needle_generator_t::shared_prefix_fan_k: return "shared_prefix_fan";
+    case substrings_needle_generator_t::sparse_wide_alphabet_k: return "sparse_wide_alphabet";
+    case substrings_needle_generator_t::fold_expanding_k: return "fold_expanding";
+    case substrings_needle_generator_t::random_short_k: return "random_short";
+    case substrings_needle_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
     }
     return "unknown";
 }
 
-constexpr char const *find_many_haystack_generator_name(find_many_haystack_generator_t kind) noexcept {
+constexpr char const *substrings_haystack_generator_name(substrings_haystack_generator_t kind) noexcept {
     switch (kind) {
-    case find_many_haystack_generator_t::planted_exact_k: return "planted_exact";
-    case find_many_haystack_generator_t::planted_concatenated_k: return "planted_concatenated";
-    case find_many_haystack_generator_t::near_miss_k: return "near_miss";
-    case find_many_haystack_generator_t::fold_preimage_k: return "fold_preimage";
-    case find_many_haystack_generator_t::boundary_stress_k: return "boundary_stress";
-    case find_many_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
+    case substrings_haystack_generator_t::planted_exact_k: return "planted_exact";
+    case substrings_haystack_generator_t::planted_concatenated_k: return "planted_concatenated";
+    case substrings_haystack_generator_t::near_miss_k: return "near_miss";
+    case substrings_haystack_generator_t::fold_preimage_k: return "fold_preimage";
+    case substrings_haystack_generator_t::boundary_stress_k: return "boundary_stress";
+    case substrings_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
     }
     return "unknown";
 }
@@ -313,13 +313,13 @@ constexpr char const *find_many_haystack_generator_name(find_many_haystack_gener
  *  Every case either appends straight into the tape or, for the one kind needing a whole-collection sort and
  *  deduplication, fills a local pool first.
  */
-inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::size_t count,
-                                        arrow_strings_tape_t &needles) {
+inline void generate_substrings_needles_(substrings_needle_generator_t kind, std::size_t count,
+                                         arrow_strings_tape_t &needles) {
     needles.reset();
     std::string scratch;
     switch (kind) {
 
-    case find_many_needle_generator_t::self_overlapping_k:
+    case substrings_needle_generator_t::self_overlapping_k:
         // Every needle is a suffix of the next, so the deepest state carries `count` merged outputs and the
         // output pool grows with the square of the depth - the worst case for anything sizing that pool.
         for (std::size_t depth = 1; depth <= count; ++depth) {
@@ -328,7 +328,7 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         }
         return;
 
-    case find_many_needle_generator_t::mutual_overlap_k:
+    case substrings_needle_generator_t::mutual_overlap_k:
         // One needle's suffix is another's prefix, so failure links traverse rather than collapse to the root.
         for (std::size_t index = 0; index < count; ++index) {
             char const first = (char)('a' + index % 6), second = (char)('a' + (index + 1) % 6);
@@ -339,7 +339,7 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         }
         return;
 
-    case find_many_needle_generator_t::shared_prefix_fan_k:
+    case substrings_needle_generator_t::shared_prefix_fan_k:
         // A single deep trunk with `count` leaves, so almost every state has out-degree one and the
         // frequency ordering has nothing to separate.
         for (std::size_t index = 0; index < count; ++index) {
@@ -350,7 +350,7 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         }
         return;
 
-    case find_many_needle_generator_t::sparse_wide_alphabet_k:
+    case substrings_needle_generator_t::sparse_wide_alphabet_k:
         // Two bytes at opposite ends of the alphabet, so every double-array base must reserve a 256-wide
         // window to hold two edges - maximum collision pressure for the packer.
         for (std::size_t pattern = 0; pattern < count; ++pattern) {
@@ -360,7 +360,7 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         }
         return;
 
-    case find_many_needle_generator_t::fold_expanding_k: {
+    case substrings_needle_generator_t::fold_expanding_k: {
         // Needles whose fold preimages span more bytes than the needle itself - "k" also matches the 3-byte
         // Kelvin sign, so `max_match_bytes` cannot be read off needle lengths.
         char const *const seeds[] = {"k", "ss", "ffl", "st", "a"};
@@ -373,7 +373,7 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         return;
     }
 
-    case find_many_needle_generator_t::random_short_k: {
+    case substrings_needle_generator_t::random_short_k: {
         // The one kind needing a whole-collection sort and deduplication before insertion, which a tape of
         // variable-length ranges cannot do in place.
         std::vector<std::string> pool {"he", "she", "his", "hers"};
@@ -384,13 +384,13 @@ inline void generate_find_many_needles_(find_many_needle_generator_t kind, std::
         return;
     }
 
-    case find_many_needle_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
+    case substrings_needle_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
     }
 }
 
 /** @brief Fills @p haystacks with @p haystack_count adversarial haystacks built against @p needles. */
-inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, arrow_strings_view_t needles,
-                                          std::size_t haystack_count, arrow_strings_tape_t &haystacks) {
+inline void generate_substrings_haystacks_(substrings_haystack_generator_t kind, arrow_strings_view_t needles,
+                                           std::size_t haystack_count, arrow_strings_tape_t &haystacks) {
     haystacks.reset();
     if (needles.size() == 0) return;
 
@@ -404,7 +404,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
         std::size_t const first_needle = haystack_index % needles.size();
         switch (kind) {
 
-        case find_many_haystack_generator_t::planted_exact_k: {
+        case substrings_haystack_generator_t::planted_exact_k: {
             span<char const> const needle = needles[first_needle];
             for (int index = 0; index < noise_length(generator); ++index)
                 scratch.push_back((char)noise_byte(generator));
@@ -414,7 +414,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
             break;
         }
 
-        case find_many_haystack_generator_t::planted_concatenated_k:
+        case substrings_haystack_generator_t::planted_concatenated_k:
             // No separator, so matches of different needles overlap and nest at the seams.
             for (std::size_t offset = 0; offset < 4 && offset < needles.size(); ++offset) {
                 span<char const> const needle = needles[(first_needle + offset) % needles.size()];
@@ -422,7 +422,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
             }
             break;
 
-        case find_many_haystack_generator_t::near_miss_k: {
+        case substrings_haystack_generator_t::near_miss_k: {
             // Every planted needle has its final byte perturbed, so the walk descends deep and then fails.
             span<char const> const needle = needles[first_needle];
             scratch.append(needle.data(), needle.size());
@@ -432,7 +432,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
             break;
         }
 
-        case find_many_haystack_generator_t::fold_preimage_k: {
+        case substrings_haystack_generator_t::fold_preimage_k: {
             // Only an uncased dictionary can match these; a cased one must report nothing at all.
             span<char const> const needle = needles[first_needle];
             for (std::size_t index = 0; index < needle.size(); ++index) {
@@ -444,7 +444,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
             break;
         }
 
-        case find_many_haystack_generator_t::boundary_stress_k: {
+        case substrings_haystack_generator_t::boundary_stress_k: {
             // Flush with the first byte and flush with the last, plus a self-repeat in between, so a match
             // lands on every edge a chunked or windowed walk could mishandle.
             span<char const> const needle = needles[first_needle];
@@ -453,7 +453,7 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
             break;
         }
 
-        case find_many_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
+        case substrings_haystack_generator_t::count_k: break; // ? Never a real generator, only the sweep's bound
         }
         verify(haystacks.try_append({scratch.data(), scratch.size()}) == status_t::success_k);
     }
@@ -464,15 +464,15 @@ inline void generate_find_many_haystacks_(find_many_haystack_generator_t kind, a
 #pragma region Unit
 
 /**
- *  @brief Known-answer vectors for `find_many`, pinned by hand rather than against a second backend.
+ *  @brief Known-answer vectors for `substrings`, pinned by hand rather than against a second backend.
  *
  *  Covers the textbook Aho-Corasick overlap example - "he" and "she" both completing at the same end offset
  *  over "ushers" - attribution of matches to the right haystack in a batch, and a self-overlapping
  *  vocabulary of {"a", "ab", "abc"} over "abcabc". Every match is reported, nested ones included; this is
  *  not leftmost-first matching.
  */
-void test_find_many_unit() {
-    std::printf("  - testing find_many known-answer vectors...\n");
+void test_substrings_unit() {
+    std::printf("  - testing substrings known-answer vectors...\n");
 
     // "she" and "he" both complete the instant the scan reaches the shared 'e', so both are reported at the
     // same end offset; "his" never occurs in "ushers" and contributes nothing.
@@ -485,12 +485,12 @@ void test_find_many_unit() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
 
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
-        find_many_match_set_t const expected {
+        substrings_match_set_t const expected {
             {0, 0, 2, 2}, // "he"   at byte [2, 4)
             {0, 1, 1, 3}, // "she"  at byte [1, 4) - same end offset as "he"
             {0, 3, 2, 4}, // "hers" at byte [2, 6)
@@ -508,12 +508,12 @@ void test_find_many_unit() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
 
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
-        find_many_match_set_t const expected {
+        substrings_match_set_t const expected {
             {0, 0, 0, 3}, // "cat" in haystack 0 at byte [0, 3)
             {0, 1, 9, 3}, // "dog" in haystack 0 at byte [9, 12)
             {2, 1, 0, 3}, // "dog" in haystack 2 at byte [0, 3)
@@ -533,12 +533,12 @@ void test_find_many_unit() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
 
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
-        find_many_match_set_t const expected {
+        substrings_match_set_t const expected {
             {0, 0, 0, 1}, {0, 1, 0, 2}, {0, 2, 0, 3}, // "a", "ab", "abc" at the first occurrence
             {0, 0, 3, 1}, {0, 1, 3, 2}, {0, 2, 3, 3}, // and again at the second
         };
@@ -557,12 +557,12 @@ void test_find_many_unit() {
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
 
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_uncased_k) == status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
-        find_many_match_set_t const expected {
+        substrings_match_set_t const expected {
             {0, 0, 0, 2}, // "ss" matches the sharp-S codepoint at byte [0, 2)
             {0, 1, 0, 2}, // "\xC3\x9F" matches itself at byte [0, 2)
         };
@@ -581,8 +581,8 @@ static void check_uncased_needle_matches_(char const *needle, std::vector<std::s
     span<char const> const needle_span(needle, std::strlen(needle));
     std::vector<span<char const>> const needles {needle_span};
 
-    find_many_u32_serial_t engine;
-    verify(engine.try_build(needles, find_many_uncased_k) == status_t::success_k);
+    substrings_u32_serial_t engine;
+    verify(engine.try_build(needles, substrings_uncased_k) == status_t::success_k);
 
     for (std::string const &haystack : must_match) {
         std::vector<span<char const>> const haystacks {span<char const>(haystack.data(), haystack.size())};
@@ -603,14 +603,14 @@ static void check_uncased_needle_matches_(char const *needle, std::vector<std::s
 }
 
 /**
- *  @brief Full Unicode case-folding conformance table for `find_many_uncased_k`, then a differential against
+ *  @brief Full Unicode case-folding conformance table for `substrings_uncased_k`, then a differential against
  *         `independent_uncased_matches_`.
  *
  *  Every non-ASCII fixture is spelled as `\xHH` byte escapes, never as a raw literal or a `\u` universal
  *  character name - both have been silently re-encoded by tooling here before. A byte-level check against a
  *  numeric expected-bytes array guards the trickiest fixtures.
  */
-void test_find_many_uncased() {
+void test_substrings_uncased() {
     std::printf("  - testing full Unicode case-folding conformance...\n");
 
     // Corruption guard: two load-bearing fixtures re-spelled as integer byte arrays, so a tool that silently
@@ -635,7 +635,7 @@ void test_find_many_uncased() {
     check_uncased_needle_matches_("wei\xC3\x9Frd", {"weissrd", "weiSSrd", "wei\xE1\xBA\x9Erd"}, {"weisrd", "weird"});
 
     // Differential: for a spread of needles and randomized valid UTF-8 haystacks, the full match set found by
-    // `find_many` must equal the full match set found by the independent fold-and-scan oracle.
+    // `substrings` must equal the full match set found by the independent fold-and-scan oracle.
     std::printf("    - differential against the independent fold-and-scan oracle...\n");
     std::vector<std::string> const needle_pool {
         "ss", "\xC3\x9F", "K", "\xC3\x85", "\xC4\xB0", "\xC3\xA9", "wei\xC3\x9Frd", "the",
@@ -650,17 +650,17 @@ void test_find_many_uncased() {
         haystack.append(needle); // ? Guarantees at least one hit most iterations, without excluding zero-hit ones.
 
         std::vector<span<char const>> const needles {span<char const>(needle.data(), needle.size())};
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles, find_many_uncased_k) == status_t::success_k);
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles, substrings_uncased_k) == status_t::success_k);
         std::vector<std::string> const haystack_strings {haystack};
         arrow_strings_tape_t haystacks;
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
-        find_many_match_set_t engine_matches;
+        substrings_match_set_t engine_matches;
         collect_matches_into_(engine, haystacks.view(), engine_matches);
 
         auto const oracle_matches = independent_uncased_matches_(haystacks.view()[0], needles[0]);
-        find_many_match_set_t expected_matches;
+        substrings_match_set_t expected_matches;
         for (auto const &oracle_match : oracle_matches)
             expected_matches.append({0, 0, oracle_match.first, oracle_match.second});
         expected_matches.finalize();
@@ -668,11 +668,11 @@ void test_find_many_uncased() {
         if (engine_matches != expected_matches) {
             std::fprintf(stderr, "Uncased differential mismatch for needle \"%s\": %zu vs %zu matches\n",
                          needle.c_str(), engine_matches.size(), expected_matches.size());
-            for (find_many_match_t const &key : engine_matches)
+            for (substrings_match_t const &key : engine_matches)
                 std::fprintf(stderr, "  engine offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
-            for (find_many_match_t const &key : expected_matches)
+            for (substrings_match_t const &key : expected_matches)
                 std::fprintf(stderr, "  oracle offset=%zu length=%zu\n", key.byte_offset, key.byte_length);
-            verify(false && "find_many disagrees with the independent fold-and-scan oracle");
+            verify(false && "substrings disagrees with the independent fold-and-scan oracle");
         }
     }
 }
@@ -683,12 +683,12 @@ void test_find_many_uncased() {
 
 /**
  *  @brief A ONE-needle dictionary must agree exactly with the shipped `sz_utf8_uncased_search` over a fuzz
- *         corpus - that agreement is the entire semantic claim of `find_many_uncased_k`.
+ *         corpus - that agreement is the entire semantic claim of `substrings_uncased_k`.
  *
- *  `find_many` reports every overlapping match, while `sz_utf8_uncased_search` reports only the first by
- *  start offset, so the comparison reduces `find_many`'s set to its own earliest-starting match.
+ *  `substrings` reports every overlapping match, while `sz_utf8_uncased_search` reports only the first by
+ *  start offset, so the comparison reduces `substrings`'s set to its own earliest-starting match.
  */
-void test_find_many_agreement() {
+void test_substrings_agreement() {
     std::printf("  - testing one-needle agreement with sz_utf8_uncased_search...\n");
 
     std::vector<std::string> const needle_pool {
@@ -706,18 +706,18 @@ void test_find_many_agreement() {
         if ((iteration & 1) == 0) haystack.append(needle); // ? Half the iterations guarantee a hit.
 
         std::vector<span<char const>> const needles {span<char const>(needle.data(), needle.size())};
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles, find_many_uncased_k) == status_t::success_k);
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles, substrings_uncased_k) == status_t::success_k);
         std::vector<std::string> const haystack_strings {haystack};
         arrow_strings_tape_t haystacks;
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
         bool engine_found = false;
         std::size_t engine_offset = 0, engine_length = 0;
-        for (find_many_match_t const &match : matches)
+        for (substrings_match_t const &match : matches)
             if (!engine_found || match.byte_offset < engine_offset) {
                 engine_found = true;
                 engine_offset = match.byte_offset;
@@ -736,13 +736,13 @@ void test_find_many_agreement() {
         bool const agrees = engine_found == reference_found &&
                             (!engine_found || (engine_offset == reference_offset && engine_length == reference_length));
         if (!agrees) {
-            std::fprintf(                                                                           //
-                stderr,                                                                             //
-                "Agreement mismatch for needle \"%s\": find_many found=%d offset=%zu length=%zu | " //
-                "sz_utf8_uncased_search found=%d offset=%zu length=%zu\n",                          //
+            std::fprintf(                                                                            //
+                stderr,                                                                              //
+                "Agreement mismatch for needle \"%s\": substrings found=%d offset=%zu length=%zu | " //
+                "sz_utf8_uncased_search found=%d offset=%zu length=%zu\n",                           //
                 needle.c_str(), engine_found, engine_offset, engine_length, reference_found, reference_offset,
                 reference_length);
-            verify(false && "find_many and sz_utf8_uncased_search disagree");
+            verify(false && "substrings and sz_utf8_uncased_search disagree");
         }
     }
 }
@@ -757,62 +757,62 @@ void test_find_many_agreement() {
  *  No member is ever rebuilt: the generators `reset` the tapes they fill and every collector `clear`s the
  *  buffers it owns, so one backing allocation survives the whole sweep.
  */
-struct find_many_adversarial_scratch_t {
+struct substrings_adversarial_scratch_t {
     /** @brief Which generator pair produced the current cell, so a failing check can name its configuration
      *         instead of leaving it to be reconstructed from a step index. */
-    find_many_needle_generator_t needle_kind = find_many_needle_generator_t::self_overlapping_k;
-    find_many_haystack_generator_t haystack_kind = find_many_haystack_generator_t::planted_exact_k;
+    substrings_needle_generator_t needle_kind = substrings_needle_generator_t::self_overlapping_k;
+    substrings_haystack_generator_t haystack_kind = substrings_haystack_generator_t::planted_exact_k;
 
     arrow_strings_tape_t needles;
     arrow_strings_tape_t haystacks;
-    find_many_match_set_t engine_keys, oracle_keys, variant_keys;
+    substrings_match_set_t engine_keys, oracle_keys, variant_keys;
 #if SZ_USE_CUDA
-    find_many_match_set_t cuda_keys;
+    substrings_match_set_t cuda_keys;
 #endif
 };
 
 /** @brief Reports @p what went wrong and which generator pair produced the cell, mirroring how
  *         `edit_distance_log_mismatch` prefixes a similarity failure with the pair that caused it. */
-void log_find_many_cell_mismatch_(find_many_adversarial_scratch_t const &scratch, char const *what) {
-    std::fprintf(stderr, "%s on needles=%s haystacks=%s\n", what, find_many_needle_generator_name(scratch.needle_kind),
-                 find_many_haystack_generator_name(scratch.haystack_kind));
+void log_substrings_cell_mismatch_(substrings_adversarial_scratch_t const &scratch, char const *what) {
+    std::fprintf(stderr, "%s on needles=%s haystacks=%s\n", what, substrings_needle_generator_name(scratch.needle_kind),
+                 substrings_haystack_generator_name(scratch.haystack_kind));
 }
 
 /**
  *  @brief The indexing check: every match the serial engine reports must agree with brute force, needle,
  *         offset, length and haystack all at once. Runs on every cell.
  */
-void check_find_many_against_oracle_(find_many_case_sensitivity_t sensitivity,
-                                     find_many_adversarial_scratch_t &scratch) {
+void check_substrings_against_oracle_(substrings_case_sensitivity_t sensitivity,
+                                      substrings_adversarial_scratch_t &scratch) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
-    find_many_u32_serial_t engine;
+    substrings_u32_serial_t engine;
     verify(engine.try_build(needles_view, sensitivity) == status_t::success_k);
     collect_matches_into_(engine, haystacks_view, scratch.engine_keys);
     collect_independent_matches_(sensitivity, needles_view, haystacks_view, scratch.oracle_keys);
 
     if (scratch.engine_keys != scratch.oracle_keys) {
-        log_find_many_cell_mismatch_(scratch, "Oracle disagreement");
-        verify(false && "find_many disagrees with the brute-force vocabulary oracle");
+        log_substrings_cell_mismatch_(scratch, "Oracle disagreement");
+        verify(false && "substrings disagrees with the brute-force vocabulary oracle");
     }
 }
 
 /** @brief Serial and fork-union-parallel must report the identical set on the same cell. */
-void check_find_many_backends_agree_(find_many_case_sensitivity_t sensitivity,
-                                     find_many_adversarial_scratch_t &scratch) {
+void check_substrings_backends_agree_(substrings_case_sensitivity_t sensitivity,
+                                      substrings_adversarial_scratch_t &scratch) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
-    find_many_u32_serial_t serial_engine;
+    substrings_u32_serial_t serial_engine;
     verify(serial_engine.try_build(needles_view, sensitivity) == status_t::success_k);
     collect_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
 
-    find_many_u32_parallel_t parallel_engine;
+    substrings_u32_parallel_t parallel_engine;
     verify(parallel_engine.try_build(needles_view, sensitivity) == status_t::success_k);
     collect_matches_into_(parallel_engine, haystacks_view, scratch.variant_keys, dummy_executor_t {});
     if (scratch.engine_keys != scratch.variant_keys) {
-        log_find_many_cell_mismatch_(scratch, "Serial-vs-parallel divergence");
+        log_substrings_cell_mismatch_(scratch, "Serial-vs-parallel divergence");
         verify(false && "Serial and parallel backends disagree");
     }
 }
@@ -823,11 +823,12 @@ void check_find_many_backends_agree_(find_many_case_sensitivity_t sensitivity,
  *  Declining is a legitimate outcome - the narrower id space caps at 65534 states, and an adversarial
  *  vocabulary is built to reach ceilings - so the property is that it never silently truncates instead.
  */
-void check_find_many_narrow_width_(find_many_case_sensitivity_t sensitivity, find_many_adversarial_scratch_t &scratch) {
+void check_substrings_narrow_width_(substrings_case_sensitivity_t sensitivity,
+                                    substrings_adversarial_scratch_t &scratch) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
-    find_many_u16_dictionary_t narrow;
+    substrings_u16_dictionary_t narrow;
     narrow.case_sensitivity(sensitivity);
     for (std::size_t index = 0; index < needles_view.size(); ++index) {
         status_t const status = narrow.try_insert(needles_view[index]);
@@ -847,7 +848,7 @@ void check_find_many_narrow_width_(find_many_case_sensitivity_t sensitivity, fin
 
     collect_independent_matches_(sensitivity, needles_view, haystacks_view, scratch.oracle_keys);
     if (scratch.variant_keys != scratch.oracle_keys) {
-        log_find_many_cell_mismatch_(scratch, "Narrow-width divergence");
+        log_substrings_cell_mismatch_(scratch, "Narrow-width divergence");
         verify(false && "u16 automaton disagrees with the oracle");
     }
 }
@@ -860,14 +861,14 @@ void check_find_many_narrow_width_(find_many_case_sensitivity_t sensitivity, fin
  *  tier-boundary bug is otherwise invisible. Driven through `aho_corasick_dictionary::hot_count` directly,
  *  the engine wrapper having no hook to override the split before `try_build`.
  */
-void check_find_many_tier_invariant_(find_many_case_sensitivity_t sensitivity,
-                                     find_many_adversarial_scratch_t &scratch) {
+void check_substrings_tier_invariant_(substrings_case_sensitivity_t sensitivity,
+                                      substrings_adversarial_scratch_t &scratch) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
     std::size_t raw_state_count = 0;
     {
-        find_many_u32_dictionary_t probe;
+        substrings_u32_dictionary_t probe;
         probe.case_sensitivity(sensitivity);
         for (std::size_t index = 0; index < needles_view.size(); ++index)
             verify(probe.try_insert(needles_view[index]) == status_t::success_k);
@@ -878,7 +879,7 @@ void check_find_many_tier_invariant_(find_many_case_sensitivity_t sensitivity,
     std::size_t const hot_counts[] = {0, 1, raw_state_count / 2, raw_state_count};
     bool saw_cold_tier = false, saw_all_hot = false;
     for (std::size_t variant_index = 0; variant_index < 4; ++variant_index) {
-        find_many_u32_dictionary_t dictionary;
+        substrings_u32_dictionary_t dictionary;
         dictionary.case_sensitivity(sensitivity);
         for (std::size_t index = 0; index < needles_view.size(); ++index)
             verify(dictionary.try_insert(needles_view[index]) == status_t::success_k);
@@ -900,7 +901,7 @@ void check_find_many_tier_invariant_(find_many_case_sensitivity_t sensitivity,
 
         if (variant_index == 0) { scratch.engine_keys = scratch.variant_keys; }
         else if (scratch.variant_keys != scratch.engine_keys) {
-            log_find_many_cell_mismatch_(scratch, "Tier mismatch");
+            log_substrings_cell_mismatch_(scratch, "Tier mismatch");
             std::fprintf(stderr, "  at hot_count=%zu (hot=%u, states=%u): %zu vs %zu matches\n",
                          hot_counts[variant_index], automaton.hot_count, automaton.state_count,
                          scratch.variant_keys.size(), scratch.engine_keys.size());
@@ -914,25 +915,26 @@ void check_find_many_tier_invariant_(find_many_case_sensitivity_t sensitivity,
 #if SZ_USE_CUDA
 /** @brief The device backend must report the identical set for the same cell, through the very same call
  *         shape every host backend takes - only the memory the haystacks live in differs. */
-void check_find_many_cuda_agrees_(find_many_case_sensitivity_t sensitivity, find_many_adversarial_scratch_t &scratch) {
+void check_substrings_cuda_agrees_(substrings_case_sensitivity_t sensitivity,
+                                   substrings_adversarial_scratch_t &scratch) {
     arrow_strings_view_t const needles_view = scratch.needles.view();
     arrow_strings_view_t const haystacks_view = scratch.haystacks.view();
 
-    find_many_u32_serial_t serial_engine;
+    substrings_u32_serial_t serial_engine;
     verify(serial_engine.try_build(needles_view, sensitivity) == status_t::success_k);
     collect_matches_into_(serial_engine, haystacks_view, scratch.engine_keys);
 
     gpu_specs_t gpu_specs;
     verify(gpu_specs_fetch(gpu_specs) == status_t::success_k);
     cuda_executor_t executor;
-    find_many_u32_cuda_t cuda_engine;
+    substrings_u32_cuda_t cuda_engine;
     verify(cuda_engine.try_build(needles_view, sensitivity, executor) == status_t::success_k);
 
     // One match type and one signature across backends: the device runs the very same collection body as
     // every CPU engine. The fixture tape is `unified_alloc`-backed under CUDA, so no copy exists anywhere.
     collect_matches_into_(cuda_engine, haystacks_view, scratch.cuda_keys, executor, gpu_specs);
     if (scratch.cuda_keys != scratch.engine_keys) {
-        log_find_many_cell_mismatch_(scratch, "CUDA-vs-serial divergence");
+        log_substrings_cell_mismatch_(scratch, "CUDA-vs-serial divergence");
         verify(false && "CUDA backend disagrees with the serial reference");
     }
 }
@@ -942,7 +944,7 @@ void check_find_many_cuda_agrees_(find_many_case_sensitivity_t sensitivity, find
  *         separate unified allocations rather than one packed tape - are searched correctly, and host-backed
  *         haystacks are refused with `device_memory_mismatch_k` rather than silently copied.
  */
-void test_find_many_cuda_memory_contract() {
+void test_substrings_cuda_memory_contract() {
     std::printf("  - testing scattered unified haystacks and the host-memory refusal...\n");
 
     gpu_specs_t gpu_specs;
@@ -953,10 +955,10 @@ void test_find_many_cuda_memory_contract() {
     arrow_strings_tape_t needles;
     verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
            status_t::success_k);
-    find_many_u32_serial_t serial_engine;
-    verify(serial_engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-    find_many_u32_cuda_t cuda_engine;
-    verify(cuda_engine.try_build(needles.view(), find_many_cased_k, executor) == status_t::success_k);
+    substrings_u32_serial_t serial_engine;
+    verify(serial_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+    substrings_u32_cuda_t cuda_engine;
+    verify(cuda_engine.try_build(needles.view(), substrings_cased_k, executor) == status_t::success_k);
 
     // Three haystacks in three separate unified allocations: the descriptors point wherever the caller's
     // memory happens to live, which is the whole point of not assuming a tape.
@@ -971,7 +973,7 @@ void test_find_many_cuda_memory_contract() {
 
     arrow_strings_tape_t reference_haystacks;
     verify(reference_haystacks.try_assign(texts.data(), texts.data() + texts.size()) == status_t::success_k);
-    find_many_match_set_t serial_keys, scattered_keys;
+    substrings_match_set_t serial_keys, scattered_keys;
     collect_matches_into_(serial_engine, reference_haystacks.view(), serial_keys);
     collect_matches_into_(cuda_engine, scattered_view, scattered_keys, executor, gpu_specs);
     verify(!serial_keys.empty() && "The fixture must produce matches");
@@ -997,39 +999,39 @@ void test_find_many_cuda_memory_contract() {
  *  a run gets. Ground truth runs on every cell; the costlier properties rotate, keeping the per-cell price
  *  flat while the sweep as a whole still exercises each of them against each generator pair.
  */
-void test_find_many_adversarial() {
+void test_substrings_adversarial() {
     std::printf("  - testing adversarial needle x haystack cross-product...\n");
-    std::size_t const needle_generators = (std::size_t)find_many_needle_generator_t::count_k;
-    std::size_t const haystack_generators = (std::size_t)find_many_haystack_generator_t::count_k;
+    std::size_t const needle_generators = (std::size_t)substrings_needle_generator_t::count_k;
+    std::size_t const haystack_generators = (std::size_t)substrings_haystack_generator_t::count_k;
     std::size_t const cells = scale_iterations(needle_generators * haystack_generators);
-    find_many_adversarial_scratch_t scratch; // ? Constructed once, refilled by every cell below.
+    substrings_adversarial_scratch_t scratch; // ? Constructed once, refilled by every cell below.
 
     for (std::size_t step = 0; step < cells; ++step) {
-        auto const needle_kind = (find_many_needle_generator_t)rotating_index(step, needle_generators);
-        auto const haystack_kind = (find_many_haystack_generator_t)rotating_index(step, haystack_generators);
+        auto const needle_kind = (substrings_needle_generator_t)rotating_index(step, needle_generators);
+        auto const haystack_kind = (substrings_haystack_generator_t)rotating_index(step, haystack_generators);
         // A vocabulary of arbitrary bytes can only be matched byte-exactly: folding rejects malformed UTF-8
         // by contract, and the brute-force oracle decodes its inputs too.
-        auto const sensitivity = step % 2 && find_many_needles_are_utf8_(needle_kind) ? find_many_uncased_k
-                                                                                      : find_many_cased_k;
+        auto const sensitivity = step % 2 && substrings_needles_are_utf8_(needle_kind) ? substrings_uncased_k
+                                                                                       : substrings_cased_k;
 
         scratch.needle_kind = needle_kind;
         scratch.haystack_kind = haystack_kind;
 
         // A vocabulary whose output pool grows with the square of its depth takes the quadratic knob, so
         // doubling the multiplier doubles the work rather than quadrupling it.
-        std::size_t const depth = find_many_needles_grow_quadratically_(needle_kind) ? scale_iterations_quadratic(10)
-                                                                                     : scale_iterations(10);
-        generate_find_many_needles_(needle_kind, depth, scratch.needles);
-        generate_find_many_haystacks_(haystack_kind, scratch.needles.view(), 6, scratch.haystacks);
+        std::size_t const depth = substrings_needles_grow_quadratically_(needle_kind) ? scale_iterations_quadratic(10)
+                                                                                      : scale_iterations(10);
+        generate_substrings_needles_(needle_kind, depth, scratch.needles);
+        generate_substrings_haystacks_(haystack_kind, scratch.needles.view(), 6, scratch.haystacks);
 
-        check_find_many_against_oracle_(sensitivity, scratch);
+        check_substrings_against_oracle_(sensitivity, scratch);
         switch (rotating_index(step, 3)) {
-        case 0: check_find_many_backends_agree_(sensitivity, scratch); break;
-        case 1: check_find_many_narrow_width_(sensitivity, scratch); break;
-        case 2: check_find_many_tier_invariant_(sensitivity, scratch); break;
+        case 0: check_substrings_backends_agree_(sensitivity, scratch); break;
+        case 1: check_substrings_narrow_width_(sensitivity, scratch); break;
+        case 2: check_substrings_tier_invariant_(sensitivity, scratch); break;
         }
 #if SZ_USE_CUDA
-        check_find_many_cuda_agrees_(sensitivity, scratch);
+        check_substrings_cuda_agrees_(sensitivity, scratch);
 #endif
     }
 }
@@ -1041,7 +1043,7 @@ void test_find_many_adversarial() {
  *  The default `cpu_specs_t` L2 threshold keeps the adversarial fixtures above on the one-core-per-haystack
  *  path, so this one forces the slicing with a threshold far below its own size and a real pool.
  */
-void test_find_many_large_haystacks() {
+void test_substrings_large_haystacks() {
     std::printf("  - testing the all-cores-on-one-large-haystack path...\n");
 
     forkunion_executor_t pool;
@@ -1062,13 +1064,13 @@ void test_find_many_large_haystacks() {
     verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
            status_t::success_k);
 
-    find_many_u32_serial_t serial_engine;
-    verify(serial_engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-    find_many_match_set_t serial_keys, parallel_keys;
+    substrings_u32_serial_t serial_engine;
+    verify(serial_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+    substrings_match_set_t serial_keys, parallel_keys;
     collect_matches_into_(serial_engine, haystacks.view(), serial_keys);
 
-    find_many_u32_parallel_t parallel_engine;
-    verify(parallel_engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
+    substrings_u32_parallel_t parallel_engine;
+    verify(parallel_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
     collect_matches_into_(parallel_engine, haystacks.view(), parallel_keys, pool, sliced_specs);
 
     verify(!serial_keys.empty() && "The fixture must produce matches");
@@ -1083,7 +1085,7 @@ void test_find_many_large_haystacks() {
  *  @brief Structural invariants of the compiled automaton, checked directly against the published
  *         `aho_corasick_view` rather than against another backend's output.
  */
-void test_find_many_construction() {
+void test_substrings_construction() {
     std::printf("  - testing structural invariants of the compiled automaton...\n");
 
     // Overlap policy, pinned as a count rather than left implicit: every occurrence of every needle is
@@ -1097,9 +1099,9 @@ void test_find_many_construction() {
                status_t::success_k);
         verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
                status_t::success_k);
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
         verify(matches.size() == 6 && "All matches are reported - this is not leftmost-longest matching");
     }
@@ -1107,7 +1109,7 @@ void test_find_many_construction() {
     // An empty needle is rejected outright. Skipping it silently would consume no needle index, so every
     // later needle's reported `needle_index` would disagree with the caller's own array.
     {
-        find_many_u32_dictionary_t dictionary;
+        substrings_u32_dictionary_t dictionary;
         verify(dictionary.try_insert(span<char const> {}) == status_t::unexpected_dimensions_k);
         verify(dictionary.count_needles() == 0 && "A rejected needle must not consume an index");
         verify(dictionary.try_insert(span<char const> {"ab", 2}) == status_t::success_k);
@@ -1122,8 +1124,8 @@ void test_find_many_construction() {
         arrow_strings_tape_t needles;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
-        find_many_u32_dictionary_t dictionary;
-        dictionary.case_sensitivity(find_many_cased_k);
+        substrings_u32_dictionary_t dictionary;
+        dictionary.case_sensitivity(substrings_cased_k);
         for (span<char const> const &needle : needles.view())
             verify(dictionary.try_insert(needle) == status_t::success_k);
         dictionary.hot_count(0);
@@ -1161,8 +1163,8 @@ void test_find_many_construction() {
         arrow_strings_tape_t needles;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_uncased_k) == status_t::success_k);
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
 
         span<string_view const> const empty_motifs;
         auto &generator = global_random_generator();
@@ -1176,19 +1178,19 @@ void test_find_many_construction() {
         arrow_strings_tape_t haystacks;
         verify(haystacks.try_assign(haystack_storage.data(), haystack_storage.data() + haystack_storage.size()) ==
                status_t::success_k);
-        find_many_match_set_t matches;
+        substrings_match_set_t matches;
         collect_matches_into_(engine, haystacks.view(), matches);
 
         std::vector<std::size_t> counts(haystacks.view().size(), 0);
         std::size_t matches_total = 0;
         verify(engine.try_count(haystacks.view(), span<std::size_t>(counts.data(), counts.size()), matches_total) ==
                status_t::success_k);
-        std::vector<find_many_match_t> raw_matches(matches_total);
+        std::vector<substrings_match_t> raw_matches(matches_total);
         std::size_t matches_found = 0;
-        verify(engine.try_find(haystacks.view(), span<find_many_match_t>(raw_matches.data(), raw_matches.size()),
+        verify(engine.try_find(haystacks.view(), span<substrings_match_t>(raw_matches.data(), raw_matches.size()),
                                matches_found) == status_t::success_k);
 
-        for (find_many_match_t const &match : raw_matches) {
+        for (substrings_match_t const &match : raw_matches) {
             // The match carries offsets only, so the bytes come from the haystack it names - the exact
             // recipe the match struct's own docstring prescribes.
             span<char const> const haystack = haystacks.view()[match.haystack_index];
@@ -1212,7 +1214,7 @@ void test_find_many_construction() {
  *  @brief The three degenerate output-buffer shapes: an empty batch, an undersized buffer, and an oversized
  *         one. The cases above always size `matches` to exactly the count `try_count` produced.
  */
-void test_find_many_buffer_contracts() {
+void test_substrings_buffer_contracts() {
     std::printf("  - testing empty, undersized and oversized output buffers...\n");
 
     std::vector<std::string> const needle_strings {"he", "she", "his", "hers"};
@@ -1223,10 +1225,10 @@ void test_find_many_buffer_contracts() {
     verify(haystacks.try_assign(haystack_strings.data(), haystack_strings.data() + haystack_strings.size()) ==
            status_t::success_k);
 
-    find_many_u32_serial_t serial_engine;
-    verify(serial_engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
-    find_many_u32_parallel_t parallel_engine;
-    verify(parallel_engine.try_build(needles.view(), find_many_cased_k) == status_t::success_k);
+    substrings_u32_serial_t serial_engine;
+    verify(serial_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
+    substrings_u32_parallel_t parallel_engine;
+    verify(parallel_engine.try_build(needles.view(), substrings_cased_k) == status_t::success_k);
 
     std::vector<std::size_t> counts(haystacks.view().size(), 0);
     std::size_t required = 0;
@@ -1240,7 +1242,7 @@ void test_find_many_buffer_contracts() {
     // array while seeding its first prefix-sum entry.
     {
         std::vector<span<char const>> const no_haystacks;
-        span<find_many_match_t> const no_matches;
+        span<substrings_match_t> const no_matches;
         verify(parallel_engine.try_find(no_haystacks, no_matches, matches_found) == status_t::success_k);
         verify(matches_found == 0);
     }
@@ -1248,8 +1250,8 @@ void test_find_many_buffer_contracts() {
     // An undersized buffer must be refused before anything is written, on both backends, and the reported
     // count must stay zero so a caller cannot mistake a refusal for a partial success.
     {
-        std::vector<find_many_match_t> too_small(required - 1);
-        span<find_many_match_t> const too_small_view(too_small.data(), too_small.size());
+        std::vector<substrings_match_t> too_small(required - 1);
+        span<substrings_match_t> const too_small_view(too_small.data(), too_small.size());
         verify(serial_engine.try_find(haystacks.view(), too_small_view, matches_found) ==
                status_t::unexpected_dimensions_k);
         verify(matches_found == 0);
@@ -1261,8 +1263,8 @@ void test_find_many_buffer_contracts() {
     // An oversized buffer is legal: `matches` supplies capacity, and `matches_found` states how much of it
     // was actually used.
     {
-        std::vector<find_many_match_t> too_large(required + 16);
-        span<find_many_match_t> const too_large_view(too_large.data(), too_large.size());
+        std::vector<substrings_match_t> too_large(required + 16);
+        span<substrings_match_t> const too_large_view(too_large.data(), too_large.size());
         verify(serial_engine.try_find(haystacks.view(), too_large_view, matches_found) == status_t::success_k);
         verify(matches_found == required);
         verify(parallel_engine.try_find(haystacks.view(), too_large_view, matches_found) == status_t::success_k);
@@ -1270,7 +1272,7 @@ void test_find_many_buffer_contracts() {
     }
 }
 
-void test_find_many_safety() {
+void test_substrings_safety() {
     std::printf("  - testing malformed-needle rejection and malformed-haystack robustness...\n");
 
     auto &generator = global_random_generator();
@@ -1285,8 +1287,8 @@ void test_find_many_safety() {
         append_malformed_class_(malformed, generator);
         std::vector<span<char const>> const needles {span<char const>(malformed.data(), malformed.size())};
 
-        find_many_u32_serial_t exact_engine;
-        verify(exact_engine.try_build(needles, find_many_cased_k) == status_t::success_k &&
+        substrings_u32_serial_t exact_engine;
+        verify(exact_engine.try_build(needles, substrings_cased_k) == status_t::success_k &&
                "Exact mode must accept any byte sequence as a needle");
 
         bool structurally_valid = true;
@@ -1300,8 +1302,8 @@ void test_find_many_safety() {
             cursor += consumed;
         }
 
-        find_many_u32_serial_t uncased_engine;
-        status_t const uncased_status = uncased_engine.try_build(needles, find_many_uncased_k);
+        substrings_u32_serial_t uncased_engine;
+        status_t const uncased_status = uncased_engine.try_build(needles, substrings_uncased_k);
         status_t const expected_status = structurally_valid ? status_t::success_k : status_t::invalid_utf8_k;
         verify(uncased_status == expected_status &&
                "Uncased mode's acceptance must track structural UTF-8 well-formedness exactly");
@@ -1314,8 +1316,8 @@ void test_find_many_safety() {
     // Positive control: a well-formed UTF-8 needle is accepted under case folding.
     {
         std::vector<span<char const>> const needles {span<char const>("caf\xC3\xA9", 5)};
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles, find_many_uncased_k) == status_t::success_k &&
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles, substrings_uncased_k) == status_t::success_k &&
                "A well-formed UTF-8 needle must be accepted under case folding");
     }
 
@@ -1326,8 +1328,8 @@ void test_find_many_safety() {
         arrow_strings_tape_t needles;
         verify(needles.try_assign(needle_strings.data(), needle_strings.data() + needle_strings.size()) ==
                status_t::success_k);
-        find_many_u32_serial_t engine;
-        verify(engine.try_build(needles.view(), find_many_uncased_k) == status_t::success_k);
+        substrings_u32_serial_t engine;
+        verify(engine.try_build(needles.view(), substrings_uncased_k) == status_t::success_k);
 
         span<string_view const> const empty_motifs;
         for (std::size_t index = 0; index < scale_iterations(80); ++index) {
@@ -1341,10 +1343,10 @@ void test_find_many_safety() {
             std::size_t matches_total = 0;
             verify(engine.try_count(haystacks, span<std::size_t>(counts.data(), counts.size()), matches_total) ==
                    status_t::success_k);
-            std::vector<find_many_match_t> matches(matches_total);
+            std::vector<substrings_match_t> matches(matches_total);
             std::size_t matches_found = 0;
-            verify(engine.try_find(haystacks, span<find_many_match_t>(matches.data(), matches.size()), matches_found) ==
-                   status_t::success_k);
+            verify(engine.try_find(haystacks, span<substrings_match_t>(matches.data(), matches.size()),
+                                   matches_found) == status_t::success_k);
             verify(matches_found == counts[0] && "try_count and try_find disagree on match count");
         }
     }

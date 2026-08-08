@@ -1,6 +1,6 @@
 /**
  *  @brief  Hardware-accelerated multi-pattern exact and case-folded substring search (serial backend).
- *  @file   include/stringzillas/find_many/serial.hpp
+ *  @file   include/stringzillas/substrings/serial.hpp
  *  @author Ash Vardanian
  *
  *  Implements the Aho-Corasick automaton at the core of the multi-pattern search engine:
@@ -9,7 +9,7 @@
  *    result into a frequency-ordered hot tier and a double-array cold tier, and exposes CSR-flattened
  *    match outputs through the shared `aho_corasick_view` contract. Construction allocates a constant
  *    number of flat buffers rather than one per state, and none of them outlives `try_build`.
- *  - `find_many` wraps the dictionary behind a `try_build` / `try_count` / `try_find` triple, with a
+ *  - `substrings` wraps the dictionary behind a `try_build` / `try_count` / `try_find` triple, with a
  *    single-threaded serial specialization and a two-level parallel one - one haystack per core below the
  *    L2 size, all cores on one haystack above it.
  *
@@ -25,13 +25,13 @@
  *  same folded position having consumed a different number of haystack bytes, so states are additionally
  *  keyed by the byte delta accumulated relative to the folded spelling's own canonical encoding.
  */
-#ifndef STRINGZILLAS_FIND_MANY_SERIAL_HPP_
-#define STRINGZILLAS_FIND_MANY_SERIAL_HPP_
+#ifndef STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
+#define STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_
 
 #include "stringzilla/types.hpp"                  // `status_t::status_t`
 #include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
-#include "stringzillas/find_many/tables.h"        // `szs_fold_preimage_narrow_images_`
+#include "stringzillas/substrings/tables.h"       // `szs_fold_preimage_narrow_images_`
 #include "stringzillas/types.hpp"                 // `dummy_executor_t`
 
 #include <forkunion/types.hpp> // `indexed_split_t` - the balanced range split every executor uses
@@ -55,11 +55,11 @@ using ashvardanian::stringzilla::to_bytes_view;
 #pragma region Vocabulary
 
 /** @brief Whether a dictionary matches needles byte-for-byte or folds both sides to a shared case first. */
-enum find_many_case_sensitivity_t {
+enum substrings_case_sensitivity_t {
     /** @brief Byte-exact matching; needles may be arbitrary bytes. */
-    find_many_cased_k,
+    substrings_cased_k,
     /** @brief Full Unicode case folding; needles must be valid UTF-8. */
-    find_many_uncased_k,
+    substrings_uncased_k,
 };
 
 /**
@@ -70,7 +70,7 @@ enum find_many_case_sensitivity_t {
  *  looked up from the needle.
  */
 template <typename state_id_type_>
-struct find_many_output {
+struct substrings_output {
     using state_id_t = state_id_type_;
 
     state_id_t needle_index {};
@@ -80,13 +80,13 @@ struct find_many_output {
 
 /**
  *  @brief One reported match, locating it by haystack, by needle, and by byte span - the one match shape
- *         every backend emits, layout-identical to the C ABI's `szs_find_many_match_t`.
+ *         every backend emits, layout-identical to the C ABI's `szs_substrings_match_t`.
  *
  *  Under case folding a needle's own byte length is not the length of every match - needle "k" matches both
  *  the 1-byte "k" and the 3-byte Kelvin sign - so the span is carried per match. The matched bytes, when
  *  needed, are `to_bytes_view(haystacks[match.haystack_index]).subspan(byte_offset, byte_length)`.
  */
-struct find_many_match_t {
+struct substrings_match_t {
     size_t haystack_index {};
     size_t needle_index {};
     size_t byte_offset {};
@@ -98,7 +98,7 @@ struct find_many_match_t {
 #pragma region Published View
 
 /** @brief Number of columns in a hot-tier row, one per possible input byte. */
-static constexpr size_t find_many_alphabet_size_k = 256;
+static constexpr size_t substrings_alphabet_size_k = 256;
 
 /**
  *  @brief One goto-completed row of @p rows, whichever memory space holds them.
@@ -107,13 +107,13 @@ static constexpr size_t find_many_alphabet_size_k = 256;
  *          cannot widen the product back.
  */
 template <typename index_type_ = size_t, typename state_id_type_>
-constexpr span<state_id_type_ const, find_many_alphabet_size_k> hot_row_of( //
+constexpr span<state_id_type_ const, substrings_alphabet_size_k> hot_row_of( //
     span<state_id_type_ const> rows, state_id_type_ state) noexcept {
     static_assert(sizeof(index_type_) >= sizeof(state_id_type_),
                   "The row index must be at least as wide as the state id, so this conversion never narrows");
     index_type_ const first_cell = static_cast<index_type_>(state) *
-                                   static_cast<index_type_>(find_many_alphabet_size_k);
-    sz_assert_(static_cast<size_t>(first_cell) + find_many_alphabet_size_k <= rows.size());
+                                   static_cast<index_type_>(substrings_alphabet_size_k);
+    sz_assert_(static_cast<size_t>(first_cell) + substrings_alphabet_size_k <= rows.size());
     return {rows.data() + first_cell};
 }
 
@@ -138,7 +138,7 @@ constexpr span<state_id_type_ const, find_many_alphabet_size_k> hot_row_of( //
 template <typename state_id_type_>
 struct aho_corasick_view {
     using state_id_t = state_id_type_;
-    using output_t = find_many_output<state_id_t>;
+    using output_t = substrings_output<state_id_t>;
 
     /** @brief Hot tier: `hot_count * 256` goto-completed targets, row-major, frequency-ordered. */
     state_id_t const *hot_rows {};
@@ -182,11 +182,11 @@ struct aho_corasick_view {
 
     /** @brief The whole hot tier as one span, so a row lookup can bounds-check itself. */
     constexpr span<state_id_t const> all_hot_rows() const noexcept {
-        return {hot_rows, hot_count * find_many_alphabet_size_k};
+        return {hot_rows, hot_count * substrings_alphabet_size_k};
     }
 
     /** @brief One goto-completed row, whose width is the alphabet and therefore known at compile time. */
-    constexpr span<state_id_t const, find_many_alphabet_size_k> hot_row(state_id_t state) const noexcept {
+    constexpr span<state_id_t const, substrings_alphabet_size_k> hot_row(state_id_t state) const noexcept {
         return hot_row_of(all_hot_rows(), state);
     }
 };
@@ -247,7 +247,7 @@ constexpr state_id_type_ aho_corasick_step_counting( //
  */
 template <typename state_id_type_ = u32_t, typename allocator_type_ = dummy_alloc_t,
           sz_capability_t capability_ = sz_cap_serial_k, typename enable_ = void>
-struct find_many;
+struct substrings;
 
 #pragma endregion Engine
 
@@ -329,7 +329,7 @@ struct aho_corasick_dictionary {
 
     using state_id_t = state_id_type_;
     using allocator_t = allocator_type_;
-    using output_t = find_many_output<state_id_t>;
+    using output_t = substrings_output<state_id_t>;
     static_assert(std::is_unsigned<state_id_t>::value, "State ID should be unsigned");
 
     static constexpr size_t alphabet_size_k = 256;
@@ -478,7 +478,7 @@ struct aho_corasick_dictionary {
     size_t count_needles_ = 0;
     state_id_t max_match_bytes_ = 0;
     state_id_t max_outputs_per_state_ = 0;
-    find_many_case_sensitivity_t case_sensitivity_ = find_many_cased_k;
+    substrings_case_sensitivity_t case_sensitivity_ = substrings_cased_k;
 
     /** @brief States `[0, hot_count_)` live in `hot_rows_`; `derive_hot_count_k` asks `try_build` to size
      *         the tier from `cpu_specs_t` instead, which `hot_count` overrides with any explicit value. */
@@ -1298,17 +1298,17 @@ struct aho_corasick_dictionary {
         count_needles_ = 0;
         max_match_bytes_ = 0;
         max_outputs_per_state_ = 0;
-        case_sensitivity_ = find_many_cased_k;
+        case_sensitivity_ = substrings_cased_k;
         hot_count_ = derive_hot_count_k;
         root_ = 0;
     }
 
     /** @brief Selects byte-exact or case-folded matching; must be called before the first `try_insert`. */
-    void case_sensitivity(find_many_case_sensitivity_t desired) noexcept {
+    void case_sensitivity(substrings_case_sensitivity_t desired) noexcept {
         sz_assert_(count_needles_ == 0 && "Case sensitivity can't change once needles have been inserted");
         case_sensitivity_ = desired;
     }
-    find_many_case_sensitivity_t case_sensitivity() const noexcept { return case_sensitivity_; }
+    substrings_case_sensitivity_t case_sensitivity() const noexcept { return case_sensitivity_; }
 
     /** @brief Forces the hot-tier size instead of deriving it from `cpu_specs_t` in `try_build`. */
     void hot_count(size_t desired) noexcept { hot_count_ = desired; }
@@ -1330,7 +1330,7 @@ struct aho_corasick_dictionary {
      *  @retval `status_t::success_k` The needle was successfully added.
      *  @retval `status_t::bad_alloc_k` Memory allocation failed.
      *  @retval `status_t::overflow_risk_k` Too many needles or states for the current state ID type.
-     *  @retval `status_t::invalid_utf8_k` In `find_many_uncased_k` mode, the needle was not valid UTF-8.
+     *  @retval `status_t::invalid_utf8_k` In `substrings_uncased_k` mode, the needle was not valid UTF-8.
      *  @retval `status_t::unexpected_dimensions_k` The needle was empty.
      *
      *  An empty needle is rejected rather than skipped: it would match at every one of `haystack_length + 1`
@@ -1341,8 +1341,8 @@ struct aho_corasick_dictionary {
         if (count_needles_ >= (size_t)invalid_state_k) return status_t::overflow_risk_k;
 
         state_id_t const needle_index = static_cast<state_id_t>(count_needles_);
-        status_t const status = case_sensitivity_ == find_many_uncased_k ? try_insert_uncased_(needle, needle_index)
-                                                                         : try_insert_cased_(needle, needle_index);
+        status_t const status = case_sensitivity_ == substrings_uncased_k ? try_insert_uncased_(needle, needle_index)
+                                                                          : try_insert_cased_(needle, needle_index);
         if (status != status_t::success_k) return status;
         ++count_needles_;
         return status_t::success_k;
@@ -1494,8 +1494,8 @@ struct aho_corasick_dictionary {
 #pragma endregion Matching
 };
 
-using find_many_u16_dictionary_t = aho_corasick_dictionary<u16_t, std::allocator<char>>;
-using find_many_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
+using substrings_u16_dictionary_t = aho_corasick_dictionary<u16_t, std::allocator<char>>;
+using substrings_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
 
 #pragma endregion Dictionary
 
@@ -1509,17 +1509,17 @@ using find_many_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator
  *          two-level parallel specialization below claims `sz_caps_sp_k` specifically.
  */
 template <typename state_id_type_, typename allocator_type_, sz_capability_t capability_>
-struct find_many<state_id_type_, allocator_type_, capability_,
-                 std::enable_if_t<(capability_ & (sz_cap_parallel_k | sz_cap_cuda_k)) == 0>> {
+struct substrings<state_id_type_, allocator_type_, capability_,
+                  std::enable_if_t<(capability_ & (sz_cap_parallel_k | sz_cap_cuda_k)) == 0>> {
     using dictionary_t = aho_corasick_dictionary<state_id_type_, allocator_type_>;
     using state_id_t = typename dictionary_t::state_id_t;
     using allocator_t = typename dictionary_t::allocator_t;
-    using match_t = find_many_match_t;
+    using match_t = substrings_match_t;
     static constexpr sz_capability_t capability_k = capability_;
 
     using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
 
-    explicit find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
+    explicit substrings(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
     dictionary_t const &dictionary() const noexcept { return dict_; }
 
@@ -1530,7 +1530,7 @@ struct find_many<state_id_type_, allocator_type_, capability_,
      *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
      */
     template <typename needles_type_>
-    status_t try_build(needles_type_ &&needles, find_many_case_sensitivity_t case_sensitivity = find_many_cased_k,
+    status_t try_build(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        cpu_specs_t const &specs = {}) noexcept {
         dict_.case_sensitivity(case_sensitivity);
         for (auto const &needle : needles) {
@@ -1563,7 +1563,7 @@ struct find_many<state_id_type_, allocator_type_, capability_,
      *  @retval `status_t::unexpected_dimensions_k` @p matches is too small; nothing is written in that case.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-    status_t try_find(haystacks_type_ const &haystacks, span<find_many_match_t> matches, size_t &matches_found,
+    status_t try_find(haystacks_type_ const &haystacks, span<substrings_match_t> matches, size_t &matches_found,
                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
 
         // Counting first is what makes the capacity refusable before any write.
@@ -1610,17 +1610,17 @@ struct find_many<state_id_type_, allocator_type_, capability_,
  *  parallel into disjoint output ranges, so neither a mutex nor an atomic sits on the write path.
  */
 template <typename state_id_type_, typename allocator_type_, typename enable_>
-struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
+struct substrings<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
     using dictionary_t = aho_corasick_dictionary<state_id_type_, allocator_type_>;
     using state_id_t = typename dictionary_t::state_id_t;
     using allocator_t = typename dictionary_t::allocator_t;
-    using match_t = find_many_match_t;
+    using match_t = substrings_match_t;
     static constexpr sz_capability_t capability_k = sz_caps_sp_k;
 
     using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
 
-    explicit find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
+    explicit substrings(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
     dictionary_t const &dictionary() const noexcept { return dict_; }
 
@@ -1631,7 +1631,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @sa `aho_corasick_dictionary::try_insert` for the status codes this forwards.
      */
     template <typename needles_type_>
-    status_t try_build(needles_type_ &&needles, find_many_case_sensitivity_t case_sensitivity = find_many_cased_k,
+    status_t try_build(needles_type_ &&needles, substrings_case_sensitivity_t case_sensitivity = substrings_cased_k,
                        cpu_specs_t const &specs = {}) noexcept {
         dict_.case_sensitivity(case_sensitivity);
         for (auto const &needle : needles) {
@@ -1695,7 +1695,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 #if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
-    status_t try_find(haystacks_type_ const &haystacks, span<find_many_match_t> matches, size_t &matches_found,
+    status_t try_find(haystacks_type_ const &haystacks, span<substrings_match_t> matches, size_t &matches_found,
                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) noexcept {
 
         using haystack_t = typename haystacks_type_::value_type;
@@ -1805,7 +1805,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     /** @brief Writes every small haystack's matches, one core per haystack into disjoint output ranges. */
     template <typename haystacks_type_, typename executor_type_>
     void scatter_matches_of_small_(haystacks_type_ const &haystacks, span<size_t const> counts,
-                                   span<size_t const> offsets, span<find_many_match_t> matches,
+                                   span<size_t const> offsets, span<substrings_match_t> matches,
                                    executor_type_ &executor, cpu_specs_t const &specs) const noexcept {
 
         using haystack_t = typename haystacks_type_::value_type;
@@ -1833,7 +1833,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      */
     template <typename executor_type_>
     void scatter_matches_of_one_large_(span<byte_t const> haystack, size_t haystack_index, size_t base_offset,
-                                       span<size_t const> counts_per_core, span<find_many_match_t> matches,
+                                       span<size_t const> counts_per_core, span<substrings_match_t> matches,
                                        executor_type_ &executor) const noexcept {
 
         fu::indexed_split_t const optimal_split {haystack.size(), counts_per_core.size()};
@@ -1964,14 +1964,14 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     }
 };
 
-using find_many_u16_serial_t = find_many<u16_t, std::allocator<char>, sz_cap_serial_k>;
-using find_many_u16_parallel_t = find_many<u16_t, std::allocator<char>, sz_caps_sp_k>;
-using find_many_u32_serial_t = find_many<u32_t, std::allocator<char>, sz_cap_serial_k>;
-using find_many_u32_parallel_t = find_many<u32_t, std::allocator<char>, sz_caps_sp_k>;
+using substrings_u16_serial_t = substrings<u16_t, std::allocator<char>, sz_cap_serial_k>;
+using substrings_u16_parallel_t = substrings<u16_t, std::allocator<char>, sz_caps_sp_k>;
+using substrings_u32_serial_t = substrings<u32_t, std::allocator<char>, sz_cap_serial_k>;
+using substrings_u32_parallel_t = substrings<u32_t, std::allocator<char>, sz_caps_sp_k>;
 
 #pragma endregion Parallel Backend
 
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_FIND_MANY_SERIAL_HPP_
+#endif // STRINGZILLAS_SUBSTRINGS_SERIAL_HPP_

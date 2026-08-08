@@ -57,8 +57,8 @@
 # * stringzillas_bench_similarities_cu20: A benchmark for similarity operations on GPU.
 # * stringzillas_bench_fingerprints_cpp20: A benchmark for sketching many strings.
 # * stringzillas_bench_fingerprints_cu20: A benchmark for sketching many strings on GPU.
-# * stringzillas_bench_find_many_cpp20: A benchmark for multi-pattern search.
-# * stringzillas_bench_find_many_cu20: A benchmark for multi-pattern search on GPU.
+# * stringzillas_bench_substrings_cpp20: A benchmark for multi-pattern search.
+# * stringzillas_bench_substrings_cu20: A benchmark for multi-pattern search on GPU.
 #
 # For higher-level language bindings separate build scripts are provided, native to each toolchain.
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
@@ -606,11 +606,11 @@ endfunction ()
 # StringZillas C-API entry units, compiled once per library - as C++ into the CPU one, as CUDA into the GPU one.
 set(STRINGZILLAS_API_CPP_SOURCES
     c/stringzillas/runtime.cpp c/stringzillas/levenshtein.cpp c/stringzillas/needleman_wunsch.cpp
-    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp c/stringzillas/find_many.cpp
+    c/stringzillas/smith_waterman.cpp c/stringzillas/fingerprints.cpp c/stringzillas/substrings.cpp
 )
 set(STRINGZILLAS_API_CU_SOURCES
     c/stringzillas/runtime.cu c/stringzillas/levenshtein.cu c/stringzillas/needleman_wunsch.cu
-    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu c/stringzillas/find_many.cu
+    c/stringzillas/smith_waterman.cu c/stringzillas/fingerprints.cu c/stringzillas/substrings.cu
 )
 # Per-ISA CPU instantiation units, host C++ in every library; off-platform files compile to empty objects.
 set(STRINGZILLAS_CPUS_SOURCES
@@ -631,12 +631,12 @@ set(STRINGZILLAS_CPUS_SOURCES
     c/stringzillas/smith_waterman_rvv.cpp
     # Multi-pattern search has one CPU unit, not a per-ISA set: the walk is a serial dependency chain, so
     # parallelism comes from many independent haystacks rather than from vector instructions.
-    c/stringzillas/find_many_serial.cpp
+    c/stringzillas/substrings_serial.cpp
 )
 # Per-tier GPU instantiation units, grouped by architecture floor: Hopper DPX needs sm_90, the rest run
 # from the base set.
 set(STRINGZILLAS_CUDA_SOURCES c/stringzillas/levenshtein_cuda.cu c/stringzillas/needleman_wunsch_cuda.cu
-                              c/stringzillas/smith_waterman_cuda.cu c/stringzillas/find_many_cuda.cu
+                              c/stringzillas/smith_waterman_cuda.cu c/stringzillas/substrings_cuda.cu
 )
 set(STRINGZILLAS_KEPLER_SOURCES c/stringzillas/levenshtein_kepler.cu)
 set(STRINGZILLAS_HOPPER_SOURCES c/stringzillas/levenshtein_hopper.cu c/stringzillas/needleman_wunsch_hopper.cu
@@ -742,20 +742,20 @@ if (STRINGZILLA_BUILD_BENCHMARK)
     # Parallel benchmarks link the precompiled static libraries when those are built.
     define_launcher(stringzillas_bench_similarities_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cpp)
     define_launcher(stringzillas_bench_fingerprints_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cpp)
-    define_launcher(stringzillas_bench_find_many_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/find_many.cpp)
+    define_launcher(stringzillas_bench_substrings_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" bench/substrings.cpp)
     if (STRINGZILLAS_BUILD_SHARED)
         target_link_libraries(stringzillas_bench_similarities_cpp20 PRIVATE stringzillas_cpus_static)
         target_link_libraries(stringzillas_bench_fingerprints_cpp20 PRIVATE stringzillas_cpus_static)
-        target_link_libraries(stringzillas_bench_find_many_cpp20 PRIVATE stringzillas_cpus_static)
+        target_link_libraries(stringzillas_bench_substrings_cpp20 PRIVATE stringzillas_cpus_static)
     endif ()
     if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(stringzillas_bench_similarities_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/similarities.cu)
         define_gpu_launcher(stringzillas_bench_fingerprints_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/fingerprints.cu)
-        define_gpu_launcher(stringzillas_bench_find_many_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/find_many.cu)
+        define_gpu_launcher(stringzillas_bench_substrings_cu20 20 "${STRINGZILLA_TARGET_ARCH}" bench/substrings.cu)
         if (STRINGZILLAS_BUILD_SHARED)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE stringzillas_cuda_static)
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE stringzillas_cuda_static)
-            target_link_libraries(stringzillas_bench_find_many_cu20 PRIVATE stringzillas_cuda_static)
+            target_link_libraries(stringzillas_bench_substrings_cu20 PRIVATE stringzillas_cuda_static)
         endif ()
         # The host object pulls in `std::log` etc.; unlike the host-compiler driver used for the `cpp20` benches, nvcc's
         # final link does not implicitly add libm. Link it only where it exists as a separate library (Linux/glibc); on
@@ -764,7 +764,7 @@ if (STRINGZILLA_BUILD_BENCHMARK)
         if (STRINGZILLA_LIBM)
             target_link_libraries(stringzillas_bench_similarities_cu20 PRIVATE ${STRINGZILLA_LIBM})
             target_link_libraries(stringzillas_bench_fingerprints_cu20 PRIVATE ${STRINGZILLA_LIBM})
-            target_link_libraries(stringzillas_bench_find_many_cu20 PRIVATE ${STRINGZILLA_LIBM})
+            target_link_libraries(stringzillas_bench_substrings_cu20 PRIVATE ${STRINGZILLA_LIBM})
         endif ()
     endif ()
 endif ()

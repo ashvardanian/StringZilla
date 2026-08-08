@@ -1,9 +1,9 @@
-# Find-Many for StringZillas
+# Substrings for StringZillas
 
-The find-many engine matches a __whole dictionary of needles__ against a __whole collection of haystacks__ in a single pass, the workhorse of __log scanning__, __protocol dispatch__, __content filtering__, and __signature matching__.
+The substrings engine matches a __whole dictionary of needles__ against a __whole collection of haystacks__ in a single pass, the workhorse of __log scanning__, __protocol dispatch__, __content filtering__, and __signature matching__.
 It compiles the needle set once into an Aho-Corasick automaton and reuses it across every later call, so the dictionary is paid for once rather than per haystack.
 The automaton is __goto-completed__ and split into two tiers: a dense 256-wide row per frequently-visited state, and a double array for the rest, so a step is one load with no failure-following at runtime.
-`find_many_cased_k` matches raw bytes and accepts any needle, while `find_many_uncased_k` bakes __full Unicode case folding__ into the transitions themselves, matching case variants of the original haystack bytes without folding the haystack at runtime.
+`substrings_cased_k` matches raw bytes and accepts any needle, while `substrings_uncased_k` bakes __full Unicode case folding__ into the transitions themselves, matching case variants of the original haystack bytes without folding the haystack at runtime.
 Every engine runs across a slice of CPU cores or a CUDA GPU, advancing many haystacks concurrently rather than making any single haystack faster.
 
 Throughput is reported in __GB/s__ of haystack bytes consumed, the rate at which the automaton advances over the corpus.
@@ -15,7 +15,7 @@ Slices are taken by term count, so the frequent and the rare slice of the same p
 Cells carry __GB/s__ parsed from the benchmark's `Throughput` line, for the counting pass that only tallies matches and the finding pass that materializes each one.
 A `-` cell is a measurement not yet taken.
 
-The tier split dominates these numbers more than the backend does, so `bench/find_many.cpp` prints the automaton's state count, how many of those states fit the hot tier, and the double array's byte size beside every result.
+The tier split dominates these numbers more than the backend does, so `bench/substrings.cpp` prints the automaton's state count, how many of those states fit the hot tier, and the double array's byte size beside every result.
 Rows name a threading tier rather than an ISA because there are no per-ISA kernels: a transition is one data-dependent load on a serial dependency chain, so throughput comes from independent scalar chains over many haystacks, and an AVX-512 `vpgatherdd` formulation measured slower than plain scalar chains at every dictionary size.
 These numbers should not be compared against `sz_find`, which searches for one needle and solves a strictly easier problem.
 
