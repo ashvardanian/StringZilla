@@ -32,6 +32,8 @@
 #pragma once
 #include <cctype>  // `std::isalnum`
 #include <clocale> // `std::setlocale`
+#include <cmath>   // `std::ceil`, `std::log`, `std::pow`
+#include <cstdio>  // `std::fopen`, `std::fscanf`
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>
@@ -549,22 +551,52 @@ inline void log_failure(                                              //
 
 /**
  *  @brief Light-weight structure to construct a histogram of function call durations for a very
- *         wide range of floating point values using logarithmic binning. TODO:
+ *         wide range of floating point values using logarithmic binning, queryable by percentile.
+ *
+ *  Every call site below feeds it raw CPU-cycle deltas rather than wall-clock seconds, so the
+ *  bounds are sized for cycle counts: from a single cycle up to a call spanning hours at multi-GHz
+ *  clocks, not for literal seconds.
  */
 template <std::size_t slots_ = 128>
 struct duration_histogram {
     using count_t = std::uint32_t;
     std::array<count_t, slots_> bins = {};
-    static constexpr double max_seconds = 1000; // Hard to imagine a single call taking more than 15-ish minutes
-    static constexpr double min_seconds = 1e-9; // A single nanosecond is just 3-ish CPU cycles on modern hardware
+    static constexpr double max_cpu_cycles_k = 1e14; // ~9 hours at 3 GHz — hard to imagine a slower single call
+    static constexpr double min_cpu_cycles_k = 1;    // A call can't take fewer than a single cycle
 
-    inline count_t &operator[](double seconds) {
-        auto bin_float = std::log(seconds / min_seconds) / std::log(max_seconds / min_seconds) * bins.size();
-        // A call quicker than `min_seconds` makes the logarithm negative, and casting that to an unsigned
+    inline count_t &operator[](double cpu_cycles) {
+        auto bin_float = std::log(cpu_cycles / min_cpu_cycles_k) / std::log(max_cpu_cycles_k / min_cpu_cycles_k) *
+                         bins.size();
+        // A call quicker than `min_cpu_cycles_k` makes the logarithm negative, and casting that to an unsigned
         // type wraps to something enormous, so the low end is clamped before the cast rather than after.
         // The high end clamps to the last slot: `bins.size()` is one past it.
         std::size_t bin = bin_float <= 0 ? 0 : std::min(bins.size() - 1, static_cast<std::size_t>(bin_float));
         return bins[bin];
+    }
+
+    /**
+     *  @brief Upper edge of the bin holding the nearest-rank percentile, e.g. `0.99` for the p99.
+     *  @retval `0` when the histogram is empty, since there is nothing to report.
+     *
+     *  Nearest rank is the `ceil(fraction * count)`-th sample, so the p99 of a hundred samples is the 99th
+     *  rather than the largest. The bin's upper edge is reported because a bin only knows its own bounds,
+     *  which rounds every reading up by at most one bin width.
+     */
+    inline double percentile(double fraction) const noexcept {
+        std::size_t total_count = 0;
+        for (count_t bin_count : bins) total_count += bin_count;
+        if (total_count == 0) return 0;
+
+        std::size_t target_rank = static_cast<std::size_t>(std::ceil(fraction * total_count));
+        if (target_rank == 0) target_rank = 1; // ? A `fraction` of zero must not select an empty leading bin
+        std::size_t cumulative_count = 0;
+        for (std::size_t bin_index = 0; bin_index < bins.size(); ++bin_index) {
+            cumulative_count += bins[bin_index];
+            if (cumulative_count >= target_rank)
+                return min_cpu_cycles_k *
+                       std::pow(max_cpu_cycles_k / min_cpu_cycles_k, (bin_index + 1.0) / bins.size());
+        }
+        return max_cpu_cycles_k;
     }
 };
 
